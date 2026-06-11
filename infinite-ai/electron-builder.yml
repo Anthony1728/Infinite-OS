@@ -1,0 +1,41 @@
+appId: ai.infinite.app
+productName: Infinite AI
+copyright: Copyright © 2026 Infinite AI contributors
+artifactName: ${productName}-${version}-${arch}.${ext}
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**
+  - package.json
+  - "!**/{.eslintrc,.prettierrc,*.map,*.ts,*.tsx}"
+  - "!**/{test,tests,docs,scripts}/**"
+asarUnpack:
+  - "**/*.{node,dll}"
+publish:
+  provider: github
+  releaseType: release
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+linux:
+  target:
+    - AppImage
+    - deb
+    - rpm
+  category: Development
+  icon: resources/icon.png
