@@ -1,4 +1,4 @@
-♾️ InfiniteAI OS
+**InfiniteAI OS**
 
 The Open-Source AI Operating System for Work, Development, Automation, and Everyday Computing
 
