@@ -6,7 +6,7 @@ export function Greeting() {
       <h1 className="text-2xl font-semibold mb-1">
         {greeting}, <span className="gradient-text">Alex</span>
       </h1>
-      <p className="text-fg-muted text-sm">Infinity is ready to build, analyze and automate anything for you.</p>
+      <p className="text-fg-muted text-sm">InfiniteAI OS is ready to build, analyze and automate anything for you.</p>
     </div>
   );
 }

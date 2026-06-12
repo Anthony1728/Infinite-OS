@@ -120,7 +120,7 @@ app.whenReady().then(async () => {
   await mcpConnectAll(cwd).catch((e) => logger.warn('mcp', e.message));
 
   // Start brain subsystems (instantiated and ready for IPC calls)
-  logger.info('brain', 'Brain subsystems initialized');
+  logger.info('Brain subsystems initialized');
 
   registerIpc(() => mainWindow);
   createWindow();

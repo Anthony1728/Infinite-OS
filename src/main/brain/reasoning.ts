@@ -128,7 +128,7 @@ export class ReasoningLoop {
       confidence: lastThought?.confidence ?? 0,
       duration,
       iterations: iteration,
-      success: lastThought?.confidence ?? 0 >= this.config.confidenceThreshold,
+      success: (lastThought?.confidence ?? 0) >= this.config.confidenceThreshold,
     };
   }
 
@@ -169,8 +169,8 @@ export class ReasoningLoop {
   }
 
   private plan(
-    task: string,
-    thoughts: Thought[],
+    _task: string,
+    _thoughts: Thought[],
     tools: Array<{ name: string }>,
   ): Plan {
     const steps = [
@@ -204,7 +204,7 @@ export class ReasoningLoop {
     };
   }
 
-  private simulate(plan: Plan, thoughts: Thought[]): Thought {
+  private simulate(plan: Plan, _thoughts: Thought[]): Thought {
     // Simulate execution
     const successProbability = plan.confidence * 0.9;
     const content = `Simulation Results:

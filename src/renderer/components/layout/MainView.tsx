@@ -5,7 +5,7 @@ import { CodeEditor } from '../workspace/CodeEditor';
 import { FileManager } from '../workspace/FileManager';
 import { MemoryPanel } from '../memory/MemoryPanel';
 import { BrowserControlView } from '../views/BrowserControlView';
-import { ComputerControlView } from '../views/ComputerControlView';
+
 import { AutomationView } from '../views/AutomationView';
 import { WebsiteBuilderView } from '../views/WebsiteBuilderView';
 import { AppBuilderView } from '../views/AppBuilderView';
@@ -14,6 +14,7 @@ import { PluginStoreView } from '../views/PluginStoreView';
 import { CloudSyncView } from '../views/CloudSyncView';
 import { MultiAgentView } from '../views/MultiAgentView';
 import { WorkspaceView } from '../views/WorkspaceView';
+import { OSHomeView } from '../views/OSHomeView';
 
 const TABS = [
   { id: 'chat', label: 'AI Chat', icon: 'M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501c1.153-.086 2.294-.213 3.423-.379 1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z' },
@@ -35,13 +36,16 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
 
   const renderContent = () => {
     switch (activeView) {
+      case 'home':
+        return <OSHomeView onOpenView={onViewChange} />;
+
       case 'chats':
         return (
           <div className="flex flex-col h-full overflow-hidden">
             {/* Header */}
             <div className="px-5 pt-4 pb-3 flex-shrink-0">
               <h1 className="text-xl font-bold text-textMain mb-0.5">Good morning, Alex</h1>
-              <p className="text-textMuted text-xs">Infinity is ready to build, analyze and automate anything for you.</p>
+              <p className="text-textMuted text-xs">InfiniteAI OS is ready to build, analyze and automate across your workspace.</p>
             </div>
 
             {/* Tabs */}
@@ -64,10 +68,10 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
               {tab === 'chat' && <ChatView />}
               {tab === 'canvas' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><InfiniteCanvas /></div>}
               {tab === 'code' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><CodeEditor /></div>}
-              {tab === 'analyze' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><div className="text-center text-textMuted py-20">Analytics dashboard coming soon</div></div>}
+              {tab === 'analyze' && <OperationalPanel title="Analysis Console" subtitle="Repository, project, and business signals" items={['Repository health', 'Project velocity', 'Customer trends', 'Knowledge gaps']} />}
               {tab === 'automate' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><AutomationView /></div>}
-              {tab === 'research' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><div className="text-center text-textMuted py-20">Research agent coming soon</div></div>}
-              {tab === 'design' && <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar"><div className="text-center text-textMuted py-20">Design tools coming soon</div></div>}
+              {tab === 'research' && <OperationalPanel title="Research Desk" subtitle="Tasks, sources, notes, and synthesis" items={['Market scan', 'Technical discovery', 'Competitor notes', 'Source brief']} />}
+              {tab === 'design' && <OperationalPanel title="Creative Studio" subtitle="Writing, design, and campaign production" items={['Content drafts', 'Image prompts', 'Brand assets', 'Publishing queue']} />}
             </div>
           </div>
         );
@@ -78,10 +82,7 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
       case 'browser':
         return <BrowserControlView />;
 
-      case 'computer':
-        return <ComputerControlView />;
-
-      case 'automations':
+case 'automations':
         return <AutomationView />;
 
       case 'website-builder':
@@ -141,6 +142,33 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {renderContent()}
+    </div>
+  );
+}
+
+function OperationalPanel({ title, subtitle, items }: { title: string; subtitle: string; items: string[] }) {
+  return (
+    <div className="h-full overflow-y-auto px-5 pb-5 custom-scrollbar">
+      <div className="bg-bgPanel border border-borderSubtle rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-semibold text-textMain">{title}</h2>
+            <p className="text-xs text-textMuted mt-1">{subtitle}</p>
+          </div>
+          <span className="px-2 py-1 rounded-full bg-green-500/15 text-green-400 text-[10px] font-medium">Ready</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {items.map((item, index) => (
+            <div key={item} className="bg-bgCard border border-borderSubtle rounded-xl p-4">
+              <div className="w-9 h-9 rounded-lg bg-indigo-500/15 border border-indigo-500/20 flex items-center justify-center text-xs font-semibold text-indigo-400 mb-3">
+                {index + 1}
+              </div>
+              <div className="font-medium text-textMain">{item}</div>
+              <div className="text-xs text-textMuted mt-1">Active workspace signal</div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -211,7 +239,7 @@ function SettingsView() {
   return (
     <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
       <h1 className="text-2xl font-bold mb-4 text-textMain">Settings</h1>
-      <p className="text-textMuted text-sm mb-6">Configure your Infinity AI experience.</p>
+      <p className="text-textMuted text-sm mb-6">Configure your InfiniteAI OS experience.</p>
       <div className="space-y-4 max-w-2xl">
         {[
           { title: 'API Provider', desc: 'Choose your AI provider', options: ['OpenRouter', 'Ollama (Local)', 'OpenAI', 'Anthropic'] },

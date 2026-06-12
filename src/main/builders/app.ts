@@ -231,7 +231,7 @@ export default ${name};
     return code;
   }
 
-  generatePage(projectId: string, name: string, route: string): string {
+  generatePage(projectId: string, name: string, _route: string): string {
     const code = `import React from 'react';
 
 export default function ${name}Page() {
@@ -316,7 +316,7 @@ export default router;
 
       // Run npm install
       try {
-        const output = execSync('npm install', { 
+        execSync('npm install', { 
           cwd: outputDir, 
           encoding: 'utf-8', 
           timeout: 120000,

@@ -96,7 +96,11 @@ export class InfiniteBrain {
   private modelPerformance: Map<string, ModelPerformance> = new Map();
   private healthHistory: SystemHealth[] = [];
   private isOnline: boolean = true;
-  private lastHealthCheck: number = 0;
+  private _lastHealthCheck: number = 0;
+
+  getLastHealthCheck(): number {
+    return this._lastHealthCheck;
+  }
   private eventListeners: Array<(event: BrainEvent) => void> = [];
 
   constructor(config?: Partial<BrainConfig>) {
@@ -323,7 +327,7 @@ export class InfiniteBrain {
     this.healthHistory.push(health);
     if (this.healthHistory.length > 100) this.healthHistory.shift();
 
-    this.lastHealthCheck = Date.now();
+    this._lastHealthCheck = Date.now();
 
     this.emit({
       type: 'observation',
@@ -368,7 +372,7 @@ export class InfiniteBrain {
     const improvements: string[] = [];
 
     // Check model performance
-    for (const [key, perf] of this.modelPerformance) {
+    for (const [, perf] of this.modelPerformance) {
       if (perf.successRate < 0.6 && perf.totalTasks > 5) {
         issues.push(`Model ${perf.modelId} has low success rate (${(perf.successRate * 100).toFixed(1)}%) for ${perf.taskType}`);
         improvements.push(`Consider alternative model for ${perf.taskType} tasks`);

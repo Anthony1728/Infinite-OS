@@ -3,7 +3,7 @@ import { useWebsiteStore } from '../../../renderer/stores/website';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function WebsiteBuilderView() {
-  const { websites, templates, stats, loading, loadWebsites, loadTemplates, loadStats, createWebsite, publishWebsite, deployWebsite, deleteWebsite } = useWebsiteStore();
+  const { websites, templates, stats, loadWebsites, loadTemplates, loadStats, createWebsite, publishWebsite, deployWebsite, deleteWebsite } = useWebsiteStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [showCreate, setShowCreate] = useState(false);
   const [newSite, setNewSite] = useState({ name: '', template: 'portfolio' });

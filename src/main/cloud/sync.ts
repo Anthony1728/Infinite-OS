@@ -197,9 +197,14 @@ export class CloudSync {
       if (includes.includes('settings') || includes.includes('all')) {
         const settingsDir = join(homedir(), '.infinite-ai', 'settings');
         if (existsSync(settingsDir)) {
-          const settingsFiles = readFileSync(join(settingsDir, 'settings.json'), 'utf-8').catch(() => '{}');
+          let settingsFiles = '{}';
+          try {
+            settingsFiles = readFileSync(join(settingsDir, 'settings.json'), 'utf-8');
+          } catch {
+            // use default
+          }
           const backupSettingsPath = join(backupDir, 'settings.json');
-          writeFileSync(backupSettingsPath, JSON.stringify(JSON.parse(settingsFiles as string), null, 2));
+          writeFileSync(backupSettingsPath, JSON.stringify(JSON.parse(settingsFiles), null, 2));
           totalSize += readFileSync(backupSettingsPath).length;
         }
       }

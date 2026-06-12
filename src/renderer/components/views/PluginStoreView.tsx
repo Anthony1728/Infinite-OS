@@ -3,7 +3,7 @@ import { usePluginStore } from '../../../renderer/stores/plugin';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function PluginStoreView() {
-  const { plugins, stats, loading, loadPlugins, loadStats, installPlugin, uninstallPlugin, enablePlugin, disablePlugin } = usePluginStore();
+  const { plugins, stats, loading, loadPlugins, loadStats, installPlugin, enablePlugin, disablePlugin } = usePluginStore();
   const addToast = useNotificationStore((s) => s.addToast);
 
   useEffect(() => { loadPlugins(); loadStats(); }, [loadPlugins, loadStats]);
@@ -35,7 +35,7 @@ export function PluginStoreView() {
           </div>
           Plugin Store
         </h1>
-        <p className="text-textMuted text-sm mt-1">Extend Infinity AI with powerful plugins.</p>
+        <p className="text-textMuted text-sm mt-1">Extend InfiniteAI OS with powerful plugins.</p>
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">

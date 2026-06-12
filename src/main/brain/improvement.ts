@@ -253,7 +253,7 @@ export class SelfImprovementEngine {
     const actions: ImprovementAction[] = [];
 
     // Check error patterns
-    for (const [key, error] of this.errors) {
+    for (const [, error] of this.errors) {
       if (!error.resolved && error.frequency > 3) {
         actions.push({
           id: randomUUID(),
@@ -282,7 +282,7 @@ export class SelfImprovementEngine {
     }
 
     // Check task patterns
-    for (const [key, pattern] of this.patterns) {
+    for (const [, pattern] of this.patterns) {
       if (pattern.successRate < 0.7 && pattern.examples > 5) {
         actions.push({
           id: randomUUID(),

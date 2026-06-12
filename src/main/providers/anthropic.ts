@@ -2,7 +2,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { ProviderAdapter, ChatRequest, StreamChunk } from './base.js';
-import type { ModelInfo } from '../../shared/types.js';
+import type { ModelInfo, Message } from '../../shared/types.js';
 
 const FREE_MODELS: ModelInfo[] = []; // Anthropic has no free tier
 
@@ -43,7 +43,7 @@ export const anthropic: ProviderAdapter = {
         model: req.model,
         max_tokens: req.max_tokens ?? 4096,
         system: req.system,
-        // messages: req.messages → flatten to Anthropic shape
+        messages: toAnthropicMessages(req.messages),
         tools: req.tools?.map((t) => ({
           name: t.name,
           description: t.description,
@@ -72,3 +72,25 @@ export const anthropic: ProviderAdapter = {
     }
   },
 };
+
+function toAnthropicMessages(messages: Message[]): Anthropic.MessageParam[] {
+  const out: Anthropic.MessageParam[] = [];
+  for (const m of messages) {
+    if (m.role === 'user' || m.role === 'assistant') {
+      const content: any[] = [];
+      for (const b of m.content) {
+        if (b.type === 'text') {
+          content.push({ type: 'text', text: b.text });
+        } else if (b.type === 'image') {
+          content.push({ type: 'image', source: { type: 'base64', media_type: b.source.mediaType as any, data: b.source.data } });
+        } else if (b.type === 'tool_use') {
+          content.push({ type: 'tool_use', id: b.id, name: b.name, input: typeof b.input === 'string' ? JSON.parse(b.input) : b.input as any });
+        } else if (b.type === 'tool_result') {
+          content.push({ type: 'tool_result', tool_use_id: b.tool_use_id, is_error: b.is_error, content: typeof b.content === 'string' ? b.content : JSON.stringify(b.content) });
+        }
+      }
+      out.push({ role: m.role, content });
+    }
+  }
+  return out;
+}

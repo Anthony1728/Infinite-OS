@@ -8,7 +8,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL ?? 'http://127.0.0.1:3001';
+const ORCHESTRATOR_URL = (typeof window !== 'undefined' && (window as unknown as Record<string, string>).__ORCHESTRATOR_URL__) || 'http://127.0.0.1:3001';
 
 export interface OSMessage {
   id: string;

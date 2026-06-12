@@ -85,7 +85,7 @@ export function RightPanel() {
         </div>
 
         <button className="w-full text-center text-[10px] text-textMuted hover:text-textMain mt-2 py-1 transition-colors">
-          View all agents →
+          View all agents
         </button>
       </div>
 

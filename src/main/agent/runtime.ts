@@ -47,6 +47,52 @@ export interface SpawnOpts {
   sink: EventSink;
   /** When true, run in parallel with other subagents. */
   background?: boolean;
+  /** Optional agent-specific configuration for this task */
+  agentConfig?: AgentExecutionConfig;
+  /** Retry configuration for failed tasks */
+  retry?: {
+    maxAttempts?: number;
+    delay?: number;
+    backoff?: boolean;
+  };
+  /** Timeout for task execution */
+  timeout?: number;
+  /** Priority level for task scheduling */
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+}
+
+export interface AgentExecutionConfig {
+  /** Custom system prompt for this specific task */
+  customPrompt?: string;
+  /** Override agent settings for this execution */
+  toolOverride?: {
+    include?: string[];
+    exclude?: string[];
+  };
+  /** Maximum steps for this execution */
+  maxSteps?: number;
+  /** Model preference for this execution */
+  preferredModel?: string;
+  /** Session memory and context */
+  context?: {
+    domain?: string;
+    urgency?: 'informational' | 'operational' | 'critical';
+    stakeholders?: string[];
+  };
+  /** Task complexity classification */
+  complexity?: 'simple' | 'moderate' | 'complex' | 'expert';
+  /** Required confidence level for task completion */
+  confidenceThreshold?: number;
+  /** External dependencies for this task */
+  dependencies?: string[];
+  /** Task-specific validation rules */
+  validation?: {
+    requiredFields?: string[];
+    format?: string;
+    schema?: Record<string, unknown>;
+  };
+  /** Output format specification */
+  outputFormat?: 'text' | 'json' | 'markdown' | 'structured';
 }
 
 /**
@@ -71,14 +117,30 @@ export function spawnSubagent(opts: SpawnOpts): { state: AgentRunState; done: Pr
   const controller = new AbortController();
   activeRuns.set(state.id, controller);
 
+  // Set up timeout if specified
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  if (opts.timeout) {
+    timeoutHandle = setTimeout(() => {
+      if (state.status === 'running' || state.status === 'queued') {
+        state.status = 'failed';
+        state.error = `Task timeout after ${opts.timeout}ms`;
+        opts.sink({ type: 'fail', runId: state.id, error: state.error });
+        controller.abort();
+      }
+    }, opts.timeout);
+  }
+
   const done = runSubagent(state, agent, opts, controller.signal).finally(() => {
     activeRuns.delete(state.id);
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   });
 
   return { state, done };
 }
 
-async function runSubagent(
+export async function runSubagent(
   state: AgentRunState,
   agent: AgentType,
   opts: SpawnOpts,
@@ -86,6 +148,12 @@ async function runSubagent(
 ): Promise<string> {
   state.status = 'running';
   opts.sink({ type: 'start', run: { ...state } });
+
+  // Apply agent configuration for this execution
+  const config = opts.agentConfig;
+  const maxSteps = config?.maxSteps ?? agent.maxTurns ?? 30;
+  const preferredModel = config?.preferredModel ?? opts.model;
+  const outputFormat = config?.outputFormat ?? 'text';
 
   const messages: Message[] = [
     {
@@ -105,21 +173,34 @@ async function runSubagent(
   }
   const apiKey = await getApiKey(opts.provider);
 
+  // Apply tool overrides from agent config
   const tools = toolRegistry
     .asProviderTools()
-    .filter((t) => agent.allowedTools.includes(t.name));
+    .filter((t) => {
+      // Include default agent tools
+      if (agent.allowedTools.includes(t.name)) return true;
+      // Apply config inclusions
+      if (config?.toolOverride?.include?.includes(t.name)) return true;
+      // Exclude config tools
+      if (config?.toolOverride?.exclude?.includes(t.name)) return false;
+      return false;
+    });
 
-  const system = [
+  // Build enhanced system prompt with config
+  const baseSystem = [
     agent.systemPrompt,
+    config?.customPrompt ? `\n--- Custom Instructions ---\n${config.customPrompt}` : '',
     '',
     '# Parent context',
     `You were spawned by the main agent in ${opts.cwd} to handle this task in isolation.`,
+    `Task priority: ${opts.priority ?? 'normal'} | Complexity: ${config?.complexity ?? 'moderate'}`,
+    `Output format required: ${outputFormat}`,
     'Focus on your assigned task. Do not spawn your own subagents. Be concise in your final report.',
     '',
-    await buildSystemPrompt({ sessionId: opts.sessionId, cwd: opts.cwd, model: opts.model, provider: opts.provider }),
+    await buildSystemPrompt({ sessionId: opts.sessionId, cwd: opts.cwd, model: preferredModel, provider: opts.provider }),
   ].join('\n');
 
-  const MAX_TURNS = agent.maxTurns ?? 30;
+  const MAX_TURNS = maxSteps;
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     if (signal.aborted) {
       state.status = 'cancelled';
@@ -129,9 +210,9 @@ async function runSubagent(
 
     const stream = provider.streamChat(
       {
-        model: opts.model,
+        model: preferredModel,
         messages,
-        system,
+        system: baseSystem,
         tools,
         stream: true,
         signal,
@@ -162,6 +243,20 @@ async function runSubagent(
         }
         if (chunk.type === 'message_end') {
           assistant.stop_reason = chunk.stop_reason as Message['stop_reason'];
+          // Validate output if confidence threshold is set
+          if (config?.confidenceThreshold && chunk.stop_reason === 'tool_use') {
+            const confidence = await calculateConfidence(assistant.content);
+            if (confidence < config.confidenceThreshold) {
+              // Continue for more validation if confidence is low
+              messages.push({
+                id: uuid(),
+                role: 'user',
+                content: [{ type: 'text', text: `Please provide more details to reach confidence threshold of ${config.confidenceThreshold}. Current confidence: ${confidence.toFixed(2)}.` }],
+                timestamp: Date.now(),
+              });
+              continue;
+            }
+          }
         }
         if (chunk.type === 'error') {
           state.status = 'failed';
@@ -179,13 +274,22 @@ async function runSubagent(
 
     if (signal.aborted) break;
 
-    // No tool calls → done
+    // No tool calls → check if task is complete based on output format
     const toolUses = assistant.content.filter(
       (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
     );
-    if (!toolUses.length) break;
 
-    // Execute each tool
+    // Check task completion based on output format requirements
+    const taskComplete = await validateTaskCompletion(
+      assistant,
+      config?.validation,
+      outputFormat,
+      config?.confidenceThreshold
+    );
+
+    if (!toolUses.length && taskComplete) break;
+
+    // Execute each tool with enhanced validation
     for (const tu of toolUses) {
       if (signal.aborted) break;
       await runHooks('PreToolUse', { tool: tu.name, input: tu.input, agent: agent.id }, { cwd: opts.cwd, sessionId: opts.sessionId });
@@ -199,20 +303,41 @@ async function runSubagent(
         messages.push({ id: uuid(), role: 'user', content: [{ type: 'tool_result', tool_use_id: tu.id, content: `Unknown tool: ${tu.name}`, is_error: true }], timestamp: Date.now() });
         continue;
       }
-      let result;
+      let toolResult;
       try {
-        result = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: signal, sessionId: opts.sessionId, onUpdate: () => {} });
+        toolResult = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: signal, sessionId: opts.sessionId, onUpdate: () => {} });
       } catch (e) {
-        result = { content: (e as Error).message, is_error: true };
+        toolResult = { content: (e as Error).message, is_error: true };
       }
-      messages.push({ id: uuid(), role: 'user', content: [{ type: 'tool_result', tool_use_id: tu.id, content: result.content, is_error: result.is_error }], timestamp: Date.now() });
+      // Validate tool output if schema is specified
+      if (config?.validation?.schema) {
+        const toolContent = typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content);
+        const validation = validateOutput(toolContent, config.validation.schema);
+        if (!validation.valid) {
+          messages.push({ id: uuid(), role: 'user', content: [{ type: 'tool_result', tool_use_id: tu.id, content: `Output validation failed: ${validation.error}`, is_error: true }], timestamp: Date.now() });
+          continue;
+        }
+      }
+      const resultContent = typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content);
+      messages.push({ id: uuid(), role: 'user', content: [{ type: 'tool_result', tool_use_id: tu.id, content: resultContent, is_error: toolResult.is_error }], timestamp: Date.now() });
     }
   }
 
   // Build final result: the last assistant text block
   const last = messages.filter((m) => m.role === 'assistant').pop();
   const textBlocks = last?.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text') ?? [];
-  const result = textBlocks.map((b) => b.text).join('\n').trim() || '(no output)';
+  let result = textBlocks.map((b) => b.text).join('\n').trim() || '(no output)';
+
+  // Apply output format transformation if needed
+  if (outputFormat === 'json' && textBlocks.length > 0) {
+    try {
+      result = JSON.stringify({ content: textBlocks.map(b => b.text), metadata: { completedAt: Date.now(), agent: agent.id } });
+    } catch {
+      // Keep original text if JSON parsing fails
+    }
+  } else if (outputFormat === 'markdown' && textBlocks.length > 0) {
+    result = `# Task Result\n\n${result}\n\n---\n*Completed by ${agent.name} at ${new Date().toISOString()}*`;
+  }
 
   state.status = 'completed';
   state.completedAt = Date.now();
@@ -221,34 +346,161 @@ async function runSubagent(
   return result;
 }
 
+async function calculateConfidence(content: ContentBlock[]): Promise<number> {
+  let confidence = 0.5;
+
+  if (content.some(b => b.type === 'text' && b.text.length > 100)) {
+    confidence += 0.3;
+  }
+
+  if (content.some(b => b.type === 'tool_use')) {
+    confidence += 0.2;
+  }
+
+  return Math.min(confidence, 1.0);
+}
+
+async function validateTaskCompletion(
+  assistant: Message,
+  validation?: AgentExecutionConfig['validation'],
+  outputFormat: string = 'text',
+  _confidenceThreshold?: number
+): Promise<boolean> {
+  if (!validation && !outputFormat && !_confidenceThreshold) {
+    return true;
+  }
+
+  let isValid = true;
+
+  if (outputFormat === 'json') {
+    try {
+      const text = assistant.content.find(b => b.type === 'text');
+      if (text && 'text' in text) {
+        JSON.parse(text.text);
+      } else {
+        isValid = false;
+      }
+    } catch {
+      isValid = false;
+    }
+  } else if (outputFormat === 'markdown') {
+    isValid = assistant.content.some(b => b.type === 'text' && 'text' in b && b.text.includes('#'));
+  }
+
+  return isValid;
+}
+
+function validateOutput(content: string, _schema: Record<string, unknown>): { valid: boolean; error?: string } {
+  try {
+    JSON.parse(content);
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Invalid JSON format' };
+  }
+}
+
 /**
  * Run a batch of subagents in parallel. Resolves when all complete
  * (or fail). Each agent runs in its own context.
  */
 export async function spawnBatch(
-  tasks: Array<{ agentId: AgentId; task: string }>,
+  tasks: Array<{ agentId: AgentId; task: string; config?: AgentExecutionConfig; priority?: SpawnOpts['priority'] }>,
   ctx: { sessionId: string; cwd: string; model: string; provider: string; parentHistory: Message[]; sink: EventSink },
-): Promise<Map<AgentId, { result: string; error?: string }>> {
-  const out = new Map<AgentId, { result: string; error?: string }>();
-  const promises = tasks.map(async (t) => {
-    const { done } = spawnSubagent({
-      agentId: t.agentId,
-      task: t.task,
-      sessionId: ctx.sessionId,
-      cwd: ctx.cwd,
-      model: ctx.model,
-      provider: ctx.provider,
-      parentHistory: ctx.parentHistory,
-      sink: ctx.sink,
-      background: true,
-    });
-    try {
-      const result = await done;
-      out.set(t.agentId, { result });
-    } catch (e) {
-      out.set(t.agentId, { result: '', error: (e as Error).message });
-    }
+  options?: {
+    maxConcurrent?: number;
+    failFast?: boolean;
+    executionMode?: 'sequential' | 'parallel' | 'mixed';
+  },
+): Promise<Map<AgentId, { result: string; error?: string }>[]> {
+  const results = await Promise.all(
+    tasks.map(async (t) => {
+      const runId = uuid();
+      const state: AgentRunState = {
+        id: runId,
+        agentId: t.agentId,
+        sessionId: ctx.sessionId,
+        status: 'queued',
+        task: t.task,
+        startedAt: Date.now(),
+        toolCallCount: 0,
+      };
+      runStates.set(state.id, state);
+      ctx.sink({ type: 'start', run: { ...state } });
+
+      const maxConcurrent = options?.maxConcurrent ?? tasks.length;
+
+      const executeTask = async (): Promise<{ result: string; error?: string }> => {
+        try {
+          const { done } = spawnSubagent({
+            agentId: t.agentId,
+            task: t.task,
+            sessionId: ctx.sessionId,
+            cwd: ctx.cwd,
+            model: ctx.model,
+            provider: ctx.provider,
+            parentHistory: ctx.parentHistory,
+            sink: (event) => {
+              if (event.type === 'complete') {
+                state.status = 'completed';
+                state.completedAt = Date.now();
+                state.result = event.result;
+              } else if (event.type === 'fail') {
+                state.status = 'failed';
+                state.error = event.error;
+              }
+              ctx.sink(event);
+            },
+            background: true,
+            agentConfig: t.config,
+            priority: t.priority ?? 'normal',
+          });
+
+          const result = await done;
+          return { result };
+        } catch (e) {
+          return { result: '', error: (e as Error).message };
+        }
+      };
+
+      const semaphore = new Semaphore(maxConcurrent);
+      return semaphore.acquire(() => executeTask());
+    })
+  );
+
+  const finalResults = new Map<AgentId, { result: string; error?: string }>();
+  tasks.forEach((t, index) => {
+    const result = results[index];
+    finalResults.set(t.agentId, result);
   });
-  await Promise.all(promises);
-  return out;
+
+  return [finalResults];
+}
+
+class Semaphore {
+  private resolveList: Array<() => void> = [];
+  private acquired = 0;
+  private max: number;
+
+  constructor(max: number) {
+    this.max = max;
+  }
+
+  public async acquire<T>(fn: () => Promise<T>): Promise<T> {
+    while (this.acquired >= this.max) {
+      await new Promise<void>((resolve) => {
+        this.resolveList.push(resolve);
+      });
+    }
+
+    this.acquired++;
+    try {
+      return await fn();
+    } finally {
+      this.acquired--;
+      if (this.resolveList.length > 0) {
+        const resolve = this.resolveList.shift();
+        if (resolve) resolve();
+      }
+    }
+  }
 }

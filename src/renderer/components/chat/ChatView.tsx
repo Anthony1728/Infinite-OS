@@ -18,7 +18,7 @@ export function ChatView() {
   const loadSessions = useChatStore((s) => s.loadSessions);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const [input, setInput] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
@@ -47,11 +47,11 @@ function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: s
     <div className="w-full">
       <div className="relative bg-bgCard border border-borderSubtle rounded-2xl overflow-hidden focus-within:border-indigo-500/40 transition-all duration-200 shadow-lg shadow-black/10">
         <textarea
-          ref={inputRef}
+          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder || "Ask Infinity anything..."}
+          placeholder={placeholder || 'Ask InfiniteAI OS anything...'}
           rows={1}
           className="w-full bg-transparent text-textMain text-sm px-4 py-3 pr-14 outline-none resize-none placeholder:text-textMuted/50"
         />
@@ -145,7 +145,7 @@ function MessageBubble({ message }: { message: Message }) {
       ) : null}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="font-semibold text-textMain text-sm">{isUser ? 'You' : 'Infinity AI'}</span>
+          <span className="font-semibold text-textMain text-sm">{isUser ? 'You' : 'InfiniteAI OS'}</span>
           <span className="text-[10px] text-textMuted">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
         {textBlocks.map((block, i) => {
@@ -219,7 +219,7 @@ function DemoChat({ input, setInput, inputRef, onSend }: { input: string; setInp
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <span className="font-semibold text-textMain text-sm">Infinity AI</span>
+                <span className="font-semibold text-textMain text-sm">InfiniteAI OS</span>
                 <span className="text-[10px] text-textMuted">10:43 AM</span>
                 <button className="ml-auto text-textMuted hover:text-textMain transition-colors">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>

@@ -1,20 +1,26 @@
-# Infinite AI — Project Plan
+# InfiniteAI OS - Project Plan
 
-> A free, open-source recreation of the Claude Desktop application that works with **any model from any provider**. Same feature set, same agentic workflow, no paywall.
+> An open-source AI-powered desktop and cloud platform that brings assistants, agents, coding, automation, business operations, creative work, and knowledge management into one unified workspace.
 
 ---
 
 ## 1. Vision
 
-| Claude Desktop | Infinite AI |
-| --- | --- |
-| Locked to Anthropic | Any provider: OpenRouter, Groq, Gemini, Mistral, Ollama, OpenAI, Anthropic, custom OpenAI-compatible |
-| Paid subscription | Bring your own free-tier keys or run local models |
-| Single vendor SDK | Unified provider adapter layer |
-| Anthropic-managed infra | 100% local-first; nothing leaves your machine except what you send to the API you configured |
-| `Claude` brand | `Infinite AI` brand |
+InfiniteAI OS is designed to make AI a true operating layer for digital work. Instead of switching between dozens of applications, users should be able to chat, create, automate, code, manage projects, coordinate teams, and interact with their devices through one intelligent interface.
 
-**Goal:** feature-parity with Claude Desktop's Code tab (multi-turn chat, agentic tool use, file editing with diff view, bash, web search/fetch, project memory, MCP servers, subagents, permissions, hooks, skills).
+| Capability | InfiniteAI OS Direction |
+| --- | --- |
+| AI Assistant | Multi-model conversational workspace with history, memory, files, voice, and image support |
+| AI Agents | Autonomous task execution, multi-agent workflows, custom agents, and background workers |
+| AI Coding | Code generation, refactoring, debugging, terminal workflows, Git, repository analysis, and diffs |
+| Automation | Workflow builder, desktop actions, browser control, productivity shortcuts, and task execution |
+| Cloud Workspaces | Remote projects, synced workspaces, team environments, and cross-device continuity |
+| Knowledge Hub | Notes, documents, memory, semantic search, and a personal knowledge graph |
+| Creative Studio | Writing, design workflows, media generation, marketing content, and social workflows |
+| Business Suite | CRM, customer support, analytics dashboards, project management, and business automation |
+| Plugin Ecosystem | Community extensions, developer APIs, custom tools, and integrations |
+
+**Goal:** build a unified AI-first operating workspace that remains open, extensible, local-first where possible, and provider-agnostic.
 
 ---
 
@@ -22,11 +28,11 @@
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Desktop shell | **Electron 32+** | Same shell as Claude Desktop; cross-platform (Win/macOS/Linux); mature |
-| Language | **TypeScript 5.5+** strict | End-to-end type safety; matches Claude's stack |
-| Renderer UI | **React 18 + Vite** | Fast HMR; same as Claude Desktop |
-| Styling | **Tailwind CSS + Radix UI primitives** | shadcn/ui-style, matches Claude's visual language |
-| State | **Zustand** + **TanStack Query** | Lightweight; matches Claude's client architecture |
+| Desktop shell | **Electron 32+** | Cross-platform desktop runtime for Win/macOS/Linux |
+| Language | **TypeScript 5.5+** strict | End-to-end type safety across main, preload, renderer, and shared packages |
+| Renderer UI | **React 18 + Vite** | Fast HMR and a mature component model for complex workspaces |
+| Styling | **Tailwind CSS + Radix UI primitives** | Accessible primitives with a flexible design system |
+| State | **Zustand** + **TanStack Query** | Lightweight local state plus async server/cache orchestration |
 | Code editor/diff | **Monaco Editor** | Same engine as VS Code; powers diff view |
 | Markdown render | **react-markdown + remark-gfm + shiki** | GFM tables, code highlighting, math |
 | Terminal output | **xterm.js** | For bash tool output |

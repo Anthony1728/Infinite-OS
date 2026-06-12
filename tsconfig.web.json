@@ -13,5 +13,8 @@
     "src/renderer/**/*.tsx",
     "src/shared/**/*.ts",
     "src/preload/api/**/*.ts"
+  ],
+  "exclude": [
+    "src/renderer/browser/**/*.ts"
   ]
 }

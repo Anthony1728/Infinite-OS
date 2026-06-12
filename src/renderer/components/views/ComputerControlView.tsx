@@ -7,7 +7,7 @@ export function ComputerControlView() {
   const [appPath, setAppPath] = useState('');
 
   useEffect(() => {
-    window.api.computerStats().then((s) => setStats(s as typeof stats)).catch(() => {});
+    window.api.computerStats().then((s: unknown) => setStats(s as typeof stats)).catch(() => {});
   }, []);
 
   const handleMouseMove = async (x: number, y: number) => {

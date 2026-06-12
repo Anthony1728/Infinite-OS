@@ -2,7 +2,7 @@
 
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
-import { brain, router, safety, offline, reasoning, workflow, monitor, improvement, marketplace, sdk } from '../index.js';
+import { brain, safety, offline, reasoning, workflow, monitor, improvement, marketplace, sdk } from '../index.js';
 
 export function registerBrainIpc(): void {
   // Brain Status

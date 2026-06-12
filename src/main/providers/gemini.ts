@@ -2,7 +2,7 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { ProviderAdapter, ChatRequest, StreamChunk } from './base.js';
-import type { ModelInfo } from '../../shared/types.js';
+import type { ModelInfo, Message } from '../../shared/types.js';
 
 const FREE_MODELS: ModelInfo[] = [
   { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'gemini', free: true, supports_tools: true, supports_vision: true },
@@ -41,9 +41,8 @@ export const gemini: ProviderAdapter = {
     });
 
     try {
-      const result = await model.generateContentStream(
-        req.messages.map((m) => m.content.map((b: { type: string; text?: string }) => (b.type === 'text' ? b.text ?? '' : '')).join('\n')).join('\n'),
-      );
+      const contents = toGeminiContents(req.messages);
+      const result = await model.generateContentStream({ contents });
       for await (const chunk of result.stream) {
         const text = chunk.text();
         if (text) yield { type: 'text_delta', text };
@@ -62,3 +61,37 @@ export const gemini: ProviderAdapter = {
     }
   },
 };
+
+function toGeminiContents(messages: Message[]): any[] {
+  const contents: any[] = [];
+  const toolIdToName = new Map<string, string>();
+  
+  for (const m of messages) {
+    const parts: any[] = [];
+    if (m.role === 'assistant') {
+      for (const b of m.content) {
+        if (b.type === 'text' && b.text) parts.push({ text: b.text });
+        else if (b.type === 'tool_use') {
+          toolIdToName.set(b.id, b.name);
+          parts.push({ functionCall: { name: b.name, args: typeof b.input === 'string' ? JSON.parse(b.input) : b.input as object } });
+        }
+      }
+      if (parts.length > 0) contents.push({ role: 'model', parts });
+    } else if (m.role === 'user') {
+      for (const b of m.content) {
+        if (b.type === 'text' && b.text) parts.push({ text: b.text });
+        else if (b.type === 'tool_result') {
+          const name = toolIdToName.get(b.tool_use_id) || b.tool_use_id;
+          parts.push({
+            functionResponse: {
+              name,
+              response: { result: typeof b.content === 'string' ? b.content : JSON.stringify(b.content) },
+            }
+          });
+        }
+      }
+      if (parts.length > 0) contents.push({ role: 'user', parts });
+    }
+  }
+  return contents;
+}

@@ -5,6 +5,7 @@ import type { ProviderAdapter } from './base.js';
 import { openaiCompatible } from './openai-compatible.js';
 import { anthropic } from './anthropic.js';
 import { gemini } from './gemini.js';
+import { openai } from './openai.js';
 
 const REGISTRY: Record<string, ProviderAdapter> = {
   openrouter: openaiCompatible({
@@ -47,6 +48,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
   }),
   gemini,
   anthropic,
+  openai,
 };
 
 export function getProvider(id: string): ProviderAdapter | undefined {

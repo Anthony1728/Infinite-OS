@@ -2,7 +2,7 @@
 // Most providers expose the /v1/chat/completions SSE format.
 
 import type { ProviderAdapter, ChatRequest, StreamChunk, ToolSpec } from './base.js';
-import type { ModelInfo } from '../../shared/types.js';
+import type { ModelInfo, Message } from '../../shared/types.js';
 
 interface Opts {
   id: string;
@@ -135,9 +135,50 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
   };
 }
 
-function toOpenAIMessages(_messages: unknown, system?: string) {
-  const out: unknown[] = [];
+function toOpenAIMessages(messages: Message[], system?: string) {
+  const out: any[] = [];
   if (system) out.push({ role: 'system', content: system });
+
+  for (const m of messages) {
+    if (m.role === 'user') {
+      // In this app, tool_result blocks are pushed into a user message by the store.
+      const hasToolResult = m.content.some((b) => b.type === 'tool_result');
+      if (hasToolResult) {
+        // OpenAI wants tool results as separate messages with role: 'tool'
+        for (const b of m.content) {
+          if (b.type === 'tool_result') {
+            out.push({
+              role: 'tool',
+              tool_call_id: b.tool_use_id,
+              content: typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
+            });
+          } else if (b.type === 'text') {
+            out.push({ role: 'user', content: b.text });
+          }
+        }
+      } else {
+        const textParts = m.content.filter(b => b.type === 'text').map((b: any) => b.text).join('\n');
+        out.push({ role: 'user', content: textParts });
+      }
+    } else if (m.role === 'assistant') {
+      const textParts = m.content.filter((b) => b.type === 'text').map((b: any) => b.text).join('\n');
+      const toolUses = m.content.filter((b) => b.type === 'tool_use');
+      const msg: any = { role: 'assistant', content: textParts || null };
+      
+      if (toolUses.length > 0) {
+        msg.tool_calls = toolUses.map((tu: any) => ({
+          id: tu.id,
+          type: 'function',
+          function: {
+            name: tu.name,
+            arguments: typeof tu.input === 'string' ? tu.input : JSON.stringify(tu.input),
+          },
+        }));
+      }
+      out.push(msg);
+    }
+  }
+
   return out;
 }
 

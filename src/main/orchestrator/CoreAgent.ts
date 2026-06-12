@@ -13,8 +13,6 @@ import type { Message, ContentBlock } from '../../shared/types.js';
 import { getProvider } from '../providers/registry.js';
 import { getApiKey } from '../settings/secrets.js';
 import { toolRegistry } from '../tools/base.js';
-import { runHooks } from '../agent/hooks.js';
-import { buildSystemPrompt, buildContext } from '../agent/context.js';
 
 // Types from core-types (inline to avoid import issues)
 export interface ChatMessage {
@@ -305,46 +303,40 @@ export class CoreAgent {
       );
 
       let assistantContent: ContentBlock[] = [];
-      let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop' = 'end_turn';
+      let stopReason = 'end_turn';
       const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
 
       // Process stream
       for await (const chunk of stream) {
-        if (chunk.type === 'message_start') {
-          // Message started
-        } else if (chunk.type === 'content_block_start') {
-          if (chunk.content_block?.type === 'tool_use') {
-            pendingToolCalls.set(chunk.content_block.id, {
-              name: chunk.content_block.name,
-              json: '',
+        if (chunk.type === 'text_delta') {
+          const text = chunk.text ?? '';
+          if (text) {
+            assistantContent.push({ type: 'text', text });
+            this.emit({
+              type: 'text_delta',
+              taskId: task.id,
+              data: { text },
             });
           }
-        } else if (chunk.type === 'content_block_delta') {
-          if (chunk.delta?.type === 'text_delta') {
-            const text = chunk.delta.text ?? '';
-            if (text) {
-              assistantContent.push({ type: 'text', text });
-              this.emit({
-                type: 'text_delta',
-                taskId: task.id,
-                data: { text },
-              });
-            }
-          } else if (chunk.delta?.type === 'input_json_delta') {
-            const toolCallId = [...pendingToolCalls.keys()].pop();
-            if (toolCallId) {
-              const tc = pendingToolCalls.get(toolCallId)!;
-              tc.json += chunk.delta.partial_json ?? '';
-            }
+        } else if (chunk.type === 'tool_use_start') {
+          pendingToolCalls.set(chunk.id, {
+            name: chunk.name,
+            json: '',
+          });
+        } else if (chunk.type === 'tool_use_delta') {
+          const tc = pendingToolCalls.get(chunk.id);
+          if (tc) {
+            tc.json += chunk.partial_json ?? '';
           }
-        } else if (chunk.type === 'content_block_stop') {
-          // Content block stopped
-        } else if (chunk.type === 'message_delta') {
-          stopReason = chunk.delta?.stop_reason ?? 'end_turn';
-        } else if (chunk.type === 'message_stop') {
-          // Message stopped
+        } else if (chunk.type === 'tool_use_end') {
+          const tc = pendingToolCalls.get(chunk.id);
+          if (tc) {
+            tc.json = JSON.stringify(chunk.input);
+          }
+        } else if (chunk.type === 'message_end') {
+          stopReason = chunk.stop_reason;
         } else if (chunk.type === 'error') {
-          throw new Error(chunk.error?.message ?? 'Stream error');
+          throw new Error(chunk.error ?? 'Stream error');
         }
       }
 
@@ -443,35 +435,35 @@ export class CoreAgent {
       );
 
       let assistantContent: ContentBlock[] = [];
-      let stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop' = 'end_turn';
+      let stopReason = 'end_turn';
       const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
 
       for await (const chunk of stream) {
-        if (chunk.type === 'content_block_start') {
-          if (chunk.content_block?.type === 'tool_use') {
-            pendingToolCalls.set(chunk.content_block.id, {
-              name: chunk.content_block.name,
-              json: '',
-            });
+        if (chunk.type === 'text_delta') {
+          const text = chunk.text ?? '';
+          if (text) {
+            assistantContent.push({ type: 'text', text });
+            yield { type: 'text', text };
           }
-        } else if (chunk.type === 'content_block_delta') {
-          if (chunk.delta?.type === 'text_delta') {
-            const text = chunk.delta.text ?? '';
-            if (text) {
-              assistantContent.push({ type: 'text', text });
-              yield { type: 'text', text };
-            }
-          } else if (chunk.delta?.type === 'input_json_delta') {
-            const toolCallId = [...pendingToolCalls.keys()].pop();
-            if (toolCallId) {
-              const tc = pendingToolCalls.get(toolCallId)!;
-              tc.json += chunk.delta.partial_json ?? '';
-            }
+        } else if (chunk.type === 'tool_use_start') {
+          pendingToolCalls.set(chunk.id, {
+            name: chunk.name,
+            json: '',
+          });
+        } else if (chunk.type === 'tool_use_delta') {
+          const tc = pendingToolCalls.get(chunk.id);
+          if (tc) {
+            tc.json += chunk.partial_json ?? '';
           }
-        } else if (chunk.type === 'message_delta') {
-          stopReason = chunk.delta?.stop_reason ?? 'end_turn';
+        } else if (chunk.type === 'tool_use_end') {
+          const tc = pendingToolCalls.get(chunk.id);
+          if (tc) {
+            tc.json = JSON.stringify(chunk.input);
+          }
+        } else if (chunk.type === 'message_end') {
+          stopReason = chunk.stop_reason;
         } else if (chunk.type === 'error') {
-          throw new Error(chunk.error?.message ?? 'Stream error');
+          throw new Error(chunk.error ?? 'Stream error');
         }
       }
 
@@ -555,7 +547,7 @@ export class CoreAgent {
   /**
    * Build messages array for the LLM
    */
-  private async buildMessages(task: AgentTask): Promise<Message[]> {
+  private async buildMessages(_task: AgentTask): Promise<Message[]> {
     const messages: Message[] = [];
 
     // Add conversation memory
@@ -596,7 +588,8 @@ export class CoreAgent {
         const result = await builtInTool.execute(input, {
           sessionId: task.config.provider,
           cwd: process.cwd(),
-          signal: AbortSignal.timeout(30000),
+          abortSignal: AbortSignal.timeout(30000),
+          onUpdate: () => {},
         });
         return typeof result === 'string' ? result : JSON.stringify(result);
       } catch (error) {

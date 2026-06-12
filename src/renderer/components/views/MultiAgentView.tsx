@@ -3,7 +3,7 @@ import { useMultiAgentStore } from '../../../renderer/stores/multiAgent';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function MultiAgentView() {
-  const { teams, tasks, stats, loading, loadTeams, loadTasks, loadStats, createTeam, createTask, startTask, completeTask } = useMultiAgentStore();
+  const { teams, tasks, stats, loadTeams, loadTasks, loadStats, createTeam, createTask, startTask, completeTask } = useMultiAgentStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [tab, setTab] = useState<'teams' | 'tasks'>('teams');
   const [showCreate, setShowCreate] = useState(false);

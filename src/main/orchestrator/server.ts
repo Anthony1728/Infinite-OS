@@ -11,36 +11,24 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { CoreAgent, createCoreAgent } from './CoreAgent.js';
-import { InMemoryMCPRegistry } from './MCPRegistry.js';
 import { toolRegistry } from '../tools/base.js';
-import { getProvider } from '../providers/registry.js';
-import { getApiKey } from '../settings/secrets.js';
 
 const PORT = Number(process.env.ORCHESTRATOR_PORT ?? 3001);
 const HOST = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
 
 let agent: CoreAgent | null = null;
-let registry: InMemoryMCPRegistry | null = null;
 
 function getAgent(): CoreAgent {
   if (!agent) {
     agent = createCoreAgent({
-      onEvent: (event) => {
-        // Broadcast to SSE clients
-        broadcastSSE(event);
+      onEvent: (_event) => {
+        // Broadcast to SSE clients (TODO: implement SSE)
       },
     });
     // Register built-in tools
     registerBuiltInTools();
   }
   return agent;
-}
-
-function getRegistry(): InMemoryMCPRegistry {
-  if (!registry) {
-    registry = new InMemoryMCPRegistry();
-  }
-  return registry;
 }
 
 function registerBuiltInTools(): void {
@@ -50,25 +38,18 @@ function registerBuiltInTools(): void {
     agent.registerTool({
       name: tool.name,
       description: tool.description,
-      inputSchema: tool.input_schema,
+      inputSchema: tool.inputSchema,
       execute: async (input) => {
         const result = await tool.execute(input, {
           sessionId: 'orchestrator',
           cwd: process.cwd(),
-          signal: AbortSignal.timeout(30000),
+          abortSignal: AbortSignal.timeout(30000),
+          onUpdate: () => {},
         });
         return typeof result === 'string' ? result : JSON.stringify(result);
       },
     });
   }
-}
-
-// SSE connections for streaming events
-const sseClients: Set<ReturnType<typeof setInterval>> = new Set();
-
-function broadcastSSE(event: unknown): void {
-  // SSE broadcast is handled by the /api/events endpoint
-  // Store events for new connections
 }
 
 export async function startOrchestratorServer(): Promise<void> {

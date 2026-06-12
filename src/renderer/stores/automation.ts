@@ -90,7 +90,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     await get().loadWorkflows();
   },
 
-  deleteWorkflow: async (id) => {
+  deleteWorkflow: async (_id) => {
     await window.api.automationListWorkflows();
     await get().loadStats();
   },

@@ -53,13 +53,13 @@ export interface WorkflowTemplate {
 }
 
 export class WorkflowEngine {
-  private config: WorkflowConfig;
+  private _config: WorkflowConfig;
   private workflows: Map<string, Workflow> = new Map();
   private templates: WorkflowTemplate[] = [];
   private stepExecutors: Map<string, (config: Record<string, unknown>) => Promise<string>> = new Map();
 
   constructor(config?: Partial<WorkflowConfig>) {
-    this.config = {
+    this._config = {
       maxConcurrentSteps: config?.maxConcurrentSteps ?? 3,
       timeoutMs: config?.timeoutMs ?? 60000,
       retryAttempts: config?.retryAttempts ?? 2,
@@ -130,9 +130,13 @@ export class WorkflowEngine {
       return `Loop completed: ${config.iterations} iterations`;
     });
 
-    this.stepExecutors.set('parallel', async (config) => {
+    this.stepExecutors.set('parallel', async (_config) => {
       return `Parallel steps completed`;
     });
+  }
+
+  getConfig(): WorkflowConfig {
+    return { ...this._config };
   }
 
   createWorkflow(
@@ -217,7 +221,7 @@ export class WorkflowEngine {
     });
   }
 
-  private async executeStep(workflow: Workflow, step: WorkflowStep): Promise<void> {
+  private async executeStep(_workflow: Workflow, step: WorkflowStep): Promise<void> {
     step.status = 'running';
     step.startTime = Date.now();
 

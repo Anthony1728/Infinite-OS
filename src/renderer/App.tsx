@@ -15,7 +15,7 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
-  const [activeView, setActiveView] = useState('chats');
+  const [activeView, setActiveView] = useState('home');
   const settingsOpen = useUIStore((s) => s.settingsOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const initStreamListener = useChatStore((s) => s.initStreamListener);
@@ -61,6 +61,7 @@ export function App() {
         onOpenChange={setCommandOpen}
         onCommand={(cmd) => {
           if (cmd === 'deploy') setDeployOpen(true);
+          else if (cmd === 'home') setActiveView('home');
           else if (cmd === 'memory') setActiveView('memory');
           else if (cmd === 'settings') setActiveView('settings');
           else if (cmd === 'browser') setActiveView('browser');
@@ -76,6 +77,9 @@ export function App() {
           else if (cmd === 'projects') setActiveView('projects');
           else if (cmd === 'documents') setActiveView('documents');
           else if (cmd === 'agents') setActiveView('agents');
+          else if (cmd === 'open-canvas') setActiveView('chats');
+          else if (cmd === 'open-code') setActiveView('chats');
+          else if (cmd === 'create-agent') setActiveView('agents');
           else if (cmd === 'new-chat') {
             setActiveView('chats');
           }

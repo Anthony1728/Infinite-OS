@@ -134,7 +134,7 @@ export class ToolMarketplace {
         tags: ['file', 'write'],
         inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
         outputSchema: { type: 'object', properties: { success: { type: 'boolean' } } },
-        execute: async (input) => ({ success: true }),
+        execute: async (_input) => ({ success: true }),
         dependencies: [],
         rating: 4.5,
         downloads: 1000,

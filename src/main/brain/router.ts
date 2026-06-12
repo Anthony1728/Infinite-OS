@@ -50,7 +50,7 @@ export class DecisionRouter {
     };
   }
 
-  analyzeTask(prompt: string, context?: Record<string, unknown>): TaskAnalysis {
+  analyzeTask(prompt: string, _context?: Record<string, unknown>): TaskAnalysis {
     const lowerPrompt = prompt.toLowerCase();
     
     // Detect task type

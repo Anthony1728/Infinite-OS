@@ -3,7 +3,7 @@ import { useWorkspaceStore } from '../../../renderer/stores/workspace';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function WorkspaceView() {
-  const { workspaces, stats, activity, loading, loadWorkspaces, loadStats, loadActivity, createWorkspace, deleteWorkspace, addMember } = useWorkspaceStore();
+  const { workspaces, stats, activity, loadWorkspaces, loadStats, loadActivity, createWorkspace, deleteWorkspace } = useWorkspaceStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [showCreate, setShowCreate] = useState(false);
   const [formData, setFormData] = useState({ name: '', description: '' });

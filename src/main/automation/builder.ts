@@ -259,8 +259,9 @@ export class AutomationBuilder {
                 cwd: homedir(),
                 abortSignal: AbortSignal.timeout(30000),
                 sessionId: workflow.id,
+                onUpdate: () => {},
               });
-              result = toolResult.content;
+              result = typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content);
             } else {
               result = `Tool not found: ${toolName}`;
             }

@@ -118,23 +118,23 @@ Instead of switching between dozens of applications, InfiniteAI OS brings everyt
 ## Architecture
 
 ```
-┌───────────────────────────┐
-│       InfiniteAI OS       │
-└─────────────┬─────────────┘
-              │
-    ┌─────────▼─────────┐
-    │    Unified UI     │
-    └─────────┬─────────┘
-              │
- ┌────────────┼────────────┐
- │            │            │
- ▼            ▼            ▼
+---------------------------
+|       InfiniteAI OS       |
+---------------------------
+              |
+    -------------------
+    |    Unified UI    |
+    -------------------
+              |
+ -------------+-------------
+ |            |            |
+ v            v            v
 AI Core    Agent Core   Cloud Core
- │            │            │
- ▼            ▼            ▼
+ |            |            |
+ v            v            v
 Models    Automation   Storage
- │            │            │
- ▼            ▼            ▼
+ |            |            |
+ v            v            v
 Plugins    Tools       Integrations
 ```
 

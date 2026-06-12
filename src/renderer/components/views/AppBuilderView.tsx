@@ -3,7 +3,7 @@ import { useAppStore } from '../../../renderer/stores/app';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function AppBuilderView() {
-  const { projects, templates, stats, loading, loadProjects, loadTemplates, loadStats, createProject, buildProject, deleteProject } = useAppStore();
+  const { projects, templates, stats, loadProjects, loadTemplates, loadStats, createProject, buildProject, deleteProject } = useAppStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [showCreate, setShowCreate] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', type: 'react' });

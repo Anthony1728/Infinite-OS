@@ -9,7 +9,6 @@
  * - Plugin configuration
  */
 
-import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -245,7 +244,7 @@ export class PluginStore {
     }
   }
 
-  private async executeNotionPlugin(command: string, args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
+  private async executeNotionPlugin(command: string, _args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
     const token = this.plugins.get('notion')?.config?.token as string;
     
     switch (command) {
