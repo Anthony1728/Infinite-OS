@@ -95,6 +95,12 @@ function createWindow(): void {
   });
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     console.error('[renderer] crashed:', details);
+    // Attempt to recover by reloading
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.reload();
+      }
+    }, 2000);
   });
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error(`[renderer] did-fail-load ${code} ${desc} ${url}`);
@@ -138,6 +144,11 @@ app.on('window-all-closed', () => {
 // Prevent crashes from unhandled promise rejections
 process.on('unhandledRejection', (reason) => {
   console.error('[main] Unhandled promise rejection:', reason);
+});
+
+// Handle GPU process crashes
+app.on('child-process-gone', (_e, details) => {
+  console.error('[main] Child process gone:', details.type, details.reason);
 });
 
 // Hard-disable navigation to external URLs

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNotificationStore } from '../../../renderer/stores/notifications';
+import { useNotificationStore } from '../../stores/notifications';
 
 export function ComputerControlView() {
   const addToast = useNotificationStore((s) => s.addToast);
