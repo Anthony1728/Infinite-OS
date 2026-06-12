@@ -17,6 +17,12 @@ import { CloudSyncView } from '../views/CloudSyncView';
 import { MultiAgentView } from '../views/MultiAgentView';
 import { WorkspaceView } from '../views/WorkspaceView';
 import { OSHomeView } from '../views/OSHomeView';
+import { VoiceView } from '../views/VoiceView';
+import { VideoView } from '../views/VideoView';
+import { DeployView } from '../views/DeployView';
+import { TestView } from '../views/TestView';
+import { EnterpriseView } from '../views/EnterpriseView';
+import { CallCenterView } from '../views/CallCenterView';
 
 
 const TABS = [
@@ -125,6 +131,24 @@ case 'automations':
 
       case 'memory':
         return <MemoryPanel onClose={() => onViewChange('chats')} />;
+
+      case 'voice':
+        return <VoiceView />;
+
+      case 'video':
+        return <VideoView />;
+
+      case 'deploy':
+        return <DeployView />;
+
+      case 'testing':
+        return <TestView />;
+
+      case 'enterprise':
+        return <EnterpriseView />;
+
+      case 'callcenter':
+        return <CallCenterView />;
 
       case 'settings':
         return <SettingsView />;

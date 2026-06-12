@@ -23,6 +23,11 @@ const COMMANDS = [
   { id: 'app-builder', label: 'App Builder', icon: 'AB', category: 'Creative' },
   { id: 'plugins', label: 'Plugin Marketplace', icon: 'PL', category: 'Platform' },
   { id: 'deploy', label: 'Deploy Project', icon: 'DP', category: 'Actions' },
+  { id: 'voice', label: 'Voice Assistant', icon: 'VC', category: 'Tools' },
+  { id: 'video', label: 'Video Clipping', icon: 'VD', category: 'Tools' },
+  { id: 'testing', label: 'Testing Framework', icon: 'TS', category: 'Tools' },
+  { id: 'enterprise', label: 'Enterprise', icon: 'EN', category: 'Platform' },
+  { id: 'callcenter', label: 'Call Center', icon: 'CC', category: 'Tools' },
   { id: 'settings', label: 'Settings', icon: 'ST', category: 'App', shortcut: 'Ctrl+,' },
 ];
 

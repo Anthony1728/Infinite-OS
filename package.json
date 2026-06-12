@@ -48,6 +48,7 @@
     "fast-glob": "^3.3.2",
     "fastify": "^5.8.5",
     "framer-motion": "^12.40.0",
+    "lucide-react": "^1.17.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.67.0",
     "pino": "^9.4.0",

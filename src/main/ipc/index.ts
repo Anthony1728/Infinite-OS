@@ -34,6 +34,12 @@ import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
 import { orchestrator, type OrchestratorEvent } from '../agent/orchestrator.js';
 import { selectBestModel, getAllFreeModels } from '../providers/model-selector.js';
+import { voiceAssistant } from '../voice/index.js';
+import { videoEngine } from '../video/index.js';
+import { deploySystem } from '../deploy/index.js';
+import { testingFramework } from '../testing/index.js';
+import { enterpriseManager } from '../enterprise/index.js';
+import { callCenter } from '../callcenter/index.js';
 
 const activeRuns = new Map<string, AbortController>();
 
@@ -366,4 +372,102 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.MODEL_FREE_LIST, async () => {
     return getAllFreeModels();
   });
+
+  // Voice Assistant IPC
+  ipcMain.handle(IPC.VOICE_CONFIG_GET, async () => voiceAssistant.getConfig());
+  ipcMain.handle(IPC.VOICE_CONFIG_SET, async (_e, { config }) => { voiceAssistant.updateConfig(config); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_START_LISTENING, async () => { voiceAssistant.setListening(true); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_STOP_LISTENING, async () => { voiceAssistant.setListening(false); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_PROCESS_TRANSCRIPT, async (_e, { transcript }) => voiceAssistant.processTranscript(transcript));
+  ipcMain.handle(IPC.VOICE_SET_WAKE_WORD, async (_e, { word }) => { voiceAssistant.setWakeWord(word); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_ADD_CUSTOM_COMMAND, async (_e, { trigger, action }) => { voiceAssistant.addCustomCommand(trigger, action); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_REMOVE_CUSTOM_COMMAND, async (_e, { trigger }) => { voiceAssistant.removeCustomCommand(trigger); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_CUSTOM_COMMANDS, async () => voiceAssistant.getCustomCommands());
+  ipcMain.handle(IPC.VOICE_HISTORY, async () => voiceAssistant.getHistory());
+  ipcMain.handle(IPC.VOICE_CLEAR_HISTORY, async () => { voiceAssistant.clearHistory(); return { ok: true }; });
+  ipcMain.handle(IPC.VOICE_SPEAK, async (_e, { text }) => {
+    const win = getMainWindow();
+    win?.webContents.send(IPC.CHAT_STREAM_EVENT, { type: 'voice_speak', text });
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.VOICE_STATUS, async () => ({
+    listening: voiceAssistant.getListening(),
+    config: voiceAssistant.getConfig(),
+    wakeWord: voiceAssistant.getWakeWord(),
+  }));
+
+  // Video Clipping IPC
+  ipcMain.handle(IPC.VIDEO_CREATE_PROJECT, async (_e, { name, sourceFile, description }) => videoEngine.createProject(name, sourceFile, description));
+  ipcMain.handle(IPC.VIDEO_LIST_PROJECTS, async () => videoEngine.listProjects());
+  ipcMain.handle(IPC.VIDEO_GET_PROJECT, async (_e, { id }) => videoEngine.getProject(id) ?? null);
+  ipcMain.handle(IPC.VIDEO_DELETE_PROJECT, async (_e, { id }) => videoEngine.deleteProject(id));
+  ipcMain.handle(IPC.VIDEO_ANALYZE, async (_e, { projectId }) => videoEngine.analyzeVideo(projectId));
+  ipcMain.handle(IPC.VIDEO_EXTRACT_CLIP, async (_e, { projectId, startTime, endTime, name, tags }) => videoEngine.extractClip({ projectId, startTime, endTime, name, tags }));
+  ipcMain.handle(IPC.VIDEO_FIND_HIGHLIGHTS, async (_e, { projectId, maxClips }) => videoEngine.findHighlights(projectId, maxClips));
+  ipcMain.handle(IPC.VIDEO_ADD_TRANSCRIPT, async (_e, { projectId, segments }) => { await videoEngine.addTranscript(projectId, segments); return { ok: true }; });
+  ipcMain.handle(IPC.VIDEO_SPLIT_BY_CHAPTERS, async (_e, { projectId }) => videoEngine.splitByChapters(projectId));
+  ipcMain.handle(IPC.VIDEO_ADD_HIGHLIGHT, async (_e, { projectId, timestamp, description }) => { videoEngine.addHighlight(projectId, timestamp, description); return { ok: true }; });
+
+  // Deployment IPC
+  ipcMain.handle(IPC.DEPLOY_CREATE_TARGET, async (_e, { name, type, config }) => deploySystem.createTarget(name, type, config));
+  ipcMain.handle(IPC.DEPLOY_LIST_TARGETS, async () => deploySystem.listTargets());
+  ipcMain.handle(IPC.DEPLOY_GET_TARGET, async (_e, { id }) => deploySystem.getTarget(id) ?? null);
+  ipcMain.handle(IPC.DEPLOY_DELETE_TARGET, async (_e, { id }) => deploySystem.deleteTarget(id));
+  ipcMain.handle(IPC.DEPLOY_CREATE_PIPELINE, async (_e, { name, projectId, targetId, commands }) => deploySystem.createPipeline(name, projectId, targetId, commands));
+  ipcMain.handle(IPC.DEPLOY_RUN_PIPELINE, async (_e, { pipelineId, cwd }) => deploySystem.runPipeline(pipelineId, cwd));
+  ipcMain.handle(IPC.DEPLOY_CANCEL_PIPELINE, async (_e, { pipelineId }) => deploySystem.cancelPipeline(pipelineId));
+  ipcMain.handle(IPC.DEPLOY_GET_PIPELINE, async (_e, { id }) => deploySystem.getPipeline(id) ?? null);
+  ipcMain.handle(IPC.DEPLOY_LIST_PIPELINES, async () => deploySystem.listPipelines());
+  ipcMain.handle(IPC.DEPLOY_DETECT_PROJECT, async (_e, { projectPath }) => deploySystem.detectProjectType(projectPath));
+  ipcMain.handle(IPC.DEPLOY_DEFAULT_CONFIG, async (_e, { type }) => deploySystem.getDefaultBuildConfig(type));
+
+  // Testing Framework IPC
+  ipcMain.handle(IPC.TEST_CREATE_SUITE, async (_e, { name, framework, description }) => testingFramework.createSuite(name, framework, description));
+  ipcMain.handle(IPC.TEST_LIST_SUITES, async () => testingFramework.listSuites());
+  ipcMain.handle(IPC.TEST_GET_SUITE, async (_e, { id }) => testingFramework.getSuite(id) ?? null);
+  ipcMain.handle(IPC.TEST_DELETE_SUITE, async (_e, { id }) => testingFramework.deleteSuite(id));
+  ipcMain.handle(IPC.TEST_ADD_TEST, async (_e, { suiteId, test }) => testingFramework.addTest(suiteId, test));
+  ipcMain.handle(IPC.TEST_REMOVE_TEST, async (_e, { suiteId, testId }) => testingFramework.removeTest(suiteId, testId));
+  ipcMain.handle(IPC.TEST_RUN_SUITE, async (_e, { suiteId }) => testingFramework.runSuite(suiteId));
+  ipcMain.handle(IPC.TEST_GENERATE_TESTS, async (_e, { description, filePath }) => testingFramework.generateTests(description, filePath));
+  ipcMain.handle(IPC.TEST_STATS, async () => testingFramework.getSuiteStats());
+  ipcMain.handle(IPC.TEST_CREATE_PLAN, async (_e, { name, description, scope, priority }) => testingFramework.createPlan(name, description, scope, priority));
+  ipcMain.handle(IPC.TEST_LIST_PLANS, async () => testingFramework.listPlans());
+
+  // Enterprise IPC
+  ipcMain.handle(IPC.ENTERPRISE_ADD_MEMBER, async (_e, { name, email, role }) => enterpriseManager.addMember(name, email, role));
+  ipcMain.handle(IPC.ENTERPRISE_LIST_MEMBERS, async () => enterpriseManager.listMembers());
+  ipcMain.handle(IPC.ENTERPRISE_GET_MEMBER, async (_e, { id }) => enterpriseManager.getMember(id) ?? null);
+  ipcMain.handle(IPC.ENTERPRISE_UPDATE_ROLE, async (_e, { id, role }) => enterpriseManager.updateMemberRole(id, role));
+  ipcMain.handle(IPC.ENTERPRISE_REMOVE_MEMBER, async (_e, { id }) => enterpriseManager.removeMember(id));
+  ipcMain.handle(IPC.ENTERPRISE_CREATE_PROJECT, async (_e, { name, ownerId, description }) => enterpriseManager.createProject(name, ownerId, description));
+  ipcMain.handle(IPC.ENTERPRISE_LIST_PROJECTS, async () => enterpriseManager.listProjects());
+  ipcMain.handle(IPC.ENTERPRISE_ADD_MEMBER_TO_PROJECT, async (_e, { projectId, memberId }) => enterpriseManager.addMemberToProject(projectId, memberId));
+  ipcMain.handle(IPC.ENTERPRISE_REMOVE_MEMBER_FROM_PROJECT, async (_e, { projectId, memberId }) => enterpriseManager.removeMemberFromProject(projectId, memberId));
+  ipcMain.handle(IPC.ENTERPRISE_AUDIT_LOG, async (_e, { filters }) => enterpriseManager.getAuditLog(filters));
+  ipcMain.handle(IPC.ENTERPRISE_ADD_COMPLIANCE_RULE, async (_e, { name, description, category, severity, check }) => enterpriseManager.addComplianceRule(name, description, category, severity, check));
+  ipcMain.handle(IPC.ENTERPRISE_COMPLIANCE_RULES, async () => enterpriseManager.listComplianceRules());
+  ipcMain.handle(IPC.ENTERPRISE_COMPLIANCE_STATUS, async () => enterpriseManager.getComplianceStatus());
+  ipcMain.handle(IPC.ENTERPRISE_EXPORT_AUDIT, async () => enterpriseManager.exportAuditLog());
+
+  // Call Center IPC
+  ipcMain.handle(IPC.CALL_CREATE, async (_e, { callerId, direction, options }) => callCenter.createCall(callerId, direction, options));
+  ipcMain.handle(IPC.CALL_ANSWER, async (_e, { callId, agentId }) => callCenter.answerCall(callId, agentId));
+  ipcMain.handle(IPC.CALL_HOLD, async (_e, { callId }) => callCenter.holdCall(callId));
+  ipcMain.handle(IPC.CALL_RESUME, async (_e, { callId }) => callCenter.resumeCall(callId));
+  ipcMain.handle(IPC.CALL_END, async (_e, { callId, disposition, notes }) => callCenter.endCall(callId, disposition, notes));
+  ipcMain.handle(IPC.CALL_MISS, async (_e, { callId }) => callCenter.missCall(callId));
+  ipcMain.handle(IPC.CALL_GET, async (_e, { id }) => callCenter.getCall(id) ?? null);
+  ipcMain.handle(IPC.CALL_LIST, async (_e, { filters }) => callCenter.listCalls(filters));
+  ipcMain.handle(IPC.CALL_QUEUE_CREATE, async (_e, { name, maxWaitTime, priority }) => callCenter.createQueue(name, maxWaitTime, priority));
+  ipcMain.handle(IPC.CALL_QUEUE_LIST, async () => callCenter.listQueues());
+  ipcMain.handle(IPC.CALL_QUEUE_ADD, async (_e, { queueId, callId }) => callCenter.addToQueue(queueId, callId));
+  ipcMain.handle(IPC.CALL_QUEUE_REMOVE, async (_e, { queueId, callId }) => callCenter.removeFromQueue(queueId, callId));
+  ipcMain.handle(IPC.CALL_AGENT_CREATE, async (_e, { name, skills, maxConcurrent }) => callCenter.createAgent(name, skills, maxConcurrent));
+  ipcMain.handle(IPC.CALL_AGENT_LIST, async () => callCenter.listAgents());
+  ipcMain.handle(IPC.CALL_AGENT_STATUS, async (_e, { agentId, status }) => callCenter.updateAgentStatus(agentId, status));
+  ipcMain.handle(IPC.CALL_ASSIGN, async (_e, { agentId, callId }) => callCenter.assignCall(agentId, callId));
+  ipcMain.handle(IPC.CALL_TEMPLATE_CREATE, async (_e, { name, greeting, prompts }) => callCenter.createTemplate(name, greeting, prompts));
+  ipcMain.handle(IPC.CALL_TEMPLATE_LIST, async () => callCenter.listTemplates());
+  ipcMain.handle(IPC.CALL_ANALYTICS, async (_e, { since }) => callCenter.getAnalytics(since));
 }

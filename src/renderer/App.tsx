@@ -93,7 +93,7 @@ export function App() {
           else if (cmd === 'memory') setActiveView('memory');
           else if (cmd === 'settings') setActiveView('settings');
           else if (cmd === 'browser') setActiveView('browser');
-          else if (cmd === 'computer') setActiveView('computer');
+          else if (cmd === 'computer') setActiveView('browser');
           else if (cmd === 'automations') setActiveView('automations');
           else if (cmd === 'website-builder') setActiveView('website-builder');
           else if (cmd === 'app-builder') setActiveView('app-builder');
@@ -105,6 +105,11 @@ export function App() {
           else if (cmd === 'projects') setActiveView('projects');
           else if (cmd === 'documents') setActiveView('documents');
           else if (cmd === 'agents') setActiveView('agents');
+          else if (cmd === 'voice') setActiveView('voice');
+          else if (cmd === 'video') setActiveView('video');
+          else if (cmd === 'testing') setActiveView('testing');
+          else if (cmd === 'enterprise') setActiveView('enterprise');
+          else if (cmd === 'callcenter') setActiveView('callcenter');
           else if (cmd === 'open-canvas') setActiveView('chats');
           else if (cmd === 'open-code') setActiveView('chats');
           else if (cmd === 'create-agent') setActiveView('agents');
