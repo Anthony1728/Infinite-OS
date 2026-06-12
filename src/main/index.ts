@@ -33,6 +33,8 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 // Disable hardware acceleration to prevent GPU process crashes on some systems
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
 
 // Brain subsystem instances
 export const brain = new InfiniteBrain();
