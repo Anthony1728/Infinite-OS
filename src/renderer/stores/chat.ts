@@ -18,6 +18,8 @@ interface ChatState {
   messages: Message[];
   streaming: boolean;
   pendingPermission: { id: string; tool: string; input: unknown } | null;
+  orchestratedTaskId: string | null;
+  orchestratorEvents: unknown[];
 
   initStreamListener: () => void;
   loadSessions: () => Promise<void>;
@@ -27,6 +29,7 @@ interface ChatState {
   sendMessage: (text: string) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
+  interject: (message: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -35,6 +38,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streaming: false,
   pendingPermission: null,
+  orchestratedTaskId: null,
+  orchestratorEvents: [],
 
   initStreamListener: () => {
     window.api.onStreamEvent((payload: unknown) => {
@@ -43,6 +48,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
       handleStreamEvent(ev);
     });
     window.api.onPermissionRequest((req: { id: string; tool: string; input: unknown }) => set({ pendingPermission: req }));
+
+    // Listen for orchestrator events
+    window.api.onOrchestratorEvent((payload: unknown) => {
+      const ev = payload as { sessionId: string; type: string; data: unknown };
+      if (ev.sessionId !== get().currentSessionId) return;
+
+      if (ev.type === 'task_completed') {
+        set({ streaming: false, orchestratedTaskId: null });
+        const data = ev.data as { completed: number; failed: number; duration: number };
+        const doneMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: `All ${data.completed} sub-tasks completed successfully.${data.failed > 0 ? ` ${data.failed} failed.` : ''} Total time: ${(data.duration / 1000).toFixed(1)}s`,
+          }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, doneMsg] }));
+      } else if (ev.type === 'task_failed') {
+        set({ streaming: false, orchestratedTaskId: null });
+      } else if (ev.type === 'subtask_completed') {
+        const data = ev.data as { subTaskId: string; result: string };
+        // Show sub-task result as system message
+        const resultMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `[Sub-agent finished] ${data.result.slice(0, 500)}` }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, resultMsg] }));
+      }
+    });
   },
 
   loadSessions: async () => {
@@ -107,17 +145,64 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     set({ messages: [...get().messages, userMessage], streaming: true });
 
-    try {
-      await window.api.sendMessage({
-        sessionId: sessionId!,
-        message: userMessage.content,
-        provider,
-        model,
-        cwd: settings.cwd ?? '.',
-      });
-    } catch (e) {
-      console.error('[chat] Send failed:', e);
-      set({ streaming: false });
+    // Detect complex tasks that need orchestration
+    const isComplexTask = text.length > 200 ||
+      /\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
+      /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text);
+
+    if (isComplexTask) {
+      // Use orchestrator for complex tasks
+      try {
+        const result = await window.api.orchestratorStart({
+          prompt: text,
+          sessionId: sessionId!,
+          cwd: settings.cwd ?? '.',
+          provider,
+          model,
+        });
+        set({ orchestratedTaskId: result.taskId });
+
+        // Show system message about what's happening
+        const systemMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
+          }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, systemMsg] }));
+      } catch (e) {
+        console.error('[chat] Orchestrator failed, falling back to direct:', e);
+        // Fall back to direct agent
+        try {
+          await window.api.sendMessage({
+            sessionId: sessionId!,
+            message: userMessage.content,
+            provider,
+            model,
+            cwd: settings.cwd ?? '.',
+          });
+        } catch (e2) {
+          console.error('[chat] Send failed:', e2);
+          set({ streaming: false });
+        }
+      }
+    } else {
+      // Use direct agent for simple tasks
+      try {
+        await window.api.sendMessage({
+          sessionId: sessionId!,
+          message: userMessage.content,
+          provider,
+          model,
+          cwd: settings.cwd ?? '.',
+        });
+      } catch (e) {
+        console.error('[chat] Send failed:', e);
+        set({ streaming: false });
+      }
     }
   },
 
@@ -132,6 +217,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!pendingPermission) return;
     await window.api.respondPermission({ id: pendingPermission.id, allowed });
     set({ pendingPermission: null });
+  },
+
+  interject: async (message) => {
+    const { orchestratedTaskId, currentSessionId } = get();
+    if (!orchestratedTaskId || !currentSessionId) return;
+
+    // Add user message to chat
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: [{ type: 'text', text: message }],
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, userMessage] }));
+
+    // Send interjection to orchestrator
+    try {
+      await window.api.orchestratorInterject({ taskId: orchestratedTaskId, message });
+    } catch (e) {
+      console.error('[chat] Interjection failed:', e);
+    }
   },
 }));
 

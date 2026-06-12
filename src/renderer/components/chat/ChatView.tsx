@@ -93,6 +93,8 @@ function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: s
 
 function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { messages: Message[]; streaming: boolean; input: string; setInput: (v: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend: (text: string) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const orchestratedTaskId = useChatStore((s) => s.orchestratedTaskId);
+  const interject = useChatStore((s) => s.interject);
 
   // Determine if we should show thinking bubble:
   // Show it only when streaming is active AND the last assistant message has no text yet
@@ -106,6 +108,15 @@ function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { 
     }
   }, [messages, streaming]);
 
+  // Handle sending during streaming (interjection)
+  const handleSendDuringStream = (text: string) => {
+    if (!text.trim()) return;
+    if (orchestratedTaskId) {
+      interject(text.trim());
+    }
+    setInput('');
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 custom-scrollbar">
@@ -114,11 +125,23 @@ function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { 
             <MessageBubble key={m.id} message={m} />
           ))}
           {showThinking && <ThinkingBubble />}
+          {orchestratedTaskId && streaming && (
+            <div className="flex items-center gap-2 text-xs text-indigo-400 animate-pulse">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              Multiple agents working in parallel — type to send updates
+            </div>
+          )}
         </div>
       </div>
       <div className="flex-shrink-0 px-5 py-3">
         <div className="max-w-4xl mx-auto">
-          <InputBar input={input} setInput={setInput} inputRef={inputRef} onSend={onSend} placeholder="Continue the conversation..." />
+          <InputBar
+            input={input}
+            setInput={setInput}
+            inputRef={inputRef}
+            onSend={streaming ? handleSendDuringStream : onSend}
+            placeholder={streaming ? 'Send a suggestion or update...' : 'Continue the conversation...'}
+          />
         </div>
       </div>
     </div>

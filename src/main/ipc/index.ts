@@ -3,7 +3,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 import { settings } from '../settings/store.js';
-import { setApiKey, hasApiKey } from '../settings/secrets.js';
+import { setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
 import { listProviders, getProvider } from '../providers/registry.js';
 import { toolRegistry } from '../tools/base.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect } from '../mcp/manager.js';
@@ -32,6 +32,8 @@ import { registerWorkspaceIpc } from './workspace.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
 import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
+import { orchestrator, type OrchestratorEvent } from '../agent/orchestrator.js';
+import { selectBestModel, getAllFreeModels } from '../providers/model-selector.js';
 
 const activeRuns = new Map<string, AbortController>();
 
@@ -305,5 +307,63 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('profile:suggestions', async () => {
     const mgr = new PersonalizationManager();
     return mgr.suggestImprovements();
+  });
+
+  // Orchestrator IPC
+  ipcMain.handle(IPC.ORCHESTRATOR_START, async (_e, { prompt, sessionId, cwd }) => {
+    const win = getMainWindow();
+    if (!win) throw new Error('No window');
+
+    // Gather available providers
+    const availableProviders = new Map<string, { apiKey?: string; baseUrl?: string }>();
+    for (const p of listProviders()) {
+      const key = await getApiKey(p.id).catch(() => undefined);
+      availableProviders.set(p.id, { apiKey: key });
+    }
+
+    // Analyze and decompose the task
+    const task = orchestrator.analyze(prompt, availableProviders);
+
+    // Notify user about paid model if needed
+    if (task.paidModelNotification) {
+      win.webContents.send(IPC.CHAT_STREAM_EVENT, {
+        sessionId,
+        type: 'text_delta',
+        message_id: 'system-notification',
+        text: `\n\n⚠️ ${task.paidModelNotification}\n`,
+      });
+    }
+
+    // Stream orchestrator events to renderer
+    const sink = (e: OrchestratorEvent) => win.webContents.send(IPC.ORCHESTRATOR_EVENT, { sessionId, ...e });
+
+    // Execute autonomously in background
+    orchestrator.execute(task.id, sessionId, cwd, sink).catch(() => {});
+
+    return { taskId: task.id, subTasks: task.subTasks.length, model: task.modelSelection };
+  });
+
+  ipcMain.handle(IPC.ORCHESTRATOR_INTERJECT, async (_e, { taskId, message }) => {
+    orchestrator.interject(taskId, message);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.ORCHESTRATOR_STATUS, async (_e, { taskId }: { taskId?: string }) => {
+    if (taskId) return orchestrator.getTask(taskId);
+    return orchestrator.getActiveTasks();
+  });
+
+  // Model Selector IPC
+  ipcMain.handle(IPC.MODEL_SELECT, async (_e, { taskType }) => {
+    const availableProviders = new Map<string, { apiKey?: string; baseUrl?: string }>();
+    for (const p of listProviders()) {
+      const key = await getApiKey(p.id).catch(() => undefined);
+      availableProviders.set(p.id, { apiKey: key });
+    }
+    return selectBestModel(taskType ?? 'general', availableProviders);
+  });
+
+  ipcMain.handle(IPC.MODEL_FREE_LIST, async () => {
+    return getAllFreeModels();
   });
 }

@@ -250,6 +250,23 @@ const api = {
   profileBusiness: (args: { ctx: unknown }) => ipcRenderer.invoke('profile:business', args),
   profileContext: () => ipcRenderer.invoke('profile:context'),
   profileSuggestions: () => ipcRenderer.invoke('profile:suggestions'),
+
+  // Orchestrator
+  orchestratorStart: (args: { prompt: string; sessionId: string; cwd: string; provider: string; model: string }) =>
+    ipcRenderer.invoke(IPC.ORCHESTRATOR_START, args),
+  orchestratorInterject: (args: { taskId: string; message: string }) =>
+    ipcRenderer.invoke(IPC.ORCHESTRATOR_INTERJECT, args),
+  orchestratorStatus: (args?: { taskId?: string }) =>
+    ipcRenderer.invoke(IPC.ORCHESTRATOR_STATUS, args ?? {}),
+  onOrchestratorEvent: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.ORCHESTRATOR_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.ORCHESTRATOR_EVENT, handler);
+  },
+
+  // Model Selector
+  modelSelect: (args: { taskType?: string }) => ipcRenderer.invoke(IPC.MODEL_SELECT, args),
+  modelFreeList: () => ipcRenderer.invoke(IPC.MODEL_FREE_LIST),
 };
 
 contextBridge.exposeInMainWorld('api', api);

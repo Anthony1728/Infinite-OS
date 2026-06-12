@@ -222,6 +222,16 @@ export const IPC = {
   WORKSPACE_REMOVE_RESOURCE: 'workspace:remove-resource',
   WORKSPACE_GET_ACTIVITY: 'workspace:get-activity',
   WORKSPACE_STATS: 'workspace:stats',
+
+  // Orchestrator
+  ORCHESTRATOR_START: 'orchestrator:start',
+  ORCHESTRATOR_INTERJECT: 'orchestrator:interject',
+  ORCHESTRATOR_STATUS: 'orchestrator:status',
+  ORCHESTRATOR_EVENT: 'orchestrator:event', // main → renderer push
+
+  // Free Model Selector
+  MODEL_SELECT: 'model:select',
+  MODEL_FREE_LIST: 'model:free-list',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
