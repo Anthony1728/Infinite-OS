@@ -52,6 +52,13 @@ export async function runAgent(
   }
 
   const apiKey = await getApiKey(opts.provider);
+  console.log(`[agent] Provider: ${opts.provider}, Model: ${opts.model}, HasKey: ${Boolean(apiKey)}`);
+  
+  if (!apiKey) {
+    opts.onEvent({ type: 'error', error: `No API key for provider "${opts.provider}". Go to Settings and add your API key.` });
+    return messages;
+  }
+  
   const tools = toolRegistry.asProviderTools();
   const system = await buildSystemPrompt(opts);
 

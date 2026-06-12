@@ -56,14 +56,23 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     const history = await sessionStore.loadMessages(sessionId);
     await sessionStore.appendMessage(sessionId, userMessage);
 
-    await runAgent(history, userMessage, {
-      sessionId,
-      cwd,
-      provider,
-      model,
-      signal: controller.signal,
-      onEvent: (ev) => win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev }),
-    });
+    try {
+      await runAgent(history, userMessage, {
+        sessionId,
+        cwd,
+        provider,
+        model,
+        signal: controller.signal,
+        onEvent: (ev) => win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev }),
+      });
+    } catch (err) {
+      console.error('[IPC] runAgent failed:', err);
+      win.webContents.send(IPC.CHAT_STREAM_EVENT, {
+        sessionId,
+        type: 'error',
+        error: (err as Error).message || 'Agent failed',
+      });
+    }
 
     activeRuns.delete(sessionId);
     return { ok: true };
