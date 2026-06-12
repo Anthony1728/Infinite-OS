@@ -29,6 +29,9 @@ import { registerPluginIpc } from './plugin.js';
 import { registerCloudIpc } from './cloud.js';
 import { registerMultiAgentIpc } from './multi-agent.js';
 import { registerWorkspaceIpc } from './workspace.js';
+import { SelfImprovementAgent } from '../agent/self-improvement.js';
+import { SkillsManager } from '../skills/manager.js';
+import { PersonalizationManager } from '../personalization/manager.js';
 
 const activeRuns = new Map<string, AbortController>();
 
@@ -225,4 +228,82 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerCloudIpc();
   registerMultiAgentIpc();
   registerWorkspaceIpc();
+
+  // Self-Improvement Agent IPC
+  ipcMain.handle('self-improvement:audit', async (_e, { cwd }: { cwd: string }) => {
+    const agent = new SelfImprovementAgent(cwd);
+    return agent.runFullAudit();
+  });
+  ipcMain.handle('self-improvement:status', async (_e, { cwd }: { cwd: string }) => {
+    const agent = new SelfImprovementAgent(cwd);
+    return agent.getLastReport();
+  });
+
+  // Skills IPC
+  ipcMain.handle('skills:list', async () => {
+    const mgr = new SkillsManager();
+    return mgr.listAllSkills();
+  });
+  ipcMain.handle('skills:get', async (_e, { id }: { id: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.getSkill(id) ?? null;
+  });
+  ipcMain.handle('skills:create', async (_e, { skill }: { skill: Parameters<SkillsManager['addSkill']>[0] }) => {
+    const mgr = new SkillsManager();
+    return mgr.addSkill(skill);
+  });
+  ipcMain.handle('skills:update', async (_e, { id, updates }: { id: string; updates: Record<string, unknown> }) => {
+    const mgr = new SkillsManager();
+    return mgr.updateSkill(id, updates as Parameters<SkillsManager['updateSkill']>[1]);
+  });
+  ipcMain.handle('skills:delete', async (_e, { id }: { id: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.removeSkill(id);
+  });
+  ipcMain.handle('skills:toggle', async (_e, { id }: { id: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.toggleSkill(id);
+  });
+  ipcMain.handle('skills:search', async (_e, { query }: { query: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.searchSkills(query);
+  });
+  ipcMain.handle('skills:stats', async () => {
+    const mgr = new SkillsManager();
+    return mgr.getStats();
+  });
+  ipcMain.handle('skills:import-claude', async (_e, { filePath }: { filePath: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.importClaudeCodeSkill(filePath);
+  });
+  ipcMain.handle('skills:relevant', async (_e, { task }: { task: string }) => {
+    const mgr = new SkillsManager();
+    return mgr.getRelevantSkills(task);
+  });
+
+  // Personalization IPC
+  ipcMain.handle('profile:get', async () => {
+    const mgr = new PersonalizationManager();
+    return mgr.getProfile();
+  });
+  ipcMain.handle('profile:update', async (_e, { updates }: { updates: Record<string, unknown> }) => {
+    const mgr = new PersonalizationManager();
+    return mgr.updateProfile(updates as Parameters<PersonalizationManager['updateProfile']>[0]);
+  });
+  ipcMain.handle('profile:preferences', async (_e, { prefs }: { prefs: Record<string, unknown> }) => {
+    const mgr = new PersonalizationManager();
+    return mgr.updatePreferences(prefs as Parameters<PersonalizationManager['updatePreferences']>[0]);
+  });
+  ipcMain.handle('profile:business', async (_e, { ctx }: { ctx: Record<string, unknown> }) => {
+    const mgr = new PersonalizationManager();
+    return mgr.updateBusinessContext(ctx as Parameters<PersonalizationManager['updateBusinessContext']>[0]);
+  });
+  ipcMain.handle('profile:context', async () => {
+    const mgr = new PersonalizationManager();
+    return mgr.getPersonalizedContext();
+  });
+  ipcMain.handle('profile:suggestions', async () => {
+    const mgr = new PersonalizationManager();
+    return mgr.suggestImprovements();
+  });
 }

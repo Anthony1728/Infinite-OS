@@ -94,6 +94,12 @@ function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: s
 function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { messages: Message[]; streaming: boolean; input: string; setInput: (v: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend: (text: string) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Determine if we should show thinking bubble:
+  // Show it only when streaming is active AND the last assistant message has no text yet
+  const lastMsg = messages[messages.length - 1];
+  const isStreamingText = lastMsg?.role === 'assistant' && lastMsg.content.some((b) => b.type === 'text' && 'text' in b && (b as { text: string }).text.trim());
+  const showThinking = streaming && !isStreamingText;
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -107,7 +113,7 @@ function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { 
           {messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
-          {streaming && <ThinkingBubble />}
+          {showThinking && <ThinkingBubble />}
         </div>
       </div>
       <div className="flex-shrink-0 px-5 py-3">

@@ -226,6 +226,30 @@ const api = {
   workspaceRemoveResource: (args: unknown) => ipcRenderer.invoke(IPC.WORKSPACE_REMOVE_RESOURCE, args),
   workspaceGetActivity: (args: unknown) => ipcRenderer.invoke(IPC.WORKSPACE_GET_ACTIVITY, args),
   workspaceStats: () => ipcRenderer.invoke(IPC.WORKSPACE_STATS),
+
+  // Self-Improvement
+  selfImprovementAudit: (args: { cwd: string }) => ipcRenderer.invoke('self-improvement:audit', args),
+  selfImprovementStatus: (args: { cwd: string }) => ipcRenderer.invoke('self-improvement:status', args),
+
+  // Skills
+  skillsList: () => ipcRenderer.invoke('skills:list'),
+  skillsGet: (args: { id: string }) => ipcRenderer.invoke('skills:get', args),
+  skillsCreate: (args: { skill: unknown }) => ipcRenderer.invoke('skills:create', args),
+  skillsUpdate: (args: { id: string; updates: unknown }) => ipcRenderer.invoke('skills:update', args),
+  skillsDelete: (args: { id: string }) => ipcRenderer.invoke('skills:delete', args),
+  skillsToggle: (args: { id: string }) => ipcRenderer.invoke('skills:toggle', args),
+  skillsSearch: (args: { query: string }) => ipcRenderer.invoke('skills:search', args),
+  skillsStats: () => ipcRenderer.invoke('skills:stats'),
+  skillsImportClaude: (args: { filePath: string }) => ipcRenderer.invoke('skills:import-claude', args),
+  skillsRelevant: (args: { task: string }) => ipcRenderer.invoke('skills:relevant', args),
+
+  // Personalization
+  profileGet: () => ipcRenderer.invoke('profile:get'),
+  profileUpdate: (args: { updates: unknown }) => ipcRenderer.invoke('profile:update', args),
+  profilePreferences: (args: { prefs: unknown }) => ipcRenderer.invoke('profile:preferences', args),
+  profileBusiness: (args: { ctx: unknown }) => ipcRenderer.invoke('profile:business', args),
+  profileContext: () => ipcRenderer.invoke('profile:context'),
+  profileSuggestions: () => ipcRenderer.invoke('profile:suggestions'),
 };
 
 contextBridge.exposeInMainWorld('api', api);
