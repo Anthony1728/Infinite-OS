@@ -149,6 +149,38 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Permissions
   ipcMain.handle(IPC.PERMISSION_RESPONSE, async (_e, { id, allowed }) => { respondToPermission(id, allowed); return { ok: true }; });
 
+  // File System
+  ipcMain.handle(IPC.FILE_READ, async (_e, { path: filePath }: { path: string }) => {
+    try {
+      const { readFile, stat } = await import('node:fs/promises');
+      const s = await stat(filePath);
+      if (s.isDirectory()) {
+        const { readdir } = await import('node:fs/promises');
+        const entries = await readdir(filePath, { withFileTypes: true });
+        return {
+          type: 'directory',
+          entries: entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory() })),
+        };
+      }
+      const content = await readFile(filePath, 'utf8');
+      return { type: 'file', content, size: s.size };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
+
+  ipcMain.handle(IPC.FILE_WRITE, async (_e, { path: filePath, content }: { path: string; content: string }) => {
+    try {
+      const { writeFile, mkdir } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content, 'utf8');
+      return { ok: true };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
+
   // App
   ipcMain.handle(IPC.APP_VERSION, async () => '0.1.0');
 

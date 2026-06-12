@@ -16,6 +16,8 @@ export function App() {
   const [deployOpen, setDeployOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [activeView, setActiveView] = useState('home');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const settingsOpen = useUIStore((s) => s.settingsOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const initStreamListener = useChatStore((s) => s.initStreamListener);
@@ -26,6 +28,22 @@ export function App() {
   }, [initStreamListener]);
 
   useEffect(() => {
+    const checkWidth = () => {
+      if (window.innerWidth < 900) {
+        setSidebarCollapsed(true);
+        setRightPanelOpen(false);
+      } else if (window.innerWidth < 1200) {
+        setRightPanelOpen(false);
+      } else {
+        setRightPanelOpen(true);
+      }
+    };
+    checkWidth();
+    window.addEventListener('resize', checkWidth);
+    return () => window.removeEventListener('resize', checkWidth);
+  }, []);
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
         e.preventDefault();
@@ -34,6 +52,10 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setCommandOpen(true);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        setSidebarCollapsed((c) => !c);
       }
     };
     window.addEventListener('keydown', handler);
@@ -48,14 +70,20 @@ export function App() {
         activeView={activeView}
         onNavChange={setActiveView}
         onOpenSettings={() => setActiveView('settings')}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
       />
       <div className="flex-1 flex flex-col min-w-0 bg-bgMain">
-        <TopBar onOpenCommand={() => setCommandOpen(true)} />
+        <TopBar
+          onOpenCommand={() => setCommandOpen(true)}
+          onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+          onToggleRightPanel={() => setRightPanelOpen((o) => !o)}
+        />
         <main className="flex-1 min-h-0 overflow-hidden">
           <MainView activeView={activeView} onViewChange={setActiveView} />
         </main>
       </div>
-      <RightPanel />
+      {rightPanelOpen && <RightPanel />}
       <CommandPalette
         open={commandOpen}
         onOpenChange={setCommandOpen}

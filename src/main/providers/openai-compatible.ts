@@ -106,15 +106,20 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
               yield { type: 'text_delta', text: delta.content };
             }
             if (delta.tool_calls) {
+              let lastToolCallId = '';
               for (const tc of delta.tool_calls) {
-                if (tc.id) yield { type: 'tool_use_start', id: tc.id, name: tc.function.name };
+                const toolCallId = tc.id || lastToolCallId;
+                if (tc.id) {
+                  lastToolCallId = tc.id;
+                  yield { type: 'tool_use_start', id: tc.id, name: tc.function.name };
+                }
                 if (tc.function?.arguments) {
-                  yield { type: 'tool_use_delta', id: tc.id, partial_json: tc.function.arguments };
+                  yield { type: 'tool_use_delta', id: toolCallId, partial_json: tc.function.arguments };
                 }
                 if (tc.function?.name && tc.function?.arguments) {
                   try {
                     const args = JSON.parse(tc.function.arguments);
-                    yield { type: 'tool_use_end', id: tc.id, name: tc.function.name, input: args };
+                    yield { type: 'tool_use_end', id: toolCallId, name: tc.function.name, input: args };
                   } catch { /* still streaming */ }
                 }
               }

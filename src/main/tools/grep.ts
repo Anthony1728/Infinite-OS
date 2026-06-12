@@ -8,11 +8,10 @@ export const grep: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      pattern: { type: 'string' },
-      path: { type: 'string' },
+      pattern: { type: 'string', description: 'Regex pattern to search for' },
+      path: { type: 'string', description: 'File or directory to search (defaults to cwd)' },
       output_mode: { type: 'string', enum: ['files_with_matches', 'content', 'count'], default: 'files_with_matches' },
-      glob: { type: 'string' },
-      multiline: { type: 'boolean', default: false },
+      glob: { type: 'string', description: 'Glob filter for file names, e.g. "*.ts"' },
     },
     required: ['pattern'],
   },
@@ -23,22 +22,31 @@ export const grep: Tool = {
       pattern: string; path?: string; output_mode?: 'files_with_matches' | 'content' | 'count'; glob?: string;
     };
 
-    const args2: string[] = ['--no-heading'];
-    if (output_mode === 'files_with_matches') args2.push('-l');
-    if (output_mode === 'count') args2.push('-c');
-    if (output_mode === 'content') args2.push('-n');
-    if (globFilter) args2.push('--glob', globFilter);
-    args2.push('--', pattern, path);
+    const rgArgs: string[] = ['--no-heading', '--color=never'];
+    if (output_mode === 'files_with_matches') rgArgs.push('-l');
+    if (output_mode === 'count') rgArgs.push('-c');
+    if (output_mode === 'content') rgArgs.push('-n');
+    if (globFilter) rgArgs.push('--glob', globFilter);
+    rgArgs.push('--', pattern, path);
 
     return new Promise<ToolResult>((resolve) => {
-      const child = spawn(rgPath, args2);
-      let out = '';
-      child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-      child.on('close', (code) => {
-        if (code === 1) return resolve({ content: '(no matches)' });
-        if (code !== 0 && code !== null) return resolve({ content: out, is_error: true });
-        resolve({ content: out.trim() || '(no matches)' });
-      });
+      try {
+        const child = spawn(rgPath, rgArgs);
+        let out = '';
+        let err = '';
+        child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+        child.stderr.on('data', (d: Buffer) => (err += d.toString()));
+        child.on('error', (e) => resolve({ content: `Grep error: ${e.message}`, is_error: true }));
+        child.on('close', (code) => {
+          if (code === 1) return resolve({ content: '(no matches)' });
+          if (code !== 0 && code !== null) {
+            return resolve({ content: err || out || `ripgrep exited with code ${code}`, is_error: true });
+          }
+          resolve({ content: out.trim() || '(no matches)' });
+        });
+      } catch (e) {
+        resolve({ content: `Grep error: ${(e as Error).message}`, is_error: true });
+      }
     });
   },
 };

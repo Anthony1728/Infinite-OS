@@ -72,6 +72,11 @@ const api = {
     return () => ipcRenderer.removeListener(IPC.PERMISSION_REQUEST, handler);
   },
 
+  // Files
+  fileRead: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_READ, args),
+  fileWrite: (args: { path: string; content: string }) => ipcRenderer.invoke(IPC.FILE_WRITE, args),
+
+  // App
   appVersion: () => ipcRenderer.invoke(IPC.APP_VERSION),
   getMetrics: () => ipcRenderer.invoke(IPC.METRICS_GET),
 

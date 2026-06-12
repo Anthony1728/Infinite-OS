@@ -8,10 +8,10 @@ export const edit: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      file_path: { type: 'string' },
-      old_string: { type: 'string' },
-      new_string: { type: 'string' },
-      replace_all: { type: 'boolean', default: false },
+      file_path: { type: 'string', description: 'Path to the file (absolute or relative to cwd)' },
+      old_string: { type: 'string', description: 'The exact string to find and replace' },
+      new_string: { type: 'string', description: 'The replacement string' },
+      replace_all: { type: 'boolean', default: false, description: 'Replace all occurrences' },
     },
     required: ['file_path', 'old_string', 'new_string'],
   },
@@ -21,20 +21,24 @@ export const edit: Tool = {
     const { file_path, old_string, new_string, replace_all = false } = args as {
       file_path: string; old_string: string; new_string: string; replace_all?: boolean;
     };
-    const abs = resolve(ctx.cwd, file_path);
-    const original = await readFile(abs, 'utf8');
+    try {
+      const abs = resolve(ctx.cwd, file_path);
+      const original = await readFile(abs, 'utf8');
 
-    let updated: string;
-    if (replace_all) {
-      updated = original.split(old_string).join(new_string);
-    } else {
-      const occurrences = original.split(old_string).length - 1;
-      if (occurrences === 0) return { content: `old_string not found in ${file_path}`, is_error: true };
-      if (occurrences > 1) return { content: `old_string appears ${occurrences} times; supply more context or use replace_all`, is_error: true };
-      updated = original.replace(old_string, new_string);
+      let updated: string;
+      if (replace_all) {
+        updated = original.split(old_string).join(new_string);
+      } else {
+        const occurrences = original.split(old_string).length - 1;
+        if (occurrences === 0) return { content: `old_string not found in ${file_path}`, is_error: true };
+        if (occurrences > 1) return { content: `old_string appears ${occurrences} times; supply more context or use replace_all`, is_error: true };
+        updated = original.replace(old_string, new_string);
+      }
+
+      await writeFile(abs, updated, 'utf8');
+      return { content: `Edited ${file_path} successfully` };
+    } catch (e) {
+      return { content: `Error editing ${file_path}: ${(e as Error).message}`, is_error: true };
     }
-
-    await writeFile(abs, updated, 'utf8');
-    return { content: `Edited ${file_path}` };
   },
 };

@@ -96,18 +96,29 @@ export async function runAgent(
             pendingToolCalls.set(chunk.id, { name: chunk.name, json: '' });
             opts.onEvent({ type: 'tool_use_start', message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name });
             break;
-          case 'tool_use_delta':
-            pendingToolCalls.get(chunk.id)!.json += chunk.partial_json;
+          case 'tool_use_delta': {
+            const existing = pendingToolCalls.get(chunk.id);
+            if (existing) {
+              existing.json += chunk.partial_json;
+            } else {
+              pendingToolCalls.set(chunk.id, { name: '', json: chunk.partial_json });
+            }
             opts.onEvent({ type: 'tool_use_delta', tool_use_id: chunk.id, partial_json: chunk.partial_json });
             break;
+          }
           case 'tool_use_end': {
-            const pending = pendingToolCalls.get(chunk.id)!;
+            const pending = pendingToolCalls.get(chunk.id);
+            const name = pending?.name ?? chunk.name ?? '';
+            const jsonStr = pending?.json ?? '';
             let parsed: unknown = {};
-            try { parsed = JSON.parse(pending.json); } catch { /* leave as {} */ }
-            const block: ContentBlock = { type: 'tool_use', id: chunk.id, name: pending.name, input: parsed };
+            try { parsed = JSON.parse(jsonStr); } catch { /* leave as {} */ }
+            if (pending) {
+              pending.name = name;
+            }
+            const block: ContentBlock = { type: 'tool_use', id: chunk.id, name, input: parsed };
             assistant.content.push(block);
             pendingToolCalls.delete(chunk.id);
-            opts.onEvent({ type: 'tool_use_end', message_id: assistant.id, tool_use_id: chunk.id, name: pending.name, input: parsed });
+            opts.onEvent({ type: 'tool_use_end', message_id: assistant.id, tool_use_id: chunk.id, name, input: parsed });
             break;
           }
           case 'message_end':

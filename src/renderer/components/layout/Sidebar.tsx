@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
 
 const NAV = [
@@ -39,7 +39,7 @@ const NAV = [
   },
   {
     id: 'documents',
-    label: 'Knowledge',
+    label: 'Files',
     icon: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
   },
   {
@@ -74,25 +74,32 @@ const NAV = [
   },
 ];
 
-const STARRED = [
-  { name: 'E-commerce Platform', color: 'bg-indigo-500' },
-  { name: 'Marketing Strategy', color: 'bg-cyan-500' },
-  { name: 'Financial Analysis', color: 'bg-emerald-500' },
-  { name: 'Website Redesign', color: 'bg-pink-500' },
-];
-
 interface SidebarProps {
   activeView: string;
   onNavChange: (view: string) => void;
   onOpenSettings: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProps) {
+export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, onToggleCollapse }: SidebarProps) {
   const { sessions, currentSessionId, loadSessions, createSession, selectSession, deleteSession } = useChatStore();
-  const currentModel = 'Llama 3.3 70B';
+  const [currentModel, setCurrentModel] = useState('Llama 3.3 70B');
 
   useEffect(() => {
     loadSessions();
+    const updateModel = () => {
+      try {
+        const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        if (cur.model) {
+          const name = cur.model.split('/').pop()?.replace(/:free$/, '') ?? cur.model;
+          setCurrentModel(name);
+        }
+      } catch { /* ignore */ }
+    };
+    updateModel();
+    window.addEventListener('storage', updateModel);
+    return () => window.removeEventListener('storage', updateModel);
   }, [loadSessions]);
 
   const handleNewChat = async () => {
@@ -112,43 +119,57 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProp
   };
 
   return (
-    <aside className="w-56 bg-bgPanel border-r border-borderSubtle flex flex-col flex-shrink-0 h-full">
-      <div className="px-3.5 py-3 flex items-center justify-between">
-        <button onClick={() => onNavChange('home')} className="flex items-center gap-2 min-w-0 text-left">
-          <svg className="w-7 h-7 flex-shrink-0" viewBox="0 0 32 18" fill="none">
-            <defs>
-              <linearGradient id="infinityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#818cf8" />
-                <stop offset="50%" stopColor="#14b8a6" />
-                <stop offset="100%" stopColor="#ec4899" />
-              </linearGradient>
-            </defs>
-            <path
-              d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z"
-              stroke="url(#infinityGrad)"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+    <aside className={`${collapsed ? 'w-12' : 'w-56'} bg-bgPanel border-r border-borderSubtle flex flex-col flex-shrink-0 h-full transition-all duration-200`}>
+      <div className={`${collapsed ? 'px-1.5 py-2' : 'px-3.5 py-3'} flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
+        {!collapsed && (
+          <button onClick={() => onNavChange('home')} className="flex items-center gap-2 min-w-0 text-left">
+            <svg className="w-7 h-7 flex-shrink-0" viewBox="0 0 32 18" fill="none">
+              <defs>
+                <linearGradient id="infinityGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#818cf8" />
+                  <stop offset="50%" stopColor="#14b8a6" />
+                  <stop offset="100%" stopColor="#ec4899" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z"
+                stroke="url(#infinityGrad)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="text-sm font-semibold text-textMain tracking-wide truncate">InfiniteAI OS</span>
+          </button>
+        )}
+        <button onClick={onToggleCollapse}
+          className="w-6 h-6 rounded hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            {collapsed
+              ? <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              : <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            }
           </svg>
-          <span className="text-sm font-semibold text-textMain tracking-wide truncate">InfiniteAI OS</span>
         </button>
       </div>
 
-      <div className="px-3 mb-3">
-        <button
-          onClick={handleNewChat}
-          className="w-full py-2 px-3 rounded-lg border border-borderSubtle hover:border-indigo-500/40 bg-white/[0.02] hover:bg-white/[0.04] text-textMain flex items-center justify-between transition-all duration-200 text-xs"
-        >
-          <span className="flex items-center gap-2">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            New Chat
-          </span>
-          <span className="text-[9px] text-textMuted bg-white/5 px-1.5 py-0.5 rounded font-mono">Ctrl+N</span>
-        </button>
-      </div>
+      {!collapsed && (
+        <div className="px-3 mb-3">
+          <button
+            onClick={handleNewChat}
+            className="w-full py-2 px-3 rounded-lg border border-borderSubtle hover:border-indigo-500/40 bg-white/[0.02] hover:bg-white/[0.04] text-textMain flex items-center justify-between transition-all duration-200 text-xs"
+          >
+            <span className="flex items-center gap-2">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New Chat
+            </span>
+            <span className="text-[9px] text-textMuted bg-white/5 px-1.5 py-0.5 rounded font-mono">Ctrl+N</span>
+          </button>
+        </div>
+      )}
 
       <nav className="flex-1 overflow-y-auto px-2 space-y-0.5 custom-scrollbar">
         {NAV.map((n) => (
@@ -159,7 +180,8 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProp
               e.preventDefault();
               onNavChange(n.id);
             }}
-            className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
+            title={collapsed ? n.label : undefined}
+            className={`group flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
               activeView === n.id ? 'bg-white/[0.06] text-textMain font-medium' : 'text-textMuted hover:text-textMain hover:bg-white/[0.03]'
             }`}
           >
@@ -172,11 +194,11 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProp
             >
               <path strokeLinecap="round" strokeLinejoin="round" d={n.icon} />
             </svg>
-            <span className="truncate">{n.label}</span>
+            {!collapsed && <span className="truncate">{n.label}</span>}
           </a>
         ))}
 
-        {sessions.length > 0 && (
+        {!collapsed && sessions.length > 0 && (
           <>
             <div className="pt-4 pb-1 px-2.5 text-[9px] font-semibold text-textMuted uppercase tracking-widest">
               Recent
@@ -211,75 +233,51 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProp
             ))}
           </>
         )}
-
-        <div className="pt-4 pb-1 px-2.5 text-[9px] font-semibold text-textMuted uppercase tracking-widest">
-          Starred
-        </div>
-        {STARRED.map((item) => (
-          <a
-            key={item.name}
-            href="#"
-            className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-textMuted hover:text-textMain hover:bg-white/[0.03] transition-all duration-150"
-          >
-            <span className={`w-2 h-2 rounded-full ${item.color} flex-shrink-0`} />
-            <span className="truncate">{item.name}</span>
-          </a>
-        ))}
       </nav>
 
-      <div className="p-2.5 border-t border-borderSubtle/60 space-y-2.5">
-        <button
-          onClick={onOpenSettings}
-          className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-white/[0.03] transition-all duration-150 text-left"
-        >
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-teal-500/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+      {!collapsed && (
+        <div className="p-2.5 border-t border-borderSubtle/60 space-y-2.5">
+          <button
+            onClick={onOpenSettings}
+            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-white/[0.03] transition-all duration-150 text-left"
+          >
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-teal-500/20 flex items-center justify-center flex-shrink-0">
+              <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[9px] text-textMuted uppercase">Model</div>
+              <div className="text-xs font-medium text-textMain truncate">{currentModel}</div>
+            </div>
+            <svg className="w-3 h-3 text-textMuted" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[9px] text-textMuted uppercase">Model</div>
-            <div className="text-xs font-medium text-textMain truncate">{currentModel}</div>
-          </div>
-          <svg className="w-3 h-3 text-textMuted" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-          </svg>
-        </button>
+          </button>
 
-        <div className="px-1">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] text-textMuted">Context Load</span>
-            <span className="text-[9px] font-medium text-textMain">64%</span>
+          <div className="px-1">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[9px] text-textMuted">Context Load</span>
+              <span className="text-[9px] font-medium text-textMain">64%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
+              <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-teal-500" style={{ width: '64%' }} />
+            </div>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
-            <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-teal-500" style={{ width: '64%' }} />
+
+          <div className="flex items-center gap-2.5 pt-2 border-t border-borderSubtle/60 cursor-pointer hover:bg-white/[0.03] rounded-lg px-1.5 py-2 transition-all duration-150">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-teal-500 to-pink-500 flex items-center justify-center text-white shadow-md">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-textMain truncate">Alex Johnson</div>
+              <div className="text-[9px] text-textMuted">Local workspace</div>
+            </div>
           </div>
         </div>
-
-        <div className="px-1">
-          <div className="text-[9px] font-semibold text-textMuted uppercase tracking-widest mb-1.5">Connected</div>
-          <div className="space-y-1">
-            {['Local PC', 'Browser', 'Files'].map((label) => (
-              <div key={label} className="flex items-center gap-2 text-[10px] text-textMuted">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5 pt-2 border-t border-borderSubtle/60 cursor-pointer hover:bg-white/[0.03] rounded-lg px-1.5 py-2 transition-all duration-150">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-teal-500 to-pink-500 flex items-center justify-center text-white shadow-md">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-medium text-textMain truncate">Alex Johnson</div>
-            <div className="text-[9px] text-textMuted">Local workspace</div>
-          </div>
-        </div>
-      </div>
+      )}
     </aside>
   );
 }
