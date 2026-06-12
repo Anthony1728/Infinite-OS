@@ -42,8 +42,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     activeRuns.set(sessionId, controller);
 
     const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
-    await sessionStore.appendMessage(sessionId, userMessage);
     const history = await sessionStore.loadMessages(sessionId);
+    await sessionStore.appendMessage(sessionId, userMessage);
 
     await runAgent(history, userMessage, {
       sessionId,

@@ -1,27 +1,28 @@
 import { useState } from 'react';
-
-const AGENTS = [
-  { name: 'Research Agent', desc: 'Analyzing market trends...', status: 'working', color: 'from-blue-500 to-indigo-500', icon: 'M9.663 17h4.674M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z' },
-  { name: 'Code Agent', desc: 'Building dashboard API...', status: 'working', color: 'from-green-500 to-emerald-500', icon: 'M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5' },
-  { name: 'Design Agent', desc: 'Creating UI components...', status: 'working', color: 'from-purple-500 to-pink-500', icon: 'M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42' },
-  { name: 'Data Agent', desc: 'Processing analytics data...', status: 'active', color: 'from-cyan-500 to-sky-500', icon: 'M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5m.75-9l3-3 2.148 2.148A12.061 12.061 0 0116.5 7.605' },
-  { name: 'SEO Agent', desc: 'Optimizing content...', status: 'idle', color: 'from-amber-500 to-orange-500', icon: 'M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18' },
-];
-
-const TASKS = [
-  { name: 'Build authentication system', progress: 100, status: 'done' },
-  { name: 'Create dashboard UI', progress: 100, status: 'done' },
-  { name: 'Integrate payment gateway', progress: 75, status: 'in-progress' },
-  { name: 'Set up email notifications', progress: 40, status: 'in-progress' },
-];
+import { useAgentsStore } from '../../stores/agents';
 
 export function RightPanel() {
   const [agentTab, setAgentTab] = useState<'ACTIVE' | 'IDLE' | 'ALL'>('ACTIVE');
   const [workspaceTab, setWorkspaceTab] = useState<'chat' | 'code'>('chat');
+  const { types, runs } = useAgentsStore();
 
-  const activeAgents = AGENTS.filter((a) => a.status === 'working' || a.status === 'active');
-  const idleAgents = AGENTS.filter((a) => a.status === 'idle');
-  const filteredAgents = agentTab === 'ACTIVE' ? activeAgents : agentTab === 'IDLE' ? idleAgents : AGENTS;
+  const activeRuns = runs.filter((r) => r.status === 'running');
+  const activeAgentIds = new Set(activeRuns.map((r) => r.agentId));
+  
+  const mappedAgents = types.map(t => {
+    const isWorking = activeAgentIds.has(t.id);
+    const activeRun = activeRuns.find(r => r.agentId === t.id);
+    return {
+      ...t,
+      status: isWorking ? 'working' : 'idle',
+      currentTask: activeRun?.task || 'Awaiting assignment',
+      color: t.color ? `from-[${t.color}] to-indigo-500` : 'from-indigo-500 to-purple-500', // fallback color
+    };
+  });
+
+  const activeAgents = mappedAgents.filter((a) => a.status === 'working');
+  const idleAgents = mappedAgents.filter((a) => a.status === 'idle');
+  const filteredAgents = agentTab === 'ACTIVE' ? activeAgents : agentTab === 'IDLE' ? idleAgents : mappedAgents;
 
   return (
     <div className="w-72 border-l border-borderSubtle bg-bgPanel flex flex-col h-full flex-shrink-0">
@@ -44,7 +45,7 @@ export function RightPanel() {
                   ? 'text-textMain border-indigo-500' 
                   : 'text-textMuted border-transparent hover:text-textMain'
               }`}>
-              {tab} ({tab === 'ACTIVE' ? activeAgents.length : tab === 'IDLE' ? idleAgents.length : AGENTS.length})
+              {tab} ({tab === 'ACTIVE' ? activeAgents.length : tab === 'IDLE' ? idleAgents.length : mappedAgents.length})
             </button>
           ))}
         </div>
@@ -60,18 +61,13 @@ export function RightPanel() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-medium text-textMain truncate">{agent.name}</div>
-                <div className="text-[10px] text-textMuted truncate">{agent.desc}</div>
+                <div className="text-[10px] text-textMuted truncate">{agent.currentTask}</div>
               </div>
               <div className="flex items-center gap-1.5">
                 {agent.status === 'working' ? (
                   <span className="text-[9px] text-amber-400 flex items-center gap-1">
                     <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                     Working
-                  </span>
-                ) : agent.status === 'active' ? (
-                  <span className="text-[9px] text-green-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                    Active
                   </span>
                 ) : (
                   <span className="text-[9px] text-textMuted flex items-center gap-1">
@@ -146,26 +142,31 @@ export function RightPanel() {
         </div>
 
         <div className="space-y-2.5">
-          {TASKS.map((task, i) => (
-            <div key={i} className="group">
+          {runs.slice(0, 5).map((run) => {
+            const isDone = run.status === 'completed' || run.status === 'failed';
+            return (
+            <div key={run.id} className="group">
               <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-2">
-                  {task.status === 'done' ? (
-                    <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                <div className="flex items-center gap-2 max-w-[80%]">
+                  {isDone ? (
+                    <svg className={`w-3.5 h-3.5 flex-shrink-0 ${run.status === 'completed' ? 'text-green-400' : 'text-red-400'}`} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d={run.status === 'completed' ? "M4.5 12.75l6 6 9-13.5" : "M6 18L18 6M6 6l12 12"}/></svg>
                   ) : (
-                    <div className="w-3.5 h-3.5 rounded-full border-2 border-indigo-500/50" />
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-indigo-500/50 flex-shrink-0" />
                   )}
-                  <span className={`text-xs ${task.status === 'done' ? 'text-textMuted line-through' : 'text-textMain'}`}>{task.name}</span>
+                  <span className={`text-xs truncate ${isDone ? 'text-textMuted' : 'text-textMain'}`}>{run.task}</span>
                 </div>
-                <span className="text-[10px] text-textMuted">{task.progress}%</span>
+                <span className="text-[10px] text-textMuted">{run.status}</span>
               </div>
               <div className="h-1 w-full rounded-full bg-white/5 overflow-hidden ml-5.5">
                 <div className={`h-full rounded-full transition-all duration-500 ${
-                  task.status === 'done' ? 'bg-green-500' : 'bg-indigo-500'
-                }`} style={{ width: `${task.progress}%` }} />
+                  run.status === 'completed' ? 'bg-green-500 w-full' : 
+                  run.status === 'failed' ? 'bg-red-500 w-full' : 
+                  'bg-indigo-500 w-1/2 animate-pulse'
+                }`} />
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

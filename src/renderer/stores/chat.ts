@@ -71,23 +71,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (text) => {
-    const { currentSessionId, messages } = get();
-    if (!currentSessionId) return;
+    const { currentSessionId } = get();
+    const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+    const provider = settings.provider ?? 'openrouter';
+    const model = settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
+
+    let sessionId = currentSessionId;
+
+    // Auto-create session if none exists
+    if (!sessionId) {
+      try {
+        const session = await window.api.createSession({
+          cwd: settings.cwd ?? '.',
+          model,
+          provider,
+          title: text.slice(0, 60),
+        });
+        sessionId = session.id;
+        set((s) => ({
+          sessions: [session, ...s.sessions],
+          currentSessionId: session.id,
+          messages: [],
+        }));
+      } catch (e) {
+        console.error('[chat] Failed to create session:', e);
+        return;
+      }
+    }
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content: [{ type: 'text', text }],
       timestamp: Date.now(),
     };
-    set({ messages: [...messages, userMessage], streaming: true });
-    const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
-    await window.api.sendMessage({
-      sessionId: currentSessionId,
-      message: userMessage.content,
-      provider: settings.provider ?? 'openrouter',
-      model: settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
-      cwd: settings.cwd ?? '.',
-    });
+    set({ messages: [...get().messages, userMessage], streaming: true });
+
+    try {
+      await window.api.sendMessage({
+        sessionId: sessionId!,
+        message: userMessage.content,
+        provider,
+        model,
+        cwd: settings.cwd ?? '.',
+      });
+    } catch (e) {
+      console.error('[chat] Send failed:', e);
+      set({ streaming: false });
+    }
   },
 
   abort: async () => {
@@ -163,7 +194,15 @@ function handleStreamEvent(
       break;
     case 'error':
       console.error('[stream]', ev.error);
-      setState({ streaming: false });
+      setState((s) => ({
+        streaming: false,
+        messages: [...s.messages, {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `Error: ${ev.error}` }],
+          timestamp: Date.now(),
+        }],
+      }));
       break;
   }
 }

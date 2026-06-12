@@ -73,7 +73,7 @@ export async function runAgent(
     const stream = provider.streamChat(
       {
         model: opts.model,
-        messages: await buildContext(messages, opts),
+        messages: await buildContext(messages, { cwd: opts.cwd }),
         system,
         tools,
         stream: true,
@@ -137,7 +137,7 @@ export async function runAgent(
 
     // Execute each tool call
     for (const tu of toolUses) {
-      await runHooks('PreToolUse', { tool: tu.name, input: tu.input }, opts);
+      await runHooks('PreToolUse', { tool: tu.name, input: tu.input }, { sessionId: opts.sessionId, cwd: opts.cwd });
 
       // Safety Governor risk assessment
       const riskLevel = getRiskLevel(tu.name);
@@ -203,7 +203,7 @@ export async function runAgent(
         timestamp: Date.now(),
       });
       opts.onEvent({ type: 'tool_result', tool_use_id: tu.id, content: result.content, is_error: result.is_error });
-      await runHooks('PostToolUse', { tool: tu.name, input: tu.input, result }, opts);
+      await runHooks('PostToolUse', { tool: tu.name, input: tu.input, result }, { sessionId: opts.sessionId, cwd: opts.cwd });
     }
   }
 

@@ -96,7 +96,12 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings }: SidebarProp
   }, [loadSessions]);
 
   const handleNewChat = async () => {
-    const session = await createSession(window.location.pathname, 'llama-3.3-70b', 'openrouter');
+    const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+    const session = await createSession(
+      settings.cwd ?? '.',
+      settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      settings.provider ?? 'openrouter',
+    );
     selectSession(session.id);
     onNavChange('chats');
   };
