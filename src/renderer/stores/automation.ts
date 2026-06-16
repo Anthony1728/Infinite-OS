@@ -76,7 +76,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   },
 
   runWorkflow: async (id) => {
-    await window.api.automationRunWorkflow({ id });
+    await window.api.automationRunWorkflow({ workflowId: id });
     await get().loadWorkflows();
   },
 

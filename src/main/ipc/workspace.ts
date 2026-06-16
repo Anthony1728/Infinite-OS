@@ -9,8 +9,8 @@ export function registerWorkspaceIpc(): void {
     return teamWorkspaces.createWorkspace(data);
   });
 
-  ipcMain.handle(IPC.WORKSPACE_LIST, async (_e, { userId }) => {
-    return teamWorkspaces.listWorkspaces(userId);
+  ipcMain.handle(IPC.WORKSPACE_LIST, async (_e, data?: { userId?: string }) => {
+    return teamWorkspaces.listWorkspaces(data?.userId);
   });
 
   ipcMain.handle(IPC.WORKSPACE_GET, async (_e, { workspaceId }) => {

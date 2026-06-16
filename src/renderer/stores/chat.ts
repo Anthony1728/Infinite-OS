@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ContentBlock, Message, Session } from '../../shared/types';
+import { useBrainStore } from './brain';
 
 export type StreamEvent =
   | { type: 'message_start'; message_id: string }
@@ -42,6 +43,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   orchestratorEvents: [],
 
   initStreamListener: () => {
+    if ((window as any).__streamListenerAttached) return;
+    (window as any).__streamListenerAttached = true;
+
     window.api.onStreamEvent((payload: unknown) => {
       const ev = payload as { sessionId: string } & StreamEvent;
       if (ev.sessionId !== get().currentSessionId) return;
@@ -49,7 +53,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     window.api.onPermissionRequest((req: { id: string; tool: string; input: unknown }) => set({ pendingPermission: req }));
 
-    // Listen for orchestrator events
     window.api.onOrchestratorEvent((payload: unknown) => {
       const ev = payload as { sessionId: string; type: string; data: unknown };
       if (ev.sessionId !== get().currentSessionId) return;
@@ -71,7 +74,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ streaming: false, orchestratedTaskId: null });
       } else if (ev.type === 'subtask_completed') {
         const data = ev.data as { subTaskId: string; result: string };
-        // Show sub-task result as system message
         const resultMsg: Message = {
           id: crypto.randomUUID(),
           role: 'assistant',
@@ -113,6 +115,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider ?? 'openrouter';
     const model = settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
+    
+    // Check if API is available (API key stored separately, not in infinite:current)
+    let hasApiConfig = false;
+    try {
+      hasApiConfig = await window.api.hasProviderKey({ provider });
+    } catch {
+      hasApiConfig = false;
+    }
+    
+    // If no API configured, use Infinite AI Brain offline mode
+    if (!hasApiConfig) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      };
+      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+      
+      // Generate brain response
+      const brainStore = useBrainStore.getState();
+      const brainResponse = brainStore.generateOfflineResponse(text);
+      
+      // Simulate thinking delay
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+      
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: [{ type: 'text', text: brainResponse }],
+        timestamp: Date.now(),
+      };
+      
+      set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+      
+      // Learn from this interaction (user input + brain's response)
+      brainStore.learnFromInteraction(text, brainResponse, 'user');
+      
+      return;
+    }
 
     let sessionId = currentSessionId;
 
@@ -145,38 +187,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     set({ messages: [...get().messages, userMessage], streaming: true });
 
+    // Safety timeout: if no response in 45s, fall back to Brain mode
+    const safetyTimer = setTimeout(() => {
+      const st = get();
+      if (st.streaming) {
+        console.error('[chat] Safety timeout — falling back to Brain mode');
+        const brainStore = useBrainStore.getState();
+        const brainResponse = brainStore.generateOfflineResponse(text);
+        brainStore.learnFromInteraction(text, brainResponse, 'system');
+        
+        set({
+          streaming: false,
+          messages: [...st.messages, {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: [{ type: 'text', text: `**Infinite AI Brain (Fallback)**\n\nThe API request timed out. Here's what I can help with from my accumulated knowledge:\n\n${brainResponse}` }],
+            timestamp: Date.now(),
+          }],
+        });
+      }
+    }, 45000);
+
     // Detect complex tasks that need orchestration
     const isComplexTask = text.length > 200 ||
-      /\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
-      /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text);
+      (/\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
+       /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
 
-    if (isComplexTask) {
-      // Use orchestrator for complex tasks
-      try {
-        const result = await window.api.orchestratorStart({
-          prompt: text,
-          sessionId: sessionId!,
-          cwd: settings.cwd ?? '.',
-          provider,
-          model,
-        });
-        set({ orchestratedTaskId: result.taskId });
-
-        // Show system message about what's happening
-        const systemMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{
-            type: 'text',
-            text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
-          }],
-          timestamp: Date.now(),
-        };
-        set((s) => ({ messages: [...s.messages, systemMsg] }));
-      } catch (e) {
-        console.error('[chat] Orchestrator failed, falling back to direct:', e);
-        // Fall back to direct agent
+    try {
+      if (isComplexTask) {
+        // Use orchestrator for complex tasks
         try {
+          const result = await window.api.orchestratorStart({
+            prompt: text,
+            sessionId: sessionId!,
+            cwd: settings.cwd ?? '.',
+            provider,
+            model,
+          });
+          set({ orchestratedTaskId: result.taskId });
+
+          const systemMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: [{
+              type: 'text',
+              text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
+            }],
+            timestamp: Date.now(),
+          };
+          set((s) => ({ messages: [...s.messages, systemMsg] }));
+        } catch (e) {
+          console.error('[chat] Orchestrator failed, falling back to direct:', e);
           await window.api.sendMessage({
             sessionId: sessionId!,
             message: userMessage.content,
@@ -184,14 +245,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             model,
             cwd: settings.cwd ?? '.',
           });
-        } catch (e2) {
-          console.error('[chat] Send failed:', e2);
-          set({ streaming: false });
         }
-      }
-    } else {
-      // Use direct agent for simple tasks
-      try {
+      } else {
+        // Use direct agent for simple tasks
         await window.api.sendMessage({
           sessionId: sessionId!,
           message: userMessage.content,
@@ -199,11 +255,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
           model,
           cwd: settings.cwd ?? '.',
         });
-      } catch (e) {
-        console.error('[chat] Send failed:', e);
-        set({ streaming: false });
       }
+    } catch (e: any) {
+      console.error('[chat] Send failed:', e);
+      clearTimeout(safetyTimer);
+      
+      // If API fails, try to use brain as fallback
+      const brainStore = useBrainStore.getState();
+      const brainResponse = brainStore.generateOfflineResponse(text);
+      brainStore.learnFromInteraction(text, brainResponse, 'system');
+      
+      set((s) => ({
+        streaming: false,
+        messages: [...s.messages, {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `API Error: ${e?.message ?? e ?? 'Unknown error'}\n\n**Infinite AI Brain (Fallback Mode)**\n\nI'll try to help using my accumulated knowledge:\n\n${brainResponse}` }],
+          timestamp: Date.now(),
+        }],
+      }));
+      return;
     }
+
+    // Clear safety timer when streaming ends (handled by message_end/done/error events)
+    const unsub = useChatStore.subscribe((s, prev) => {
+      if (prev.streaming && !s.streaming) {
+        clearTimeout(safetyTimer);
+        unsub();
+      }
+    });
   },
 
   abort: async () => {
@@ -244,6 +324,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 function handleStreamEvent(
   ev: { sessionId: string } & StreamEvent,
 ) {
+  console.log(`[chat] handleStreamEvent type=${ev.type} sessionId=${ev.sessionId}`);
   const { setState, getState } = useChatStore;
   switch (ev.type) {
     case 'message_start': {
@@ -292,20 +373,49 @@ function handleStreamEvent(
       }
       break;
     }
-    case 'message_end':
+    case 'message_end': {
       setState({ streaming: false });
+      
+      // Learn from the completed conversation
+      const messages = getState().messages;
+      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+      const lastAssistantMsg = messages[messages.length - 1];
+      
+      if (lastUserMsg && lastAssistantMsg && lastAssistantMsg.role === 'assistant') {
+        const userInput = lastUserMsg.content
+          .filter(c => c.type === 'text')
+          .map(c => c.text)
+          .join(' ');
+        const assistantOutput = lastAssistantMsg.content
+          .filter(c => c.type === 'text')
+          .map(c => c.text)
+          .join(' ');
+        
+        if (userInput && assistantOutput) {
+          const brainStore = useBrainStore.getState();
+          brainStore.learnFromInteraction(userInput, assistantOutput, 'api');
+        }
+      }
       break;
+    }
     case 'done':
       setState({ streaming: false });
       break;
     case 'error':
       console.error('[stream]', ev.error);
+      // Fall back to Brain mode on API error
+      const brainStore = useBrainStore.getState();
+      const lastUserMsg = [...getState().messages].reverse().find(m => m.role === 'user');
+      const userText = lastUserMsg?.content?.filter(c => c.type === 'text')?.map(c => c.text)?.join(' ') ?? '';
+      const brainResponse = brainStore.generateOfflineResponse(userText);
+      brainStore.learnFromInteraction(userText, brainResponse, 'system');
+      
       setState((s) => ({
         streaming: false,
         messages: [...s.messages, {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: [{ type: 'text', text: `Error: ${ev.error}` }],
+          content: [{ type: 'text', text: `**Infinite AI Brain (Fallback)**\n\nAPI Error: ${ev.error}\n\n${brainResponse}` }],
           timestamp: Date.now(),
         }],
       }));

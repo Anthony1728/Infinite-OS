@@ -66,20 +66,52 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
         tools: req.tools?.length ? req.tools.map(toOpenAITool) : undefined,
       };
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: req.signal,
-      });
+      console.log(`[provider:${opts.id}] POST ${url} model=${req.model} messages=${body.messages.length} tools=${body.tools?.length ?? 0}`);
 
-      if (!res.ok || !res.body) {
-        yield { type: 'error', error: `HTTP ${res.status}: ${await res.text()}` };
+      // Create a timeout controller (30 seconds)
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
+      
+      // Combine with user's abort signal
+      const combinedSignal = req.signal 
+        ? AbortSignal.any([req.signal, timeoutController.signal])
+        : timeoutController.signal;
+
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify(body),
+          signal: combinedSignal,
+        });
+      } catch (e: any) {
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          const errorMsg = timeoutController.signal.aborted 
+            ? `Connection timeout after 30s — check your internet connection and API key`
+            : 'Request cancelled';
+          console.error(`[provider:${opts.id}] ${errorMsg}`);
+          yield { type: 'error', error: errorMsg };
+        } else {
+          console.error(`[provider:${opts.id}] Fetch error: ${e.message}`);
+          yield { type: 'error', error: `Network error: ${e.message}` };
+        }
         return;
       }
+      clearTimeout(timeoutId);
+
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => 'no body');
+        console.error(`[provider:${opts.id}] HTTP ${res.status}: ${errText}`);
+        yield { type: 'error', error: `HTTP ${res.status}: ${errText}` };
+        return;
+      }
+
+      console.log(`[provider:${opts.id}] Response OK, reading stream...`);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

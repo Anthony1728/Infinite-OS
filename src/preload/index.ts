@@ -6,7 +6,10 @@ const api = {
     ipcRenderer.invoke(IPC.CHAT_SEND, args),
   abortMessage: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.CHAT_ABORT, args),
   onStreamEvent: (cb: (e: unknown) => void) => {
-    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    const handler = (_e: unknown, payload: unknown) => {
+      console.log('[preload] onStreamEvent:', JSON.stringify(payload)?.slice(0, 200));
+      cb(payload);
+    };
     ipcRenderer.on(IPC.CHAT_STREAM_EVENT, handler);
     return () => ipcRenderer.removeListener(IPC.CHAT_STREAM_EVENT, handler);
   },

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dev launcher — spawns Vite for renderer + electron main, with HMR.
+// Dev launcher — uses electron-vite dev for renderer HMR + electron with hot reload.
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,25 +10,17 @@ const root = join(__dirname, '..');
 const isWin = process.platform === 'win32';
 const npmCmd = isWin ? 'npm.cmd' : 'npm';
 
-const procs = [];
+const p = spawn(npmCmd, ['exec', '--', 'electron-vite', 'dev'], {
+  stdio: 'inherit',
+  cwd: root,
+  env: process.env,
+  shell: isWin,
+});
 
-function run(name, cmd, args, env = {}) {
-  const p = spawn(cmd, args, {
-    stdio: 'inherit',
-    cwd: root,
-    env: { ...process.env, ...env },
-    shell: isWin,
-  });
-  p.on('exit', (code) => {
-    console.log(`[${name}] exited ${code}`);
-    procs.filter((x) => x !== p).forEach((x) => x.kill());
-    process.exit(code ?? 0);
-  });
-  procs.push(p);
-}
+p.on('exit', (code) => {
+  console.log(`[electron-vite] exited ${code}`);
+  process.exit(code ?? 0);
+});
 
-run('vite',     npmCmd, ['exec', '--', 'vite'],                    { ELECTRON_RENDERER_URL: 'http://localhost:5173' });
-run('electron', npmCmd, ['exec', '--', 'electron-vite', 'preview'], {});
-
-process.on('SIGINT',  () => { procs.forEach((p) => p.kill()); process.exit(0); });
-process.on('SIGTERM', () => { procs.forEach((p) => p.kill()); process.exit(0); });
+process.on('SIGINT',  () => { p.kill(); process.exit(0); });
+process.on('SIGTERM', () => { p.kill(); process.exit(0); });

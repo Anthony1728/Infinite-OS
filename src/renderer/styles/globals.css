@@ -135,6 +135,18 @@
     box-shadow: 0 2px 10px rgba(79, 70, 229, 0.3);
   }
 
+  .btn-danger {
+    @apply px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200;
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    color: white;
+    box-shadow: 0 4px 14px rgba(220, 38, 38, 0.25);
+  }
+
+  .btn-danger:hover {
+    box-shadow: 0 6px 20px rgba(220, 38, 38, 0.4);
+    transform: translateY(-1px);
+  }
+
   .card-premium {
     @apply bg-bgCard border border-borderSubtle rounded-2xl p-4 transition-all duration-300;
   }
@@ -170,7 +182,35 @@
   .status-dot-error {
     @apply status-dot bg-brandRed;
   }
+
+  /* Agent run status badges */
+  .badge-running {
+    @apply px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider;
+    background: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    animation: pulseBadge 2s ease-in-out infinite;
+  }
+
+  .badge-completed {
+    @apply px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider;
+    background: rgba(16, 185, 129, 0.15);
+    color: #6ee7b7;
+  }
+
+  .badge-failed {
+    @apply px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider;
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+  }
+
+  .badge-queued {
+    @apply px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider;
+    background: rgba(255, 255, 255, 0.06);
+    color: #828292;
+  }
 }
+
+/* ── Keyframe Animations ─────────────────────────────────── */
 
 @keyframes gradientShift {
   0% { background-position: 0% 50%; }
@@ -181,4 +221,70 @@
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes pulseBadge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Utility animation classes */
+.animate-fade-in {
+  animation: fadeIn 0.25s ease both;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.25s ease both;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.2s ease both;
+}
+
+.animate-spin-slow {
+  animation: spinSlow 3s linear infinite;
+}
+
+/* Live pulse for active indicators */
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+}
+
+.animate-live-pulse {
+  animation: livePulse 2s ease-in-out infinite;
 }

@@ -47,31 +47,47 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Chat
   ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, provider, model, cwd }) => {
     const win = getMainWindow();
-    if (!win) throw new Error('No window');
+    if (!win) {
+      console.error('[IPC] CHAT_SEND: No window available');
+      throw new Error('No window');
+    }
+
+    console.log(`[IPC] CHAT_SEND: session=${sessionId} provider=${provider} model=${model} cwd=${cwd}`);
+    console.log(`[IPC] CHAT_SEND: message type=${typeof message} isArray=${Array.isArray(message)}`);
 
     const controller = new AbortController();
     activeRuns.set(sessionId, controller);
 
     const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
     const history = await sessionStore.loadMessages(sessionId);
+    console.log(`[IPC] CHAT_SEND: history length=${history.length}`);
     await sessionStore.appendMessage(sessionId, userMessage);
 
     try {
+      console.log(`[IPC] CHAT_SEND: calling runAgent...`);
       await runAgent(history, userMessage, {
         sessionId,
         cwd,
         provider,
         model,
         signal: controller.signal,
-        onEvent: (ev) => win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev }),
+        onEvent: (ev) => {
+          console.log(`[IPC] CHAT_SEND: sending event type=${ev.type}`);
+          win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev });
+        },
       });
-    } catch (err) {
-      console.error('[IPC] runAgent failed:', err);
-      win.webContents.send(IPC.CHAT_STREAM_EVENT, {
-        sessionId,
-        type: 'error',
-        error: (err as Error).message || 'Agent failed',
-      });
+      console.log(`[IPC] CHAT_SEND: runAgent completed`);
+    } catch (err: any) {
+      console.error('[IPC] CHAT_SEND: runAgent failed:', err?.message ?? err);
+      try {
+        win.webContents.send(IPC.CHAT_STREAM_EVENT, {
+          sessionId,
+          type: 'error',
+          error: err?.message || 'Agent failed',
+        });
+      } catch (sendErr) {
+        console.error('[IPC] CHAT_SEND: failed to send error event:', sendErr);
+      }
     }
 
     activeRuns.delete(sessionId);

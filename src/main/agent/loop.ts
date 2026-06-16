@@ -44,26 +44,32 @@ export async function runAgent(
   userMessage: Message,
   opts: AgentRunOptions,
 ): Promise<Message[]> {
+  console.log(`[agent] runAgent called: provider=${opts.provider} model=${opts.model} cwd=${opts.cwd}`);
   const messages = [...history, userMessage];
   const provider = getProvider(opts.provider);
   if (!provider) {
+    console.error(`[agent] Unknown provider: ${opts.provider}`);
     opts.onEvent({ type: 'error', error: `Unknown provider: ${opts.provider}` });
     return messages;
   }
 
   const apiKey = await getApiKey(opts.provider);
-  console.log(`[agent] Provider: ${opts.provider}, Model: ${opts.model}, HasKey: ${Boolean(apiKey)}`);
+  console.log(`[agent] Provider: ${opts.provider}, Model: ${opts.model}, HasKey: ${Boolean(apiKey)}, keyPreview: ${apiKey ? apiKey.slice(0, 8) + '...' : 'NONE'}`);
   
   if (!apiKey) {
-    opts.onEvent({ type: 'error', error: `No API key for provider "${opts.provider}". Go to Settings and add your API key.` });
+    console.error(`[agent] No API key for provider: ${opts.provider}`);
+    opts.onEvent({ type: 'error', error: `No API key for provider "${opts.provider}". Go to Settings → API Keys and add your key.` });
     return messages;
   }
   
   const tools = toolRegistry.asProviderTools();
+  console.log(`[agent] Building system prompt...`);
   const system = await buildSystemPrompt(opts);
+  console.log(`[agent] System prompt length: ${system.length} chars, Tools: ${tools.length}`);
 
   const MAX_TURNS = 100;
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    console.log(`[agent] Turn ${turn}/${MAX_TURNS}`);
     if (opts.signal.aborted) break;
 
     const assistant: Message = {
@@ -77,6 +83,7 @@ export async function runAgent(
     messages.push(assistant);
     opts.onEvent({ type: 'message_start', message_id: assistant.id });
 
+    console.log(`[agent] Calling provider.streamChat...`);
     const stream = provider.streamChat(
       {
         model: opts.model,
@@ -94,6 +101,7 @@ export async function runAgent(
     try {
       for await (const chunk of stream) {
         if (opts.signal.aborted) break;
+        console.log(`[agent] chunk type=${chunk.type}`);
         switch (chunk.type) {
           case 'text_delta':
             appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
@@ -134,20 +142,24 @@ export async function runAgent(
             opts.onEvent({ type: 'message_end', message_id: assistant.id, stop_reason: chunk.stop_reason, usage: chunk.usage });
             break;
           case 'error':
+            console.error(`[agent] Stream error: ${chunk.error}`);
             opts.onEvent({ type: 'error', error: chunk.error });
             return messages;
         }
       }
-    } catch (e) {
-      opts.onEvent({ type: 'error', error: (e as Error).message });
+    } catch (e: any) {
+      console.error('[agent] Stream loop error:', e?.message ?? e);
+      opts.onEvent({ type: 'error', error: e?.message ?? String(e) });
       return messages;
     }
 
+    console.log(`[agent] Turn ${turn} complete, checking tool calls...`);
     if (opts.signal.aborted) break;
 
     // If no tool calls → done
     const toolUses = assistant.content.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use');
     if (!toolUses.length) {
+      console.log(`[agent] No tool calls, done after ${turn + 1} turns`);
       decisionRouter.recordTask(opts.model, true);
       opts.onEvent({ type: 'done' });
       return messages;

@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Message } from '../../../shared/types';
 import { useChatStore } from '../../stores/chat';
+import { useEditorStore } from '../../stores/editor';
+import { useAuthStore } from '../../stores/auth';
 
 const SUGGESTIONS = [
   'Add dark mode',
@@ -11,22 +13,78 @@ const SUGGESTIONS = [
   'Add team settings',
 ];
 
+const SLASH_COMMANDS = [
+  { id: 'build', label: 'Build', description: 'Generate or rebuild an application', icon: 'M11.42 15.17l-5.1-5.1m0 0L11.42 4.97m-5.1 5.1H21' },
+  { id: 'deploy', label: 'Deploy', description: 'Deploy to GitHub or cloud', icon: 'M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.691 0a15.02 15.02 0 012.834 5.37' },
+  { id: 'edit', label: 'Edit File', description: 'Open a file in the code editor', icon: 'M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5' },
+  { id: 'video', label: 'Generate Video', description: 'Create video content with AI', icon: 'M15.75 10.5 20.47 5.78A.75.75 0 0121.75 6v12a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z' },
+  { id: 'test', label: 'Run Tests', description: 'Generate and run tests', icon: 'M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5' },
+  { id: 'browser', label: 'Browse Web', description: 'Navigate and scrape websites', icon: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418' },
+  { id: 'code', label: 'Open Code', description: 'Open code editor in right panel', icon: 'M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5' },
+  { id: 'agent', label: 'Create Agent', description: 'Spawn a new AI agent', icon: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z' },
+  { id: 'research', label: 'Research', description: 'Deep research on a topic', icon: 'M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18' },
+];
+
 export function ChatView() {
   const messages = useChatStore((s) => s.messages);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const streaming = useChatStore((s) => s.streaming);
   const loadSessions = useChatStore((s) => s.loadSessions);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const openInEditor = useEditorStore((s) => s.openInEditor);
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
 
-  const handleSend = (text: string) => {
+  const handleSend = useCallback((text: string) => {
     if (!text.trim()) return;
-    sendMessage(text.trim());
+
+    // Handle slash commands
+    if (text.startsWith('/')) {
+      const [cmd, ...args] = text.slice(1).split(' ');
+      const arg = args.join(' ');
+
+      switch (cmd) {
+        case 'build':
+          sendMessage(`Build me a ${arg || 'modern web application'} with best practices and clean architecture`);
+          break;
+        case 'deploy':
+          sendMessage(`Deploy this project to GitHub. Push all files to the repository.`);
+          break;
+        case 'edit':
+          if (arg) {
+            openInEditor(arg, `// Editing ${arg}\n// Make your changes here\n`, 'typescript');
+          } else {
+            openInEditor('untitled.ts', '// New file\n', 'typescript');
+          }
+          break;
+        case 'video':
+          sendMessage(`Generate a video about: ${arg || 'a compelling product demo'}`);
+          break;
+        case 'test':
+          sendMessage(`Generate and run tests for: ${arg || 'the entire codebase'}`);
+          break;
+        case 'browser':
+          sendMessage(`Browse and analyze: ${arg || 'the current project documentation'}`);
+          break;
+        case 'code':
+          sendMessage(`Show me the code for: ${arg || 'the main component'}`);
+          break;
+        case 'agent':
+          sendMessage(`Create a new AI agent specialized in: ${arg || 'general tasks'}`);
+          break;
+        case 'research':
+          sendMessage(`Research deeply: ${arg || 'best practices for this project'}`);
+          break;
+        default:
+          sendMessage(text);
+      }
+    } else {
+      sendMessage(text);
+    }
     setInput('');
-  };
+  }, [sendMessage, openInEditor]);
 
   if (!currentSessionId) {
     return <DemoChat input={input} setInput={setInput} inputRef={inputRef} onSend={handleSend} />;
@@ -35,23 +93,113 @@ export function ChatView() {
   return <RealChat messages={messages} streaming={streaming} input={input} setInput={setInput} inputRef={inputRef} onSend={handleSend} />;
 }
 
-function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: string; setInput: (v: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend: (text: string) => void; placeholder?: string }) {
+function InputBar({ input, setInput, inputRef, onSend, placeholder, isOnline = false }: { input: string; setInput: (v: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend: (text: string) => void; placeholder?: string; isOnline?: boolean }) {
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
+
+  const isSlashCommand = input.startsWith('/');
+  const slashQuery = isSlashCommand ? input.slice(1).toLowerCase() : '';
+  const filteredCommands = SLASH_COMMANDS.filter(cmd =>
+    cmd.label.toLowerCase().includes(slashQuery) || cmd.description.toLowerCase().includes(slashQuery)
+  );
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showSlashMenu && filteredCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSlashIndex(prev => (prev + 1) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSlashIndex(prev => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const cmd = filteredCommands[selectedSlashIndex];
+        onSend(`/${cmd.id}`);
+        setInput('');
+        setShowSlashMenu(false);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowSlashMenu(false);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onSend(input);
     }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInput(value);
+    setShowSlashMenu(value.startsWith('/'));
+    setSelectedSlashIndex(0);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (slashMenuRef.current && !slashMenuRef.current.contains(e.target as Node)) {
+        setShowSlashMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
-    <div className="w-full">
-      <div className="relative bg-bgCard border border-borderSubtle rounded-2xl overflow-hidden focus-within:border-indigo-500/40 transition-all duration-200 shadow-lg shadow-black/10">
+    <div className="w-full relative">
+      {/* Slash command menu */}
+      {showSlashMenu && filteredCommands.length > 0 && (
+        <div ref={slashMenuRef} className="absolute bottom-full left-0 right-0 mb-2 bg-[#0d0d11] border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden z-50">
+          <div className="px-3 py-2 text-[10px] text-textMuted uppercase tracking-wider border-b border-white/5">Commands</div>
+          {filteredCommands.map((cmd, i) => (
+            <button
+              key={cmd.id}
+              onClick={() => { onSend(`/${cmd.id}`); setInput(''); setShowSlashMenu(false); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                i === selectedSlashIndex ? 'bg-indigo-500/15 text-white' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+              }`}
+            >
+              <svg className="w-4 h-4 flex-shrink-0 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d={cmd.icon} />
+              </svg>
+              <div>
+                <div className="text-sm font-medium">{cmd.label}</div>
+                <div className="text-[10px] text-textMuted">{cmd.description}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Brain mode indicator */}
+      {!isOnline && (
+        <div className="mb-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 via-cyan-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-400 via-cyan-400 to-pink-400 animate-pulse" />
+          <span className="text-[11px] text-purple-300">Infinite AI Brain Active</span>
+          <span className="text-[10px] text-textMuted ml-auto">Offline mode — Learning from interactions</span>
+        </div>
+      )}
+
+      {/* Input container with glow effect when online */}
+      <div className={`relative bg-bgCard border rounded-2xl overflow-hidden transition-all duration-300 shadow-lg ${
+        isOnline 
+          ? 'border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.15),0_0_40px_rgba(34,211,238,0.05)] focus-within:border-cyan-400/60 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.2),0_0_50px_rgba(34,211,238,0.1)]' 
+          : 'border-borderSubtle focus-within:border-indigo-500/40 shadow-black/10'
+      }`}>
         <textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder || 'Ask InfiniteAI OS anything...'}
+          placeholder={placeholder || (isOnline ? 'Ask Infinity anything...' : 'Ask the Infinite AI Brain anything...')}
           rows={1}
           className="w-full bg-transparent text-textMain text-sm px-4 py-3 pr-14 outline-none resize-none placeholder:text-textMuted/50"
         />
@@ -59,7 +207,11 @@ function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: s
           <button
             onClick={() => onSend(input)}
             disabled={!input.trim()}
-            className="w-9 h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:cursor-not-allowed flex items-center justify-center transition-all duration-200 text-white shadow-md"
+            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 text-white shadow-md ${
+              isOnline 
+                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 disabled:from-zinc-600 disabled:to-zinc-700' 
+                : 'bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-400 hover:to-cyan-400 disabled:from-zinc-600 disabled:to-zinc-700'
+            } disabled:cursor-not-allowed`}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
           </button>
@@ -68,24 +220,20 @@ function InputBar({ input, setInput, inputRef, onSend, placeholder }: { input: s
       {/* Bottom icons */}
       <div className="flex items-center justify-between mt-2 px-1">
         <div className="flex items-center gap-1">
-          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Add">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Attach file">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" /></svg>
           </button>
-          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Browser">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582" /></svg>
-          </button>
-          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Desktop">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" /></svg>
-          </button>
-          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Voice">
+          <button className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all" title="Voice input">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" /></svg>
           </button>
         </div>
-        <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/8 text-xs text-textMuted hover:text-textMain transition-all">
-          <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" /></svg>
-          Agent Mode
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-textMuted">Type / for commands</span>
+          <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/8 text-xs text-textMuted hover:text-textMain transition-all">
+            <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" /></svg>
+            Agent
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -95,6 +243,23 @@ function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { 
   const scrollRef = useRef<HTMLDivElement>(null);
   const orchestratedTaskId = useChatStore((s) => s.orchestratedTaskId);
   const interject = useChatStore((s) => s.interject);
+  const [isOnline, setIsOnline] = useState(false);
+
+  // Check if AI model is online
+  useEffect(() => {
+    const checkOnlineStatus = async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        const hasKey = settings.provider && settings.apiKey;
+        setIsOnline(!!hasKey);
+      } catch {
+        setIsOnline(false);
+      }
+    };
+    checkOnlineStatus();
+    window.addEventListener('storage', checkOnlineStatus);
+    return () => window.removeEventListener('storage', checkOnlineStatus);
+  }, []);
 
   // Determine if we should show thinking bubble:
   // Show it only when streaming is active AND the last assistant message has no text yet
@@ -141,6 +306,7 @@ function RealChat({ messages, streaming, input, setInput, inputRef, onSend }: { 
             inputRef={inputRef}
             onSend={streaming ? handleSendDuringStream : onSend}
             placeholder={streaming ? 'Send a suggestion or update...' : 'Continue the conversation...'}
+            isOnline={isOnline}
           />
         </div>
       </div>
@@ -164,8 +330,16 @@ function MessageBubble({ message }: { message: Message }) {
   return (
     <div className="flex gap-3">
       {isAssistant ? (
-        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-white flex-shrink-0 mt-0.5 shadow-md">
-          <svg className="w-4 h-3" viewBox="0 0 32 18" fill="none"><path d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 via-cyan-500 to-pink-500 flex items-center justify-center text-white flex-shrink-0 mt-0.5 shadow-md">
+          <svg className="w-4 h-3" viewBox="0 0 200 100" fill="none">
+            <path 
+              d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
+              stroke="currentColor" 
+              strokeWidth="12" 
+              strokeLinecap="round"
+              fill="none"
+            />
+          </svg>
         </div>
       ) : isUser ? (
         <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-blue-400 flex-shrink-0 mt-0.5">
@@ -209,12 +383,20 @@ function MessageBubble({ message }: { message: Message }) {
 function ThinkingBubble() {
   return (
     <div className="flex gap-3">
-      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-white flex-shrink-0 mt-0.5 shadow-md">
-        <svg className="w-4 h-3" viewBox="0 0 32 18" fill="none"><path d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 via-cyan-500 to-pink-500 flex items-center justify-center text-white flex-shrink-0 mt-0.5 shadow-md">
+        <svg className="w-4 h-3" viewBox="0 0 200 100" fill="none">
+          <path 
+            d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
+            stroke="currentColor" 
+            strokeWidth="12" 
+            strokeLinecap="round"
+            fill="none"
+          />
+        </svg>
       </div>
       <div className="bg-bgCard border border-borderSubtle rounded-2xl px-4 py-2.5 inline-flex items-center gap-2 shadow-sm">
         <span className="text-xs text-textMuted">Thinking</span>
-        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
         <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" style={{ animationDelay: '200ms' }} />
         <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" style={{ animationDelay: '400ms' }} />
       </div>
@@ -223,128 +405,139 @@ function ThinkingBubble() {
 }
 
 function DemoChat({ input, setInput, inputRef, onSend }: { input: string; setInput: (v: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null>; onSend: (text: string) => void }) {
+  const user = useAuthStore((s) => s.user);
+  const firstName = user?.name?.split(' ')[0] || 'there';
+  const [isOnline, setIsOnline] = useState(false);
+
+  const hour = new Date().getHours();
+  let greeting = 'Hello';
+  if (hour < 12) greeting = 'Good morning';
+  else if (hour < 17) greeting = 'Good afternoon';
+  else greeting = 'Good evening';
+
+  // Check if AI model is online (has API key configured)
+  useEffect(() => {
+    const checkOnlineStatus = async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        const provider = settings.provider ?? 'openrouter';
+        const hasKey = await window.api.hasProviderKey({ provider });
+        setIsOnline(!!hasKey);
+      } catch {
+        setIsOnline(false);
+      }
+    };
+    checkOnlineStatus();
+    window.addEventListener('storage', checkOnlineStatus);
+    return () => window.removeEventListener('storage', checkOnlineStatus);
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-4xl mx-auto px-5 py-5 space-y-5">
-          {/* User message */}
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-blue-400 flex-shrink-0 mt-0.5">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-semibold text-textMain text-sm">You</span>
-                <span className="text-[10px] text-textMuted">10:42 AM</span>
-              </div>
-              <p className="text-sm text-zinc-300">Build me a modern SaaS dashboard with analytics, user management and billing.</p>
-            </div>
-          </div>
-
-          {/* AI message */}
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-500 flex items-center justify-center text-white flex-shrink-0 mt-0.5 shadow-md">
-              <svg className="w-4 h-3" viewBox="0 0 32 18" fill="none"><path d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-semibold text-textMain text-sm">InfiniteAI OS</span>
-                <span className="text-[10px] text-textMuted">10:43 AM</span>
-                <button className="ml-auto text-textMuted hover:text-textMain transition-colors">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-                </button>
-              </div>
-              <p className="text-sm text-zinc-300 mb-4">I'll build a complete SaaS dashboard for you.</p>
-
-              {/* Checklist card */}
-              <div className="bg-bgCard border border-borderSubtle rounded-xl p-4 mb-4">
-                <div className="flex gap-4">
-                  {/* Checklist */}
-                  <div className="flex-1 space-y-3">
-                    <h4 className="text-sm font-semibold text-textMain flex items-center gap-2">
-                      <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                      SaaS Dashboard Generated Successfully
-                    </h4>
-                    {[
-                      { title: 'Frontend', sub: 'Next.js + Tailwind', desc: 'Modern responsive dashboard UI' },
-                      { title: 'Backend API', sub: 'Node.js + Express', desc: 'RESTful API with authentication' },
-                      { title: 'Database', sub: 'PostgreSQL', desc: 'Users, teams, billing, analytics schema' },
-                      { title: 'Authentication', sub: 'JWT', desc: 'JWT auth with role-based access' },
-                      { title: 'Charts & Analytics', sub: '', desc: 'Real-time analytics and reporting' },
-                    ].map((item, i) => (
-                      <div key={i} className="flex gap-2.5">
-                        <svg className="w-4 h-4 text-green-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                        <div>
-                          <span className="text-sm font-medium text-zinc-200">{item.title}</span>
-                          {item.sub && <span className="text-xs text-textMuted ml-1">({item.sub})</span>}
-                          <p className="text-xs text-textMuted mt-0.5">{item.desc}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Dashboard preview */}
-                  <div className="w-72 bg-bgMain rounded-lg border border-borderSubtle p-3 flex flex-col relative overflow-hidden">
-                    <div className="text-[10px] text-textMuted mb-2 font-medium">Dashboard</div>
-                    {/* Mini dashboard mockup */}
-                    <div className="grid grid-cols-3 gap-1.5 mb-2">
-                      <div className="bg-bgPanel rounded p-1.5">
-                        <div className="text-[7px] text-textMuted uppercase">Revenue</div>
-                        <div className="text-[10px] font-bold text-textMain">$24,450</div>
-                      </div>
-                      <div className="bg-bgPanel rounded p-1.5">
-                        <div className="text-[7px] text-textMuted uppercase">Users</div>
-                        <div className="text-[10px] font-bold text-textMain">1,245</div>
-                      </div>
-                      <div className="bg-bgPanel rounded p-1.5">
-                        <div className="text-[7px] text-textMuted uppercase">Conv.</div>
-                        <div className="text-[10px] font-bold text-textMain">3.42%</div>
-                      </div>
-                    </div>
-                    <div className="bg-bgPanel rounded p-2 flex-1 relative min-h-[50px]">
-                      <svg className="w-full h-full text-indigo-500/60" viewBox="0 0 100 30" preserveAspectRatio="none">
-                        <path d="M0,25 L10,20 L20,22 L30,15 L40,18 L50,12 L60,16 L70,10 L80,14 L90,8 L100,12" fill="none" stroke="currentColor" strokeWidth="1.5"/>
-                        <path d="M0,25 L10,20 L20,22 L30,15 L40,18 L50,12 L60,16 L70,10 L80,14 L90,8 L100,12 L100,30 L0,30 Z" fill="currentColor" opacity="0.1"/>
-                      </svg>
-                    </div>
-                    <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-bgCard to-transparent pointer-events-none" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Action buttons */}
-              <div className="flex gap-2 mb-4">
-                {[
-                  { label: 'Preview', icon: 'M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178zM15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-                  { label: 'Edit Code', icon: 'M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5' },
-                  { label: 'Deploy', icon: 'M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.691 0a15.02 15.02 0 012.834 5.37' },
-                  { label: 'Add to Project', icon: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z' },
-                ].map((btn) => (
-                  <button key={btn.label} className="px-3 py-1.5 bg-bgPanel hover:bg-bgCard text-textMain rounded-lg border border-borderSubtle flex items-center gap-1.5 transition-colors text-xs">
-                    <svg className="w-3.5 h-3.5 text-textMuted" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d={btn.icon}/></svg>
-                    {btn.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Suggestion chips */}
-          <div className="flex items-center gap-2 pt-2">
-            {SUGGESTIONS.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => { setInput(s); inputRef.current?.focus(); }}
-                className="px-3 py-1.5 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-xs text-textMuted hover:text-textMain transition-all duration-200"
+        <div className="max-w-4xl mx-auto px-5 py-12 flex flex-col items-center justify-center min-h-[60vh]">
+          {/* Logo - High-Res Animated Infinity Symbol */}
+          <div className="w-24 h-24 mb-6 flex items-center justify-center relative">
+            <svg viewBox="0 0 200 100" className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="infGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#a855f7">
+                    <animate attributeName="stop-color" values="#a855f7;#06b6d4;#ec4899;#a855f7" dur="4s" repeatCount="indefinite"/>
+                  </stop>
+                  <stop offset="50%" stopColor="#06b6d4">
+                    <animate attributeName="stop-color" values="#06b6d4;#ec4899;#a855f7;#06b6d4" dur="4s" repeatCount="indefinite"/>
+                  </stop>
+                  <stop offset="100%" stopColor="#ec4899">
+                    <animate attributeName="stop-color" values="#ec4899;#a855f7;#06b6d4;#ec4899" dur="4s" repeatCount="indefinite"/>
+                  </stop>
+                </linearGradient>
+                
+                <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="4" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+                
+                <filter id="outerGlow" x="-100%" y="-100%" width="300%" height="300%">
+                  <feGaussianBlur stdDeviation="8" result="blur"/>
+                  <feMerge>
+                    <feMergeNode in="blur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+              
+              <path 
+                d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
+                stroke="url(#infGrad1)" 
+                strokeWidth="12" 
+                fill="none"
+                filter="url(#outerGlow)"
+                opacity="0.4"
+              />
+              
+              <path 
+                d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
+                stroke="url(#infGrad1)" 
+                strokeWidth="6" 
+                strokeLinecap="round"
+                fill="none"
+                filter="url(#glow)"
               >
-                {s}
-              </button>
-            ))}
-            <button className="w-7 h-7 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 flex items-center justify-center text-textMuted hover:text-textMain transition-all ml-1">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
+                <animate 
+                  attributeName="stroke-dashoffset" 
+                  from="0" 
+                  to="600" 
+                  dur="3s" 
+                  repeatCount="indefinite"
+                />
+              </path>
+              
+              <path 
+                d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
+                stroke="white" 
+                strokeWidth="2" 
+                strokeLinecap="round"
+                fill="none"
+                strokeDasharray="80 520"
+                opacity="0.8"
+              >
+                <animate 
+                  attributeName="stroke-dashoffset" 
+                  from="600" 
+                  to="0" 
+                  dur="3s" 
+                  repeatCount="indefinite"
+                />
+              </path>
+            </svg>
+          </div>
+
+          {/* Clean greeting - no demo content */}
+          <h1 className="text-2xl font-semibold text-textMain mb-2">{greeting}, {firstName}</h1>
+          <p className="text-sm text-textMuted mb-8">InfiniteAI Chat Ready — Type a message to begin</p>
+
+          {/* Minimal quick actions */}
+          <div className="flex gap-3 mb-8">
+            <button
+              onClick={() => { setInput('/build '); inputRef.current?.focus(); }}
+              className="px-4 py-2 rounded-xl bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-sm text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17l-5.1-5.1m0 0L11.42 4.97m-5.1 5.1H21" />
+              </svg>
+              Build something
             </button>
-            <button className="w-7 h-7 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 flex items-center justify-center text-textMuted hover:text-textMain transition-all">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+            <button
+              onClick={() => { setInput('/research '); inputRef.current?.focus(); }}
+              className="px-4 py-2 rounded-xl bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-sm text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+              </svg>
+              Research
             </button>
           </div>
         </div>
@@ -353,7 +546,7 @@ function DemoChat({ input, setInput, inputRef, onSend }: { input: string; setInp
       {/* Input bar */}
       <div className="flex-shrink-0 px-5 py-3 border-t border-borderSubtle/40">
         <div className="max-w-4xl mx-auto">
-          <InputBar input={input} setInput={setInput} inputRef={inputRef} onSend={onSend} />
+          <InputBar input={input} setInput={setInput} inputRef={inputRef} onSend={onSend} isOnline={isOnline} />
         </div>
       </div>
     </div>
