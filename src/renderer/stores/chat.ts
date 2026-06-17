@@ -62,7 +62,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const ev = payload as { sessionId: string; type: string; data: unknown };
       if (ev.sessionId !== get().currentSessionId) return;
 
-      if (ev.type === 'task_completed') {
+      const agentStore = useAgentsStore.getState();
+
+      if (ev.type === 'subtask_deployed') {
+        const data = ev.data as { subTaskId: string; agentType: string; description: string };
+        agentStore.addSubTask(
+          get().orchestratedTaskId ?? '',
+          data.subTaskId,
+          data.agentType,
+          data.description
+        );
+        // Show progress message
+        const progressMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, progressMsg] }));
+      } else if (ev.type === 'task_completed') {
         set({ streaming: false, orchestratedTaskId: null });
         const data = ev.data as { completed: number; failed: number; duration: number };
         const doneMsg: Message = {
@@ -70,22 +88,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
           role: 'assistant',
           content: [{
             type: 'text',
-            text: `All ${data.completed} sub-tasks completed successfully.${data.failed > 0 ? ` ${data.failed} failed.` : ''} Total time: ${(data.duration / 1000).toFixed(1)}s`,
+            text: `**All done!** ${data.completed} sub-tasks completed.${data.failed > 0 ? ` ${data.failed} failed.` : ''} Total time: ${(data.duration / 1000).toFixed(1)}s`,
           }],
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, doneMsg] }));
       } else if (ev.type === 'task_failed') {
         set({ streaming: false, orchestratedTaskId: null });
+        const failMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: '**Task failed.** All sub-agents were unable to complete.' }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, failMsg] }));
       } else if (ev.type === 'subtask_completed') {
         const data = ev.data as { subTaskId: string; result: string };
+        // Create files from sub-agent result
+        const files = extractAndCreateFilesFromText(data.result);
+        agentStore.completeSubTask(data.subTaskId, data.result, files);
+        // Show result message
+        const fileNote = files.length > 0 ? `\n\n**Files created:** ${files.join(', ')}` : '';
         const resultMsg: Message = {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: [{ type: 'text', text: `[Sub-agent finished] ${data.result.slice(0, 500)}` }],
+          content: [{ type: 'text', text: `**Sub-agent complete**\n\n${data.result.slice(0, 800)}${fileNote}` }],
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, resultMsg] }));
+      } else if (ev.type === 'subtask_failed') {
+        const data = ev.data as { subTaskId: string; error: string };
+        agentStore.failSubTask(data.subTaskId, data.error);
       }
     });
   },
@@ -371,24 +404,32 @@ function extractAndCreateFiles(message: Message): string[] {
   for (const block of textBlocks) {
     if (block.type !== 'text') continue;
     const text = (block as { text: string }).text;
+    const files = extractAndCreateFilesFromText(text);
+    createdFiles.push(...files);
+  }
 
-    // Match code blocks: ```lang\n code ``` or ```lang filename="file"\n code ```
-    const regex = /```(\w+)?\s*(?:filename="([^"]+)")?\s*\n([\s\S]*?)```/g;
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      const lang = match[1] || 'txt';
-      const filename = match[2] || generateFilename(lang);
-      const content = match[3].trim();
+  return createdFiles;
+}
 
-      if (content.length > 10) {
-        try {
-          window.api.fileWrite({ path: filename, content });
-          useEditorStore.getState().openInEditor(filename, content);
-          createdFiles.push(filename);
-          console.log(`[chat] Created file: ${filename} (${content.length} chars)`);
-        } catch (e) {
-          console.error('[chat] Failed to create file:', filename, e);
-        }
+function extractAndCreateFilesFromText(text: string): string[] {
+  const createdFiles: string[] = [];
+
+  // Match code blocks: ```lang\n code ``` or ```lang filename="file"\n code ```
+  const regex = /```(\w+)?\s*(?:filename="([^"]+)")?\s*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const lang = match[1] || 'txt';
+    const filename = match[2] || generateFilename(lang);
+    const content = match[3].trim();
+
+    if (content.length > 10) {
+      try {
+        window.api.fileWrite({ path: filename, content });
+        useEditorStore.getState().openInEditor(filename, content);
+        createdFiles.push(filename);
+        console.log(`[chat] Created file: ${filename} (${content.length} chars)`);
+      } catch (e) {
+        console.error('[chat] Failed to create file:', filename, e);
       }
     }
   }

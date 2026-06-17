@@ -145,16 +145,146 @@ export const useBrainStore = create<BrainState>((set, get) => ({
   generateOfflineResponse: (input) => {
     const state = get();
     const relevantKnowledge = state.searchKnowledge(input);
+    const inputLower = input.toLowerCase();
+    
+    // Detect code generation requests
+    const isCodeRequest = /\b(code|create|build|make|write|generate|game|website|app|script|function|component|page|form|button|api|database)\b/i.test(input);
+    
+    if (isCodeRequest) {
+      // Generate actual code templates based on the request
+      const templates: Record<string, string> = {
+        game: `\`\`\`html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a2e; }
+        canvas { display: block; margin: 0 auto; background: #16213e; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #e94560; font-family: Arial; font-size: 24px; }
+    </style>
+</head>
+<body>
+    <div id="ui">Score: <span id="score">0</span></div>
+    <canvas id="game" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        let score = 0;
+        let player = { x: 375, y: 500, w: 50, h: 50, speed: 6, color: '#e94560' };
+        let objects = [];
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        function spawn() { objects.push({ x: Math.random() * 750, y: -50, w: 30, h: 30, speed: 3 + Math.random() * 4, color: ['#0f3460','#533483','#e94560'][Math.floor(Math.random()*3)] }); }
+        function update() {
+            if (keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+            if (keys['ArrowRight'] && player.x < 750) player.x += player.speed;
+            if (keys['ArrowUp'] && player.y > 0) player.y -= player.speed;
+            if (keys['ArrowDown'] && player.y < 550) player.y += player.speed;
+            if (Math.random() < 0.03) spawn();
+            for (let i = objects.length - 1; i >= 0; i--) {
+                objects[i].y += objects[i].speed;
+                if (player.x < objects[i].x + objects[i].w && player.x + player.w > objects[i].x && player.y < objects[i].y + objects[i].h && player.y + player.h > objects[i].y) {
+                    alert('Game Over! Score: ' + score); location.reload();
+                }
+                if (objects[i].y > 600) { objects.splice(i, 1); score++; document.getElementById('score').textContent = score; }
+            }
+        }
+        function draw() {
+            ctx.clearRect(0, 0, 800, 600);
+            ctx.fillStyle = player.color; ctx.fillRect(player.x, player.y, player.w, player.h);
+            objects.forEach(o => { ctx.fillStyle = o.color; ctx.fillRect(o.x, o.y, o.w, o.h); });
+            requestAnimationFrame(update); draw = requestAnimationFrame(draw);
+        }
+        update(); draw();
+    </script>
+</body>
+</html>\`\`\``,
+        website: `\`\`\`html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Website</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; }
+        .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 2rem; }
+        h1 { font-size: 3.5rem; background: linear-gradient(135deg, #a855f7, #06b6d4, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem; }
+        p { font-size: 1.2rem; color: #888; max-width: 600px; margin-bottom: 2rem; }
+        .btn { padding: 12px 32px; background: linear-gradient(135deg, #a855f7, #06b6d4); border: none; border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; transition: transform 0.2s; }
+        .btn:hover { transform: scale(1.05); }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; padding: 4rem 2rem; max-width: 1200px; margin: 0 auto; }
+        .feature { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 2rem; }
+        .feature h3 { color: #a855f7; margin-bottom: 0.5rem; }
+    </style>
+</head>
+<body>
+    <section class="hero">
+        <h1>Welcome</h1>
+        <p>Build something amazing today.</p>
+        <button class="btn">Get Started</button>
+    </section>
+    <section class="features">
+        <div class="feature"><h3>Fast</h3><p>Lightning-fast performance.</p></div>
+        <div class="feature"><h3>Secure</h3><p>Enterprise-grade security.</p></div>
+        <div class="feature"><h3>Scalable</h3><p>Grows with your needs.</p></div>
+    </section>
+</body>
+</html>\`\`\``,
+        python: `\`\`\`python
+# Python script generated by Infinite AI Brain
+import sys
+
+def main():
+    print("Hello from Infinite AI!")
+    # Add your code here
+    result = compute(10, 20)
+    print(f"Result: {result}")
+
+def compute(a, b):
+    return a + b
+
+if __name__ == "__main__":
+    main()
+\`\`\``,
+        javascript: `\`\`\`javascript
+// JavaScript generated by Infinite AI Brain
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+
+app.get('/', (req, res) => {
+    res.json({ message: 'Hello from Infinite AI!', status: 'running' });
+});
+
+app.listen(PORT, () => {
+    console.log(\`Server running on port \${PORT}\`);
+});
+\`\`\``,
+      };
+
+      // Pick template based on keywords
+      let template = templates.javascript; // default
+      if (inputLower.match(/\b(game|car|race|avoid|dodge)\b/)) template = templates.game;
+      else if (inputLower.match(/\b(website|site|landing|page|web)\b/)) template = templates.website;
+      else if (inputLower.match(/\b(python|py)\b/)) template = templates.python;
+      
+      return `**Infinite AI Brain (Offline Mode)**\n\nI'm generating code from my accumulated knowledge (${state.totalInteractions} interactions learned). Here's a starting template you can build on:\n\n${template}\n\n---\n*Tip: Connect an API in Settings for more advanced code generation.*`;
+    }
     
     if (relevantKnowledge.length === 0) {
-      return `I don't have enough knowledge yet to answer this question. I'm still learning! I've learned ${state.totalInteractions} things so far. Try connecting an API in Settings to help me learn faster, or ask me something simpler.`;
+      return `I don't have enough knowledge yet to answer this question. I've learned ${state.totalInteractions} things so far. Try connecting an API in Settings to help me learn faster, or ask me something simpler.`;
     }
     
     // Build response from learned knowledge
     const responses = relevantKnowledge.map(k => {
-      const inputSnippet = k.input.slice(0, 100);
-      const outputSnippet = k.output.slice(0, 200);
-      return `Based on my learning: ${outputSnippet}`;
+      const outputSnippet = k.output.slice(0, 300);
+      return outputSnippet;
     });
     
     const combinedResponse = responses.slice(0, 3).join('\n\n');

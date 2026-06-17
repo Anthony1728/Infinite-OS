@@ -5,7 +5,7 @@ import { CodeEditor } from '../workspace/CodeEditor';
 export function RightPanel() {
   const [agentTab, setAgentTab] = useState<'ACTIVE' | 'IDLE' | 'ALL'>('ACTIVE');
   const [workspaceTab, setWorkspaceTab] = useState<'agents' | 'code'>('code');
-  const { types, runs, chatTasks } = useAgentsStore();
+  const { types, runs, chatTasks, subTasks } = useAgentsStore();
 
   const activeRuns = runs.filter((r) => r.status === 'running');
   const activeAgentIds = new Set(activeRuns.map((r) => r.agentId));
@@ -26,6 +26,8 @@ export function RightPanel() {
   const filteredAgents = agentTab === 'ACTIVE' ? activeAgents : agentTab === 'IDLE' ? idleAgents : mappedAgents;
 
   const recentChatTasks = chatTasks.slice(0, 10);
+  const activeSubTasks = subTasks.filter(t => t.status === 'running' || t.status === 'pending');
+  const recentSubTasks = subTasks.slice(0, 15);
 
   return (
     <div className="w-80 border-l border-borderSubtle bg-bgPanel flex flex-col h-full flex-shrink-0">
@@ -112,16 +114,78 @@ export function RightPanel() {
           <div className="p-3 flex-1 overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-textMain">Tasks</h2>
-              <span className="text-[10px] text-textMuted">{chatTasks.length} total</span>
+              {activeSubTasks.length > 0 && (
+                <span className="text-[10px] text-indigo-400 flex items-center gap-1">
+                  <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  {activeSubTasks.length} active
+                </span>
+              )}
             </div>
 
             <div className="space-y-2.5">
-              {chatTasks.length === 0 && runs.length === 0 && (
+              {chatTasks.length === 0 && runs.length === 0 && subTasks.length === 0 && (
                 <div className="text-center py-6">
                   <div className="text-textMuted text-xs">No active tasks</div>
                   <div className="text-textMuted/50 text-[10px] mt-1">Send a message to start working</div>
                 </div>
               )}
+
+              {/* Orchestrator sub-tasks */}
+              {recentSubTasks.map((sub) => {
+                const isWorking = sub.status === 'running';
+                const isDone = sub.status === 'completed';
+                const isFailed = sub.status === 'failed';
+                const agentColors: Record<string, string> = {
+                  research: 'text-cyan-400',
+                  code: 'text-green-400',
+                  design: 'text-pink-400',
+                  seo: 'text-amber-400',
+                  data: 'text-blue-400',
+                  general: 'text-indigo-400',
+                };
+                const agentColor = agentColors[sub.agentType] || 'text-indigo-400';
+                return (
+                  <div key={sub.id} className="group">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2 max-w-[80%]">
+                        {isDone ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0 text-green-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                        ) : isFailed ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0 text-red-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                        ) : (
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-indigo-500/50 flex-shrink-0 animate-pulse" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-[10px] font-medium ${agentColor} uppercase`}>{sub.agentType}</span>
+                          <span className="text-xs text-textMuted ml-1.5 truncate">{sub.description.slice(0, 40)}</span>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] ${isWorking ? 'text-indigo-400' : 'text-textMuted'}`}>
+                        {isWorking ? 'running...' : isDone ? 'done' : 'failed'}
+                      </span>
+                    </div>
+                    <div className="h-1 w-full rounded-full bg-white/5 overflow-hidden ml-5.5">
+                      <div className={`h-full rounded-full transition-all duration-500 ${
+                        isDone ? 'bg-green-500 w-full' :
+                        isFailed ? 'bg-red-500 w-full' :
+                        'bg-indigo-500 animate-pulse'
+                      }`} style={{ width: isWorking ? '60%' : '100%' }} />
+                    </div>
+                    {sub.filesCreated && sub.filesCreated.length > 0 && (
+                      <div className="ml-5.5 mt-1 flex flex-wrap gap-1">
+                        {sub.filesCreated.map((f, i) => (
+                          <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">{f}</span>
+                        ))}
+                      </div>
+                    )}
+                    {isFailed && sub.error && (
+                      <div className="ml-5.5 mt-1 text-[9px] text-red-400/70 truncate">{sub.error}</div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Chat tasks */}
               {recentChatTasks.map((task) => {
                 const isWorking = task.status === 'working';
                 const isDone = task.status === 'completed';
@@ -160,6 +224,8 @@ export function RightPanel() {
                   </div>
                 );
               })}
+
+              {/* Agent runs */}
               {runs.slice(0, 3).map((run) => {
                 const isDone = run.status === 'completed' || run.status === 'failed';
                 return (

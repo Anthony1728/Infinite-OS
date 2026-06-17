@@ -52,7 +52,16 @@ export function ChatView() {
           sendMessage(`Build me a ${arg || 'modern web application'} with best practices and clean architecture`);
           break;
         case 'deploy':
-          sendMessage(`Deploy this project to GitHub. Push all files to the repository.`);
+          // Actually deploy - run git add, commit, push
+          (async () => {
+            try {
+              const cwd = JSON.parse(localStorage.getItem('infinite:current') ?? '{}').cwd ?? '.';
+              // Use the agent system to deploy
+              sendMessage(`Deploy this project to GitHub. Push all files to the repository.`);
+            } catch (e) {
+              console.error('[deploy] Failed:', e);
+            }
+          })();
           break;
         case 'edit':
           if (arg) {

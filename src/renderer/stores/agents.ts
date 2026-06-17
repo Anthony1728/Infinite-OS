@@ -33,10 +33,24 @@ export interface ChatTask {
   filesCreated?: string[];
 }
 
+export interface OrchestratorSubTask {
+  id: string;
+  taskId: string;
+  agentType: string;
+  description: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  result?: string;
+  error?: string;
+  startedAt: number;
+  completedAt?: number;
+  filesCreated?: string[];
+}
+
 interface AgentsState {
   types: AgentTypeInfo[];
   runs: AgentRun[];
   chatTasks: ChatTask[];
+  subTasks: OrchestratorSubTask[];
 
   init: () => Promise<void>;
   refreshRuns: () => Promise<void>;
@@ -46,12 +60,17 @@ interface AgentsState {
   addChatTask: (title: string) => string;
   completeChatTask: (id: string, files?: string[]) => void;
   failChatTask: (id: string) => void;
+  addSubTask: (taskId: string, subTaskId: string, agentType: string, description: string) => void;
+  completeSubTask: (subTaskId: string, result: string, files?: string[]) => void;
+  failSubTask: (subTaskId: string, error: string) => void;
+  clearOldSubTasks: () => void;
 }
 
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   types: [],
   runs: [],
   chatTasks: [],
+  subTasks: [],
 
   init: async () => {
     const types = (await window.api.listAgents()) as AgentTypeInfo[];
@@ -172,6 +191,41 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       chatTasks: s.chatTasks.map(t =>
         t.id === id ? { ...t, status: 'failed', completedAt: Date.now() } : t
       ),
+    }));
+  },
+
+  addSubTask: (taskId, subTaskId, agentType, description) => {
+    const sub: OrchestratorSubTask = {
+      id: subTaskId,
+      taskId,
+      agentType,
+      description,
+      status: 'running',
+      startedAt: Date.now(),
+    };
+    set((s) => ({ subTasks: [sub, ...s.subTasks].slice(0, 100) }));
+  },
+
+  completeSubTask: (subTaskId, result, files) => {
+    set((s) => ({
+      subTasks: s.subTasks.map(t =>
+        t.id === subTaskId ? { ...t, status: 'completed', completedAt: Date.now(), result, filesCreated: files } : t
+      ),
+    }));
+  },
+
+  failSubTask: (subTaskId, error) => {
+    set((s) => ({
+      subTasks: s.subTasks.map(t =>
+        t.id === subTaskId ? { ...t, status: 'failed', completedAt: Date.now(), error } : t
+      ),
+    }));
+  },
+
+  clearOldSubTasks: () => {
+    const cutoff = Date.now() - 5 * 60 * 1000; // 5 minutes
+    set((s) => ({
+      subTasks: s.subTasks.filter(t => t.completedAt == null || t.completedAt > cutoff),
     }));
   },
 }));
