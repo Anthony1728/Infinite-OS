@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import type { ContentBlock, Message, Session } from '../../shared/types';
 import { useBrainStore } from './brain';
 
+// Module-level safety timer reference so handleStreamEvent can clear it
+let pendingSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+
 export type StreamEvent =
   | { type: 'message_start'; message_id: string }
   | { type: 'text_delta'; message_id: string; text: string }
@@ -116,16 +119,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const provider = settings.provider ?? 'openrouter';
     const model = settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
     
+    console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
+    
     // Check if API is available (API key stored separately, not in infinite:current)
     let hasApiConfig = false;
     try {
       hasApiConfig = await window.api.hasProviderKey({ provider });
-    } catch {
+      console.log(`[chat] hasProviderKey(${provider}) = ${hasApiConfig}`);
+    } catch (e) {
+      console.error('[chat] hasProviderKey error:', e);
       hasApiConfig = false;
     }
     
     // If no API configured, use Infinite AI Brain offline mode
     if (!hasApiConfig) {
+      console.log('[chat] No API key found, using Brain mode');
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -155,6 +163,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       
       return;
     }
+    
+    console.log('[chat] API key found, proceeding with API call');
 
     let sessionId = currentSessionId;
 
@@ -207,6 +217,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     }, 45000);
+    // Store timer ref so handleStreamEvent can clear it immediately
+    pendingSafetyTimer = safetyTimer;
 
     // Detect complex tasks that need orchestration
     const isComplexTask = text.length > 200 ||
@@ -276,14 +288,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
       return;
     }
-
-    // Clear safety timer when streaming ends (handled by message_end/done/error events)
-    const unsub = useChatStore.subscribe((s, prev) => {
-      if (prev.streaming && !s.streaming) {
-        clearTimeout(safetyTimer);
-        unsub();
-      }
-    });
   },
 
   abort: async () => {
@@ -374,6 +378,12 @@ function handleStreamEvent(
       break;
     }
     case 'message_end': {
+      // Clear safety timer immediately — API responded successfully
+      if (pendingSafetyTimer) {
+        clearTimeout(pendingSafetyTimer);
+        pendingSafetyTimer = null;
+        console.log('[chat] Cleared safety timer (message_end)');
+      }
       setState({ streaming: false });
       
       // Learn from the completed conversation
@@ -399,9 +409,21 @@ function handleStreamEvent(
       break;
     }
     case 'done':
+      // Clear safety timer immediately
+      if (pendingSafetyTimer) {
+        clearTimeout(pendingSafetyTimer);
+        pendingSafetyTimer = null;
+        console.log('[chat] Cleared safety timer (done)');
+      }
       setState({ streaming: false });
       break;
     case 'error':
+      // Clear safety timer immediately
+      if (pendingSafetyTimer) {
+        clearTimeout(pendingSafetyTimer);
+        pendingSafetyTimer = null;
+        console.log('[chat] Cleared safety timer (error)');
+      }
       console.error('[stream]', ev.error);
       // Fall back to Brain mode on API error
       const brainStore = useBrainStore.getState();
@@ -415,7 +437,7 @@ function handleStreamEvent(
         messages: [...s.messages, {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: [{ type: 'text', text: `**Infinite AI Brain (Fallback)**\n\nAPI Error: ${ev.error}\n\n${brainResponse}` }],
+          content: [{ type: 'text', text: `**Infinite AI Brain (Offline)**\n\nThe API is temporarily unavailable (${ev.error.includes('429') ? 'rate limited' : 'connection error'}). Here's what I can help with from my knowledge:\n\n${brainResponse}` }],
           timestamp: Date.now(),
         }],
       }));

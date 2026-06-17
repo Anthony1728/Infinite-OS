@@ -21,6 +21,21 @@ const REGISTRY: Record<string, ProviderAdapter> = {
     ],
     homepage: 'https://openrouter.ai',
   }),
+  nvidia: openaiCompatible({
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    defaultBaseUrl: 'https://integrate.api.nvidia.com/v1',
+    defaultModel: 'nvidia/llama-3.3-70b-instruct',
+    freeModels: [
+      { id: 'nvidia/llama-3.3-70b-instruct', label: 'Llama 3.3 70B Instruct', provider: 'nvidia', free: true, supports_tools: true },
+      { id: 'nvidia/llama-3.1-8b-instruct', label: 'Llama 3.1 8B Instruct', provider: 'nvidia', free: true, supports_tools: true },
+      { id: 'meta/llama-3.1-405b-instruct', label: 'Llama 3.1 405B Instruct', provider: 'nvidia', free: true, supports_tools: false },
+      { id: 'nvidia/nemotron-4-340b-instruct', label: 'Nemotron 4 340B', provider: 'nvidia', free: true, supports_tools: false },
+      { id: 'mistralai/mistral-large-2-instruct', label: 'Mistral Large 2', provider: 'nvidia', free: true, supports_tools: false },
+      { id: 'google/gemma-2-27b-it', label: 'Gemma 2 27B', provider: 'nvidia', free: true, supports_tools: false },
+    ],
+    homepage: 'https://build.nvidia.com',
+  }),
   groq: openaiCompatible({
     id: 'groq',
     label: 'Groq',

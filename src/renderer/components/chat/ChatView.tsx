@@ -29,6 +29,7 @@ export function ChatView() {
   const messages = useChatStore((s) => s.messages);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const streaming = useChatStore((s) => s.streaming);
+  const initStreamListener = useChatStore((s) => s.initStreamListener);
   const loadSessions = useChatStore((s) => s.loadSessions);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const openInEditor = useEditorStore((s) => s.openInEditor);
@@ -36,6 +37,7 @@ export function ChatView() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
+  useEffect(() => { initStreamListener(); }, [initStreamListener]);
 
   const handleSend = useCallback((text: string) => {
     if (!text.trim()) return;

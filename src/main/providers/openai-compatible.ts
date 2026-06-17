@@ -57,116 +57,137 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
 
     async *streamChat(req: ChatRequest, apiKey: string, baseUrl?: string): AsyncIterable<StreamChunk> {
       const url = `${baseUrl ?? opts.defaultBaseUrl}/chat/completions`;
-      const body = {
-        model: req.model,
-        messages: toOpenAIMessages(req.messages, req.system),
-        max_tokens: req.max_tokens ?? 4096,
-        temperature: req.temperature ?? 0.7,
-        stream: true,
-        tools: req.tools?.length ? req.tools.map(toOpenAITool) : undefined,
-      };
+      const maxRetries = 2;
 
-      console.log(`[provider:${opts.id}] POST ${url} model=${req.model} messages=${body.messages.length} tools=${body.tools?.length ?? 0}`);
-
-      // Create a timeout controller (30 seconds)
-      const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
-      
-      // Combine with user's abort signal
-      const combinedSignal = req.signal 
-        ? AbortSignal.any([req.signal, timeoutController.signal])
-        : timeoutController.signal;
-
-      let res: Response;
-      try {
-        res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-          },
-          body: JSON.stringify(body),
-          signal: combinedSignal,
-        });
-      } catch (e: any) {
-        clearTimeout(timeoutId);
-        if (e.name === 'AbortError') {
-          const errorMsg = timeoutController.signal.aborted 
-            ? `Connection timeout after 30s — check your internet connection and API key`
-            : 'Request cancelled';
-          console.error(`[provider:${opts.id}] ${errorMsg}`);
-          yield { type: 'error', error: errorMsg };
-        } else {
-          console.error(`[provider:${opts.id}] Fetch error: ${e.message}`);
-          yield { type: 'error', error: `Network error: ${e.message}` };
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          const delay = Math.min(3000 * attempt, 10000);
+          console.log(`[provider:${opts.id}] Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
+          await new Promise(r => setTimeout(r, delay));
         }
-        return;
-      }
-      clearTimeout(timeoutId);
 
-      if (!res.ok || !res.body) {
-        const errText = await res.text().catch(() => 'no body');
-        console.error(`[provider:${opts.id}] HTTP ${res.status}: ${errText}`);
-        yield { type: 'error', error: `HTTP ${res.status}: ${errText}` };
-        return;
-      }
+        const body = {
+          model: req.model,
+          messages: toOpenAIMessages(req.messages, req.system),
+          max_tokens: req.max_tokens ?? 4096,
+          temperature: req.temperature ?? 0.7,
+          stream: true,
+          tools: req.tools?.length ? req.tools.map(toOpenAITool) : undefined,
+        };
 
-      console.log(`[provider:${opts.id}] Response OK, reading stream...`);
+        console.log(`[provider:${opts.id}] POST ${url} model=${req.model} messages=${body.messages.length} tools=${body.tools?.length ?? 0}`);
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+        const timeoutController = new AbortController();
+        const timeoutId = setTimeout(() => timeoutController.abort(), 30000);
+        const combinedSignal = req.signal
+          ? AbortSignal.any([req.signal, timeoutController.signal])
+          : timeoutController.signal;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify(body),
+            signal: combinedSignal,
+          });
+        } catch (e: any) {
+          clearTimeout(timeoutId);
+          if (e.name === 'AbortError') {
+            const errorMsg = timeoutController.signal.aborted
+              ? `Connection timeout after 30s — check your internet connection and API key`
+              : 'Request cancelled';
+            console.error(`[provider:${opts.id}] ${errorMsg}`);
+            yield { type: 'error', error: errorMsg };
+          } else {
+            console.error(`[provider:${opts.id}] Fetch error: ${e.message}`);
+            yield { type: 'error', error: `Network error: ${e.message}` };
+          }
+          return;
+        }
+        clearTimeout(timeoutId);
 
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const payload = trimmed.slice(5).trim();
-          if (payload === '[DONE]') return;
+        // Handle 429 rate limiting — retry
+        if (res.status === 429 && attempt < maxRetries) {
+          const errText = await res.text().catch(() => '');
+          let retryAfter = 5;
           try {
-            const obj = JSON.parse(payload);
-            const choice = obj.choices?.[0];
-            const delta = choice?.delta ?? {};
-            if (delta.content) {
-              yield { type: 'text_delta', text: delta.content };
-            }
-            if (delta.tool_calls) {
-              let lastToolCallId = '';
-              for (const tc of delta.tool_calls) {
-                const toolCallId = tc.id || lastToolCallId;
-                if (tc.id) {
-                  lastToolCallId = tc.id;
-                  yield { type: 'tool_use_start', id: tc.id, name: tc.function.name };
-                }
-                if (tc.function?.arguments) {
-                  yield { type: 'tool_use_delta', id: toolCallId, partial_json: tc.function.arguments };
-                }
-                if (tc.function?.name && tc.function?.arguments) {
-                  try {
-                    const args = JSON.parse(tc.function.arguments);
-                    yield { type: 'tool_use_end', id: toolCallId, name: tc.function.name, input: args };
-                  } catch { /* still streaming */ }
+            const parsed = JSON.parse(errText);
+            retryAfter = parsed?.metadata?.retry_after_seconds ?? retryAfter;
+          } catch { /* use default */ }
+          console.warn(`[provider:${opts.id}] HTTP 429 rate limited, retrying in ${retryAfter}s...`);
+          await new Promise(r => setTimeout(r, retryAfter * 1000));
+          continue;
+        }
+
+        if (!res.ok || !res.body) {
+          const errText = await res.text().catch(() => 'no body');
+          console.error(`[provider:${opts.id}] HTTP ${res.status}: ${errText}`);
+          yield { type: 'error', error: `API error (${res.status}): ${res.status === 429 ? 'Rate limited — try again shortly or switch model' : errText.slice(0, 200)}` };
+          return;
+        }
+
+        console.log(`[provider:${opts.id}] Response OK, reading stream...`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === '[DONE]') return;
+            try {
+              const obj = JSON.parse(payload);
+              const choice = obj.choices?.[0];
+              const delta = choice?.delta ?? {};
+              if (delta.content) {
+                yield { type: 'text_delta', text: delta.content };
+              }
+              if (delta.tool_calls) {
+                let lastToolCallId = '';
+                for (const tc of delta.tool_calls) {
+                  const toolCallId = tc.id || lastToolCallId;
+                  if (tc.id) {
+                    lastToolCallId = tc.id;
+                    yield { type: 'tool_use_start', id: tc.id, name: tc.function.name };
+                  }
+                  if (tc.function?.arguments) {
+                    yield { type: 'tool_use_delta', id: toolCallId, partial_json: tc.function.arguments };
+                  }
+                  if (tc.function?.name && tc.function?.arguments) {
+                    try {
+                      const args = JSON.parse(tc.function.arguments);
+                      yield { type: 'tool_use_end', id: toolCallId, name: tc.function.name, input: args };
+                    } catch { /* still streaming */ }
+                  }
                 }
               }
+              if (choice?.finish_reason) {
+                yield {
+                  type: 'message_end',
+                  stop_reason: choice.finish_reason,
+                  usage: obj.usage ?? { input: 0, output: 0 },
+                };
+              }
+            } catch {
+              // skip malformed line
             }
-            if (choice?.finish_reason) {
-              yield {
-                type: 'message_end',
-                stop_reason: choice.finish_reason,
-                usage: obj.usage ?? { input: 0, output: 0 },
-              };
-            }
-          } catch {
-            // skip malformed line
           }
         }
+        return; // Successfully completed
       }
     },
   };

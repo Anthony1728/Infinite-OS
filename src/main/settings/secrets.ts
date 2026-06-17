@@ -9,25 +9,32 @@ import { homedir } from 'node:os';
 const FILE = join(homedir(), '.infinite-ai', 'secrets.bin');
 
 let cache: Record<string, string> = {};
-let loaded = false;
+let loadPromise: Promise<void> | null = null;
 
 async function load(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
-  if (!safeStorage.isEncryptionAvailable()) {
-    console.warn('[secrets] safeStorage unavailable; keys will be stored in plaintext');
-  }
-  if (!existsSync(FILE)) {
-    cache = {};
-    return;
-  }
-  try {
-    const buf = await readFile(FILE);
-    const json = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8');
-    cache = JSON.parse(json);
-  } catch {
-    cache = {};
-  }
+  if (loadPromise) return loadPromise;
+  
+  loadPromise = (async () => {
+    if (!safeStorage.isEncryptionAvailable()) {
+      console.warn('[secrets] safeStorage unavailable; keys will be stored in plaintext');
+    }
+    if (!existsSync(FILE)) {
+      cache = {};
+      console.log('[secrets] No secrets file found, starting with empty cache');
+      return;
+    }
+    try {
+      const buf = await readFile(FILE);
+      const json = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8');
+      cache = JSON.parse(json);
+      console.log(`[secrets] Loaded ${Object.keys(cache).length} keys: ${Object.keys(cache).join(', ') || 'none'}`);
+    } catch (e) {
+      console.error('[secrets] Failed to load secrets:', e);
+      cache = {};
+    }
+  })();
+  
+  return loadPromise;
 }
 
 async function save(): Promise<void> {
@@ -35,11 +42,14 @@ async function save(): Promise<void> {
   const json = JSON.stringify(cache);
   const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(json) : Buffer.from(json, 'utf8');
   await writeFile(FILE, buf);
+  console.log(`[secrets] Saved ${Object.keys(cache).length} keys: ${Object.keys(cache).join(', ') || 'none'}`);
 }
 
 export async function getApiKey(provider: string): Promise<string> {
   await load();
-  return cache[provider] ?? '';
+  const key = cache[provider] ?? '';
+  console.log(`[secrets] getApiKey(${provider}) = ${key ? key.slice(0, 8) + '...' : 'EMPTY'}`);
+  return key;
 }
 
 export async function setApiKey(provider: string, key: string): Promise<void> {
@@ -50,5 +60,7 @@ export async function setApiKey(provider: string, key: string): Promise<void> {
 
 export async function hasApiKey(provider: string): Promise<boolean> {
   await load();
-  return Boolean(cache[provider]);
+  const has = Boolean(cache[provider]);
+  console.log(`[secrets] hasApiKey(${provider}) = ${has}, all keys: ${Object.keys(cache).join(', ') || 'none'}`);
+  return has;
 }
