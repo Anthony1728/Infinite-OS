@@ -5,7 +5,7 @@ import { CodeEditor } from '../workspace/CodeEditor';
 export function RightPanel() {
   const [agentTab, setAgentTab] = useState<'ACTIVE' | 'IDLE' | 'ALL'>('ACTIVE');
   const [workspaceTab, setWorkspaceTab] = useState<'agents' | 'code'>('code');
-  const { types, runs } = useAgentsStore();
+  const { types, runs, chatTasks } = useAgentsStore();
 
   const activeRuns = runs.filter((r) => r.status === 'running');
   const activeAgentIds = new Set(activeRuns.map((r) => r.agentId));
@@ -24,6 +24,8 @@ export function RightPanel() {
   const activeAgents = mappedAgents.filter((a) => a.status === 'working');
   const idleAgents = mappedAgents.filter((a) => a.status === 'idle');
   const filteredAgents = agentTab === 'ACTIVE' ? activeAgents : agentTab === 'IDLE' ? idleAgents : mappedAgents;
+
+  const recentChatTasks = chatTasks.slice(0, 10);
 
   return (
     <div className="w-80 border-l border-borderSubtle bg-bgPanel flex flex-col h-full flex-shrink-0">
@@ -110,11 +112,55 @@ export function RightPanel() {
           <div className="p-3 flex-1 overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-textMain">Tasks</h2>
-              <button className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors">View all</button>
+              <span className="text-[10px] text-textMuted">{chatTasks.length} total</span>
             </div>
 
             <div className="space-y-2.5">
-              {runs.slice(0, 5).map((run) => {
+              {chatTasks.length === 0 && runs.length === 0 && (
+                <div className="text-center py-6">
+                  <div className="text-textMuted text-xs">No active tasks</div>
+                  <div className="text-textMuted/50 text-[10px] mt-1">Send a message to start working</div>
+                </div>
+              )}
+              {recentChatTasks.map((task) => {
+                const isWorking = task.status === 'working';
+                const isDone = task.status === 'completed';
+                const isFailed = task.status === 'failed';
+                return (
+                  <div key={task.id} className="group">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2 max-w-[80%]">
+                        {isDone ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0 text-green-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                        ) : isFailed ? (
+                          <svg className="w-3.5 h-3.5 flex-shrink-0 text-red-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                        ) : (
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-indigo-500/50 flex-shrink-0 animate-pulse" />
+                        )}
+                        <span className={`text-xs truncate ${isWorking ? 'text-textMain' : 'text-textMuted'}`}>{task.title}</span>
+                      </div>
+                      <span className={`text-[10px] ${isWorking ? 'text-indigo-400' : 'text-textMuted'}`}>
+                        {isWorking ? 'working...' : isDone ? 'done' : 'failed'}
+                      </span>
+                    </div>
+                    <div className="h-1 w-full rounded-full bg-white/5 overflow-hidden ml-5.5">
+                      <div className={`h-full rounded-full transition-all duration-500 ${
+                        isDone ? 'bg-green-500 w-full' :
+                        isFailed ? 'bg-red-500 w-full' :
+                        'bg-indigo-500 animate-pulse'
+                      }`} style={{ width: isWorking ? '60%' : '100%' }} />
+                    </div>
+                    {task.filesCreated && task.filesCreated.length > 0 && (
+                      <div className="ml-5.5 mt-1 flex flex-wrap gap-1">
+                        {task.filesCreated.map((f, i) => (
+                          <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">{f}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {runs.slice(0, 3).map((run) => {
                 const isDone = run.status === 'completed' || run.status === 'failed';
                 return (
                 <div key={run.id} className="group">

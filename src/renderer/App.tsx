@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from './stores/auth';
 import { useSessionStore } from './stores/session';
+import { useAgentsStore } from './stores/agents';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
 import { OnboardingFlow } from './components/auth/OnboardingFlow';
@@ -107,6 +108,11 @@ export function App() {
     setShowLoading(false);
     setAppReady(true);
   };
+
+  // Initialize agents store on mount
+  useEffect(() => {
+    useAgentsStore.getState().init();
+  }, []);
 
   // Show brief loading for returning users
   useEffect(() => {

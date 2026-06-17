@@ -24,20 +24,34 @@ export interface AgentRun {
   toolCallCount: number;
 }
 
+export interface ChatTask {
+  id: string;
+  title: string;
+  status: 'working' | 'completed' | 'failed';
+  startedAt: number;
+  completedAt?: number;
+  filesCreated?: string[];
+}
+
 interface AgentsState {
   types: AgentTypeInfo[];
   runs: AgentRun[];
+  chatTasks: ChatTask[];
 
   init: () => Promise<void>;
   refreshRuns: () => Promise<void>;
   spawn: (agentId: string, task: string) => Promise<AgentRun | null>;
   abort: (runId: string) => Promise<void>;
   getRunsByStatus: (status: AgentRun['status']) => AgentRun[];
+  addChatTask: (title: string) => string;
+  completeChatTask: (id: string, files?: string[]) => void;
+  failChatTask: (id: string) => void;
 }
 
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   types: [],
   runs: [],
+  chatTasks: [],
 
   init: async () => {
     const types = (await window.api.listAgents()) as AgentTypeInfo[];
@@ -132,6 +146,33 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
 
   getRunsByStatus: (status) => {
     return get().runs.filter((r) => r.status === status);
+  },
+
+  addChatTask: (title) => {
+    const task: ChatTask = {
+      id: crypto.randomUUID(),
+      title,
+      status: 'working',
+      startedAt: Date.now(),
+    };
+    set((s) => ({ chatTasks: [task, ...s.chatTasks].slice(0, 50) }));
+    return task.id;
+  },
+
+  completeChatTask: (id, files) => {
+    set((s) => ({
+      chatTasks: s.chatTasks.map(t =>
+        t.id === id ? { ...t, status: 'completed', completedAt: Date.now(), filesCreated: files } : t
+      ),
+    }));
+  },
+
+  failChatTask: (id) => {
+    set((s) => ({
+      chatTasks: s.chatTasks.map(t =>
+        t.id === id ? { ...t, status: 'failed', completedAt: Date.now() } : t
+      ),
+    }));
   },
 }));
 

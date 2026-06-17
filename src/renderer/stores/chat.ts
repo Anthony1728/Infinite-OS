@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { ContentBlock, Message, Session } from '../../shared/types';
 import { useBrainStore } from './brain';
+import { useEditorStore } from './editor';
+import { useAgentsStore } from './agents';
 
 // Module-level safety timer reference so handleStreamEvent can clear it
 let pendingSafetyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -141,6 +143,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
       };
       set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+
+      // Create a chat task
+      const taskTitle = text.length > 60 ? text.slice(0, 60) + '...' : text;
+      const taskId = useAgentsStore.getState().addChatTask(taskTitle);
       
       // Generate brain response
       const brainStore = useBrainStore.getState();
@@ -157,6 +163,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
       
       set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+
+      // Auto-create files from brain response
+      const files = extractAndCreateFiles(assistantMessage);
+      useAgentsStore.getState().completeChatTask(taskId, files);
       
       // Learn from this interaction (user input + brain's response)
       brainStore.learnFromInteraction(text, brainResponse, 'user');
@@ -196,6 +206,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: Date.now(),
     };
     set({ messages: [...get().messages, userMessage], streaming: true });
+
+    // Create a chat task for the right panel
+    const taskTitle = text.length > 60 ? text.slice(0, 60) + '...' : text;
+    useAgentsStore.getState().addChatTask(taskTitle);
 
     // Safety timeout: if no response in 45s, fall back to Brain mode
     const safetyTimer = setTimeout(() => {
@@ -325,6 +339,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 }));
 
+function generateFilename(lang: string): string {
+  const map: Record<string, string> = {
+    html: 'index.html',
+    javascript: 'script.js',
+    js: 'script.js',
+    typescript: 'index.ts',
+    ts: 'index.ts',
+    css: 'styles.css',
+    python: 'main.py',
+    py: 'main.py',
+    json: 'config.json',
+    markdown: 'readme.md',
+    md: 'readme.md',
+    rust: 'main.rs',
+    rs: 'main.rs',
+    go: 'main.go',
+    yaml: 'config.yaml',
+    yml: 'config.yaml',
+    sql: 'query.sql',
+    sh: 'script.sh',
+    bash: 'script.sh',
+  };
+  return map[lang.toLowerCase()] || `file.${lang || 'txt'}`;
+}
+
+function extractAndCreateFiles(message: Message): string[] {
+  const createdFiles: string[] = [];
+  const textBlocks = message.content.filter(c => c.type === 'text');
+
+  for (const block of textBlocks) {
+    if (block.type !== 'text') continue;
+    const text = (block as { text: string }).text;
+
+    // Match code blocks: ```lang\n code ``` or ```lang filename="file"\n code ```
+    const regex = /```(\w+)?\s*(?:filename="([^"]+)")?\s*\n([\s\S]*?)```/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const lang = match[1] || 'txt';
+      const filename = match[2] || generateFilename(lang);
+      const content = match[3].trim();
+
+      if (content.length > 10) {
+        try {
+          window.api.fileWrite({ path: filename, content });
+          useEditorStore.getState().openInEditor(filename, content);
+          createdFiles.push(filename);
+          console.log(`[chat] Created file: ${filename} (${content.length} chars)`);
+        } catch (e) {
+          console.error('[chat] Failed to create file:', filename, e);
+        }
+      }
+    }
+  }
+
+  return createdFiles;
+}
+
 function handleStreamEvent(
   ev: { sessionId: string } & StreamEvent,
 ) {
@@ -385,9 +456,29 @@ function handleStreamEvent(
         console.log('[chat] Cleared safety timer (message_end)');
       }
       setState({ streaming: false });
-      
-      // Learn from the completed conversation
+
+      // Auto-create files from code blocks in the AI response
       const messages = getState().messages;
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant) {
+        const files = extractAndCreateFiles(lastAssistant);
+        if (files.length > 0) {
+          console.log(`[chat] Auto-created ${files.length} files:`, files);
+          // Complete the active chat task
+          const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+          if (activeTask) {
+            useAgentsStore.getState().completeChatTask(activeTask.id, files);
+          }
+        } else {
+          // No files created, just complete the task
+          const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+          if (activeTask) {
+            useAgentsStore.getState().completeChatTask(activeTask.id);
+          }
+        }
+      }
+
+      // Learn from the completed conversation
       const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
       const lastAssistantMsg = messages[messages.length - 1];
       
@@ -416,6 +507,13 @@ function handleStreamEvent(
         console.log('[chat] Cleared safety timer (done)');
       }
       setState({ streaming: false });
+      // Complete any active chat task
+      {
+        const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+        if (activeTask) {
+          useAgentsStore.getState().completeChatTask(activeTask.id);
+        }
+      }
       break;
     case 'error':
       // Clear safety timer immediately
@@ -425,22 +523,31 @@ function handleStreamEvent(
         console.log('[chat] Cleared safety timer (error)');
       }
       console.error('[stream]', ev.error);
+      // Fail the active chat task
+      {
+        const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+        if (activeTask) {
+          useAgentsStore.getState().failChatTask(activeTask.id);
+        }
+      }
       // Fall back to Brain mode on API error
-      const brainStore = useBrainStore.getState();
-      const lastUserMsg = [...getState().messages].reverse().find(m => m.role === 'user');
-      const userText = lastUserMsg?.content?.filter(c => c.type === 'text')?.map(c => c.text)?.join(' ') ?? '';
-      const brainResponse = brainStore.generateOfflineResponse(userText);
-      brainStore.learnFromInteraction(userText, brainResponse, 'system');
-      
-      setState((s) => ({
-        streaming: false,
-        messages: [...s.messages, {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: `**Infinite AI Brain (Offline)**\n\nThe API is temporarily unavailable (${ev.error.includes('429') ? 'rate limited' : 'connection error'}). Here's what I can help with from my knowledge:\n\n${brainResponse}` }],
-          timestamp: Date.now(),
-        }],
-      }));
+      {
+        const brainStore = useBrainStore.getState();
+        const lastUserMsg = [...getState().messages].reverse().find(m => m.role === 'user');
+        const userText = lastUserMsg?.content?.filter(c => c.type === 'text')?.map(c => c.text)?.join(' ') ?? '';
+        const brainResponse = brainStore.generateOfflineResponse(userText);
+        brainStore.learnFromInteraction(userText, brainResponse, 'system');
+        
+        setState((s) => ({
+          streaming: false,
+          messages: [...s.messages, {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: [{ type: 'text', text: `**Infinite AI Brain (Offline)**\n\nThe API is temporarily unavailable (${ev.error.includes('429') ? 'rate limited' : 'connection error'}). Here's what I can help with from my knowledge:\n\n${brainResponse}` }],
+            timestamp: Date.now(),
+          }],
+        }));
+      }
       break;
   }
 }
