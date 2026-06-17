@@ -272,6 +272,7 @@ export const IPC = {
   DEPLOY_LIST_PIPELINES: 'deploy:list-pipelines',
   DEPLOY_DETECT_PROJECT: 'deploy:detect-project',
   DEPLOY_DEFAULT_CONFIG: 'deploy:default-config',
+  DEPLOY_QUICK_PUSH: 'deploy:quick-push',
 
   // Testing
   TEST_CREATE_SUITE: 'test:create-suite',

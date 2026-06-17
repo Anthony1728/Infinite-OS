@@ -52,14 +52,20 @@ export function ChatView() {
           sendMessage(`Build me a ${arg || 'modern web application'} with best practices and clean architecture`);
           break;
         case 'deploy':
-          // Actually deploy - run git add, commit, push
           (async () => {
             try {
-              const cwd = JSON.parse(localStorage.getItem('infinite:current') ?? '{}').cwd ?? '.';
-              // Use the agent system to deploy
-              sendMessage(`Deploy this project to GitHub. Push all files to the repository.`);
-            } catch (e) {
-              console.error('[deploy] Failed:', e);
+              const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+              const cwd = settings.cwd ?? '.';
+              const result = await window.api.deployQuickPush({ cwd, message: `deploy ${arg || new Date().toISOString().slice(0, 19)}` });
+              const pipeline = result as any;
+              if (pipeline?.status === 'success') {
+                sendMessage(`Deployment complete! All steps succeeded:\n${pipeline.steps?.map((s: any) => `  - ${s.name}: ${s.status}`).join('\n')}`);
+              } else {
+                const failed = pipeline?.steps?.find((s: any) => s.status === 'failed');
+                sendMessage(`Deployment failed at step "${failed?.name}": ${failed?.output || 'unknown error'}`);
+              }
+            } catch (e: any) {
+              sendMessage(`Deployment error: ${e?.message || e}`);
             }
           })();
           break;
@@ -74,7 +80,24 @@ export function ChatView() {
           sendMessage(`Generate a video about: ${arg || 'a compelling product demo'}`);
           break;
         case 'test':
-          sendMessage(`Generate and run tests for: ${arg || 'the entire codebase'}`);
+          (async () => {
+            try {
+              const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+              const cwd = settings.cwd ?? '.';
+              const detected = await window.api.deployDetectProject({ projectPath: cwd });
+              const config = await window.api.deployDefaultConfig({ type: detected || 'node' }) as any;
+              const target = await window.api.deployCreateTarget({ name: 'test-run', type: 'local', config: {} });
+              const pipeline = await window.api.deployCreatePipeline({ name: 'Run Tests', projectId: 'default', targetId: (target as any).id, commands: [config.commands?.test || 'npx vitest run'] });
+              const result = await window.api.deployRunPipeline({ pipelineId: (pipeline as any).id, cwd }) as any;
+              if (result?.status === 'success') {
+                sendMessage(`Tests passed!\n\n${result.steps?.map((s: any) => s.output).join('\n')}`);
+              } else {
+                sendMessage(`Tests failed.\n\n${result?.steps?.filter((s: any) => s.status === 'failed').map((s: any) => s.output).join('\n') || 'Unknown error'}`);
+              }
+            } catch (e: any) {
+              sendMessage(`Test error: ${e?.message || e}`);
+            }
+          })();
           break;
         case 'browser':
           sendMessage(`Browse and analyze: ${arg || 'the current project documentation'}`);

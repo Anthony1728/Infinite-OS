@@ -153,6 +153,49 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider ?? 'openrouter';
     const model = settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
+    const textLower = text.toLowerCase();
+    
+    // Intent detection: intercept deploy/push actions and run them directly
+    if (/\b(deploy|push\s+to\s+github|push\s+to\s+git|publish)\b/i.test(textLower) && /\b(this|project|repo|code|app|now|it)\b/i.test(textLower)) {
+      const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
+      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+      try {
+        const result = await window.api.deployQuickPush({ cwd: settings.cwd ?? '.', message: text.slice(0, 72) }) as any;
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: result?.status === 'success' ? `**Deployed successfully!**\n\n${result.steps?.map((s: any) => `- ${s.name}: \`${s.command}\` — ${s.status}`).join('\n')}` : `**Deployment failed.**\n\n${result?.steps?.filter((s: any) => s.status === 'failed').map((s: any) => `- ${s.name}: ${s.output}`).join('\n') || 'Unknown error'}` }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+      } catch (e: any) {
+        set((s) => ({ messages: [...s.messages, { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `**Deployment error:** ${e?.message || e}` }], timestamp: Date.now() } as Message], streaming: false }));
+      }
+      return;
+    }
+
+    // Intent detection: intercept test/run actions
+    if (/\b(run\s+tests?|test\s+this|run\s+vitest|run\s+jest|run\s+pytest)\b/i.test(textLower)) {
+      const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
+      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+      try {
+        const detected = await window.api.deployDetectProject({ projectPath: settings.cwd ?? '.' });
+        const config = await window.api.deployDefaultConfig({ type: detected || 'node' }) as any;
+        const target = await window.api.deployCreateTarget({ name: 'test-run', type: 'local', config: {} });
+        const pipeline = await window.api.deployCreatePipeline({ name: 'Run Tests', projectId: 'default', targetId: (target as any).id, commands: [config.commands?.test || 'npx vitest run'] });
+        const result = await window.api.deployRunPipeline({ pipelineId: (pipeline as any).id, cwd: settings.cwd ?? '.' }) as any;
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: result?.status === 'success' ? `**Tests passed!**\n\n${result.steps?.map((s: any) => s.output).join('\n')}` : `**Tests failed.**\n\n${result?.steps?.filter((s: any) => s.status === 'failed').map((s: any) => s.output).join('\n') || 'Unknown error'}` }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+      } catch (e: any) {
+        set((s) => ({ messages: [...s.messages, { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `**Test error:** ${e?.message || e}` }], timestamp: Date.now() } as Message], streaming: false }));
+      }
+      return;
+    }
     
     console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
     

@@ -310,6 +310,7 @@ const api = {
   deployListPipelines: () => ipcRenderer.invoke(IPC.DEPLOY_LIST_PIPELINES),
   deployDetectProject: (args: { projectPath: string }) => ipcRenderer.invoke(IPC.DEPLOY_DETECT_PROJECT, args),
   deployDefaultConfig: (args: { type: string }) => ipcRenderer.invoke(IPC.DEPLOY_DEFAULT_CONFIG, args),
+  deployQuickPush: (args: { cwd?: string; message?: string }) => ipcRenderer.invoke(IPC.DEPLOY_QUICK_PUSH, args),
 
   // Testing
   testCreateSuite: (args: { name: string; framework: string; description?: string }) => ipcRenderer.invoke(IPC.TEST_CREATE_SUITE, args),

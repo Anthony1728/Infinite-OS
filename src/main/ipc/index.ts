@@ -445,6 +445,17 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.DEPLOY_LIST_PIPELINES, async () => deploySystem.listPipelines());
   ipcMain.handle(IPC.DEPLOY_DETECT_PROJECT, async (_e, { projectPath }) => deploySystem.detectProjectType(projectPath));
   ipcMain.handle(IPC.DEPLOY_DEFAULT_CONFIG, async (_e, { type }) => deploySystem.getDefaultBuildConfig(type));
+  ipcMain.handle(IPC.DEPLOY_QUICK_PUSH, async (_e, { cwd, message }: { cwd?: string; message?: string }) => {
+    const workDir = cwd || process.cwd();
+    const commitMsg = message || `deploy ${new Date().toISOString().slice(0, 19)}`;
+    const target = deploySystem.createTarget('github-push', 'local', { cwd: workDir });
+    const pipeline = await deploySystem.createPipeline('Quick Push', 'default', target.id, [
+      `git add -A`,
+      `git commit -m "${commitMsg}"`,
+      `git push`,
+    ]);
+    return deploySystem.runPipeline(pipeline.id, workDir);
+  });
 
   // Testing Framework IPC
   ipcMain.handle(IPC.TEST_CREATE_SUITE, async (_e, { name, framework, description }) => testingFramework.createSuite(name, framework, description));
