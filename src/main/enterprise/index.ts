@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import log from 'electron-log';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface TeamMember {
@@ -153,7 +152,7 @@ class EnterpriseManager extends EventEmitter {
     let log = [...this.auditLog];
     if (filters?.userId) log = log.filter((e) => e.userId === filters.userId);
     if (filters?.action) log = log.filter((e) => e.action === filters.action);
-    if (filters?.since) log = log.filter((e) => e.timestamp >= filters.since);
+    if (filters?.since) log = log.filter((e) => e.timestamp >= (filters.since ?? 0));
     return log;
   }
 
@@ -203,3 +202,4 @@ class EnterpriseManager extends EventEmitter {
 }
 
 export const enterpriseManager = new EnterpriseManager();
+

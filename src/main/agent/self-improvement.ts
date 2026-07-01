@@ -1,12 +1,26 @@
 // Self-Improvement Agent — runs locally without API keys.
 // Monitors the OS for errors, fixes common issues, maintains quality.
 
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
-const execAsync = promisify(exec);
+function selfExec(command: string, opts: { cwd: string; timeout: number }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
+    const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command];
+    const child = spawn(shell, shellArgs, { cwd: opts.cwd, timeout: opts.timeout, env: process.env, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('close', (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr || `exited with code ${code}`));
+    });
+    child.on('error', reject);
+  });
+}
 
 export interface HealthReport {
   timestamp: number;
@@ -102,7 +116,7 @@ export class SelfImprovementAgent {
 
   private async checkTypeScript(): Promise<CheckResult> {
     try {
-      const { stdout, stderr } = await execAsync('npx tsc --noEmit -p tsconfig.node.json 2>&1', {
+      const { stdout, stderr } = await selfExec('npx tsc --noEmit -p tsconfig.node.json 2>&1', {
         cwd: this.workspaceRoot,
         timeout: 60000,
       });
@@ -280,3 +294,4 @@ export class SelfImprovementAgent {
     return this.reportHistory[this.reportHistory.length - 1] ?? null;
   }
 }
+

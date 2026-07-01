@@ -232,3 +232,4 @@ export class SkillsManager {
     return { total: this.manifest.skills.length, enabled, bySource, byCategory };
   }
 }
+

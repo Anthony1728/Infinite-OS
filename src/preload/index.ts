@@ -78,6 +78,10 @@ const api = {
   // Files
   fileRead: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_READ, args),
   fileWrite: (args: { path: string; content: string }) => ipcRenderer.invoke(IPC.FILE_WRITE, args),
+  fileMkdir: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_MKDIR, args),
+  fileDelete: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_DELETE, args),
+  fileRename: (args: { oldPath: string; newPath: string }) => ipcRenderer.invoke(IPC.FILE_RENAME, args),
+  terminalExecute: (args: { command: string; cwd?: string }) => ipcRenderer.invoke(IPC.TERMINAL_EXECUTE, args),
 
   // App
   appVersion: () => ipcRenderer.invoke(IPC.APP_VERSION),
@@ -101,6 +105,21 @@ const api = {
   brainSdkInfo: () => ipcRenderer.invoke(IPC.BRAIN_SDK_INFO),
   brainSdkCreateTool: (args: unknown) => ipcRenderer.invoke(IPC.BRAIN_SDK_CREATE_TOOL, args),
 
+  // ── System Doctor ──
+  brainDoctorHealth: () => ipcRenderer.invoke('brain:doctor:health'),
+  brainDoctorRunCheck: () => ipcRenderer.invoke('brain:doctor:runCheck'),
+
+  // ── Self-Improvement ──
+  brainImproveRun: () => ipcRenderer.invoke('brain:improve:run'),
+  brainImprovePatterns: () => ipcRenderer.invoke('brain:improve:patterns'),
+  brainImproveErrors: () => ipcRenderer.invoke('brain:improve:errors'),
+  brainImproveActions: () => ipcRenderer.invoke('brain:improve:actions'),
+
+  // ── Brain Memory ──
+  brainMemoryLearning: () => ipcRenderer.invoke('brain:memory:learning'),
+  brainMemoryPerformance: () => ipcRenderer.invoke('brain:memory:performance'),
+  brainMemoryEvents: (args?: { count?: number }) => ipcRenderer.invoke('brain:memory:events', args ?? {}),
+
   // Browser Agent
   browserCreateSession: (args?: unknown) => ipcRenderer.invoke(IPC.BROWSER_CREATE_SESSION, args),
   browserNavigate: (args: unknown) => ipcRenderer.invoke(IPC.BROWSER_NAVIGATE, args),
@@ -112,16 +131,6 @@ const api = {
   browserListSessions: () => ipcRenderer.invoke(IPC.BROWSER_LIST_SESSIONS),
   browserDeleteSession: (args: unknown) => ipcRenderer.invoke(IPC.BROWSER_DELETE_SESSION, args),
   browserStats: () => ipcRenderer.invoke(IPC.BROWSER_STATS),
-
-  // Computer Control
-  computerMoveMouse: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_MOVE_MOUSE, args),
-  computerClickMouse: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_CLICK_MOUSE, args),
-  computerTypeText: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_TYPE_TEXT, args),
-  computerPressKey: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_PRESS_KEY, args),
-  computerCaptureScreen: () => ipcRenderer.invoke(IPC.COMPUTER_CAPTURE_SCREEN),
-  computerOpenApp: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_OPEN_APP, args),
-  computerCloseApp: (args: unknown) => ipcRenderer.invoke(IPC.COMPUTER_CLOSE_APP, args),
-  computerStats: () => ipcRenderer.invoke(IPC.COMPUTER_STATS),
 
   // Automation
   automationCreateWorkflow: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CREATE_WORKFLOW, args),
@@ -284,7 +293,6 @@ const api = {
   voiceHistory: () => ipcRenderer.invoke(IPC.VOICE_HISTORY),
   voiceClearHistory: () => ipcRenderer.invoke(IPC.VOICE_CLEAR_HISTORY),
   voiceSpeak: (args: { text: string }) => ipcRenderer.invoke(IPC.VOICE_SPEAK, args),
-  voiceStatus: () => ipcRenderer.invoke(IPC.VOICE_STATUS),
 
   // Video Clipping
   videoCreateProject: (args: { name: string; sourceFile: string; description?: string }) => ipcRenderer.invoke(IPC.VIDEO_CREATE_PROJECT, args),
@@ -361,6 +369,256 @@ const api = {
   callTemplateCreate: (args: { name: string; greeting: string; prompts?: string[] }) => ipcRenderer.invoke(IPC.CALL_TEMPLATE_CREATE, args),
   callTemplateList: () => ipcRenderer.invoke(IPC.CALL_TEMPLATE_LIST),
   callAnalytics: (args?: { since?: number }) => ipcRenderer.invoke(IPC.CALL_ANALYTICS, args ?? {}),
+
+  // YouTube Learning
+  ytAnalyze: (args: { url: string; transcript: string; title?: string; channel?: string }) => ipcRenderer.invoke(IPC.YT_ANALYZE, args),
+  ytLearn: (args: { url: string; transcript: string; taskTitle?: string }) => ipcRenderer.invoke(IPC.YT_LEARN, args),
+  ytListTasks: () => ipcRenderer.invoke(IPC.YT_LIST_TASKS),
+  ytGetTask: (args: { id: string }) => ipcRenderer.invoke(IPC.YT_GET_TASK, args),
+  ytDeleteTask: (args: { id: string }) => ipcRenderer.invoke(IPC.YT_DELETE_TASK, args),
+  ytListAnalyses: () => ipcRenderer.invoke(IPC.YT_LIST_ANALYSES),
+  ytCreateTemplate: (args: { name: string; steps: Array<{ type: string; action: string; target?: string; value?: string }>; variables?: Record<string, string>; description?: string }) => ipcRenderer.invoke(IPC.YT_CREATE_TEMPLATE, args),
+  ytListTemplates: () => ipcRenderer.invoke(IPC.YT_LIST_TEMPLATES),
+  ytLearnDaily: (args: { sessionData: { date: string; videosWatched: number; tasksCompleted: number; timeSpent: number } }) => ipcRenderer.invoke(IPC.YT_LEARN_DAILY, args),
+
+  // Activity Tracker
+  trackerStart: () => ipcRenderer.invoke(IPC.TRACKER_START),
+  trackerStop: () => ipcRenderer.invoke(IPC.TRACKER_STOP),
+  trackerStatus: () => ipcRenderer.invoke(IPC.TRACKER_STATUS),
+  trackerRecord: (args: { action: { type: string; target?: string; timestamp: number } }) => ipcRenderer.invoke(IPC.TRACKER_RECORD, args),
+  trackerRecent: (args?: { count?: number }) => ipcRenderer.invoke(IPC.TRACKER_RECENT, args ?? { count: 50 }),
+  trackerAnalyzeDay: (args?: { date?: string }) => ipcRenderer.invoke(IPC.TRACKER_ANALYZE_DAY, args ?? {}),
+  trackerPatterns: () => ipcRenderer.invoke(IPC.TRACKER_PATTERNS),
+
+  // Task Replay
+  replayExecute: (args: { taskName: string; steps: Array<{ type: string; action: string; target?: string; value?: string }>; variables?: Record<string, string>; speed?: number }) => ipcRenderer.invoke(IPC.REPLAY_EXECUTE, args),
+  replayExecuteTask: (args: { taskId: string; overrides?: Record<string, string> }) => ipcRenderer.invoke(IPC.REPLAY_EXECUTE_TASK, args),
+  replayExecuteNL: (args: { description: string }) => ipcRenderer.invoke(IPC.REPLAY_EXECUTE_NL, args),
+  replayCancel: (args: { executionId: string }) => ipcRenderer.invoke(IPC.REPLAY_CANCEL, args),
+  replayPause: (args: { executionId: string }) => ipcRenderer.invoke(IPC.REPLAY_PAUSE, args),
+  replayResume: (args: { executionId: string }) => ipcRenderer.invoke(IPC.REPLAY_RESUME, args),
+  replayList: () => ipcRenderer.invoke(IPC.REPLAY_LIST),
+  replayGet: (args: { id: string }) => ipcRenderer.invoke(IPC.REPLAY_GET, args),
+  replayBrowserTask: (args: { url: string; actions: Array<{ type: string; selector?: string; value?: string }> }) => ipcRenderer.invoke(IPC.REPLAY_BROWSER_TASK, args),
+  replayComputerTask: (args: { actions: Array<{ type: string; target?: string; value?: string }> }) => ipcRenderer.invoke(IPC.REPLAY_COMPUTER_TASK, args),
+
+  // Email
+  emailList: (args?: { folder?: string; limit?: number }) => ipcRenderer.invoke(IPC.EMAIL_LIST, args ?? {}),
+  emailRead: (args: { uid: string; folder?: string }) => ipcRenderer.invoke(IPC.EMAIL_READ, args),
+  emailSend: (args: { to: string; subject: string; text: string; inReplyTo?: string }) => ipcRenderer.invoke(IPC.EMAIL_SEND, args),
+  emailTest: (args: { imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; user: string; password: string }) => ipcRenderer.invoke(IPC.EMAIL_TEST, args),
+  emailConfigGet: () => ipcRenderer.invoke(IPC.EMAIL_CONFIG_GET),
+  emailConfigSave: (args: { imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; user: string; password: string }) => ipcRenderer.invoke(IPC.EMAIL_CONFIG_SAVE, args),
+  emailHasConfig: () => ipcRenderer.invoke(IPC.EMAIL_HAS_CONFIG),
+
+  // Auth (file-based)
+  authGetUsers: () => ipcRenderer.invoke(IPC.AUTH_GET_USERS),
+  authSetUsers: (users: Array<{ id: string; username: string; password: string; createdAt: number }>) => ipcRenderer.invoke(IPC.AUTH_SET_USERS, users),
+  authGetSession: () => ipcRenderer.invoke(IPC.AUTH_GET_SESSION),
+  authSetSession: (session: { userId: string; username: string; loginAt: number } | null) => ipcRenderer.invoke(IPC.AUTH_SET_SESSION, session),
+
+  // Replay events
+  onReplayCommand: (callback: (event: { type: string; data: unknown }) => void) => {
+    ipcRenderer.on(IPC.REPLAY_COMMAND, (_event, data) => callback(data));
+    return () => { ipcRenderer.removeAllListeners(IPC.REPLAY_COMMAND); };
+  },
+
+  // Ollama local AI brain
+  ollamaChat: (args: { messages: Array<{ role: string; content: string; images?: string[] }>; options?: { temperature?: number; maxTokens?: number } }) => ipcRenderer.invoke(IPC.OLLAMA_CHAT, args),
+  ollamaAsk: (args: { prompt: string; systemPrompt?: string; model?: string }) => ipcRenderer.invoke(IPC.OLLAMA_ASK, args),
+  ollamaAnalyzeImage: (args: { imageBase64: string; question: string }) => ipcRenderer.invoke(IPC.OLLAMA_ANALYZE_IMAGE, args),
+  ollamaTeach: () => ipcRenderer.invoke(IPC.OLLAMA_TEACH),
+  ollamaStatus: () => ipcRenderer.invoke(IPC.OLLAMA_STATUS),
+  ollamaRecordApi: (args: { input: string; response: string; model: string; provider: string }) => ipcRenderer.invoke(IPC.OLLAMA_RECORD_API, args),
+  ollamaRecordConversation: (args: { input: string; output: string; source: 'brain' | 'api' | 'ollama' }) => ipcRenderer.invoke(IPC.OLLAMA_RECORD_CONVERSATION, args),
+  ollamaSystemPrompt: () => ipcRenderer.invoke(IPC.OLLAMA_SYSTEM_PROMPT),
+
+  // ── OCR ──
+  ocrRecognize: (args: { imagePath: string }) => ipcRenderer.invoke('ocr:recognize', args),
+  ocrAnalyze: (args: { imagePath: string; prompt: string }) => ipcRenderer.invoke('ocr:analyze', args),
+  ocrStatus: () => ipcRenderer.invoke('ocr:status'),
+
+  // ── Voice ──
+  voiceSTT: (args: { audioBuffer: string; format: string }) => ipcRenderer.invoke('voice:stt', args),
+  voiceTTS: (args: { text: string; voice?: string }) => ipcRenderer.invoke('voice:tts', args),
+  voiceStatus: () => ipcRenderer.invoke('voice:status'),
+  voiceSetKey: (args: { apiKey: string }) => ipcRenderer.invoke('voice:setKey', args),
+
+  // ── Credentials ──
+  credSave: (args: { id: string; service: string; apiKey: string }) => ipcRenderer.invoke('cred:save', args),
+  credGet: (args: { id: string }) => ipcRenderer.invoke('cred:get', args),
+  credList: () => ipcRenderer.invoke('cred:list'),
+  credDelete: (args: { id: string }) => ipcRenderer.invoke('cred:delete', args),
+  credHas: (args: { id: string }) => ipcRenderer.invoke('cred:has', args),
+  credDetect: (args: { text: string }) => ipcRenderer.invoke('cred:detect', args),
+
+  // ── Persistent Memory ──
+  pmemSave: (args: { category: string; key: string; value: string }) => ipcRenderer.invoke('pmem:save', args),
+  pmemGet: (args: { category: string }) => ipcRenderer.invoke('pmem:get', args),
+  pmemGetValue: (args: { category: string; key: string }) => ipcRenderer.invoke('pmem:getValue', args),
+  pmemDelete: (args: { category: string; key: string }) => ipcRenderer.invoke('pmem:delete', args),
+  pmemSaveSession: (args: { sessionId: string; history: unknown[]; title?: string }) => ipcRenderer.invoke('pmem:saveSession', args),
+  pmemLoadSession: (args: { sessionId: string }) => ipcRenderer.invoke('pmem:loadSession', args),
+  pmemListSessions: () => ipcRenderer.invoke('pmem:listSessions'),
+  pmemDeleteSession: (args: { sessionId: string }) => ipcRenderer.invoke('pmem:deleteSession', args),
+  pmemLogAudit: (args: { action: string; details?: string; source?: string }) => ipcRenderer.invoke('pmem:logAudit', args),
+  pmemAuditLogs: (args?: { limit?: number }) => ipcRenderer.invoke('pmem:auditLogs', args ?? {}),
+  pmemSaveKnowledge: (args: { input: string; output: string; source?: string; tags?: string[] }) => ipcRenderer.invoke('pmem:saveKnowledge', args),
+  pmemSearchKnowledge: (args: { query: string; limit?: number }) => ipcRenderer.invoke('pmem:searchKnowledge', args),
+  pmemStats: () => ipcRenderer.invoke('pmem:stats'),
+  pmemKnowledgeStats: () => ipcRenderer.invoke('pmem:knowledgeStats'),
+
+  // System
+  systemOpenUrl: (args: { url: string }) => ipcRenderer.invoke(IPC.SYSTEM_OPEN_URL, args),
+
+  // Clipboard
+  clipboardRead: (args?: { format?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_READ, args ?? {}),
+  clipboardWrite: (args: { text?: string; html?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_WRITE, args),
+
+  // Notifications
+  notificationShow: (args: { title: string; body: string; silent?: boolean }) => ipcRenderer.invoke(IPC.NOTIFICATION_SHOW, args),
+  notificationStatus: () => ipcRenderer.invoke(IPC.NOTIFICATION_STATUS),
+  notificationClear: () => ipcRenderer.invoke(IPC.NOTIFICATION_CLEAR),
+
+  // Interactive Terminal (PTY)
+  terminalCreateSession: (args?: { cols?: number; rows?: number; cwd?: string }) => ipcRenderer.invoke(IPC.TERMINAL_CREATE_SESSION, args),
+  terminalWrite: (args: { sessionId: string; data: string }) => ipcRenderer.invoke(IPC.TERMINAL_WRITE, args),
+  terminalResize: (args: { sessionId: string; cols: number; rows: number }) => ipcRenderer.invoke(IPC.TERMINAL_RESIZE, args),
+  terminalCloseSession: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.TERMINAL_CLOSE_SESSION, args),
+  terminalListSessions: () => ipcRenderer.invoke(IPC.TERMINAL_LIST_SESSIONS),
+  terminalSubscribe: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.TERMINAL_SUBSCRIBE, args),
+  terminalUnsubscribe: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.TERMINAL_UNSUBSCRIBE, args),
+  terminalCloseAll: () => ipcRenderer.invoke(IPC.TERMINAL_CLOSE_ALL),
+  onTerminalData: (cb: (data: { sessionId: string; data: string }) => void) => {
+    ipcRenderer.on(IPC.TERMINAL_DATA, (_event, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners(IPC.TERMINAL_DATA);
+  },
+  onTerminalExit: (cb: (data: { sessionId: string; exitCode: number; signal: string }) => void) => {
+    ipcRenderer.on(IPC.TERMINAL_EXIT, (_event, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners(IPC.TERMINAL_EXIT);
+  },
+  onTerminalSessionCreated: (cb: (data: unknown) => void) => {
+    ipcRenderer.on(IPC.TERMINAL_SESSION_CREATED, (_event, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners(IPC.TERMINAL_SESSION_CREATED);
+  },
+
+  // Git
+  gitStatus: (args?: { cwd?: string }) => ipcRenderer.invoke(IPC.GIT_STATUS, args ?? {}),
+  gitLog: (args?: { cwd?: string; count?: number }) => ipcRenderer.invoke(IPC.GIT_LOG, args ?? {}),
+  gitCommit: (args: { cwd?: string; message: string; all?: boolean }) => ipcRenderer.invoke(IPC.GIT_COMMIT, args),
+  gitBranch: (args?: { cwd?: string }) => ipcRenderer.invoke(IPC.GIT_BRANCH, args ?? {}),
+  gitPush: (args?: { cwd?: string; remote?: string; branch?: string; force?: boolean }) => ipcRenderer.invoke(IPC.GIT_PUSH, args ?? {}),
+  gitPull: (args?: { cwd?: string; remote?: string; rebase?: boolean }) => ipcRenderer.invoke(IPC.GIT_PULL, args ?? {}),
+  gitDiff: (args?: { cwd?: string; staged?: boolean; file?: string }) => ipcRenderer.invoke(IPC.GIT_DIFF, args ?? {}),
+
+  // Checkpoints
+  checkpointCreate: (args: { taskId: string; name: string; description?: string; metadata?: Record<string, unknown> }) => ipcRenderer.invoke(IPC.CHECKPOINT_CREATE, args),
+  checkpointList: (args?: { taskId?: string; limit?: number }) => ipcRenderer.invoke(IPC.CHECKPOINT_LIST, args ?? {}),
+  checkpointGet: (args: { id: string }) => ipcRenderer.invoke(IPC.CHECKPOINT_GET, args),
+  checkpointRestore: (args: { id: string }) => ipcRenderer.invoke(IPC.CHECKPOINT_RESTORE, args),
+  checkpointDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.CHECKPOINT_DELETE, args),
+  checkpointDiff: (args: { id1: string; id2: string }) => ipcRenderer.invoke(IPC.CHECKPOINT_DIFF, args),
+
+  // Task Queue
+  queueCreate: (args: { name: string; priority?: number }) => ipcRenderer.invoke(IPC.QUEUE_CREATE, args),
+  queueList: () => ipcRenderer.invoke(IPC.QUEUE_LIST),
+  queueGet: (args: { id: string }) => ipcRenderer.invoke(IPC.QUEUE_GET, args),
+  queueDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.QUEUE_DELETE, args),
+  queueEnqueue: (args: { queueId: string; task: Record<string, unknown>; priority?: number }) => ipcRenderer.invoke(IPC.QUEUE_ENQUEUE, args),
+  queueDequeue: (args: { queueId: string }) => ipcRenderer.invoke(IPC.QUEUE_DEQUEUE, args),
+  queuePeek: (args: { queueId: string }) => ipcRenderer.invoke(IPC.QUEUE_PEEK, args),
+  queueStatus: (args: { queueId: string }) => ipcRenderer.invoke(IPC.QUEUE_STATUS, args),
+  queueStats: () => ipcRenderer.invoke(IPC.QUEUE_STATS),
+
+  // Workspace Indexing
+  indexBuild: (args?: { paths?: string[]; force?: boolean }) => ipcRenderer.invoke(IPC.INDEX_BUILD, args ?? {}),
+  indexSearch: (args: { query: string; limit?: number }) => ipcRenderer.invoke(IPC.INDEX_SEARCH, args),
+  indexStatus: () => ipcRenderer.invoke(IPC.INDEX_STATUS),
+  indexClear: () => ipcRenderer.invoke(IPC.INDEX_CLEAR),
+  indexFileAdd: (args: { path: string }) => ipcRenderer.invoke(IPC.INDEX_FILE_ADD, args),
+  indexFileRemove: (args: { path: string }) => ipcRenderer.invoke(IPC.INDEX_FILE_REMOVE, args),
+  indexRebuild: () => ipcRenderer.invoke(IPC.INDEX_REBUILD),
+
+  // Code Completion
+  completionRequest: (args: { filePath: string; position: { line: number; character: number }; context: string }) => ipcRenderer.invoke(IPC.COMPLETION_REQUEST, args),
+  completionCancel: (args: { id: string }) => ipcRenderer.invoke(IPC.COMPLETION_CANCEL, args),
+  completionList: () => ipcRenderer.invoke(IPC.COMPLETION_LIST),
+  onCompletionResult: (cb: (data: { id: string; completions: unknown[] }) => void) => {
+    ipcRenderer.on('completion:result', (_event, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners('completion:result');
+  },
+
+  // Debug
+  debugStart: (args: { filePath: string; breakPoints?: string[] }) => ipcRenderer.invoke(IPC.DEBUG_START, args),
+  debugStop: () => ipcRenderer.invoke(IPC.DEBUG_STOP),
+  debugStatus: () => ipcRenderer.invoke(IPC.DEBUG_STATUS),
+  debugBreakpointsSet: (args: { filePath: string; lines: number[] }) => ipcRenderer.invoke(IPC.DEBUG_BREAKPOINTS_SET, args),
+  debugBreakpointsList: (args: { filePath: string }) => ipcRenderer.invoke(IPC.DEBUG_BREAKPOINTS_LIST, args),
+  debugEvaluate: (args: { expression: string }) => ipcRenderer.invoke(IPC.DEBUG_EVALUATE, args),
+  debugStep: (args: { action: 'in' | 'out' | 'over' }) => ipcRenderer.invoke(IPC.DEBUG_STEP, args),
+  debugContinue: () => ipcRenderer.invoke(IPC.DEBUG_CONTINUE),
+  debugPause: () => ipcRenderer.invoke(IPC.DEBUG_PAUSE),
+  onDebugEvent: (cb: (data: unknown) => void) => {
+    ipcRenderer.on('debug:event', (_event, payload) => cb(payload));
+    return () => ipcRenderer.removeAllListeners('debug:event');
+  },
+
+  // GitHub Integration
+  githubSetToken: (args: { token: string }) => ipcRenderer.invoke('github:setToken', args),
+  githubSetUsername: (args: { username: string }) => ipcRenderer.invoke('github:setUsername', args),
+  githubIsConfigured: () => ipcRenderer.invoke('github:isConfigured'),
+  githubCreateRepo: (args: { name: string; description?: string; private?: boolean }) => ipcRenderer.invoke('github:createRepo', args),
+  githubGetRepo: (args: { owner: string; repo: string }) => ipcRenderer.invoke('github:getRepo', args),
+  githubListRepos: (args?: { type?: string; sort?: string; perPage?: number }) => ipcRenderer.invoke('github:listRepos', args),
+  githubDeleteRepo: (args: { owner: string; repo: string }) => ipcRenderer.invoke('github:deleteRepo', args),
+  githubForkRepo: (args: { owner: string; repo: string }) => ipcRenderer.invoke('github:forkRepo', args),
+  githubGetFile: (args: { owner: string; repo: string; path: string; ref?: string }) => ipcRenderer.invoke('github:getFile', args),
+  githubSaveFile: (args: { owner: string; repo: string; path: string; content: string; message: string; sha?: string; branch?: string }) => ipcRenderer.invoke('github:saveFile', args),
+  githubListContents: (args: { owner: string; repo: string; path: string }) => ipcRenderer.invoke('github:listContents', args),
+  githubListBranches: (args: { owner: string; repo: string }) => ipcRenderer.invoke('github:listBranches', args),
+  githubCreateBranch: (args: { owner: string; repo: string; name: string; fromSha: string }) => ipcRenderer.invoke('github:createBranch', args),
+  githubCreateIssue: (args: { owner: string; repo: string; title: string; body: string; labels?: string[] }) => ipcRenderer.invoke('github:createIssue', args),
+  githubListIssues: (args: { owner: string; repo: string; state?: string }) => ipcRenderer.invoke('github:listIssues', args),
+  githubUpdateIssue: (args: { owner: string; repo: string; number: number; updates: { title?: string; body?: string; state?: string } }) => ipcRenderer.invoke('github:updateIssue', args),
+  githubCreatePR: (args: { owner: string; repo: string; title: string; body: string; head: string; base: string; draft?: boolean }) => ipcRenderer.invoke('github:createPR', args),
+  githubListPRs: (args: { owner: string; repo: string; state?: string }) => ipcRenderer.invoke('github:listPRs', args),
+  githubMergePR: (args: { owner: string; repo: string; number: number; method?: string }) => ipcRenderer.invoke('github:mergePR', args),
+  githubCreateDeployment: (args: { owner: string; repo: string; ref: string; environment?: string; description?: string }) => ipcRenderer.invoke('github:createDeployment', args),
+  githubListDeployments: (args: { owner: string; repo: string; environment?: string }) => ipcRenderer.invoke('github:listDeployments', args),
+  githubListWorkflowRuns: (args: { owner: string; repo: string; workflowId?: string; branch?: string }) => ipcRenderer.invoke('github:listWorkflowRuns', args),
+  githubTriggerWorkflow: (args: { owner: string; repo: string; workflowId: string; ref: string; inputs?: Record<string, string> }) => ipcRenderer.invoke('github:triggerWorkflow', args),
+  githubCloneRepo: (args: { url: string; targetPath: string; depth?: number; branch?: string }) => ipcRenderer.invoke('github:cloneRepo', args),
+  githubPush: (args: { cwd: string; remote?: string; branch?: string }) => ipcRenderer.invoke('github:push', args),
+
+  // Computer Automation
+  computerMoveMouse: (args: { x: number; y: number; smooth?: boolean }) => ipcRenderer.invoke('computer:moveMouse', args),
+  computerGetCursorPosition: () => ipcRenderer.invoke('computer:getCursorPosition'),
+  computerClick: (args: { x: number; y: number; button?: string }) => ipcRenderer.invoke('computer:click', args),
+  computerDoubleClick: (args: { x: number; y: number }) => ipcRenderer.invoke('computer:doubleClick', args),
+  computerRightClick: (args: { x: number; y: number }) => ipcRenderer.invoke('computer:rightClick', args),
+  computerDrag: (args: { fromX: number; fromY: number; toX: number; toY: number; holdTime?: number }) => ipcRenderer.invoke('computer:drag', args),
+  computerScroll: (args: { x: number; y: number; amount: number }) => ipcRenderer.invoke('computer:scroll', args),
+  computerHover: (args: { x: number; y: number; duration?: number }) => ipcRenderer.invoke('computer:hover', args),
+  computerTypeText: (args: { text: string; delay?: number }) => ipcRenderer.invoke('computer:typeText', args),
+  computerPressKey: (args: { key: string }) => ipcRenderer.invoke('computer:pressKey', args),
+  computerHotkey: (args: { keys: string[] }) => ipcRenderer.invoke('computer:hotkey', args),
+  computerCaptureScreen: () => ipcRenderer.invoke('computer:captureScreen'),
+  computerCaptureRegion: (args: { x: number; y: number; width: number; height: number }) => ipcRenderer.invoke('computer:captureRegion', args),
+  computerGetScreenSize: () => ipcRenderer.invoke('computer:getScreenSize'),
+  computerSaveScreenshot: (args: { filename: string }) => ipcRenderer.invoke('computer:saveScreenshot', args),
+  computerGetWindows: () => ipcRenderer.invoke('computer:getWindows'),
+  computerFindWindow: (args: { title: string }) => ipcRenderer.invoke('computer:findWindow', args),
+  computerFocusWindow: (args: { title: string }) => ipcRenderer.invoke('computer:focusWindow', args),
+  computerMinimizeWindow: (args: { title: string }) => ipcRenderer.invoke('computer:minimizeWindow', args),
+  computerOpenApp: (args: { name: string }) => ipcRenderer.invoke('computer:openApp', args),
+  computerOpenUrl: (args: { url: string }) => ipcRenderer.invoke('computer:openUrl', args),
+  computerCloseApp: (args: { name: string }) => ipcRenderer.invoke('computer:closeApp', args),
+  computerGetProcesses: () => ipcRenderer.invoke('computer:getProcesses'),
+  computerGetClipboard: () => ipcRenderer.invoke('computer:getClipboard'),
+  computerSetClipboard: (args: { text: string }) => ipcRenderer.invoke('computer:setClipboard', args),
+  computerExecute: (args: { command: string; cwd?: string }) => ipcRenderer.invoke('computer:execute', args),
+  computerStats: () => ipcRenderer.invoke('computer:stats'),
+  computerActionLog: (args?: { count?: number }) => ipcRenderer.invoke('computer:actionLog', args),
 };
 
 contextBridge.exposeInMainWorld('api', api);

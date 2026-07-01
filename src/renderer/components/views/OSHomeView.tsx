@@ -325,3 +325,4 @@ export function OSHomeView({ onOpenView }: OSHomeViewProps) {
     </div>
   );
 }
+

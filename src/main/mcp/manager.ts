@@ -103,3 +103,4 @@ export async function disconnect(name: string): Promise<void> {
 export function listServers(): { name: string; toolCount: number; connected: boolean }[] {
   return Array.from(servers.entries()).map(([name, s]) => ({ name, toolCount: s.tools.length, connected: true }));
 }
+

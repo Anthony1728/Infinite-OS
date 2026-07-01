@@ -23,3 +23,4 @@ export const useUIStore = create<UIState>((set) => ({
     else root.classList.toggle('light', window.matchMedia('(prefers-color-scheme: light)').matches);
   },
 }));
+

@@ -7,6 +7,93 @@ import { anthropic } from './anthropic.js';
 import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 
+// Ollama provider — auto-detects installed models from local Ollama API
+const ollamaAdapter: ProviderAdapter = {
+  id: 'ollama',
+  label: 'Ollama (local)',
+  requiresApiKey: false,
+  homepage: 'https://ollama.com',
+  defaultModel: '',
+  freeModels: [],
+
+  async testConnection() {
+    try {
+      const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(5000) });
+      return { ok: res.ok };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  },
+
+  async listModels() {
+    try {
+      const res = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { models?: Array<{ name: string; size?: number; modified_at?: string }> };
+      const models = data.models ?? [];
+      return models.map((m) => ({
+        id: m.name,
+        label: m.name.replace(':latest', ''),
+        provider: 'ollama',
+        free: true,
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async *streamChat(req) {
+    const ollamaMessages = req.messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content : m.content.map((b: { type: string; text?: string }) => b.text ?? '').join(''),
+    }));
+
+    try {
+      const res = await fetch('http://localhost:11434/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: req.model,
+          messages: ollamaMessages,
+          stream: true,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        yield { type: 'error', error: `Ollama API error: ${res.status}` };
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line) as { message?: { content?: string }; done?: boolean };
+            if (parsed.message?.content) {
+              yield { type: 'text_delta', text: parsed.message.content };
+            }
+            if (parsed.done) {
+              yield { type: 'message_end', stop_reason: 'end_turn', usage: { input: 0, output: 0 } };
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    } catch (e) {
+      yield { type: 'error', error: (e as Error).message };
+    }
+  },
+};
+
 const REGISTRY: Record<string, ProviderAdapter> = {
   openrouter: openaiCompatible({
     id: 'openrouter',
@@ -33,6 +120,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
       { id: 'nvidia/nemotron-4-340b-instruct', label: 'Nemotron 4 340B', provider: 'nvidia', free: true, supports_tools: false },
       { id: 'mistralai/mistral-large-2-instruct', label: 'Mistral Large 2', provider: 'nvidia', free: true, supports_tools: false },
       { id: 'google/gemma-2-27b-it', label: 'Gemma 2 27B', provider: 'nvidia', free: true, supports_tools: false },
+      { id: 'nvidia/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (free tier)', provider: 'nvidia', free: true, supports_tools: true },
     ],
     homepage: 'https://build.nvidia.com',
   }),
@@ -48,19 +136,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
     ],
     homepage: 'https://console.groq.com',
   }),
-  ollama: openaiCompatible({
-    id: 'ollama',
-    label: 'Ollama (local)',
-    defaultBaseUrl: 'http://localhost:11434/v1',
-    defaultModel: 'llama3.3',
-    freeModels: [
-      { id: 'llama3.3', label: 'Llama 3.3', provider: 'ollama', free: true },
-      { id: 'qwen2.5-coder', label: 'Qwen 2.5 Coder', provider: 'ollama', free: true },
-      { id: 'deepseek-coder-v2', label: 'DeepSeek Coder V2', provider: 'ollama', free: true },
-    ],
-    requiresApiKey: false,
-    homepage: 'https://ollama.com',
-  }),
+  ollama: ollamaAdapter,
   gemini,
   anthropic,
   openai,

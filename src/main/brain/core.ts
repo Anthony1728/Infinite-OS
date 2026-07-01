@@ -584,3 +584,4 @@ export function getBrain(): InfiniteBrain {
 export function createBrain(config?: Partial<BrainConfig>): InfiniteBrain {
   return new InfiniteBrain(config);
 }
+

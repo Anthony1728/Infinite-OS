@@ -1,6 +1,6 @@
 // Electron main process entry — creates the window, registers IPC, wires auto-update.
 
-import { app, BrowserWindow, shell, Menu } from 'electron';
+import { app, BrowserWindow, shell, Menu, nativeImage } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc/index.js';
@@ -19,7 +19,7 @@ import { SelfImprovementEngine } from './brain/improvement.js';
 import { ToolMarketplace } from './brain/marketplace.js';
 import { DeveloperSDK } from './brain/sdk.js';
 import { BrowserAgent } from './agent/browser.js';
-import { ComputerControlAgent } from './agent/computer.js';
+
 import { AutomationBuilder } from './automation/builder.js';
 import { WebsiteBuilder } from './builders/website.js';
 import { AppBuilder } from './builders/app.js';
@@ -31,10 +31,8 @@ import { TeamWorkspaces } from './team/workspaces.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-// Disable hardware acceleration to prevent GPU process crashes on some systems
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
-app.commandLine.appendSwitch('disable-software-rasterizer');
 
 // Brain subsystem instances
 export const brain = new InfiniteBrain();
@@ -50,7 +48,8 @@ export const sdk = new DeveloperSDK();
 
 // Phase 2 instances
 export const browserAgent = new BrowserAgent();
-export const computerControl = new ComputerControlAgent();
+import { getComputerControl } from './agent/computer-singleton.js';
+export const computerControl = getComputerControl();
 export const automationBuilder = new AutomationBuilder();
 
 // Phase 3 instances
@@ -74,8 +73,9 @@ function createWindow(): void {
     minHeight: 600,
     title: 'Infinite AI',
     backgroundColor: '#0e0e10',
-    show: false,
+    show: true,
     autoHideMenuBar: true,
+    icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.png')),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -84,7 +84,11 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    console.log('[main] Window ready-to-show, showing...');
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
 
   // Open DevTools automatically to surface render errors
   if (process.env['INFINITY_DEVTOOLS'] === '1') {
@@ -95,14 +99,17 @@ function createWindow(): void {
     const tag = ['V', 'I', 'W', 'E'][level] ?? '?';
     console.log(`[renderer ${tag}] ${message} (${source}:${line})`);
   });
+  let hasCrashed = false;
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
-    console.error('[renderer] crashed:', details);
-    // Attempt to recover by reloading
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.reload();
-      }
-    }, 2000);
+    console.error('[renderer] CRASH:', JSON.stringify(details));
+    if (!hasCrashed) {
+      hasCrashed = true;
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.reload();
+        }
+      }, 2000);
+    }
   });
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
     console.error(`[renderer] did-fail-load ${code} ${desc} ${url}`);
@@ -130,7 +137,37 @@ app.whenReady().then(async () => {
   // Start brain subsystems (instantiated and ready for IPC calls)
   logger.info('Brain subsystems initialized');
 
-  registerIpc(() => mainWindow);
+  // Start background health check loop (every 60s)
+  setInterval(() => {
+    try {
+      monitor.collectMetrics();
+      brain.checkHealth();
+      const suggestions = monitor.getSuggestions();
+      if (suggestions.length > 0) {
+        logger.info({ suggestions: suggestions.map(s => s.title) }, 'Brain doctor suggestions');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Brain health check failed');
+    }
+  }, 60_000);
+
+  // Start background self-improvement loop (every 5 min)
+  setInterval(() => {
+    try {
+      const result = improvement.generateImprovements();
+      if (result.length > 0) {
+        logger.info({ count: result.length }, 'Brain self-improvement generated');
+      }
+      const cycleResult = brain.runImprovementCycle();
+      if (cycleResult.issuesFound > 0) {
+        logger.info({ issues: cycleResult.issuesFound, suggestions: cycleResult.improvementsSuggested }, 'Brain improvement cycle');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Brain improvement cycle failed');
+    }
+  }, 300_000);
+
+  await registerIpc(() => mainWindow);
   createWindow();
   Menu.setApplicationMenu(null);
 
@@ -159,3 +196,4 @@ app.on('web-contents-created', (_e, contents) => {
     if (!url.startsWith('http://localhost') && !url.startsWith('file://')) e.preventDefault();
   });
 });
+

@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import log from 'electron-log';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface TestSuite {
@@ -159,13 +158,14 @@ class TestingFramework extends EventEmitter {
           results.failed++;
           results.failures.push({ testId: test.id, name: test.name, error: 'Test failed' });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
         results.failed++;
         results.failures.push({
           testId: test.id,
           name: test.name,
-          error: err.message || 'Unknown error',
-          stack: err.stack,
+          error: error.message || 'Unknown error',
+          stack: error.stack,
         });
       }
     }
@@ -178,11 +178,11 @@ class TestingFramework extends EventEmitter {
     return results;
   }
 
-  private executeTest(test: TestCase): boolean {
+  private executeTest(_test: TestCase): boolean {
     return true;
   }
 
-  async generateTests(description: string, filePath?: string): Promise<TestCase[]> {
+  async generateTests(description: string, _filePath?: string): Promise<TestCase[]> {
     const tests: TestCase[] = [];
     const patterns = [
       { name: 'should handle empty input', type: 'unit' as const },
@@ -221,3 +221,4 @@ class TestingFramework extends EventEmitter {
 }
 
 export const testingFramework = new TestingFramework();
+

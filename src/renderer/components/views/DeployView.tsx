@@ -15,7 +15,7 @@ interface DeployPipeline {
   name: string;
   projectId: string;
   targetId: string;
-  steps: any[];
+  steps: Array<{ name: string; status: string; output?: string }>;
   status: string;
   currentStep: number;
   logs: string[];
@@ -37,17 +37,17 @@ export function DeployView() {
   useEffect(() => { loadTargets(); loadPipelines(); }, []);
 
   const loadTargets = async () => {
-    try { setTargets(await (window as any).api.deployListTargets()); } catch {}
+    try { setTargets(await window.api.deployListTargets()); } catch { /* silent */ }
   };
   const loadPipelines = async () => {
-    try { setPipelines(await (window as any).api.deployListPipelines()); } catch {}
+    try { setPipelines(await window.api.deployListPipelines()); } catch { /* silent */ }
   };
 
   const createTarget = async () => {
     if (!newTargetName) return;
     let config = {};
-    try { config = JSON.parse(newTargetConfig); } catch {}
-    await (window as any).api.deployCreateTarget({ name: newTargetName, type: newTargetType, config });
+    try { config = JSON.parse(newTargetConfig); } catch { /* silent */ }
+    await window.api.deployCreateTarget({ name: newTargetName, type: newTargetType, config });
     setShowNewTarget(false);
     setNewTargetName('');
     setNewTargetConfig('');
@@ -55,34 +55,34 @@ export function DeployView() {
   };
 
   const deleteTarget = async (id: string) => {
-    await (window as any).api.deployDeleteTarget({ id });
+    await window.api.deployDeleteTarget({ id });
     loadTargets();
   };
 
   const runPipeline = async (pipeline: DeployPipeline) => {
-    const result = await (window as any).api.deployRunPipeline({ pipelineId: pipeline.id, cwd: projectPath || undefined });
+    const result = await window.api.deployRunPipeline({ pipelineId: pipeline.id, cwd: projectPath || undefined });
     if (result) setSelectedPipeline(result);
     loadPipelines();
   };
 
   const cancelPipeline = async (id: string) => {
-    await (window as any).api.deployCancelPipeline({ pipelineId: id });
+    await window.api.deployCancelPipeline({ pipelineId: id });
     loadPipelines();
   };
 
   const detectProject = async () => {
     if (!projectPath) return;
-    const type = await (window as any).api.deployDetectProject({ projectPath });
+    const type = await window.api.deployDetectProject({ projectPath });
     setDetectedType(type || 'unknown');
   };
 
   const createQuickPipeline = async () => {
-    const config = await (window as any).api.deployDefaultConfig({ type: detectedType || 'node' });
+    const config = await window.api.deployDefaultConfig({ type: detectedType || 'node' }) as { commands?: Record<string, string> };
     if (!config) return;
     const tgt = targets[0];
     if (!tgt) return;
-    const cmds = Object.values(config.commands).filter(Boolean);
-    const p = await (window as any).api.deployCreatePipeline({
+    const cmds = Object.values(config.commands || {}).filter(Boolean);
+    const p = await window.api.deployCreatePipeline({
       name: `Build ${detectedType || 'project'}`,
       projectId: projectPath,
       targetId: tgt.id,
@@ -225,15 +225,15 @@ export function DeployView() {
             </div>
 
             <div className="space-y-2 mb-4">
-              {selectedPipeline.steps.map((step: any, i: number) => (
-                <div key={step.id} className={`flex items-center gap-3 p-3 rounded ${
+              {selectedPipeline.steps.map((step: { id?: string; name: string; status: string; command?: string; output?: string }, i: number) => (
+                <div key={step.id || i} className={`flex items-center gap-3 p-3 rounded ${
                   i === selectedPipeline.currentStep && selectedPipeline.status === 'running'
                     ? 'bg-yellow-500/10 border border-yellow-500/30'
                     : 'bg-[var(--bg-secondary)]'
                 }`}>
                   {statusIcon(step.status)}
                   <span className="text-sm flex-1">{step.name}</span>
-                  <span className="text-xs text-[var(--text-secondary)] font-mono">{step.command}</span>
+                  {step.command && <span className="text-xs text-[var(--text-secondary)] font-mono">{step.command}</span>}
                 </div>
               ))}
             </div>
@@ -262,3 +262,4 @@ export function DeployView() {
     </div>
   );
 }
+

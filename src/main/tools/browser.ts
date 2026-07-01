@@ -113,3 +113,4 @@ function parseSearchResults(html: string): { title: string; url: string }[] {
   }
   return out;
 }
+

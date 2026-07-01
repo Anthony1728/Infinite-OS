@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Shield, Users, FolderOpen, Plus, Trash2, Settings, Download, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { FolderOpen, Plus, Trash2, Download, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 
 interface TeamMember {
   id: string;
@@ -23,8 +23,8 @@ export function EnterpriseView() {
   const [tab, setTab] = useState<'members' | 'projects' | 'audit' | 'compliance'>('members');
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [projects, setProjects] = useState<TeamProject[]>([]);
-  const [auditLog, setAuditLog] = useState<any[]>([]);
-  const [complianceRules, setComplianceRules] = useState<any[]>([]);
+  const [auditLog, setAuditLog] = useState<Array<{ id: string; action: string; userId: string; timestamp: number; details?: string; resource?: string }>>([]);
+  const [complianceRules, setComplianceRules] = useState<Array<{ id: string; name: string; description: string; category: string; severity: string; check: string; status?: string }>>([]);
   const [complianceStatus, setComplianceStatus] = useState({ total: 0, compliant: 0, nonCompliant: 0, unknown: 0 });
   const [showAddMember, setShowAddMember] = useState(false);
   const [newName, setNewName] = useState('');
@@ -43,16 +43,16 @@ export function EnterpriseView() {
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
-    try { setMembers(await (window as any).api.enterpriseListMembers()); } catch {}
-    try { setProjects(await (window as any).api.enterpriseListProjects()); } catch {}
-    try { setAuditLog(await (window as any).api.enterpriseAuditLog()); } catch {}
-    try { setComplianceRules(await (window as any).api.enterpriseComplianceRules()); } catch {}
-    try { setComplianceStatus(await (window as any).api.enterpriseComplianceStatus()); } catch {}
+    try { setMembers(await window.api.enterpriseListMembers()); } catch { /* silent */ }
+    try { setProjects(await window.api.enterpriseListProjects()); } catch { /* silent */ }
+    try { setAuditLog(await window.api.enterpriseAuditLog()); } catch { /* silent */ }
+    try { setComplianceRules(await window.api.enterpriseComplianceRules()); } catch { /* silent */ }
+    try { setComplianceStatus(await window.api.enterpriseComplianceStatus()); } catch { /* silent */ }
   };
 
   const addMember = async () => {
     if (!newName || !newEmail) return;
-    await (window as any).api.enterpriseAddMember({ name: newName, email: newEmail, role: newRole });
+    await window.api.enterpriseAddMember({ name: newName, email: newEmail, role: newRole });
     setShowAddMember(false);
     setNewName('');
     setNewEmail('');
@@ -60,18 +60,18 @@ export function EnterpriseView() {
   };
 
   const removeMember = async (id: string) => {
-    await (window as any).api.enterpriseRemoveMember({ id });
+    await window.api.enterpriseRemoveMember({ id });
     loadAll();
   };
 
   const updateRole = async (id: string, role: string) => {
-    await (window as any).api.enterpriseUpdateRole({ id, role });
+    await window.api.enterpriseUpdateRole({ id, role });
     loadAll();
   };
 
   const addProject = async () => {
     if (!projName || !members[0]) return;
-    await (window as any).api.enterpriseCreateProject({ name: projName, ownerId: members[0].id, description: projDesc });
+    await window.api.enterpriseCreateProject({ name: projName, ownerId: members[0].id, description: projDesc });
     setShowAddProject(false);
     setProjName('');
     setProjDesc('');
@@ -80,7 +80,7 @@ export function EnterpriseView() {
 
   const addComplianceRule = async () => {
     if (!ruleName) return;
-    await (window as any).api.enterpriseAddComplianceRule({
+    await window.api.enterpriseAddComplianceRule({
       name: ruleName, description: ruleDesc, category: ruleCategory, severity: ruleSeverity, check: ruleCheck,
     });
     setShowAddRule(false);
@@ -91,7 +91,7 @@ export function EnterpriseView() {
   };
 
   const exportAudit = async () => {
-    const data = await (window as any).api.enterpriseExportAudit();
+    const data = await window.api.enterpriseExportAudit();
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -304,7 +304,7 @@ export function EnterpriseView() {
             <div className="space-y-2">
               {complianceRules.map((r) => (
                 <div key={r.id} className="flex items-center gap-3 p-3 bg-[var(--bg-secondary)] rounded">
-                  {complianceColor(r.status)}
+                  {complianceColor(r.status || 'unknown')}
                   <div className="flex-1">
                     <span className="text-sm font-medium">{r.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] ml-2">{r.category}</span>
@@ -324,3 +324,4 @@ export function EnterpriseView() {
     </div>
   );
 }
+

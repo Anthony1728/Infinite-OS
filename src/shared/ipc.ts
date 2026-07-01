@@ -65,6 +65,12 @@ export const IPC = {
   FILE_WRITE: 'file:write',
   PICK_DIRECTORY: 'file:pick-directory',
 
+  FILE_MKDIR: 'file:mkdir',
+  FILE_DELETE: 'file:delete',
+  FILE_RENAME: 'file:rename',
+
+  TERMINAL_EXECUTE: 'terminal:execute',
+
   // Permissions
   PERMISSION_REQUEST: 'permission:request',
   PERMISSION_RESPONSE: 'permission:response',
@@ -323,6 +329,154 @@ export const IPC = {
   CALL_TEMPLATE_CREATE: 'call:template:create',
   CALL_TEMPLATE_LIST: 'call:template:list',
   CALL_ANALYTICS: 'call:analytics',
+
+  // YouTube Learning
+  YT_ANALYZE: 'yt:analyze',
+  YT_LEARN: 'yt:learn',
+  YT_LIST_TASKS: 'yt:list-tasks',
+  YT_GET_TASK: 'yt:get-task',
+  YT_DELETE_TASK: 'yt:delete-task',
+  YT_LIST_ANALYSES: 'yt:list-analyses',
+  YT_CREATE_TEMPLATE: 'yt:create-template',
+  YT_LIST_TEMPLATES: 'yt:list-templates',
+  YT_LEARN_DAILY: 'yt:learn-daily',
+
+  // Activity Tracker
+  TRACKER_START: 'tracker:start',
+  TRACKER_STOP: 'tracker:stop',
+  TRACKER_STATUS: 'tracker:status',
+  TRACKER_RECORD: 'tracker:record',
+  TRACKER_RECENT: 'tracker:recent',
+  TRACKER_ANALYZE_DAY: 'tracker:analyze-day',
+  TRACKER_PATTERNS: 'tracker:patterns',
+
+  // Email
+  EMAIL_LIST: 'email:list',
+  EMAIL_READ: 'email:read',
+  EMAIL_SEND: 'email:send',
+  EMAIL_TEST: 'email:test',
+  EMAIL_CONFIG_GET: 'email:config:get',
+  EMAIL_CONFIG_SAVE: 'email:config:save',
+  EMAIL_HAS_CONFIG: 'email:has-config',
+
+  // Auth (file-based)
+  AUTH_GET_USERS: 'auth:get-users',
+  AUTH_SET_USERS: 'auth:set-users',
+  AUTH_GET_SESSION: 'auth:get-session',
+  AUTH_SET_SESSION: 'auth:set-session',
+
+  // Task Replay
+  REPLAY_EXECUTE: 'replay:execute',
+  REPLAY_EXECUTE_TASK: 'replay:execute-task',
+  REPLAY_EXECUTE_NL: 'replay:execute-nl',
+  REPLAY_CANCEL: 'replay:cancel',
+  REPLAY_PAUSE: 'replay:pause',
+  REPLAY_RESUME: 'replay:resume',
+  REPLAY_LIST: 'replay:list',
+  REPLAY_GET: 'replay:get',
+  REPLAY_BROWSER_TASK: 'replay:browser-task',
+  REPLAY_COMPUTER_TASK: 'replay:computer-task',
+  REPLAY_COMMAND: 'replay:command',
+
+  // Ollama (local AI brain)
+  OLLAMA_CHAT: 'ollama:chat',
+  OLLAMA_ASK: 'ollama:ask',
+  OLLAMA_ANALYZE_IMAGE: 'ollama:analyze-image',
+  OLLAMA_TEACH: 'ollama:teach',
+  OLLAMA_STATUS: 'ollama:status',
+  OLLAMA_RECORD_API: 'ollama:record-api',
+  OLLAMA_RECORD_CONVERSATION: 'ollama:record-conversation',
+  OLLAMA_SYSTEM_PROMPT: 'ollama:system-prompt',
+
+  // System
+  SYSTEM_OPEN_URL: 'system:open-url',
+
+  // Clipboard
+  CLIPBOARD_READ: 'clipboard:read',
+  CLIPBOARD_WRITE: 'clipboard:write',
+  CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
+  CLIPBOARD_WRITE_IMAGE: 'clipboard:write-image',
+
+  // Notification
+  NOTIFICATION_SHOW: 'notification:show',
+  NOTIFICATION_PROGRESS: 'notification:progress',
+  NOTIFICATION_ACTION: 'notification:action',
+  NOTIFICATION_STATUS: 'notification:status',
+  NOTIFICATION_CLEAR: 'notification:clear',
+
+  // Interactive Terminal (PTY-based)
+  TERMINAL_CREATE_SESSION: 'terminal:create-session',
+  TERMINAL_WRITE: 'terminal:write',
+  TERMINAL_RESIZE: 'terminal:resize',
+  TERMINAL_CLOSE_SESSION: 'terminal:close-session',
+  TERMINAL_LIST_SESSIONS: 'terminal:list-sessions',
+  TERMINAL_GET_SESSION: 'terminal:get-session',
+  TERMINAL_SUBSCRIBE: 'terminal:subscribe',
+  TERMINAL_UNSUBSCRIBE: 'terminal:unsubscribe',
+  TERMINAL_CLOSE_ALL: 'terminal:close-all',
+  TERMINAL_DATA: 'terminal:data', // main → renderer push
+  TERMINAL_EXIT: 'terminal:exit', // main → renderer push
+  TERMINAL_SESSION_CREATED: 'terminal:session-created', // main → renderer push
+
+  // Checkpoint System
+  CHECKPOINT_CREATE: 'checkpoint:create',
+  CHECKPOINT_LIST: 'checkpoint:list',
+  CHECKPOINT_RESTORE: 'checkpoint:restore',
+  CHECKPOINT_DELETE: 'checkpoint:delete',
+  CHECKPOINT_DIFF: 'checkpoint:diff',
+  CHECKPOINT_GET: 'checkpoint:get',
+
+  // Task Queue
+  QUEUE_CREATE: 'queue:create',
+  QUEUE_LIST: 'queue:list',
+  QUEUE_GET: 'queue:get',
+  QUEUE_DELETE: 'queue:delete',
+  QUEUE_ENQUEUE: 'queue:enqueue',
+  QUEUE_DEQUEUE: 'queue:dequeue',
+  QUEUE_PEEK: 'queue:peek',
+  QUEUE_STATUS: 'queue:status',
+  QUEUE_STATS: 'queue:stats',
+
+  // Workspace Indexing
+  INDEX_BUILD: 'index:build',
+  INDEX_SEARCH: 'index:search',
+  INDEX_STATUS: 'index:status',
+  INDEX_CLEAR: 'index:clear',
+  INDEX_FILE_ADD: 'index:file:add',
+  INDEX_FILE_REMOVE: 'index:file:remove',
+  INDEX_REBUILD: 'index:rebuild',
+
+  // Code Completion
+  COMPLETION_REQUEST: 'completion:request',
+  COMPLETION_CANCEL: 'completion:cancel',
+  COMPLETION_LIST: 'completion:list',
+
+  // Debug
+  DEBUG_START: 'debug:start',
+  DEBUG_STOP: 'debug:stop',
+  DEBUG_STATUS: 'debug:status',
+  DEBUG_BREAKPOINTS_SET: 'debug:breakpoints:set',
+  DEBUG_BREAKPOINTS_LIST: 'debug:breakpoints:list',
+  DEBUG_EVALUATE: 'debug:evaluate',
+  DEBUG_STEP: 'debug:step',
+  DEBUG_CONTINUE: 'debug:continue',
+  DEBUG_PAUSE: 'debug:pause',
+
+  // Git (additional channels beyond tool interface)
+  GIT_STATUS: 'git:status',
+  GIT_LOG: 'git:log',
+  GIT_COMMIT: 'git:commit',
+  GIT_BRANCH: 'git:branch',
+  GIT_PUSH: 'git:push',
+  GIT_PULL: 'git:pull',
+  GIT_DIFF: 'git:diff',
+  GIT_CLONE: 'git:clone',
+  GIT_INIT: 'git:init',
+  GIT_FETCH: 'git:fetch',
+  GIT_MERGE: 'git:merge',
+  GIT_REBASE: 'git:rebase',
+  GIT_STASH: 'git:stash',
+  GIT_REMOTE: 'git:remote',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

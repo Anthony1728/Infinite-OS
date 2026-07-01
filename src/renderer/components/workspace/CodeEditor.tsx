@@ -2,8 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEditorStore } from '../../stores/editor';
 
-const DEFAULT_FILES: FileTab[] = [];
-
 interface FileTab {
   name: string;
   language: string;
@@ -16,8 +14,8 @@ export function CodeEditor() {
   const [files, setFiles] = useState<FileTab[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [statusMessage, setStatusMessage] = useState('Ready');
-  const editorRef = useRef<any>(null);
-  const monacoRef = useRef<any>(null);
+  const editorRef = useRef<unknown>(null);
+  const monacoRef = useRef<unknown>(null);
 
   const openFile = useEditorStore((s) => s.openFile);
   const openFileContent = useEditorStore((s) => s.openFileContent);
@@ -216,3 +214,4 @@ export function CodeEditor() {
     </div>
   );
 }
+

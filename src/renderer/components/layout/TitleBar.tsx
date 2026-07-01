@@ -9,3 +9,4 @@ export function TitleBar({ onOpenSettings }: { onOpenSettings: () => void }) {
     </header>
   );
 }
+

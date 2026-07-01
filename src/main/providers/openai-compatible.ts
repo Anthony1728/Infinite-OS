@@ -94,17 +94,18 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
             body: JSON.stringify(body),
             signal: combinedSignal,
           });
-        } catch (e: any) {
+        } catch (e: unknown) {
           clearTimeout(timeoutId);
-          if (e.name === 'AbortError') {
+          const error = e instanceof Error ? e : new Error(String(e));
+          if (error.name === 'AbortError') {
             const errorMsg = timeoutController.signal.aborted
               ? `Connection timeout after 30s — check your internet connection and API key`
               : 'Request cancelled';
             console.error(`[provider:${opts.id}] ${errorMsg}`);
             yield { type: 'error', error: errorMsg };
           } else {
-            console.error(`[provider:${opts.id}] Fetch error: ${e.message}`);
-            yield { type: 'error', error: `Network error: ${e.message}` };
+            console.error(`[provider:${opts.id}] Fetch error: ${error.message}`);
+            yield { type: 'error', error: `Network error: ${error.message}` };
           }
           return;
         }
@@ -193,16 +194,28 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
   };
 }
 
-function toOpenAIMessages(messages: Message[], system?: string) {
-  const out: any[] = [];
+interface OpenAIMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
+}
+
+function toOpenAIMessages(messages: Message[], system?: string): OpenAIMessage[] {
+  const out: OpenAIMessage[] = [];
   if (system) out.push({ role: 'system', content: system });
 
   for (const m of messages) {
     if (m.role === 'user') {
-      // In this app, tool_result blocks are pushed into a user message by the store.
       const hasToolResult = m.content.some((b) => b.type === 'tool_result');
       if (hasToolResult) {
-        // OpenAI wants tool results as separate messages with role: 'tool'
         for (const b of m.content) {
           if (b.type === 'tool_result') {
             out.push({
@@ -215,21 +228,21 @@ function toOpenAIMessages(messages: Message[], system?: string) {
           }
         }
       } else {
-        const textParts = m.content.filter(b => b.type === 'text').map((b: any) => b.text).join('\n');
+        const textParts = m.content.filter((b) => b.type === 'text').map((b) => b.type === 'text' ? b.text : '').join('\n');
         out.push({ role: 'user', content: textParts });
       }
     } else if (m.role === 'assistant') {
-      const textParts = m.content.filter((b) => b.type === 'text').map((b: any) => b.text).join('\n');
+      const textParts = m.content.filter((b) => b.type === 'text').map((b) => b.type === 'text' ? b.text : '').join('\n');
       const toolUses = m.content.filter((b) => b.type === 'tool_use');
-      const msg: any = { role: 'assistant', content: textParts || null };
+      const msg: OpenAIMessage = { role: 'assistant', content: textParts || null };
       
       if (toolUses.length > 0) {
-        msg.tool_calls = toolUses.map((tu: any) => ({
-          id: tu.id,
-          type: 'function',
+        msg.tool_calls = toolUses.map((tu) => ({
+          id: tu.type === 'tool_use' ? tu.id : '',
+          type: 'function' as const,
           function: {
-            name: tu.name,
-            arguments: typeof tu.input === 'string' ? tu.input : JSON.stringify(tu.input),
+            name: tu.type === 'tool_use' ? tu.name : '',
+            arguments: tu.type === 'tool_use' ? (typeof tu.input === 'string' ? tu.input : JSON.stringify(tu.input)) : '{}',
           },
         }));
       }
@@ -243,3 +256,4 @@ function toOpenAIMessages(messages: Message[], system?: string) {
 function toOpenAITool(t: ToolSpec) {
   return { type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } };
 }
+

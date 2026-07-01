@@ -102,7 +102,7 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
 
         {/* Switch to register */}
         <p className="text-center text-sm text-gray-500 mt-6">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <button
             onClick={onSwitchToRegister}
             className="text-indigo-400 hover:text-indigo-300 transition-colors"
@@ -114,3 +114,4 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     </div>
   );
 }
+

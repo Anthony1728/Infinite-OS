@@ -13,3 +13,4 @@ export const logger = pino({
     options: { colorize: true, destination: 1 },
   },
 });
+

@@ -49,12 +49,12 @@ interface BusinessState {
 export const useBusinessStore = create<BusinessState>((set, get) => ({
   contacts: [], leads: [], invoices: [], deals: [],
   analytics: null, stats: null, loading: false,
-  loadContacts: async () => { try { set({ contacts: await window.api.businessListContacts() as Contact[] }); } catch {} },
-  loadLeads: async () => { try { set({ leads: await window.api.businessListLeads() as Lead[] }); } catch {} },
-  loadInvoices: async () => { try { set({ invoices: await window.api.businessListInvoices() as Invoice[] }); } catch {} },
-  loadDeals: async () => { try { set({ deals: await window.api.businessListDeals() as Deal[] }); } catch {} },
-  loadAnalytics: async () => { try { set({ analytics: await window.api.businessAnalytics() as BusinessAnalytics }); } catch {} },
-  loadStats: async () => { try { set({ stats: await window.api.businessStats() as BusinessStats }); } catch {} },
+  loadContacts: async () => { try { set({ contacts: await window.api.businessListContacts() as Contact[] }); } catch { /* silent */ } },
+  loadLeads: async () => { try { set({ leads: await window.api.businessListLeads() as Lead[] }); } catch { /* silent */ } },
+  loadInvoices: async () => { try { set({ invoices: await window.api.businessListInvoices() as Invoice[] }); } catch { /* silent */ } },
+  loadDeals: async () => { try { set({ deals: await window.api.businessListDeals() as Deal[] }); } catch { /* silent */ } },
+  loadAnalytics: async () => { try { set({ analytics: await window.api.businessAnalytics() as BusinessAnalytics }); } catch { /* silent */ } },
+  loadStats: async () => { try { set({ stats: await window.api.businessStats() as BusinessStats }); } catch { /* silent */ } },
   createContact: async (c) => { await window.api.businessCreateContact(c); await get().loadContacts(); await get().loadStats(); },
   deleteContact: async (id) => { await window.api.businessDeleteContact({ id }); await get().loadContacts(); },
   createLead: async (l) => { await window.api.businessCreateLead(l); await get().loadLeads(); await get().loadStats(); },
@@ -62,3 +62,4 @@ export const useBusinessStore = create<BusinessState>((set, get) => ({
   createDeal: async (d) => { await window.api.businessCreateDeal(d); await get().loadDeals(); await get().loadStats(); },
   updateDealStage: async (id, stage) => { await window.api.businessUpdateDealStage({ id, stage }); await get().loadDeals(); await get().loadAnalytics(); },
 }));
+

@@ -33,9 +33,9 @@ interface MultiAgentState {
 
 export const useMultiAgentStore = create<MultiAgentState>((set, get) => ({
   teams: [], tasks: [], messages: [], stats: null, loading: false,
-  loadTeams: async () => { try { set({ teams: await window.api.multiAgentListTeams() as AgentTeam[] }); } catch {} },
-  loadTasks: async () => { try { set({ tasks: await window.api.multiAgentListTasks() as AgentTask[] }); } catch {} },
-  loadStats: async () => { try { set({ stats: await window.api.multiAgentStats() as MultiAgentStats }); } catch {} },
+  loadTeams: async () => { try { set({ teams: await window.api.multiAgentListTeams() as AgentTeam[] }); } catch { /* silent */ } },
+  loadTasks: async () => { try { set({ tasks: await window.api.multiAgentListTasks() as AgentTask[] }); } catch { /* silent */ } },
+  loadStats: async () => { try { set({ stats: await window.api.multiAgentStats() as MultiAgentStats }); } catch { /* silent */ } },
   createTeam: async (team) => { await window.api.multiAgentCreateTeam(team); await get().loadTeams(); await get().loadStats(); },
   createTask: async (task) => { await window.api.multiAgentCreateTask(task); await get().loadTasks(); await get().loadStats(); },
   startTask: async (id) => { await window.api.multiAgentStartTask({ id }); await get().loadTasks(); },
@@ -46,3 +46,4 @@ export const useMultiAgentStore = create<MultiAgentState>((set, get) => ({
     set({ messages: msgs }); return msgs;
   },
 }));
+

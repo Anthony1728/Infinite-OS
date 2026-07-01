@@ -22,3 +22,4 @@ export function ToolCallCard({ name, input, status }: { name: string; input: unk
     </div>
   );
 }
+

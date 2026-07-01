@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
+import { InfiniteLogo } from '../brand/InfiniteLogo';
 
 const NAV = [
   {
@@ -54,8 +55,6 @@ const NAV = [
   },
 ];
 
-const STARRED_ITEMS: { name: string; color: string; requiresView?: string }[] = [];
-
 interface SidebarProps {
   activeView: string;
   onNavChange: (view: string) => void;
@@ -65,7 +64,14 @@ interface SidebarProps {
   starredItems?: { name: string; color: string }[];
 }
 
-export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, onToggleCollapse, starredItems = [] }: SidebarProps) {
+export function Sidebar({
+  activeView,
+  onNavChange,
+  onOpenSettings,
+  collapsed,
+  onToggleCollapse,
+  starredItems = [],
+}: SidebarProps) {
   const { sessions, currentSessionId, loadSessions, createSession, selectSession, deleteSession } = useChatStore();
   const { runs } = useAgentsStore();
   const { user, logout } = useAuthStore();
@@ -79,10 +85,16 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
       try {
         const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
         if (cur.model) {
-          const name = cur.model.split('/').pop()?.replace(/:free$/, '') ?? cur.model;
+          const name =
+            cur.model
+              .split('/')
+              .pop()
+              ?.replace(/:free$/, '') ?? cur.model;
           setCurrentModel(name);
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
     updateModel();
     window.addEventListener('storage', updateModel);
@@ -106,48 +118,32 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
   };
 
   return (
-    <aside className={`${collapsed ? 'w-14' : 'w-56'} bg-[#0d0d11] border-r border-white/[0.06] flex flex-col flex-shrink-0 h-full transition-all duration-200`}>
+    <aside
+      className={`${collapsed ? 'w-14' : 'w-60'} bg-[#0c0c10] border-r border-white/[0.055] flex flex-col flex-shrink-0 h-full transition-[width] duration-200`}
+    >
       {/* Logo + collapse toggle */}
-      <div className={`${collapsed ? 'px-2 py-3' : 'px-4 py-3'} flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
+      <div
+        className={`${collapsed ? 'px-2 py-3' : 'px-4 py-3'} flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}
+      >
         {!collapsed && (
-          <button onClick={() => onNavChange('chats')} className="flex items-center gap-2 min-w-0 text-left">
-            <svg className="w-7 h-5 flex-shrink-0" viewBox="0 0 200 100" fill="none">
-              <defs>
-                <linearGradient id="sideGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#a855f7" />
-                  <stop offset="50%" stopColor="#06b6d4" />
-                  <stop offset="100%" stopColor="#ec4899" />
-                </linearGradient>
-                <filter id="sideGlow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur stdDeviation="3" result="blur"/>
-                  <feMerge>
-                    <feMergeNode in="blur"/>
-                    <feMergeNode in="SourceGraphic"/>
-                  </feMerge>
-                </filter>
-              </defs>
-              <path 
-                d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
-                stroke="url(#sideGrad)" 
-                strokeWidth="8" 
-                strokeLinecap="round"
-                fill="none"
-                filter="url(#sideGlow)"
-              />
-            </svg>
-            <span className="text-sm font-semibold text-white tracking-wide truncate">InfiniteAI</span>
+          <button
+            onClick={() => onNavChange('chats')}
+            className="flex items-center gap-2.5 min-w-0 text-left rounded-lg"
+            aria-label="Open chats"
+          >
+            <span className="w-8 h-7 rounded-lg bg-white/[0.035] border border-white/[0.07] flex items-center justify-center shadow-sm">
+              <InfiniteLogo className="w-6 h-4" />
+            </span>
+            <span className="text-[13px] font-semibold text-zinc-100 tracking-[-0.01em] truncate">InfiniteAI</span>
           </button>
         )}
-        <button
-          onClick={onToggleCollapse}
-          className="w-6 h-6 rounded hover:bg-white/5 flex items-center justify-center text-gray-500 hover:text-white transition-all"
-          title={collapsed ? 'Expand' : 'Collapse'}
-        >
+        <button onClick={onToggleCollapse} className="icon-button w-7 h-7" title={collapsed ? 'Expand' : 'Collapse'}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            {collapsed
-              ? <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-              : <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            }
+            {collapsed ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            )}
           </svg>
         </button>
       </div>
@@ -157,7 +153,7 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
         <div className="px-3 mb-3">
           <button
             onClick={handleNewChat}
-            className="w-full py-2 px-3 rounded-lg border border-white/[0.08] hover:border-indigo-500/40 bg-white/[0.02] hover:bg-white/[0.04] text-white flex items-center justify-between transition-all duration-200 text-xs"
+            className="w-full h-9 px-3 rounded-lg border border-white/[0.08] hover:border-indigo-400/30 bg-white/[0.025] hover:bg-white/[0.045] text-zinc-200 flex items-center justify-between transition-all duration-150 text-xs shadow-sm"
           >
             <span className="flex items-center gap-2">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -175,12 +171,11 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
         {NAV.map((n) => {
           const isActive = activeView === n.id;
           return (
-            <a
+            <button
               key={n.id}
-              href="#"
-              onClick={(e) => { e.preventDefault(); onNavChange(n.id); }}
+              onClick={() => onNavChange(n.id)}
               title={collapsed ? n.label : undefined}
-              className={`group relative flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
+              className={`group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
                 isActive
                   ? 'bg-white/[0.06] text-white font-medium'
                   : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
@@ -199,7 +194,7 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
                 <path strokeLinecap="round" strokeLinejoin="round" d={n.icon} />
               </svg>
               {!collapsed && <span className="truncate">{n.label}</span>}
-            </a>
+            </button>
           );
         })}
 
@@ -232,17 +227,35 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
               <a
                 key={s.id}
                 href="#"
-                onClick={(e) => { e.preventDefault(); handleSelectSession(s.id); }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSelectSession(s.id);
+                }}
                 className={`group flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all duration-150 text-xs ${
-                  currentSessionId === s.id ? 'bg-white/[0.06] text-white' : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
+                  currentSessionId === s.id
+                    ? 'bg-white/[0.06] text-white'
+                    : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
                 }`}
               >
-                <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                <svg
+                  className="w-3 h-3 flex-shrink-0 opacity-40"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"
+                  />
                 </svg>
                 <span className="truncate flex-1">{s.title || 'New Chat'}</span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteSession(s.id);
+                  }}
                   className="opacity-0 group-hover:opacity-100 ml-auto text-gray-500 hover:text-red-400 text-[10px] transition-all w-4 h-4 flex items-center justify-center rounded hover:bg-red-400/10"
                   title="Delete"
                 >
@@ -265,15 +278,31 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
             className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-white/[0.03] transition-all duration-150 text-left group"
           >
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-teal-500/20 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
-              <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
+              <svg
+                className="w-3.5 h-3.5 text-indigo-400"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"
+                />
               </svg>
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[9px] text-gray-600 uppercase tracking-wide">Model</div>
               <div className="text-xs font-medium text-white truncate">{currentModel}</div>
             </div>
-            <svg className="w-3 h-3 text-gray-600 group-hover:text-white transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <svg
+              className="w-3 h-3 text-gray-600 group-hover:text-white transition-colors"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
           </button>
@@ -282,7 +311,9 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
           {activeAgents > 0 && (
             <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse flex-shrink-0" />
-              <span className="text-[10px] text-indigo-300 font-medium">{activeAgents} agent{activeAgents !== 1 ? 's' : ''} running</span>
+              <span className="text-[10px] text-indigo-300 font-medium">
+                {activeAgents} agent{activeAgents !== 1 ? 's' : ''} running
+              </span>
             </div>
           )}
 
@@ -296,12 +327,19 @@ export function Sidebar({ activeView, onNavChange, onOpenSettings, collapsed, on
               <div className="text-[9px] text-gray-600">{user?.email ?? ''}</div>
             </div>
             <button
-              onClick={(e) => { e.stopPropagation(); logout(); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                logout();
+              }}
               className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all"
               title="Sign out"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
+                />
               </svg>
             </button>
           </div>

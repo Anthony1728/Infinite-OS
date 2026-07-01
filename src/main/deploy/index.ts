@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import log from 'electron-log';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { exec } from 'child_process';
@@ -147,9 +146,10 @@ class DeploymentSystem extends EventEmitter {
         step.status = 'success';
         pipeline.logs.push(`[${step.name}] ${step.output}`);
         this.emit('stepCompleted', { pipelineId, step });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const error = err instanceof Error ? err : new Error(String(err));
         step.status = 'failed';
-        step.output = err.message || 'Command failed';
+        step.output = error.message || 'Command failed';
         pipeline.logs.push(`[${step.name}] ERROR: ${step.output}`);
         pipeline.status = 'failed';
         pipeline.completedAt = Date.now();
@@ -239,3 +239,4 @@ class DeploymentSystem extends EventEmitter {
 }
 
 export const deploySystem = new DeploymentSystem();
+

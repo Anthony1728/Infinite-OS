@@ -220,7 +220,7 @@ export class PluginStore {
         try {
           const result = execSync('curl -s -H "Authorization: token ' + token + '" https://api.github.com/user/repos?per_page=10', { encoding: 'utf-8' });
           const repos = JSON.parse(result);
-          return { success: true, result: repos.map((r: any) => `${r.name}: ${r.description || 'No description'}`).join('\n') };
+          return { success: true, result: repos.map((r: { name: string; description?: string }) => `${r.name}: ${r.description || 'No description'}`).join('\n') };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -253,7 +253,7 @@ export class PluginStore {
         try {
           const result = execSync(`curl -s -H "Authorization: Bearer ${token}" -H "Notion-Version: 2022-06-28" https://api.notion.com/v1/search`, { encoding: 'utf-8' });
           const data = JSON.parse(result);
-          return { success: true, result: data.results?.map((r: any) => `${r.properties?.title?.title?.[0]?.plain_text || 'Untitled'}`).join('\n') || 'No pages found' };
+          return { success: true, result: data.results?.map((r: { properties?: { title?: { title?: Array<{ plain_text?: string }> } } }) => `${r.properties?.title?.title?.[0]?.plain_text || 'Untitled'}`).join('\n') || 'No pages found' };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -272,7 +272,7 @@ export class PluginStore {
         try {
           const result = execSync(`curl -s -H "Authorization: Bearer ${token}" https://slack.com/api/conversations.list`, { encoding: 'utf-8' });
           const data = JSON.parse(result);
-          return { success: true, result: data.channels?.map((c: any) => `#${c.name}`).join('\n') || 'No channels found' };
+          return { success: true, result: data.channels?.map((c: { name: string }) => `#${c.name}`).join('\n') || 'No channels found' };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -392,3 +392,4 @@ export class PluginStore {
     };
   }
 }
+

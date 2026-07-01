@@ -60,8 +60,9 @@ export function AgentsView() {
       } else {
         addToast({ type: 'error', title: 'Failed to spawn agent', message: 'Session could not be created.' });
       }
-    } catch (e: any) {
-      addToast({ type: 'error', title: 'Agent error', message: e?.message ?? 'Unknown error' });
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      addToast({ type: 'error', title: 'Agent error', message: error.message });
     } finally {
       setSpawning(false);
     }
@@ -338,3 +339,4 @@ export function AgentsView() {
     </div>
   );
 }
+

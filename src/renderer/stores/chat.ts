@@ -13,7 +13,13 @@ export type StreamEvent =
   | { type: 'tool_use_start'; message_id: string; tool_use_id: string; name: string }
   | { type: 'tool_use_delta'; tool_use_id: string; partial_json: string }
   | { type: 'tool_use_end'; message_id: string; tool_use_id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content?: string | ContentBlock[]; is_error?: boolean; partial?: boolean }
+  | {
+      type: 'tool_result';
+      tool_use_id: string;
+      content?: string | ContentBlock[];
+      is_error?: boolean;
+      partial?: boolean;
+    }
   | { type: 'message_end'; message_id: string; stop_reason: string; usage?: { input: number; output: number } }
   | { type: 'error'; error: string }
   | { type: 'done' };
@@ -48,15 +54,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   orchestratorEvents: [],
 
   initStreamListener: () => {
-    if ((window as any).__streamListenerAttached) return;
-    (window as any).__streamListenerAttached = true;
+    const win = window as { __streamListenerAttached?: boolean };
+    if (win.__streamListenerAttached) return;
+    win.__streamListenerAttached = true;
 
     window.api.onStreamEvent((payload: unknown) => {
       const ev = payload as { sessionId: string } & StreamEvent;
       if (ev.sessionId !== get().currentSessionId) return;
-      handleStreamEvent(ev);
+      handleStreamEvent(ev).catch((e) => console.error('[chat] handleStreamEvent error:', e));
     });
-    window.api.onPermissionRequest((req: { id: string; tool: string; input: unknown }) => set({ pendingPermission: req }));
+    window.api.onPermissionRequest((req: { id: string; tool: string; input: unknown }) =>
+      set({ pendingPermission: req }),
+    );
 
     window.api.onOrchestratorEvent((payload: unknown) => {
       const ev = payload as { sessionId: string; type: string; data: unknown };
@@ -66,12 +75,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (ev.type === 'subtask_deployed') {
         const data = ev.data as { subTaskId: string; agentType: string; description: string };
-        agentStore.addSubTask(
-          get().orchestratedTaskId ?? '',
-          data.subTaskId,
-          data.agentType,
-          data.description
-        );
+        agentStore.addSubTask(get().orchestratedTaskId ?? '', data.subTaskId, data.agentType, data.description);
         // Show progress message
         const progressMsg: Message = {
           id: crypto.randomUUID(),
@@ -86,10 +90,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const doneMsg: Message = {
           id: crypto.randomUUID(),
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: `**All done!** ${data.completed} sub-tasks completed.${data.failed > 0 ? ` ${data.failed} failed.` : ''} Total time: ${(data.duration / 1000).toFixed(1)}s`,
-          }],
+          content: [
+            {
+              type: 'text',
+              text: `**All done!** ${data.completed} sub-tasks completed.${data.failed > 0 ? ` ${data.failed} failed.` : ''} Total time: ${(data.duration / 1000).toFixed(1)}s`,
+            },
+          ],
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, doneMsg] }));
@@ -154,64 +160,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const provider = settings.provider ?? 'openrouter';
     const model = settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
     const textLower = text.toLowerCase();
-    
-    // Intent detection: intercept deploy/push actions and run them directly
-    if (/\b(deploy|push\s+to\s+github|push\s+to\s+git|publish)\b/i.test(textLower) && /\b(this|project|repo|code|app|now|it)\b/i.test(textLower)) {
-      const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
-      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
-      try {
-        const result = await window.api.deployQuickPush({ cwd: settings.cwd ?? '.', message: text.slice(0, 72) }) as any;
-        const assistantMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: result?.status === 'success' ? `**Deployed successfully!**\n\n${result.steps?.map((s: any) => `- ${s.name}: \`${s.command}\` — ${s.status}`).join('\n')}` : `**Deployment failed.**\n\n${result?.steps?.filter((s: any) => s.status === 'failed').map((s: any) => `- ${s.name}: ${s.output}`).join('\n') || 'Unknown error'}` }],
-          timestamp: Date.now(),
-        };
-        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
-      } catch (e: any) {
-        set((s) => ({ messages: [...s.messages, { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `**Deployment error:** ${e?.message || e}` }], timestamp: Date.now() } as Message], streaming: false }));
-      }
-      return;
-    }
 
-    // Intent detection: intercept test/run actions
-    if (/\b(run\s+tests?|test\s+this|run\s+vitest|run\s+jest|run\s+pytest)\b/i.test(textLower)) {
-      const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
-      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
-      try {
-        const detected = await window.api.deployDetectProject({ projectPath: settings.cwd ?? '.' });
-        const config = await window.api.deployDefaultConfig({ type: detected || 'node' }) as any;
-        const target = await window.api.deployCreateTarget({ name: 'test-run', type: 'local', config: {} });
-        const pipeline = await window.api.deployCreatePipeline({ name: 'Run Tests', projectId: 'default', targetId: (target as any).id, commands: [config.commands?.test || 'npx vitest run'] });
-        const result = await window.api.deployRunPipeline({ pipelineId: (pipeline as any).id, cwd: settings.cwd ?? '.' }) as any;
-        const assistantMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: result?.status === 'success' ? `**Tests passed!**\n\n${result.steps?.map((s: any) => s.output).join('\n')}` : `**Tests failed.**\n\n${result?.steps?.filter((s: any) => s.status === 'failed').map((s: any) => s.output).join('\n') || 'Unknown error'}` }],
-          timestamp: Date.now(),
-        };
-        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
-      } catch (e: any) {
-        set((s) => ({ messages: [...s.messages, { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `**Test error:** ${e?.message || e}` }], timestamp: Date.now() } as Message], streaming: false }));
-      }
-      return;
-    }
-    
-    console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
-    
-    // Check if API is available (API key stored separately, not in infinite:current)
-    let hasApiConfig = false;
-    try {
-      hasApiConfig = await window.api.hasProviderKey({ provider });
-      console.log(`[chat] hasProviderKey(${provider}) = ${hasApiConfig}`);
-    } catch (e) {
-      console.error('[chat] hasProviderKey error:', e);
-      hasApiConfig = false;
-    }
-    
-    // If no API configured, use Infinite AI Brain offline mode
-    if (!hasApiConfig) {
-      console.log('[chat] No API key found, using Brain mode');
+    // Intent detection: intercept deploy/push actions and run them directly
+    if (
+      /\b(deploy|push\s+to\s+github|push\s+to\s+git|publish)\b/i.test(textLower) &&
+      /\b(this|project|repo|code|app|now|it)\b/i.test(textLower)
+    ) {
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -219,38 +173,350 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
       };
       set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
-
-      // Create a chat task
-      const taskTitle = text.length > 60 ? text.slice(0, 60) + '...' : text;
-      const taskId = useAgentsStore.getState().addChatTask(taskTitle);
-      
-      // Generate brain response
-      const brainStore = useBrainStore.getState();
-      const brainResponse = brainStore.generateOfflineResponse(text);
-      
-      // Simulate thinking delay
-      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
-      
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: [{ type: 'text', text: brainResponse }],
-        timestamp: Date.now(),
-      };
-      
-      set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
-
-      // Auto-create files from brain response
-      const files = extractAndCreateFiles(assistantMessage);
-      useAgentsStore.getState().completeChatTask(taskId, files);
-      
-      // Learn from this interaction (user input + brain's response)
-      brainStore.learnFromInteraction(text, brainResponse, 'user');
-      
+      try {
+        const result = (await window.api.deployQuickPush({ cwd: settings.cwd ?? '.', message: text.slice(0, 72) })) as {
+          status?: string;
+          steps?: Array<{ name: string; command: string; status: string; output?: string }>;
+        };
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text:
+                result?.status === 'success'
+                  ? `**Deployed successfully!**\n\n${result.steps?.map((s) => `- ${s.name}: \`${s.command}\` — ${s.status}`).join('\n')}`
+                  : `**Deployment failed.**\n\n${
+                      result?.steps
+                        ?.filter((s) => s.status === 'failed')
+                        .map((s) => `- ${s.name}: ${s.output}`)
+                        .join('\n') || 'Unknown error'
+                    }`,
+            },
+          ],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e : new Error(String(e));
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: [{ type: 'text', text: `**Deployment error:** ${error.message}` }],
+              timestamp: Date.now(),
+            } as Message,
+          ],
+          streaming: false,
+        }));
+      }
       return;
     }
-    
-    console.log('[chat] API key found, proceeding with API call');
+
+    // Intent detection: intercept test/run actions
+    if (/\b(run\s+tests?|test\s+this|run\s+vitest|run\s+jest|run\s+pytest)\b/i.test(textLower)) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      };
+      set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+      try {
+        const detected = await window.api.deployDetectProject({ projectPath: settings.cwd ?? '.' });
+        const config = (await window.api.deployDefaultConfig({ type: detected || 'node' })) as {
+          commands?: { test?: string };
+        };
+        const target = (await window.api.deployCreateTarget({ name: 'test-run', type: 'local', config: {} })) as {
+          id: string;
+        };
+        const pipeline = (await window.api.deployCreatePipeline({
+          name: 'Run Tests',
+          projectId: 'default',
+          targetId: target.id,
+          commands: [config.commands?.test || 'npx vitest run'],
+        })) as { id: string };
+        const result = (await window.api.deployRunPipeline({ pipelineId: pipeline.id, cwd: settings.cwd ?? '.' })) as {
+          status?: string;
+          steps?: Array<{ status: string; output?: string }>;
+        };
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text:
+                result?.status === 'success'
+                  ? `**Tests passed!**\n\n${result.steps?.map((s) => s.output).join('\n')}`
+                  : `**Tests failed.**\n\n${
+                      result?.steps
+                        ?.filter((s) => s.status === 'failed')
+                        .map((s) => s.output)
+                        .join('\n') || 'Unknown error'
+                    }`,
+            },
+          ],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+      } catch (e: unknown) {
+        const error = e instanceof Error ? e : new Error(String(e));
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: [{ type: 'text', text: `**Test error:** ${error.message}` }],
+              timestamp: Date.now(),
+            } as Message,
+          ],
+          streaming: false,
+        }));
+      }
+      return;
+    }
+
+    console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
+
+    // Check if Brain Mode is enabled — use Brain immediately without IPC delay
+    // Default to true: Brain is the default when no preference is set
+    const brainMode = settings.brainMode !== false;
+
+    // Check if user has an API key configured — check directly via IPC
+    let hasApiKey = false;
+    try {
+      hasApiKey = (await window.api.hasProviderKey({ provider })) as boolean;
+    } catch {
+      /* ignore */
+    }
+
+    // If provider is a real API (not local/ollama), always try it
+    const isRealProvider = provider !== 'local' && provider !== 'ollama';
+
+    console.log(
+      `[chat] provider=${provider} model=${model} brainMode=${brainMode} hasApiKey=${hasApiKey} isRealProvider=${isRealProvider}`,
+    );
+
+    if (isRealProvider && !hasApiKey) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      };
+      const errorMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: `I couldn't start the request because **${provider}** does not have a saved API key. Open Settings, choose ${provider}, then use **Test & Save** before trying again.`,
+          },
+        ],
+        timestamp: Date.now(),
+      };
+      set((s) => ({ messages: [...s.messages, userMessage, errorMessage], streaming: false }));
+      return;
+    }
+
+    // If we have a real API provider, skip Brain entirely
+    if (isRealProvider) {
+      console.log('[chat] Real API provider — routing directly to API');
+      // Fall through to API path below (the code after this brainMode block)
+    } else if (brainMode) {
+      console.log('[chat] Brain mode — local provider, using Brain patterns');
+
+      // Step 1: Try Brain patterns FIRST — these execute real actions (build, open, email, terminal, etc.)
+      let brainResponse: string | null = null;
+      let isActionResponse = false;
+      try {
+        const brainStore = useBrainStore.getState();
+        brainResponse = await brainStore.generateOfflineResponse(text);
+
+        // Check if this was an ACTION pattern (file write, command, browser, etc.)
+        isActionResponse =
+          brainResponse.startsWith('**$ ') ||
+          brainResponse.includes('```') ||
+          brainResponse.startsWith('📁') ||
+          brainResponse.startsWith('✅') ||
+          brainResponse.startsWith('📸') ||
+          brainResponse.startsWith('📂') ||
+          brainResponse.startsWith('🖥️') ||
+          brainResponse.startsWith('🌐') ||
+          brainResponse.startsWith('📧') ||
+          brainResponse.startsWith('📬') ||
+          brainResponse.startsWith('📭') ||
+          brainResponse.startsWith('🔊') ||
+          brainResponse.startsWith('🔇') ||
+          brainResponse.startsWith('⏳') ||
+          brainResponse.includes('Exit code:') ||
+          brainResponse.includes('created successfully') ||
+          brainResponse.includes('Error:') ||
+          brainResponse.includes('❌');
+
+        // If it's an ACTION, use the Brain response directly
+        if (isActionResponse) {
+          console.log('[chat] Brain matched an action pattern — using Brain response');
+        }
+        // If it's conversational and user has an API key, skip Brain — go to API
+        else if (hasApiKey) {
+          console.log('[chat] Brain gave conversational response — routing to API instead');
+          brainResponse = null; // Don't use Brain response
+        }
+      } catch (brainErr: unknown) {
+        const error = brainErr instanceof Error ? brainErr : new Error(String(brainErr));
+        console.error('[chat] Brain error:', error);
+        brainResponse = `❌ Brain error: ${error.message}. Try again or check the console for details.`;
+        isActionResponse = true; // Treat errors as action responses
+      }
+
+      // If Brain gave an action response, display it and stop
+      if (isActionResponse && brainResponse) {
+        const userMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: [{ type: 'text', text }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+
+        const taskTitle = text.length > 60 ? text.slice(0, 60) + '...' : text;
+        const taskId = useAgentsStore.getState().addChatTask(taskTitle);
+
+        await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500));
+
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: brainResponse }],
+          timestamp: Date.now(),
+        };
+
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+
+        const files = extractAndCreateFiles(assistantMessage);
+        useAgentsStore.getState().completeChatTask(taskId, files);
+
+        try {
+          useBrainStore.getState().learnFromInteraction(text, brainResponse, 'user');
+        } catch {
+          /* silent */
+        }
+
+        // Create a session so the chat persists in the sidebar
+        if (!currentSessionId) {
+          try {
+            const session = await window.api.createSession({
+              cwd: settings.cwd ?? '.',
+              model: 'brain',
+              provider: 'local',
+              title: text.slice(0, 60),
+            });
+            set((s) => ({
+              sessions: [session, ...s.sessions],
+              currentSessionId: session.id,
+            }));
+          } catch (e) {
+            console.error('[chat] Failed to create brain session:', e);
+          }
+        }
+
+        return;
+      }
+
+      // If Brain gave conversational response but user has API key, fall through to API path
+      if (!isActionResponse && hasApiKey) {
+        console.log('[chat] Falling through to API path...');
+        // Don't add user message yet — the API path will add it
+        // Fall through to the API code below (past the brainMode block)
+      }
+
+      // If no API key, try Ollama, then use Brain response
+      if (!isActionResponse && !hasApiKey) {
+        const userMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: [{ type: 'text', text }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
+
+        const taskTitle = text.length > 60 ? text.slice(0, 60) + '...' : text;
+        const taskId = useAgentsStore.getState().addChatTask(taskTitle);
+
+        let finalResponse = brainResponse || "I'm not sure what to do with that.";
+
+        try {
+          const ollamaAvailable = await window.api
+            .ollamaStatus()
+            .then((s: any) => s.available)
+            .catch(() => false);
+          if (ollamaAvailable) {
+            const systemPrompt = await window.api.ollamaSystemPrompt().catch(() => '');
+            const selectedModel = settings.ollamaModel || 'rafw007/gemma4-e4b-claude-coder:latest';
+            const ollamaResponse = (await window.api.ollamaAsk({
+              prompt: text,
+              systemPrompt,
+              model: selectedModel,
+            })) as string;
+            if (ollamaResponse && ollamaResponse.length > 5) {
+              finalResponse = ollamaResponse;
+              window.api
+                .ollamaRecordConversation({ input: text, output: finalResponse, source: 'ollama' })
+                .catch(() => {});
+            }
+          }
+        } catch {
+          // Ollama unavailable — keep the pattern-matching response
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 300 + Math.random() * 500));
+
+        const assistantMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: finalResponse }],
+          timestamp: Date.now(),
+        };
+
+        set((s) => ({ messages: [...s.messages, assistantMessage], streaming: false }));
+
+        const files = extractAndCreateFiles(assistantMessage);
+        useAgentsStore.getState().completeChatTask(taskId, files);
+
+        try {
+          useBrainStore.getState().learnFromInteraction(text, finalResponse, 'user');
+        } catch {
+          /* silent */
+        }
+
+        if (!currentSessionId) {
+          try {
+            const session = await window.api.createSession({
+              cwd: settings.cwd ?? '.',
+              model: 'brain',
+              provider: 'local',
+              title: text.slice(0, 60),
+            });
+            set((s) => ({
+              sessions: [session, ...s.sessions],
+              currentSessionId: session.id,
+            }));
+          } catch (e) {
+            console.error('[chat] Failed to create brain session:', e);
+          }
+        }
+
+        return;
+      }
+    }
+
+    console.log('[chat] Brain mode OFF — proceeding with API call');
 
     let sessionId = currentSessionId;
 
@@ -288,22 +554,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     useAgentsStore.getState().addChatTask(taskTitle);
 
     // Safety timeout: if no response in 45s, fall back to Brain mode
-    const safetyTimer = setTimeout(() => {
+    const safetyTimer = setTimeout(async () => {
       const st = get();
       if (st.streaming) {
         console.error('[chat] Safety timeout — falling back to Brain mode');
         const brainStore = useBrainStore.getState();
-        const brainResponse = brainStore.generateOfflineResponse(text);
+        const brainResponse = await brainStore.generateOfflineResponse(text);
         brainStore.learnFromInteraction(text, brainResponse, 'system');
-        
+
         set({
           streaming: false,
-          messages: [...st.messages, {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: [{ type: 'text', text: `**Infinite AI Brain (Fallback)**\n\nThe API request timed out. Here's what I can help with from my accumulated knowledge:\n\n${brainResponse}` }],
-            timestamp: Date.now(),
-          }],
+          messages: [
+            ...st.messages,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: `**${provider} timed out.** I used the offline fallback so you still have a response:\n\n${brainResponse}`,
+                },
+              ],
+              timestamp: Date.now(),
+            },
+          ],
         });
       }
     }, 45000);
@@ -311,9 +585,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     pendingSafetyTimer = safetyTimer;
 
     // Detect complex tasks that need orchestration
-    const isComplexTask = text.length > 200 ||
+    const isComplexTask =
+      text.length > 200 ||
       (/\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
-       /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
+        /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
 
     try {
       if (isComplexTask) {
@@ -331,10 +606,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const systemMsg: Message = {
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: [{
-              type: 'text',
-              text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
-            }],
+            content: [
+              {
+                type: 'text',
+                text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
+              },
+            ],
             timestamp: Date.now(),
           };
           set((s) => ({ messages: [...s.messages, systemMsg] }));
@@ -358,23 +635,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
           cwd: settings.cwd ?? '.',
         });
       }
-    } catch (e: any) {
-      console.error('[chat] Send failed:', e);
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      console.error('[chat] Send failed:', error);
       clearTimeout(safetyTimer);
-      
+
       // If API fails, try to use brain as fallback
       const brainStore = useBrainStore.getState();
-      const brainResponse = brainStore.generateOfflineResponse(text);
+      const brainResponse = await brainStore.generateOfflineResponse(text);
       brainStore.learnFromInteraction(text, brainResponse, 'system');
-      
+
       set((s) => ({
         streaming: false,
-        messages: [...s.messages, {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: `API Error: ${e?.message ?? e ?? 'Unknown error'}\n\n**Infinite AI Brain (Fallback Mode)**\n\nI'll try to help using my accumulated knowledge:\n\n${brainResponse}` }],
-          timestamp: Date.now(),
-        }],
+        messages: [
+          ...s.messages,
+          {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: [{ type: 'text', text: `API Error: ${error.message}\n\n${brainResponse}` }],
+            timestamp: Date.now(),
+          },
+        ],
       }));
       return;
     }
@@ -442,7 +723,7 @@ function generateFilename(lang: string): string {
 
 function extractAndCreateFiles(message: Message): string[] {
   const createdFiles: string[] = [];
-  const textBlocks = message.content.filter(c => c.type === 'text');
+  const textBlocks = message.content.filter((c) => c.type === 'text');
 
   for (const block of textBlocks) {
     if (block.type !== 'text') continue;
@@ -480,9 +761,7 @@ function extractAndCreateFilesFromText(text: string): string[] {
   return createdFiles;
 }
 
-function handleStreamEvent(
-  ev: { sessionId: string } & StreamEvent,
-) {
+async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
   console.log(`[chat] handleStreamEvent type=${ev.type} sessionId=${ev.sessionId}`);
   const { setState, getState } = useChatStore;
   switch (ev.type) {
@@ -513,7 +792,10 @@ function handleStreamEvent(
       setState((s) => ({
         messages: s.messages.map((m) => {
           if (m.id !== ev.message_id) return m;
-          return { ...m, content: [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }] };
+          return {
+            ...m,
+            content: [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }],
+          };
         }),
       }));
       break;
@@ -522,12 +804,22 @@ function handleStreamEvent(
       const last = getState().messages[getState().messages.length - 1];
       if (!last || last.role !== 'user') {
         setState((s) => ({
-          messages: [...s.messages, {
-            id: crypto.randomUUID(),
-            role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: ev.tool_use_id, content: ev.content as string, is_error: ev.is_error }],
-            timestamp: Date.now(),
-          }],
+          messages: [
+            ...s.messages,
+            {
+              id: crypto.randomUUID(),
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: ev.tool_use_id,
+                  content: ev.content as string,
+                  is_error: ev.is_error,
+                },
+              ],
+              timestamp: Date.now(),
+            },
+          ],
         }));
       }
       break;
@@ -543,19 +835,19 @@ function handleStreamEvent(
 
       // Auto-create files from code blocks in the AI response
       const messages = getState().messages;
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
       if (lastAssistant) {
         const files = extractAndCreateFiles(lastAssistant);
         if (files.length > 0) {
           console.log(`[chat] Auto-created ${files.length} files:`, files);
           // Complete the active chat task
-          const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+          const activeTask = useAgentsStore.getState().chatTasks.find((t) => t.status === 'working');
           if (activeTask) {
             useAgentsStore.getState().completeChatTask(activeTask.id, files);
           }
         } else {
           // No files created, just complete the task
-          const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+          const activeTask = useAgentsStore.getState().chatTasks.find((t) => t.status === 'working');
           if (activeTask) {
             useAgentsStore.getState().completeChatTask(activeTask.id);
           }
@@ -563,22 +855,32 @@ function handleStreamEvent(
       }
 
       // Learn from the completed conversation
-      const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
       const lastAssistantMsg = messages[messages.length - 1];
-      
+
       if (lastUserMsg && lastAssistantMsg && lastAssistantMsg.role === 'assistant') {
         const userInput = lastUserMsg.content
-          .filter(c => c.type === 'text')
-          .map(c => c.text)
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
           .join(' ');
         const assistantOutput = lastAssistantMsg.content
-          .filter(c => c.type === 'text')
-          .map(c => c.text)
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
           .join(' ');
-        
+
         if (userInput && assistantOutput) {
           const brainStore = useBrainStore.getState();
           brainStore.learnFromInteraction(userInput, assistantOutput, 'api');
+          // Teach Ollama from API conversations (knowledge distillation)
+          const settings2 = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+          window.api
+            .ollamaRecordApi({
+              input: userInput,
+              response: assistantOutput,
+              model: settings2.model ?? 'unknown',
+              provider: settings2.provider ?? 'unknown',
+            })
+            .catch(() => {});
         }
       }
       break;
@@ -593,7 +895,7 @@ function handleStreamEvent(
       setState({ streaming: false });
       // Complete any active chat task
       {
-        const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+        const activeTask = useAgentsStore.getState().chatTasks.find((t) => t.status === 'working');
         if (activeTask) {
           useAgentsStore.getState().completeChatTask(activeTask.id);
         }
@@ -609,27 +911,30 @@ function handleStreamEvent(
       console.error('[stream]', ev.error);
       // Fail the active chat task
       {
-        const activeTask = useAgentsStore.getState().chatTasks.find(t => t.status === 'working');
+        const activeTask = useAgentsStore.getState().chatTasks.find((t) => t.status === 'working');
         if (activeTask) {
           useAgentsStore.getState().failChatTask(activeTask.id);
         }
       }
-      // Fall back to Brain mode on API error
       {
-        const brainStore = useBrainStore.getState();
-        const lastUserMsg = [...getState().messages].reverse().find(m => m.role === 'user');
-        const userText = lastUserMsg?.content?.filter(c => c.type === 'text')?.map(c => c.text)?.join(' ') ?? '';
-        const brainResponse = brainStore.generateOfflineResponse(userText);
-        brainStore.learnFromInteraction(userText, brainResponse, 'system');
-        
+        const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        const provider = current.provider ?? 'provider';
         setState((s) => ({
           streaming: false,
-          messages: [...s.messages, {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: [{ type: 'text', text: `**Infinite AI Brain (Offline)**\n\nThe API is temporarily unavailable (${ev.error.includes('429') ? 'rate limited' : 'connection error'}). Here's what I can help with from my knowledge:\n\n${brainResponse}` }],
-            timestamp: Date.now(),
-          }],
+          messages: [
+            ...s.messages.filter((message, index) => message.content.length > 0 || index !== s.messages.length - 1),
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: `**${provider} could not complete the response.**\n\n${ev.error}\n\nCheck the selected model in Settings, test the API key again, and retry.`,
+                },
+              ],
+              timestamp: Date.now(),
+            },
+          ],
         }));
       }
       break;

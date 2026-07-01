@@ -276,3 +276,4 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
     </div>
   );
 }
+

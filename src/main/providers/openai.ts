@@ -17,3 +17,4 @@ export const openai: ProviderAdapter = openaiCompatible({
   homepage: 'https://platform.openai.com',
   requiresApiKey: true,
 });
+

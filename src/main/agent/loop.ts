@@ -147,9 +147,10 @@ export async function runAgent(
             return messages;
         }
       }
-    } catch (e: any) {
-      console.error('[agent] Stream loop error:', e?.message ?? e);
-      opts.onEvent({ type: 'error', error: e?.message ?? String(e) });
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e : new Error(String(e));
+      console.error('[agent] Stream loop error:', error.message);
+      opts.onEvent({ type: 'error', error: error.message });
       return messages;
     }
 
@@ -271,3 +272,4 @@ function getActionType(toolName: string): string {
   if (name.includes('navigate') || name.includes('click') || name.includes('type')) return 'system';
   return 'read';
 }
+

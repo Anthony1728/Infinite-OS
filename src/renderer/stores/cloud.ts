@@ -16,12 +16,13 @@ interface CloudState {
 
 export const useCloudStore = create<CloudState>((set, get) => ({
   devices: [], backups: [], records: [], stats: null, loading: false,
-  loadDevices: async () => { try { set({ devices: await window.api.cloudListDevices() as CloudDevice[] }); } catch {} },
-  loadBackups: async () => { try { set({ backups: await window.api.cloudListBackups() as CloudBackup[] }); } catch {} },
-  loadRecords: async () => { try { set({ records: await window.api.cloudRecentRecords() as CloudRecord[] }); } catch {} },
-  loadStats: async () => { try { set({ stats: await window.api.cloudStats() as CloudStats }); } catch {} },
+  loadDevices: async () => { try { set({ devices: await window.api.cloudListDevices() as CloudDevice[] }); } catch { /* silent */ } },
+  loadBackups: async () => { try { set({ backups: await window.api.cloudListBackups() as CloudBackup[] }); } catch { /* silent */ } },
+  loadRecords: async () => { try { set({ records: await window.api.cloudRecentRecords() as CloudRecord[] }); } catch { /* silent */ } },
+  loadStats: async () => { try { set({ stats: await window.api.cloudStats() as CloudStats }); } catch { /* silent */ } },
   registerDevice: async (name) => { await window.api.cloudRegisterDevice({ name }); await get().loadDevices(); await get().loadStats(); },
   syncData: async (type, data) => { await window.api.cloudSyncData({ type, data }); await get().loadRecords(); },
   createBackup: async () => { await window.api.cloudCreateBackup(); await get().loadBackups(); await get().loadStats(); },
   restoreBackup: async (id) => { await window.api.cloudRestoreBackup({ id }); },
 }));
+

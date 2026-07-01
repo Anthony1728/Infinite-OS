@@ -70,3 +70,4 @@ export function registerBusinessIpc(): void {
     return businessOS.getStats();
   });
 }
+

@@ -55,14 +55,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const templates = await window.api.appTemplates() as AppTemplate[];
       set({ templates });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   loadStats: async () => {
     try {
       const stats = await window.api.appStats() as AppStats;
       set({ stats });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   createProject: async (args) => {
@@ -97,3 +97,4 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadProjects();
   },
 }));
+

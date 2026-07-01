@@ -42,6 +42,8 @@ export function OnboardingFlow() {
       }, 40);
       return () => clearInterval(interval);
     }
+
+    return undefined;
   }, [step, completeOnboarding]);
 
   if (step === 'loading') {
@@ -63,7 +65,7 @@ export function OnboardingFlow() {
             </filter>
           </defs>
           <path 
-            d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z" 
+            d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
             stroke="url(#loadGrad)" 
             strokeWidth="8" 
             strokeLinecap="round"
@@ -109,7 +111,7 @@ export function OnboardingFlow() {
               </filter>
             </defs>
             <path 
-              d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z" 
+              d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
               stroke="url(#welcomeGrad)" 
             strokeWidth="8" 
             strokeLinecap="round"
@@ -234,7 +236,7 @@ export function OnboardingFlow() {
             </linearGradient>
           </defs>
           <path 
-            d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z" 
+            d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
             stroke="url(#initGrad)" 
             strokeWidth="8" 
             strokeLinecap="round"
@@ -260,3 +262,4 @@ export function OnboardingFlow() {
 
   return null;
 }
+

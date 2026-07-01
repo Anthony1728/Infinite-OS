@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import log from 'electron-log';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface CallRecord {
@@ -146,7 +145,7 @@ class CallCenterSystem extends EventEmitter {
     let calls = Array.from(this.calls.values());
     if (filters?.status) calls = calls.filter((c) => c.status === filters.status);
     if (filters?.direction) calls = calls.filter((c) => c.direction === filters.direction);
-    if (filters?.since) calls = calls.filter((c) => c.createdAt >= filters.since);
+    if (filters?.since) calls = calls.filter((c) => c.createdAt >= (filters.since ?? 0));
     return calls.sort((a, b) => b.createdAt - a.createdAt);
   }
 
@@ -323,3 +322,4 @@ class CallCenterSystem extends EventEmitter {
 }
 
 export const callCenter = new CallCenterSystem();
+

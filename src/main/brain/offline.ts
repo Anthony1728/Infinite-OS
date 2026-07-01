@@ -184,3 +184,4 @@ export class OfflineManager {
     return 'No connection - using offline mode with local models';
   }
 }
+

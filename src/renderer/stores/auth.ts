@@ -15,7 +15,7 @@ export interface SessionState {
   fileExplorerPath?: string;
   terminalState?: 'open' | 'closed';
   lastActiveView?: string;
-  recentActivity?: Array<{ type: string; title: string; timestamp: number }>;
+  recentActivity?: Array<{ type: 'chat' | 'project' | 'file' | 'deploy'; title: string; timestamp: number; id?: string }>;
 }
 
 export interface User {
@@ -46,16 +46,25 @@ interface AuthState {
   setRestoringSession: (val: boolean) => void;
 }
 
-const getUsers = (): Record<string, { user: User; password: string }> => {
+// File-based storage (works across dev and prod — both read from ~/.infinite-ai/auth.json)
+const getUsers = async (): Promise<Record<string, { user: User; password: string }>> => {
   try {
-    return JSON.parse(localStorage.getItem('infinite:users') ?? '{}');
-  } catch {
-    return {};
-  }
+    return await window.api.authGetUsers();
+  } catch { return {}; }
 };
 
-const saveUsers = (users: Record<string, { user: User; password: string }>) => {
-  localStorage.setItem('infinite:users', JSON.stringify(users));
+const saveUsers = async (users: Record<string, { user: User; password: string }>) => {
+  await window.api.authSetUsers(users);
+};
+
+const saveSession = async (user: User | null) => {
+  await window.api.authSetSession(user ? { user, isAuthenticated: true } : null);
+};
+
+const loadSession = async (): Promise<{ user: User; isAuthenticated: boolean } | null> => {
+  try {
+    return await window.api.authGetSession();
+  } catch { return null; }
 };
 
 export const useAuthStore = create<AuthState>()(
@@ -71,7 +80,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
         await new Promise(r => setTimeout(r, 800));
 
-        const users = getUsers();
+        const users = await getUsers();
         const entry = users[email.toLowerCase()];
 
         if (!entry || entry.password !== password) {
@@ -84,7 +93,8 @@ export const useAuthStore = create<AuthState>()(
         // Update last login time
         const updatedUser = { ...entry.user, lastLoginAt: Date.now() };
         entry.user = updatedUser;
-        saveUsers(users);
+        await saveUsers(users);
+        await saveSession(updatedUser);
 
         set({
           user: updatedUser,
@@ -99,7 +109,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
         await new Promise(r => setTimeout(r, 1000));
 
-        const users = getUsers();
+        const users = await getUsers();
 
         if (users[email.toLowerCase()]) {
           set({ isLoading: false });
@@ -122,7 +132,8 @@ export const useAuthStore = create<AuthState>()(
         };
 
         users[email.toLowerCase()] = { user: newUser, password };
-        saveUsers(users);
+        await saveUsers(users);
+        await saveSession(newUser);
 
         set({
           user: newUser,
@@ -134,6 +145,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        saveSession(null);
         set({
           user: null,
           isAuthenticated: false,
@@ -148,11 +160,14 @@ export const useAuthStore = create<AuthState>()(
           const updatedUser = { ...user, hasCompletedOnboarding: true };
           set({ user: updatedUser, isNewUser: false });
 
-          const users = getUsers();
-          if (users[user.email]) {
-            users[user.email].user = updatedUser;
-            saveUsers(users);
-          }
+          (async () => {
+            const users = await getUsers();
+            if (users[user.email]) {
+              users[user.email].user = updatedUser;
+              await saveUsers(users);
+            }
+            await saveSession(updatedUser);
+          })();
         }
       },
 
@@ -166,11 +181,14 @@ export const useAuthStore = create<AuthState>()(
         };
         set({ user: updatedUser });
 
-        const users = getUsers();
-        if (users[user.email]) {
-          users[user.email].user = updatedUser;
-          saveUsers(users);
-        }
+        (async () => {
+          const users = await getUsers();
+          if (users[user.email]) {
+            users[user.email].user = updatedUser;
+            await saveUsers(users);
+          }
+          await saveSession(updatedUser);
+        })();
       },
 
       updateSessionState: (updates) => {
@@ -183,11 +201,14 @@ export const useAuthStore = create<AuthState>()(
         };
         set({ user: updatedUser });
 
-        const users = getUsers();
-        if (users[user.email]) {
-          users[user.email].user = updatedUser;
-          saveUsers(users);
-        }
+        (async () => {
+          const users = await getUsers();
+          if (users[user.email]) {
+            users[user.email].user = updatedUser;
+            await saveUsers(users);
+          }
+          await saveSession(updatedUser);
+        })();
       },
 
       setRestoringSession: (val) => set({ isRestoringSession: val }),
@@ -201,3 +222,27 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+// Auto-login on startup: try to restore from file-based session
+// Wait for window.api to be available (preload)
+const tryRestoreSession = async () => {
+  for (let i = 0; i < 50; i++) {
+    if (window.api?.authGetSession) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  try {
+    const session = await loadSession();
+    if (session?.user && session.isAuthenticated) {
+      useAuthStore.setState({
+        user: session.user,
+        isAuthenticated: true,
+        isNewUser: false,
+      });
+      console.log('[auth] Auto-restored session for:', session.user.email);
+    }
+  } catch (e) {
+    console.error('[auth] Session restore failed:', e);
+  }
+};
+tryRestoreSession();
+

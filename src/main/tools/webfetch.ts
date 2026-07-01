@@ -112,3 +112,4 @@ function htmlToText(html: string): string {
 
   return text;
 }
+

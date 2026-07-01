@@ -59,14 +59,14 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     try {
       const templates = await window.api.automationGetTemplates() as AutomationTemplate[];
       set({ templates });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   loadStats: async () => {
     try {
       const stats = await window.api.automationStats() as AutomationStats;
       set({ stats });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   createWorkflow: async (workflow) => {
@@ -95,3 +95,4 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     await get().loadStats();
   },
 }));
+

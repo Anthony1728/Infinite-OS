@@ -1,143 +1,119 @@
-// Browser agent - simplified version for Node.js compilation
-// The full browser automation runs in the renderer context
+import type { BrowserConfig as PWBrowserConfig, BrowserSession as PWBrowserSession, PageSnapshot } from './browser-agent-playwright.js';
 
-export interface BrowserConfig {
+import { BrowserAgentPlaywright as Impl } from './browser-agent-playwright.js';
+
+// Browser agent (Playwright-backed)
+
+export type BrowserConfig = {
   headless: boolean;
-  defaultTimeout: number;
+  defaultTimeoutMs?: number;
   viewport: { width: number; height: number };
   userDataDir: string;
-}
+  
+  // Back-compat for older config naming
+  defaultTimeout?: number;
+};
 
-export interface PageSnapshot {
-  url: string;
-  title: string;
-  text: string;
-  links: Array<{ text: string; href: string }>;
-  forms: Array<{ action: string; method: string; fields: Array<{ name: string; type: string; value: string }> }>;
-  images: Array<{ src: string; alt: string }>;
-  timestamp: number;
-}
 
-export interface BrowserAction {
+export type { PageSnapshot };
+
+export type BrowserAction = {
   id: string;
-  type: 'navigate' | 'click' | 'type' | 'select' | 'screenshot' | 'extract' | 'scroll' | 'wait' | 'back' | 'forward' | 'reload';
+  type:
+    | 'navigate'
+    | 'click'
+    | 'type'
+    | 'select'
+    | 'screenshot'
+    | 'extract'
+    | 'scroll'
+    | 'wait'
+    | 'back'
+    | 'forward'
+    | 'reload';
   target?: string;
   value?: string;
   timestamp: number;
-  result?: string;
+  result?: unknown;
   error?: string;
-}
+};
 
-export interface BrowserSession {
-  id: string;
-  name: string;
-  url: string;
-  actions: BrowserAction[];
-  cookies: Record<string, string>;
-  localStorage: Record<string, string>;
-  createdAt: number;
-  lastActive: number;
-}
+export type BrowserSession = PWBrowserSession;
 
 export class BrowserAgent {
-  private sessions: Map<string, BrowserSession> = new Map();
+  private impl: Impl;
 
-  constructor(_config?: Partial<BrowserConfig>) {
+  constructor(config?: Partial<BrowserConfig>) {
+    this.impl = new Impl({
+      headless: config?.headless ?? true,
+      defaultTimeoutMs: config?.defaultTimeoutMs ?? config?.defaultTimeout ?? 30_000,
+      viewport: config?.viewport ?? { width: 1280, height: 720 },
+      userDataDir: config?.userDataDir,
+    } satisfies Partial<PWBrowserConfig>);
   }
 
-  createSession(_name?: string): BrowserSession {
-    const session: BrowserSession = {
-      id: `session-${Date.now()}`,
-      name: _name ?? `Session ${this.sessions.size + 1}`,
-      url: 'about:blank',
-      actions: [],
-      cookies: {},
-      localStorage: {},
-      createdAt: Date.now(),
-      lastActive: Date.now(),
-    };
-    this.sessions.set(session.id, session);
-    return session;
+  createSession(name?: string): Promise<BrowserSession> {
+    return this.impl.createSession(name);
   }
 
-  async navigate(_sessionId: string, _url: string): Promise<PageSnapshot> {
-    return {
-      url: _url,
-      title: 'Loading...',
-      text: '',
-      links: [],
-      forms: [],
-      images: [],
-      timestamp: Date.now(),
-    };
+  navigate(sessionId: string, url: string): Promise<PageSnapshot> {
+    return this.impl.navigate(sessionId, url);
   }
 
-  async click(_sessionId: string, _selector: string): Promise<string> {
-    return `Clicked: ${_selector}`;
+  click(sessionId: string, selector: string): Promise<string> {
+    return this.impl.click(sessionId, selector);
   }
 
-  async type(_sessionId: string, _selector: string, _value: string): Promise<string> {
-    return `Typed into ${_selector}`;
+  type(sessionId: string, selector: string, value: string): Promise<string> {
+    return this.impl.type(sessionId, selector, value);
   }
 
-  async screenshot(_sessionId: string): Promise<string> {
-    return 'screenshot.png';
+  screenshot(sessionId: string): Promise<{ imageBase64: string; mimeType: 'image/png'; fileName: string }> {
+    return this.impl.screenshot(sessionId);
   }
 
-  async extractData(_sessionId: string, _selector: string): Promise<string[]> {
-    return [];
+  extractData(sessionId: string, selector: string): Promise<string[]> {
+    return this.impl.extractData(sessionId, selector);
   }
 
-  async fillForm(_sessionId: string, _formSelector: string, _data: Record<string, string>): Promise<string> {
-    return 'Form filled';
+  fillForm(sessionId: string, formSelector: string, data: Record<string, string>): Promise<string> {
+    return this.impl.fillForm(sessionId, formSelector, data);
   }
 
-  async scroll(_sessionId: string, _direction: 'up' | 'down' | 'top' | 'bottom'): Promise<string> {
-    return `Scrolled ${_direction}`;
+  scroll(sessionId: string, direction: 'up' | 'down' | 'top' | 'bottom'): Promise<string> {
+    return this.impl.scroll(sessionId, direction);
   }
 
-  async goBack(_sessionId: string): Promise<string> {
-    return 'Navigated back';
+  goBack(sessionId: string): Promise<string> {
+    return this.impl.goBack(sessionId);
   }
 
-  async goForward(_sessionId: string): Promise<string> {
-    return 'Navigated forward';
+  goForward(sessionId: string): Promise<string> {
+    return this.impl.goForward(sessionId);
   }
 
-  async reload(_sessionId: string): Promise<string> {
-    return 'Reloaded';
+  reload(sessionId: string): Promise<string> {
+    return this.impl.reload(sessionId);
   }
 
-  async getPageContent(_sessionId: string): Promise<string> {
-    return '';
+  getPageContent(sessionId: string): Promise<string> {
+    return this.impl.getPageContent(sessionId);
   }
 
-  async closeSession(sessionId: string): Promise<void> {
-    this.sessions.delete(sessionId);
-  }
-
-  getSession(sessionId: string): BrowserSession | undefined {
-    return this.sessions.get(sessionId);
+  closeSession(sessionId: string): Promise<void> {
+    return this.impl.closeSession(sessionId);
   }
 
   listSessions(): BrowserSession[] {
-    return Array.from(this.sessions.values());
+    return this.impl.listSessions();
   }
 
   deleteSession(sessionId: string): boolean {
-    return this.sessions.delete(sessionId);
+    return this.impl.deleteSession(sessionId);
   }
 
-  getStats(): {
-    totalSessions: number;
-    totalActions: number;
-    activeSessions: number;
-  } {
-    const sessions = Array.from(this.sessions.values());
-    return {
-      totalSessions: sessions.length,
-      totalActions: sessions.reduce((sum, s) => sum + s.actions.length, 0),
-      activeSessions: sessions.filter((s) => Date.now() - s.lastActive < 3600000).length,
-    };
+  getStats() {
+    return this.impl.getStats();
   }
 }
+

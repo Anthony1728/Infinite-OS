@@ -49,3 +49,4 @@ export function registerAppIpc(): void {
     return appBuilder.getStats();
   });
 }
+

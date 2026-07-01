@@ -15,15 +15,39 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-let chromium: any = null;
-let browser: any = null;
-let pages: Map<string, any> = new Map();
+interface PlaywrightBrowser {
+  newPage: (options?: { viewport?: { width: number; height: number } }) => Promise<PlaywrightPage>;
+  close: () => Promise<void>;
+}
 
-async function getBrowser(headless = true) {
+interface PlaywrightPage {
+  goto: (url: string, options?: { waitUntil?: string; timeout?: number }) => Promise<void>;
+  waitForTimeout: (ms: number) => Promise<void>;
+  title: () => Promise<string>;
+  url: () => string;
+  evaluate: <T>(fn: () => T) => Promise<T>;
+  click: (selector: string, options?: { timeout?: number }) => Promise<void>;
+  fill: (selector: string, value: string, options?: { timeout?: number }) => Promise<void>;
+  screenshot: (options?: { path?: string; fullPage?: boolean }) => Promise<void>;
+  goBack: (options?: { waitUntil?: string }) => Promise<void>;
+  goForward: (options?: { waitUntil?: string }) => Promise<void>;
+  reload: (options?: { waitUntil?: string }) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface PlaywrightChromium {
+  launch: (options?: { headless?: boolean; args?: string[] }) => Promise<PlaywrightBrowser>;
+}
+
+let chromium: PlaywrightChromium | null = null;
+let browser: PlaywrightBrowser | null = null;
+const pages: Map<string, PlaywrightPage> = new Map();
+
+async function getBrowser(headless = true): Promise<PlaywrightBrowser> {
   if (browser) return browser;
   try {
     // Dynamic import to avoid build issues
-    const playwright = await Function('return import("playwright")')() as any;
+    const playwright = await Function('return import("playwright")')() as { chromium: PlaywrightChromium };
     chromium = playwright.chromium;
     browser = await chromium.launch({ headless, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     return browser;

@@ -15,7 +15,7 @@ export default defineConfig({
       outDir: 'out/main',
       rollupOptions: {
         input: { index: resolve('src/main/index.ts') },
-        external: ['playwright', 'playwright-core'],
+        external: ['playwright', 'playwright-core', '@playwright/test'],
       },
     },
   },

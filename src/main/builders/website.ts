@@ -343,7 +343,7 @@ export class WebsiteBuilder {
       <p>${(props.subtitle as string) || 'Build something amazing'}</p>
       <a href="${(props.ctaLink as string) || '#'}" class="btn">${(props.ctaText as string) || 'Get Started'}</a>
     </section>`;
-      case 'features':
+      case 'features': {
         const features = (props.items as Array<{ title: string; description: string }>) || [];
         return `
     <section id="features">
@@ -352,7 +352,8 @@ export class WebsiteBuilder {
         ${features.map(f => `<div class="card"><h3>${f.title}</h3><p>${f.description}</p></div>`).join('\n        ')}
       </div>
     </section>`;
-      case 'pricing':
+      }
+      case 'pricing': {
         const plans = (props.plans as Array<{ name: string; price: string; features: string[] }>) || [];
         return `
     <section id="pricing">
@@ -361,6 +362,7 @@ export class WebsiteBuilder {
         ${plans.map(p => `<div class="card"><h3>${p.name}</h3><div style="font-size:32px;font-weight:700;margin:16px 0;">${p.price}</div><ul style="list-style:none;margin-bottom:24px;">${p.features.map(f => `<li style="padding:8px 0;border-bottom:1px solid ${theme.darkMode ? '#334155' : '#e2e8f0'};">✓ ${f}</li>`).join('')}</ul><a href="#" class="btn" style="width:100%;text-align:center;">Choose Plan</a></div>`).join('\n        ')}
       </div>
     </section>`;
+      }
       case 'cta':
         return `
     <section style="text-align:center;padding:80px 0;background:linear-gradient(135deg,${theme.primaryColor}22,${theme.secondaryColor}22);border-radius:16px;margin:40px 0;">
@@ -429,7 +431,7 @@ const theme = {
           ${(props.ctaText as string) || 'Get Started'}
         </a>
       </section>\n`;
-      case 'features':
+      case 'features': {
         const features = (props.items as Array<{ title: string; description: string }>) || [];
         return `      <section className="py-16 px-6">
         <h2 className="text-3xl font-bold text-center mb-12">Features</h2>
@@ -440,6 +442,7 @@ const theme = {
           </div>`).join('\n          ')}
         </div>
       </section>\n`;
+      }
       default:
         return `      {/* ${comp.name} (${comp.type}) */}\n`;
     }
@@ -526,3 +529,4 @@ const theme = {
     };
   }
 }
+

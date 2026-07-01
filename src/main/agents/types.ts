@@ -45,3 +45,4 @@ export type AgentEvent =
 
 /** Helper: load all messages from a session's transcript. */
 export type MessageSource = (sessionId: string) => Promise<Message[]>;
+

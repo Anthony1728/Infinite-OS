@@ -53,3 +53,4 @@ class ToolRegistry {
 
 export const toolRegistry = new ToolRegistry();
 export { ToolRegistry };
+

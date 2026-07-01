@@ -77,14 +77,14 @@ function toAnthropicMessages(messages: Message[]): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
   for (const m of messages) {
     if (m.role === 'user' || m.role === 'assistant') {
-      const content: any[] = [];
+      const content: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolUseBlockParam | Anthropic.ToolResultBlockParam> = [];
       for (const b of m.content) {
         if (b.type === 'text') {
           content.push({ type: 'text', text: b.text });
         } else if (b.type === 'image') {
-          content.push({ type: 'image', source: { type: 'base64', media_type: b.source.mediaType as any, data: b.source.data } });
+          content.push({ type: 'image', source: { type: 'base64', media_type: b.source.mediaType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp', data: b.source.data } });
         } else if (b.type === 'tool_use') {
-          content.push({ type: 'tool_use', id: b.id, name: b.name, input: typeof b.input === 'string' ? JSON.parse(b.input) : b.input as any });
+          content.push({ type: 'tool_use', id: b.id, name: b.name, input: typeof b.input === 'string' ? JSON.parse(b.input) : (b.input as Record<string, unknown>) });
         } else if (b.type === 'tool_result') {
           content.push({ type: 'tool_result', tool_use_id: b.tool_use_id, is_error: b.is_error, content: typeof b.content === 'string' ? b.content : JSON.stringify(b.content) });
         }
@@ -94,3 +94,4 @@ function toAnthropicMessages(messages: Message[]): Anthropic.MessageParam[] {
   }
   return out;
 }
+

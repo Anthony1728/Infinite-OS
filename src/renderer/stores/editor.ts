@@ -36,7 +36,7 @@ const inferLanguage = (name: string): string => {
   return 'plaintext';
 };
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const useEditorStore = create<EditorState>((set) => ({
   files: [],
   activeIndex: 0,
   openFile: null,
@@ -80,3 +80,4 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   clearAnimation: () => set({ showAnimation: false }),
 }));
+

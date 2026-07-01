@@ -29,3 +29,4 @@ export function respondToPermission(id: string, allowed: boolean): void {
   pending.get(id)?.(allowed);
   pending.delete(id);
 }
+

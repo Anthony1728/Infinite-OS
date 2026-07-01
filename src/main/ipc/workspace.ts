@@ -57,3 +57,4 @@ export function registerWorkspaceIpc(): void {
     return teamWorkspaces.getStats();
   });
 }
+

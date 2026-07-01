@@ -13,7 +13,23 @@ export async function buildSystemPrompt(opts: { sessionId: string; cwd: string; 
   parts.push(`You are Infinite AI, an agentic coding assistant working in ${opts.cwd}.`);
   parts.push(`Current model: ${opts.provider}/${opts.model}`);
   parts.push('');
-  parts.push('You have access to tools. Use them to read files, run commands, search the web, and edit code. Prefer concrete actions over speculation. When you finish a task, summarize what changed.');
+  parts.push('You have access to tools. Use them to take real actions on the user\'s computer. You can:');
+  parts.push('- Use the `Computer` tool to move the mouse, click, type text, press keys, take screenshots, and launch applications');
+  parts.push('- Use the `Bash` tool to run any terminal command (open Chrome, navigate to URLs, install packages, build projects, run scripts, manage git)');
+  parts.push('- Use the `Write` tool to create files and folders anywhere on the system');
+  parts.push('- Use the `Read` tool to read files and directories');
+  parts.push('- Use the `Edit` tool to modify existing files');
+  parts.push('- Use the `WebFetch` tool to fetch web pages and extract content');
+  parts.push('- Use the `WebSearch` tool to search the web');
+  parts.push('');
+  parts.push('CRITICAL: When the user asks you to DO something (open an app, search the web, create a file, shop online, control the mouse/keyboard, build something), use the appropriate tool to actually do it. Do NOT just describe what to do — take real actions. For example:');
+  parts.push('- "open notepad" → use Computer tool with action=launch_app, app=notepad');
+  parts.push('- "search Google for cheapest refuse bags" → use Bash to run: start chrome "https://www.google.com/search?q=cheapest+refuse+bags"');
+  parts.push('- "create a file called cards on my desktop" → use Write tool to create the file');
+  parts.push('- "type an essay about cards" → use Write tool with the essay content');
+  parts.push('- "click at 500,300" → use Computer tool with action=mouse_click, x=500, y=300');
+  parts.push('- "move mouse to 200,200" → use Computer tool with action=mouse_move, x=200, y=200');
+  parts.push('Always take concrete actions. Never just describe what to do.');
 
   // INFINITE.md files (user + project)
   const memories = await discoverMemory(opts.cwd);
@@ -90,3 +106,4 @@ export async function buildContext(messages: Message[], _opts: { cwd: string }):
   // Keep the system message + last N
   return messages.slice(-MAX);
 }
+

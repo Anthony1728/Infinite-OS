@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Phone, PhoneCall, PhoneOff, Pause, Play, Users, BarChart3, Clock, Plus, Trash2, Headphones } from 'lucide-react';
+import { Phone, PhoneCall, PhoneOff, Pause, Play, Users, Plus, Headphones } from 'lucide-react';
 
 interface CallRecord {
   id: string;
@@ -37,7 +37,7 @@ export function CallCenterView() {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [agents, setAgents] = useState<CallAgent[]>([]);
   const [queues, setQueues] = useState<CallQueue[]>([]);
-  const [analytics, setAnalytics] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<{ totalCalls?: number; answeredCalls?: number; missedCalls?: number; avgHandleTime?: number; callsByHour?: Array<{ hour: number; count: number }>; topDispositions?: Array<{ disposition: string; count: number }> } | null>(null);
   const [showNewAgent, setShowNewAgent] = useState(false);
   const [newAgentName, setNewAgentName] = useState('');
   const [showNewQueue, setShowNewQueue] = useState(false);
@@ -49,15 +49,15 @@ export function CallCenterView() {
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
-    try { setCalls(await (window as any).api.callList()); } catch {}
-    try { setAgents(await (window as any).api.callAgentList()); } catch {}
-    try { setQueues(await (window as any).api.callQueueList()); } catch {}
-    try { setAnalytics(await (window as any).api.callAnalytics()); } catch {}
+    try { setCalls(await window.api.callList()); } catch { /* silent */ }
+    try { setAgents(await window.api.callAgentList()); } catch { /* silent */ }
+    try { setQueues(await window.api.callQueueList()); } catch { /* silent */ }
+    try { setAnalytics(await window.api.callAnalytics()); } catch { /* silent */ }
   };
 
   const createCall = async () => {
     if (!newCallerId) return;
-    await (window as any).api.callCreate({ callerId: newCallerId, direction: newDirection });
+    await window.api.callCreate({ callerId: newCallerId, direction: newDirection });
     setShowNewCall(false);
     setNewCallerId('');
     loadAll();
@@ -65,28 +65,28 @@ export function CallCenterView() {
 
   const answerCall = async (callId: string) => {
     const avail = agents.find((a) => a.status === 'available');
-    await (window as any).api.callAnswer({ callId, agentId: avail?.id });
+    await window.api.callAnswer({ callId, agentId: avail?.id });
     loadAll();
   };
 
   const holdCall = async (callId: string) => {
-    await (window as any).api.callHold({ callId });
+    await window.api.callHold({ callId });
     loadAll();
   };
 
   const resumeCall = async (callId: string) => {
-    await (window as any).api.callResume({ callId });
+    await window.api.callResume({ callId });
     loadAll();
   };
 
   const endCall = async (callId: string) => {
-    await (window as any).api.callEnd({ callId, disposition: 'completed' });
+    await window.api.callEnd({ callId, disposition: 'completed' });
     loadAll();
   };
 
   const createAgent = async () => {
     if (!newAgentName) return;
-    await (window as any).api.callAgentCreate({ name: newAgentName, skills: [], maxConcurrent: 1 });
+    await window.api.callAgentCreate({ name: newAgentName, skills: [], maxConcurrent: 1 });
     setShowNewAgent(false);
     setNewAgentName('');
     loadAll();
@@ -94,14 +94,14 @@ export function CallCenterView() {
 
   const createQueue = async () => {
     if (!newQueueName) return;
-    await (window as any).api.callQueueCreate({ name: newQueueName });
+    await window.api.callQueueCreate({ name: newQueueName });
     setShowNewQueue(false);
     setNewQueueName('');
     loadAll();
   };
 
   const updateAgentStatus = async (agentId: string, status: string) => {
-    await (window as any).api.callAgentStatus({ agentId, status });
+    await window.api.callAgentStatus({ agentId, status });
     loadAll();
   };
 
@@ -331,23 +331,23 @@ export function CallCenterView() {
             <div className="p-4 bg-[var(--bg-secondary)] rounded-lg">
               <h3 className="text-sm font-medium mb-3">Calls by Hour</h3>
               <div className="flex items-end gap-1 h-32">
-                {analytics.callsByHour.map((count: number, hour: number) => (
-                  <div key={hour} className="flex-1 flex flex-col items-center">
+                {analytics.callsByHour?.map((entry: { hour: number; count: number }) => (
+                  <div key={entry.hour} className="flex-1 flex flex-col items-center">
                     <div
                       className="w-full bg-[var(--accent)] rounded-t"
-                      style={{ height: `${Math.max(2, (count / Math.max(...analytics.callsByHour, 1)) * 100)}%` }}
+                      style={{ height: `${Math.max(2, (entry.count / Math.max(...(analytics.callsByHour?.map((e: { count: number }) => e.count) ?? [1]), 1)) * 100)}%` }}
                     />
-                    {hour % 3 === 0 && <span className="text-[8px] text-[var(--text-secondary)] mt-1">{hour}h</span>}
+                    {entry.hour % 3 === 0 && <span className="text-[8px] text-[var(--text-secondary)] mt-1">{entry.hour}h</span>}
                   </div>
                 ))}
               </div>
             </div>
 
-            {analytics.topDispositions.length > 0 && (
+            {analytics.topDispositions && analytics.topDispositions.length > 0 && (
               <div className="p-4 bg-[var(--bg-secondary)] rounded-lg">
                 <h3 className="text-sm font-medium mb-3">Top Dispositions</h3>
                 <div className="space-y-2">
-                  {analytics.topDispositions.map((d: any) => (
+                  {analytics.topDispositions.map((d: { disposition: string; count: number }) => (
                     <div key={d.disposition} className="flex items-center gap-3">
                       <span className="text-sm flex-1">{d.disposition}</span>
                       <span className="text-xs text-[var(--text-secondary)]">{d.count}</span>
@@ -362,3 +362,4 @@ export function CallCenterView() {
     </div>
   );
 }
+

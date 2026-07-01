@@ -64,3 +64,4 @@ export async function hasApiKey(provider: string): Promise<boolean> {
   console.log(`[secrets] hasApiKey(${provider}) = ${has}, all keys: ${Object.keys(cache).join(', ') || 'none'}`);
   return has;
 }
+

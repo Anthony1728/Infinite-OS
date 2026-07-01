@@ -29,7 +29,7 @@ export interface Trigger {
 
 export interface Action {
   id: string;
-  type: 'tool_call' | 'agent_run' | 'condition' | 'delay' | 'notify' | 'script';
+  type: 'tool_call' | 'agent_run' | 'condition' | 'delay' | 'notify' | 'script' | 'computer_action';
   config: Record<string, unknown>;
   next?: string;
   onError?: 'stop' | 'continue' | 'retry';
@@ -300,6 +300,50 @@ export class AutomationBuilder {
             }
             break;
           }
+          case 'computer_action': {
+            const { getComputerControl } = await import('../agent/computer-singleton.js');
+            const computerControl = getComputerControl();
+            const actionType = action.config.action as string;
+            switch (actionType) {
+              case 'mouse_click':
+                await computerControl.clickMouse(
+                  Number(action.config.x) || 0,
+                  Number(action.config.y) || 0,
+                  (action.config.button as 'left' | 'right') || 'left',
+                );
+                result = `Clicked at (${action.config.x}, ${action.config.y})`;
+                break;
+              case 'mouse_move':
+                await computerControl.moveMouse(
+                  Number(action.config.x) || 0,
+                  Number(action.config.y) || 0,
+                );
+                result = `Moved mouse to (${action.config.x}, ${action.config.y})`;
+                break;
+              case 'type_text':
+                await computerControl.typeText(String(action.config.text || ''));
+                result = `Typed: ${action.config.text}`;
+                break;
+              case 'key_press':
+                await computerControl.pressKey(String(action.config.key || 'enter'));
+                result = `Pressed key: ${action.config.key}`;
+                break;
+              case 'screenshot':
+                await computerControl.captureScreen();
+                result = 'Screenshot captured';
+                break;
+              case 'open_app':
+                await computerControl.openApplication(
+                  String(action.config.name || action.config.path || ''),
+                  action.config.path ? String(action.config.path) : undefined,
+                );
+                result = `Opened app: ${action.config.name || action.config.path}`;
+                break;
+              default:
+                result = `Unknown computer action: ${actionType}`;
+            }
+            break;
+          }
         }
 
         run.actionResults.push({ actionId: action.id, status: 'completed', result });
@@ -353,3 +397,4 @@ export class AutomationBuilder {
     };
   }
 }
+

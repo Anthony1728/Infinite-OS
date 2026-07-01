@@ -149,3 +149,4 @@ export function getMemoryStats(): { total: number; byType: Record<string, number
   const byType = Object.fromEntries(rows.map((r) => [r.type, r.count]));
   return { total, byType };
 }
+

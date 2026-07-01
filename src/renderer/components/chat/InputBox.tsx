@@ -49,3 +49,4 @@ export function InputBox({ disabled, streaming, onAbort }: { disabled: boolean; 
     </div>
   );
 }
+

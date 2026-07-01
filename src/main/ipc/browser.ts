@@ -45,3 +45,4 @@ export function registerBrowserIpc(): void {
     return browserAgent.getStats();
   });
 }
+

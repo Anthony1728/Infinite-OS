@@ -120,3 +120,4 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
     </motion.div>
   );
 }
+

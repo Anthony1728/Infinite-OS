@@ -14,6 +14,7 @@ import { DeployModal } from './components/deploy/DeployModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { PermissionDialog } from './components/permissions/PermissionDialog';
 import { ToastContainer } from './components/notifications/ToastContainer';
+import { InfiniteLogo } from './components/brand/InfiniteLogo';
 
 type AuthView = 'login' | 'register';
 
@@ -22,15 +23,10 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
   const [statusText, setStatusText] = useState('Restoring workspace…');
 
   useEffect(() => {
-    const statusTexts = [
-      'Restoring workspace…',
-      'Loading sessions…',
-      'Preparing AI engine…',
-      'Almost ready…',
-    ];
-    
+    const statusTexts = ['Restoring workspace…', 'Loading sessions…', 'Preparing AI engine…', 'Almost ready…'];
+
     const interval = setInterval(() => {
-      setProgress(prev => {
+      setProgress((prev) => {
         const newProgress = prev + 4;
         if (newProgress >= 100) {
           clearInterval(interval);
@@ -47,41 +43,19 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
   }, [onComplete]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center animate-fade-in">
-      <svg className="w-20 h-20 mb-6" viewBox="0 0 200 100" fill="none">
-        <defs>
-          <linearGradient id="loadGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#a855f7">
-              <animate attributeName="stop-color" values="#a855f7;#06b6d4;#ec4899;#a855f7" dur="4s" repeatCount="indefinite"/>
-            </stop>
-            <stop offset="50%" stopColor="#06b6d4">
-              <animate attributeName="stop-color" values="#06b6d4;#ec4899;#a855f7;#06b6d4" dur="4s" repeatCount="indefinite"/>
-            </stop>
-            <stop offset="100%" stopColor="#ec4899">
-              <animate attributeName="stop-color" values="#ec4899;#a855f7;#06b6d4;#ec4899" dur="4s" repeatCount="indefinite"/>
-            </stop>
-          </linearGradient>
-          <filter id="loadGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="4" result="blur"/>
-            <feMerge>
-              <feMergeNode in="blur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        <path 
-          d="M50 50 C50 28, 68 15, 90 15 C112 15, 120 28, 120 50 C120 72, 138 85, 160 85 C182 85, 195 72, 195 50 C195 28, 182 15, 160 15 C138 15, 120 28, 120 50 C120 72, 100 85, 90 85 C68 85, 50 72, 50 50 Z"
-          stroke="url(#loadGrad)" 
-          strokeWidth="8" 
-          strokeLinecap="round"
-          fill="none"
-          filter="url(#loadGlow)"
-        />
-      </svg>
-      <div className="text-gray-500 text-sm mb-4">{statusText}</div>
-      <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
+    <div
+      className="min-h-screen bg-[#08080b] flex flex-col items-center justify-center animate-fade-in"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="relative mb-7">
+        <div className="absolute inset-3 rounded-full bg-indigo-500/10 blur-2xl" />
+        <InfiniteLogo className="relative w-28 h-16" animated labelled />
+      </div>
+      <div className="text-zinc-400 text-[13px] font-medium mb-4 tracking-[0.01em]">{statusText}</div>
+      <div className="w-52 h-1 bg-white/[0.06] rounded-full overflow-hidden ring-1 ring-white/[0.04]">
         <div
-          className="h-full bg-gradient-to-r from-purple-500 via-cyan-500 to-pink-500 transition-all duration-300"
+          className="h-full bg-gradient-to-r from-violet-500 via-cyan-400 to-pink-500 transition-[width] duration-200 ease-out rounded-full"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -90,7 +64,7 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
 }
 
 export function App() {
-  const { isAuthenticated, isNewUser, user } = useAuthStore();
+  const { isAuthenticated, isNewUser } = useAuthStore();
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
   const [showLoading, setShowLoading] = useState(false);
@@ -146,7 +120,7 @@ export function App() {
 
   // Main app
   return (
-    <div className="h-screen w-full flex overflow-hidden text-[11px] selection:bg-indigo-500/30 bg-[#0a0a0f] animate-fade-in">
+    <div className="app-shell h-screen w-full flex overflow-hidden text-[11px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
       <Sidebar
         activeView={activeView}
         onNavChange={setActiveView}
@@ -166,7 +140,7 @@ export function App() {
           <MainView activeView={activeView} onViewChange={setActiveView} />
         </main>
       </div>
-      {rightPanelOpen && <RightPanel />}
+      {rightPanelOpen && <RightPanel onViewChange={setActiveView} />}
       <CommandPalette
         open={commandOpen}
         onOpenChange={setCommandOpen}

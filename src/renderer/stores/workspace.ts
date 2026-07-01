@@ -33,10 +33,10 @@ interface WorkspaceState {
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [], currentWorkspace: null, activity: [], stats: null, loading: false,
-  loadWorkspaces: async () => { try { set({ workspaces: await window.api.workspaceList() as Workspace[] }); } catch {} },
-  loadWorkspace: async (id) => { try { set({ currentWorkspace: await window.api.workspaceGet({ id }) as Workspace }); } catch {} },
-  loadStats: async () => { try { set({ stats: await window.api.workspaceStats() as WorkspaceStats }); } catch {} },
-  loadActivity: async (workspaceId) => { try { set({ activity: await window.api.workspaceGetActivity({ workspaceId }) as WorkspaceActivity[] }); } catch {} },
+  loadWorkspaces: async () => { try { set({ workspaces: await window.api.workspaceList() as Workspace[] }); } catch { /* silent */ } },
+  loadWorkspace: async (id) => { try { set({ currentWorkspace: await window.api.workspaceGet({ id }) as Workspace }); } catch { /* silent */ } },
+  loadStats: async () => { try { set({ stats: await window.api.workspaceStats() as WorkspaceStats }); } catch { /* silent */ } },
+  loadActivity: async (workspaceId) => { try { set({ activity: await window.api.workspaceGetActivity({ workspaceId }) as WorkspaceActivity[] }); } catch { /* silent */ } },
   createWorkspace: async (w) => { await window.api.workspaceCreate(w); await get().loadWorkspaces(); await get().loadStats(); },
   deleteWorkspace: async (id) => { await window.api.workspaceDelete({ id }); await get().loadWorkspaces(); await get().loadStats(); },
   addMember: async (workspaceId, m) => { await window.api.workspaceAddMember({ workspaceId, ...m }); await get().loadWorkspace(workspaceId); },
@@ -44,3 +44,4 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   createProject: async (workspaceId, p) => { await window.api.workspaceCreateProject({ workspaceId, ...p }); await get().loadWorkspace(workspaceId); },
   addResource: async (workspaceId, r) => { await window.api.workspaceAddResource({ workspaceId, ...r }); await get().loadWorkspace(workspaceId); },
 }));
+

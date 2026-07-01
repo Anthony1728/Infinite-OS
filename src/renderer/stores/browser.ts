@@ -47,7 +47,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     try {
       const stats = await window.api.browserStats() as BrowserStats;
       set({ stats });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   createSession: async (name) => {
@@ -87,3 +87,4 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
   setActiveSession: (id) => set({ activeSession: id }),
 }));
+

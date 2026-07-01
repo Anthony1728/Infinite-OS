@@ -46,3 +46,4 @@ export interface ProviderAdapter {
   /** Stream a chat completion. */
   streamChat(req: ChatRequest, apiKey: string, baseUrl?: string): AsyncIterable<StreamChunk>;
 }
+

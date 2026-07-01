@@ -1,18 +1,34 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, VolumeX, Settings, Command, Trash2, Plus, Circle } from 'lucide-react';
+import { Mic, MicOff, Settings, Command, Trash2, Plus } from 'lucide-react';
+
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
 
 export function VoiceView() {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interim, setInterim] = useState('');
-  const [history, setHistory] = useState<any[]>([]);
-  const [customCommands, setCustomCommands] = useState<any[]>([]);
+  const [history, setHistory] = useState<Array<{ id: string; transcript: string; response: string; timestamp: number; intent?: string }>>([]);
+  const [customCommands, setCustomCommands] = useState<Array<{ id: string; trigger: string; action: string }>>([]);
   const [newTrigger, setNewTrigger] = useState('');
   const [newAction, setNewAction] = useState('');
   const [wakeWord, setWakeWord] = useState('hey infinite');
   const [showSettings, setShowSettings] = useState(false);
   const [config, setConfig] = useState({ language: 'en-US', rate: 1, pitch: 1, volume: 1, autoSpeak: true });
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => {
     loadHistory();
@@ -22,42 +38,44 @@ export function VoiceView() {
 
   const loadHistory = async () => {
     try {
-      const h = await (window as any).api.voiceHistory();
+      const h = await window.api.voiceHistory();
       setHistory(h || []);
-    } catch {}
+    } catch { /* silent */ }
   };
 
   const loadCustomCommands = async () => {
     try {
-      const cmds = await (window as any).api.voiceCustomCommands();
+      const cmds = await window.api.voiceCustomCommands();
       setCustomCommands(cmds || []);
-    } catch {}
+    } catch { /* silent */ }
   };
 
   const loadConfig = async () => {
     try {
-      const cfg = await (window as any).api.voiceConfigGet();
+      const cfg = await window.api.voiceConfigGet();
       if (cfg) setConfig(cfg);
-    } catch {}
+    } catch { /* silent */ }
   };
 
   const toggleListening = useCallback(async () => {
     if (listening) {
       recognitionRef.current?.stop();
       setListening(false);
-      await (window as any).api.voiceStopListening();
+      await window.api.voiceStopListening();
     } else {
       if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         alert('Speech recognition is not supported in this browser.');
         return;
       }
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const win = window as { SpeechRecognition?: new () => SpeechRecognitionInstance; webkitSpeechRecognition?: new () => SpeechRecognitionInstance };
+      const SpeechRecognition = win.SpeechRecognition || win.webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = config.language;
 
-      recognition.onresult = async (event: any) => {
+      recognition.onresult = async (event: SpeechRecognitionEvent) => {
         let final = '';
         let interimText = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -72,11 +90,11 @@ export function VoiceView() {
           setTranscript(final);
           setInterim('');
           try {
-            const result = await (window as any).api.voiceProcessTranscript({ transcript: final });
+            const result = await window.api.voiceProcessTranscript({ transcript: final }) as { intent?: string; response?: string } | undefined;
             if (result?.intent === 'wake_word_detected') {
               setListening(true);
             }
-          } catch {}
+          } catch { /* silent */ }
         } else {
           setInterim(interimText);
         }
@@ -87,38 +105,31 @@ export function VoiceView() {
       recognitionRef.current = recognition;
       recognition.start();
       setListening(true);
-      await (window as any).api.voiceStartListening();
+      await window.api.voiceStartListening();
     }
   }, [listening, config.language]);
 
-  const speakText = async (text: string) => {
-    if (!config.autoSpeak) return;
-    try {
-      await (window as any).api.voiceSpeak({ text });
-    } catch {}
-  };
-
   const addCustomCommand = async () => {
     if (!newTrigger || !newAction) return;
-    await (window as any).api.voiceAddCustomCommand({ trigger: newTrigger, action: newAction });
+    await window.api.voiceAddCustomCommand({ trigger: newTrigger, action: newAction });
     setNewTrigger('');
     setNewAction('');
     loadCustomCommands();
   };
 
   const removeCustomCommand = async (trigger: string) => {
-    await (window as any).api.voiceRemoveCustomCommand({ trigger });
+    await window.api.voiceRemoveCustomCommand({ trigger });
     loadCustomCommands();
   };
 
   const updateWakeWord = async () => {
-    await (window as any).api.voiceSetWakeWord({ word: wakeWord });
+    await window.api.voiceSetWakeWord({ word: wakeWord });
   };
 
   const updateConfig = async (partial: Partial<typeof config>) => {
     const newConfig = { ...config, ...partial };
     setConfig(newConfig);
-    await (window as any).api.voiceConfigSet({ config: newConfig });
+    await window.api.voiceConfigSet({ config: newConfig });
   };
 
   return (
@@ -226,7 +237,7 @@ export function VoiceView() {
             {customCommands.map((cmd) => (
               <div key={cmd.trigger} className="flex items-center justify-between p-2 bg-[var(--bg-secondary)] rounded">
                 <div className="text-sm">
-                  <span className="font-mono text-[var(--accent)]">"{cmd.trigger}"</span>
+                  <span className="font-mono text-[var(--accent)]">&quot;{cmd.trigger}&quot;</span>
                   <span className="text-[var(--text-secondary)] mx-2">→</span>
                   <span>{cmd.action}</span>
                 </div>
@@ -272,3 +283,4 @@ export function VoiceView() {
     </div>
   );
 }
+

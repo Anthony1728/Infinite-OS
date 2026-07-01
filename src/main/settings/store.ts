@@ -72,3 +72,4 @@ class SettingsStore {
 }
 
 export const settings = new SettingsStore();
+

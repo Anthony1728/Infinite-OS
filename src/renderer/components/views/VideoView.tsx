@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Film, Plus, Trash2, Scissors, Play, Tag, Clock, Zap, Search } from 'lucide-react';
+import { Film, Plus, Trash2, Scissors, Clock, Zap, Search } from 'lucide-react';
 
 interface VideoProject {
   id: string;
   name: string;
   description: string;
   sourceFile: string;
-  clips: any[];
+  clips: Array<{ id: string; name: string; startTime: number; endTime: number; duration?: number; tags: string[] }>;
   highlights: string[];
   createdAt: number;
 }
@@ -21,21 +21,21 @@ export function VideoView() {
   const [clipStart, setClipStart] = useState('0');
   const [clipEnd, setClipEnd] = useState('60');
   const [clipName, setClipName] = useState('');
-  const [highlights, setHighlights] = useState<any[]>([]);
+  const [highlights, setHighlights] = useState<Array<{ id: string; startTime: number; endTime: number; description: string; name?: string; score?: number }>>([]);
   const [analyzing, setAnalyzing] = useState(false);
 
   useEffect(() => { loadProjects(); }, []);
 
   const loadProjects = async () => {
     try {
-      const p = await (window as any).api.videoListProjects();
+      const p = await window.api.videoListProjects();
       setProjects(p || []);
-    } catch {}
+    } catch { /* silent */ }
   };
 
   const createProject = async () => {
     if (!newName || !newSource) return;
-    const p = await (window as any).api.videoCreateProject({ name: newName, sourceFile: newSource, description: newDesc });
+    const p = await window.api.videoCreateProject({ name: newName, sourceFile: newSource, description: newDesc });
     setSelectedProject(p);
     setShowNewProject(false);
     setNewName('');
@@ -45,7 +45,7 @@ export function VideoView() {
   };
 
   const deleteProject = async (id: string) => {
-    await (window as any).api.videoDeleteProject({ id });
+    await window.api.videoDeleteProject({ id });
     if (selectedProject?.id === id) setSelectedProject(null);
     loadProjects();
   };
@@ -54,22 +54,22 @@ export function VideoView() {
     if (!selectedProject) return;
     setAnalyzing(true);
     try {
-      await (window as any).api.videoAnalyze({ projectId: selectedProject.id });
-    } catch {}
+      await window.api.videoAnalyze({ projectId: selectedProject.id });
+    } catch { /* silent */ }
     setAnalyzing(false);
   };
 
   const findHighlights = async () => {
     if (!selectedProject) return;
     try {
-      const h = await (window as any).api.videoFindHighlights({ projectId: selectedProject.id, maxClips: 10 });
+      const h = await window.api.videoFindHighlights({ projectId: selectedProject.id, maxClips: 10 });
       setHighlights(h || []);
-    } catch {}
+    } catch { /* silent */ }
   };
 
   const extractClip = async () => {
     if (!selectedProject) return;
-    await (window as any).api.videoExtractClip({
+    await window.api.videoExtractClip({
       projectId: selectedProject.id,
       startTime: parseInt(clipStart) || 0,
       endTime: parseInt(clipEnd) || 60,
@@ -201,7 +201,7 @@ export function VideoView() {
                   <Clock size={14} /> Clips ({selectedProject.clips.length})
                 </h3>
                 <div className="space-y-1 max-h-40 overflow-auto">
-                  {selectedProject.clips.map((c: any) => (
+                  {selectedProject.clips.map((c) => (
                     <div key={c.id} className="flex items-center justify-between p-2 bg-[var(--bg-primary)] rounded text-sm">
                       <span className="truncate">{c.name}</span>
                       <span className="text-[var(--text-secondary)]">{c.duration}s</span>
@@ -247,3 +247,4 @@ export function VideoView() {
     </div>
   );
 }
+

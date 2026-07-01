@@ -3,7 +3,7 @@ import { useNotificationStore } from '../../stores/notifications';
 
 export function ComputerControlView() {
   const addToast = useNotificationStore((s) => s.addToast);
-  const [stats, setStats] = useState<{ totalActions: number; screenshotsTaken: number; appsOpened: number } | null>(null);
+  const [stats, setStats] = useState<{ totalMouseActions: number; totalKeyboardActions: number; totalCaptures: number; runningApps: number } | null>(null);
   const [appPath, setAppPath] = useState('');
 
   useEffect(() => {
@@ -58,9 +58,9 @@ export function ComputerControlView() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
-          { label: 'Total Actions', value: stats?.totalActions ?? 0, color: 'from-purple-500 to-pink-500' },
-          { label: 'Screenshots', value: stats?.screenshotsTaken ?? 0, color: 'from-cyan-500 to-blue-500' },
-          { label: 'Apps Opened', value: stats?.appsOpened ?? 0, color: 'from-green-500 to-emerald-500' },
+          { label: 'Mouse Actions', value: stats?.totalMouseActions ?? 0, color: 'from-purple-500 to-pink-500' },
+          { label: 'Key Presses', value: stats?.totalKeyboardActions ?? 0, color: 'from-cyan-500 to-blue-500' },
+          { label: 'Running Apps', value: stats?.runningApps ?? 0, color: 'from-green-500 to-emerald-500' },
         ].map((stat, i) => (
           <div key={i} className="card-premium animate-slide-up" style={{ animationDelay: `${i * 25}ms` }}>
             <div className="flex items-center gap-3">
@@ -147,3 +147,4 @@ export function ComputerControlView() {
     </div>
   );
 }
+

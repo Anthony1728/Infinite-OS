@@ -37,3 +37,4 @@ export function registerCloudIpc(): void {
     return cloudSync.getStats();
   });
 }
+

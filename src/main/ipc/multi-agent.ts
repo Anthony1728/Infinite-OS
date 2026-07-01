@@ -57,3 +57,4 @@ export function registerMultiAgentIpc(): void {
     return multiAgentSystem.getStats();
   });
 }
+

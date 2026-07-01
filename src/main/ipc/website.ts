@@ -49,3 +49,4 @@ export function registerWebsiteIpc(): void {
     return websiteBuilder.getStats();
   });
 }
+

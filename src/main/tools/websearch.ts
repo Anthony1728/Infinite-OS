@@ -81,3 +81,4 @@ function parseResults(html: string): { title: string; url: string; snippet?: str
 
   return out;
 }
+

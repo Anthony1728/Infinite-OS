@@ -62,18 +62,20 @@ export const gemini: ProviderAdapter = {
   },
 };
 
-function toGeminiContents(messages: Message[]): any[] {
-  const contents: any[] = [];
+import type { Content, Part } from '@google/generative-ai';
+
+function toGeminiContents(messages: Message[]): Content[] {
+  const contents: Content[] = [];
   const toolIdToName = new Map<string, string>();
   
   for (const m of messages) {
-    const parts: any[] = [];
+    const parts: Part[] = [];
     if (m.role === 'assistant') {
       for (const b of m.content) {
         if (b.type === 'text' && b.text) parts.push({ text: b.text });
         else if (b.type === 'tool_use') {
           toolIdToName.set(b.id, b.name);
-          parts.push({ functionCall: { name: b.name, args: typeof b.input === 'string' ? JSON.parse(b.input) : b.input as object } });
+          parts.push({ functionCall: { name: b.name, args: typeof b.input === 'string' ? JSON.parse(b.input) : (b.input as Record<string, unknown>) } });
         }
       }
       if (parts.length > 0) contents.push({ role: 'model', parts });
@@ -95,3 +97,4 @@ function toGeminiContents(messages: Message[]): any[] {
   }
   return contents;
 }
+

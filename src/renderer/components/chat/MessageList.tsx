@@ -14,3 +14,4 @@ export function MessageList({ messages }: { messages: Message[] }) {
     </div>
   );
 }
+

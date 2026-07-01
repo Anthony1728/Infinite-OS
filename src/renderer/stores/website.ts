@@ -57,14 +57,14 @@ export const useWebsiteStore = create<WebsiteState>((set, get) => ({
     try {
       const templates = await window.api.websiteTemplates() as WebsiteTemplate[];
       set({ templates });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   loadStats: async () => {
     try {
       const stats = await window.api.websiteStats() as WebsiteStats;
       set({ stats });
-    } catch {}
+    } catch { /* silent */ }
   },
 
   createWebsite: async (args) => {
@@ -94,3 +94,4 @@ export const useWebsiteStore = create<WebsiteState>((set, get) => ({
     await get().loadWebsites();
   },
 }));
+

@@ -6,6 +6,9 @@ interface CurrentSettings {
   provider: string;
   model: string;
   cwd: string;
+  brainMode?: boolean;
+  ollamaModel?: string;
+  hasApiKey?: boolean;
 }
 
 function loadCurrent(): CurrentSettings {
@@ -29,21 +32,30 @@ export function SettingsView() {
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
   const [cwd, setCwd] = useState(() => loadCurrent().cwd);
+  const [brainMode, setBrainMode] = useState(() => loadCurrent().brainMode ?? true);
   const currentModel = loadCurrent().model;
   const addToast = useNotificationStore((s) => s.addToast);
 
   useEffect(() => {
+    const syncFromStorage = () => {
+      const cur = loadCurrent();
+      setBrainMode(cur.brainMode ?? true);
+    };
+    window.addEventListener('storage', syncFromStorage);
     window.api.listProviders().then((p: ProviderInfo[]) => {
       setProviders(p);
       const cur = loadCurrent();
       setActiveProvider(cur.provider);
       setCwd(cur.cwd);
+      setBrainMode(cur.brainMode ?? true);
 
       // Check if API key already exists for this provider
       window.api.hasProviderKey({ provider: cur.provider }).then((has: boolean) => {
         if (has) {
           setApiKeyLoaded(true);
           setStatus('ok');
+          // Also flag that API key is available for chat routing
+          saveCurrent({ hasApiKey: true });
           // Load models list
           window.api.listProviderModels({ provider: cur.provider }).then((list: unknown[]) => {
             setModels(list as { id: string; label: string; free: boolean }[]);
@@ -51,6 +63,8 @@ export function SettingsView() {
         }
       });
     });
+
+    return () => window.removeEventListener('storage', syncFromStorage);
   }, []);
 
   const test = async () => {
@@ -63,8 +77,8 @@ export function SettingsView() {
           await window.api.setProviderKey({ provider: activeProvider, key: apiKey });
           setApiKeyLoaded(true);
         }
-        // Always save provider to localStorage
-        saveCurrent({ provider: activeProvider });
+        // Always save provider to localStorage, and flag if API key is available
+        saveCurrent({ provider: activeProvider, hasApiKey: !!(apiKey || apiKeyLoaded) });
 
         const list = await window.api.listProviderModels({ provider: activeProvider, apiKey });
         const modelList = list as { id: string; label: string; free: boolean }[];
@@ -91,7 +105,9 @@ export function SettingsView() {
   };
 
   const pickModel = (id: string) => {
-    saveCurrent({ provider: activeProvider, model: id });
+    const patch: Partial<CurrentSettings> = { provider: activeProvider, model: id };
+    if (activeProvider === 'ollama') patch.ollamaModel = id;
+    saveCurrent(patch);
     addToast({ type: 'success', title: `Model set to ${id}` });
   };
 
@@ -101,6 +117,13 @@ export function SettingsView() {
   };
 
   const provider = providers.find((p) => p.id === activeProvider);
+
+  const toggleBrainMode = () => {
+    const newVal = !brainMode;
+    setBrainMode(newVal);
+    saveCurrent({ brainMode: newVal });
+    addToast({ type: 'success', title: newVal ? 'InfiniteAI Brain Mode enabled — all chats use the Brain' : 'InfiniteAI Brain Mode disabled — using connected API' });
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
@@ -121,6 +144,39 @@ export function SettingsView() {
             />
             <button onClick={saveCwd} className="btn-premium whitespace-nowrap">Save</button>
           </div>
+        </div>
+
+        {/* InfiniteAI Brain Mode */}
+        <div className="card-premium">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium text-textMain">InfiniteAI Brain Mode</h3>
+              <p className="text-xs text-textMuted mt-1">
+                When enabled, all chats go through the Infinite AI Brain — learning from every interaction and giving direct answers from accumulated knowledge.
+              </p>
+            </div>
+            <button
+              onClick={toggleBrainMode}
+              className={`relative w-12 h-6 rounded-full transition-all duration-200 flex-shrink-0 ml-4 ${
+                brainMode
+                  ? 'bg-gradient-to-r from-purple-500 to-cyan-500 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
+                  : 'bg-white/10 border border-white/10'
+              }`}
+            >
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-all duration-200 ${
+                brainMode ? 'left-[26px]' : 'left-0.5'
+              }`} />
+            </button>
+          </div>
+          {brainMode && (
+            <div className="mt-3 px-3 py-2 bg-gradient-to-r from-purple-500/10 via-cyan-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-400 via-cyan-400 to-pink-400 animate-pulse" />
+                <span className="text-xs text-purple-300 font-medium">Brain Mode Active</span>
+              </div>
+              <p className="text-[11px] text-textMuted mt-1">The Brain learns from every conversation and gets smarter over time. API keys are still used for external tools when needed.</p>
+            </div>
+          )}
         </div>
 
         {/* AI Provider */}
@@ -166,6 +222,19 @@ export function SettingsView() {
               >
                 {status === 'testing' ? 'Testing...' : 'Test & Save'}
               </button>
+            </div>
+          )}
+
+          {!provider?.requiresApiKey && (
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={test}
+                disabled={status === 'testing'}
+                className="btn-premium whitespace-nowrap"
+              >
+                {status === 'testing' ? 'Connecting...' : 'Test Connection'}
+              </button>
+              <span className="text-xs text-textMuted self-center">No API key needed — runs locally</span>
             </div>
           )}
 
@@ -244,3 +313,4 @@ export function SettingsView() {
     </div>
   );
 }
+

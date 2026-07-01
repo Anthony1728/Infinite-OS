@@ -121,7 +121,7 @@ export const useSessionStore = create<SessionStore>()(
               openTabs: user.lastSession.openChats ?? [],
               fileExplorerPath: user.lastSession.fileExplorerPath ?? '.',
               terminalOpen: user.lastSession.terminalState === 'open',
-              recentActivity: user.lastSession.recentActivity ?? [],
+              recentActivity: (user.lastSession.recentActivity ?? []) as WorkspaceState['recentActivity'],
             },
           });
           setTimeout(() => set({ isRestoring: false }), 500);
@@ -134,7 +134,7 @@ export const useSessionStore = create<SessionStore>()(
         if (user) {
           useAuthStore.getState().updateSessionState({
             lastActiveView: workspace.currentView,
-            lastProject: workspace.lastProject,
+            lastProject: workspace.lastProject ?? undefined,
             openChats: workspace.openTabs,
             fileExplorerPath: workspace.fileExplorerPath,
             terminalState: workspace.terminalOpen ? 'open' : 'closed',
@@ -149,3 +149,4 @@ export const useSessionStore = create<SessionStore>()(
     }
   )
 );
+

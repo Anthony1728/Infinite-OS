@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
-import log from 'electron-log';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
 
 export interface VideoClip {
   id: string;
@@ -201,3 +199,4 @@ class VideoClippingEngine extends EventEmitter {
 }
 
 export const videoEngine = new VideoClippingEngine();
+

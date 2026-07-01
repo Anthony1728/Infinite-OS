@@ -129,3 +129,4 @@ export function getModelNotification(selection: ModelSelection): string | null {
   if (selection.free) return null;
   return `Using paid model: ${selection.model} (${selection.provider}). ${selection.reason}`;
 }
+

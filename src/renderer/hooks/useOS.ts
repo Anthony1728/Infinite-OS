@@ -295,3 +295,4 @@ export function useOS(options: UseOSOptions = {}): UseOSReturn {
 }
 
 export default useOS;
+

@@ -24,3 +24,4 @@ export function QuickTabs({ active, onChange }: { active: string; onChange: (id:
     </div>
   );
 }
+

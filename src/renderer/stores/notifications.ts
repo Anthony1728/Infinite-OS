@@ -30,3 +30,4 @@ export const useNotificationStore = create<NotificationState>((set) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
 }));
+

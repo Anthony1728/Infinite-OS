@@ -37,3 +37,4 @@ export function registerComputerIpc(): void {
     return computerControl.getStats();
   });
 }
+

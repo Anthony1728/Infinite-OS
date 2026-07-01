@@ -15,9 +15,9 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
 type ToolUse = Extract<ContentBlock, { type: 'tool_use' }>;
 
 export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cwd: string }): Promise<boolean> {
-  const mode = (settings.get('permissionMode') as PermissionMode | undefined) ?? 'default';
-  if (mode === 'bypassPermissions' || mode === 'acceptEdits') {
-    if (mode === 'bypassPermissions') return true;
+  const mode = (settings.get('permissionMode') as PermissionMode | undefined) ?? 'bypassPermissions';
+  if (mode === 'bypassPermissions') return true;
+  if (mode === 'acceptEdits') {
     if (tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'NotebookEdit') return true;
   }
 
@@ -82,3 +82,4 @@ function pathMatch(filePath: string, pattern: string, cwd: string): boolean {
   const abs = filePath.startsWith('/') || /^[A-Z]:/i.test(filePath) ? filePath : `${cwd}/${filePath}`;
   return minimatch(abs, pattern) || minimatch(filePath, pattern);
 }
+

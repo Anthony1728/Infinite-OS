@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
-import { TestTube, Play, Plus, Trash2, CheckCircle2, XCircle, SkipForward, Zap, BarChart3 } from 'lucide-react';
+import { TestTube, Play, Plus, Trash2, CheckCircle2, XCircle, SkipForward, Zap } from 'lucide-react';
 
 interface TestSuite {
   id: string;
   name: string;
   description: string;
   framework: string;
-  tests: any[];
+  tests: Array<{ id: string; name: string; description: string; status: string; type?: string; tags?: string[] }>;
   status: string;
   results?: { total: number; passed: number; failed: number; skipped: number; duration: number };
 }
@@ -25,15 +25,15 @@ export function TestView() {
   useEffect(() => { loadSuites(); loadStats(); }, []);
 
   const loadSuites = async () => {
-    try { setSuites(await (window as any).api.testListSuites()); } catch {}
+    try { setSuites(await window.api.testListSuites()); } catch { /* silent */ }
   };
   const loadStats = async () => {
-    try { setStats(await (window as any).api.testStats()); } catch {}
+    try { setStats(await window.api.testStats()); } catch { /* silent */ }
   };
 
   const createSuite = async () => {
     if (!newName) return;
-    await (window as any).api.testCreateSuite({ name: newName, framework: newFramework, description: newDesc });
+    await window.api.testCreateSuite({ name: newName, framework: newFramework, description: newDesc });
     setShowNew(false);
     setNewName('');
     setNewDesc('');
@@ -41,14 +41,14 @@ export function TestView() {
   };
 
   const deleteSuite = async (id: string) => {
-    await (window as any).api.testDeleteSuite({ id });
+    await window.api.testDeleteSuite({ id });
     if (selectedSuite?.id === id) setSelectedSuite(null);
     loadSuites();
     loadStats();
   };
 
   const runSuite = async (suite: TestSuite) => {
-    const result = await (window as any).api.testRunSuite({ suiteId: suite.id });
+    const result = await window.api.testRunSuite({ suiteId: suite.id });
     if (result) {
       setSelectedSuite({ ...suite, results: result, status: result.failed > 0 ? 'failed' : 'passed' });
     }
@@ -60,14 +60,14 @@ export function TestView() {
     if (!genDesc) return;
     setGenerating(true);
     try {
-      const tests = await (window as any).api.testGenerateTests({ description: genDesc });
+      const tests = await window.api.testGenerateTests({ description: genDesc });
       if (selectedSuite && tests?.length) {
         for (const t of tests) {
-          await (window as any).api.testAddTest({ suiteId: selectedSuite.id, test: t });
+          await window.api.testAddTest({ suiteId: selectedSuite.id, test: t });
         }
         loadSuites();
       }
-    } catch {}
+    } catch { /* silent */ }
     setGenerating(false);
   };
 
@@ -213,14 +213,14 @@ export function TestView() {
             </div>
 
             <div className="flex-1 overflow-auto space-y-1">
-              {selectedSuite.tests.map((t: any) => (
+              {selectedSuite.tests.map((t: { id: string; name: string; type?: string; status?: string; tags?: string[] }) => (
                 <div key={t.id} className="flex items-center gap-3 p-3 bg-[var(--bg-secondary)] rounded">
                   {statusIcon(t.status || 'idle')}
                   <div className="flex-1">
                     <span className="text-sm font-medium">{t.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] ml-2">{t.type}</span>
                   </div>
-                  {t.tags?.length > 0 && (
+                  {t.tags && t.tags.length > 0 && (
                     <div className="flex gap-1">
                       {t.tags.map((tag: string) => (
                         <span key={tag} className="text-xs px-1.5 py-0.5 bg-[var(--bg-tertiary)] rounded">{tag}</span>
@@ -243,3 +243,4 @@ export function TestView() {
     </div>
   );
 }
+

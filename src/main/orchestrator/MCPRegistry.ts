@@ -81,3 +81,4 @@ export function getMCPRegistry(): InMemoryMCPRegistry {
 export function createMCPRegistry(): InMemoryMCPRegistry {
   return new InMemoryMCPRegistry();
 }
+

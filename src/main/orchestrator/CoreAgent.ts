@@ -302,7 +302,7 @@ export class CoreAgent {
         apiKey,
       );
 
-      let assistantContent: ContentBlock[] = [];
+      const assistantContent: ContentBlock[] = [];
       let stopReason = 'end_turn';
       const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
 
@@ -434,7 +434,7 @@ export class CoreAgent {
         apiKey,
       );
 
-      let assistantContent: ContentBlock[] = [];
+      const assistantContent: ContentBlock[] = [];
       let stopReason = 'end_turn';
       const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
 
@@ -620,3 +620,4 @@ export function getCoreAgent(): CoreAgent {
 export function createCoreAgent(options?: CoreAgentOptions): CoreAgent {
   return new CoreAgent(options);
 }
+

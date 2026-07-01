@@ -45,3 +45,4 @@ export function registerAutomationIpc(): void {
     return automationBuilder.getStats();
   });
 }
+

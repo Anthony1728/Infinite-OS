@@ -45,3 +45,4 @@ export function registerPluginIpc(): void {
     return pluginStore.getStats();
   });
 }
+
