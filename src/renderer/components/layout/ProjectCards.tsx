@@ -1,99 +1,142 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-const PROJECTS = [
-  {
-    title: 'Client App',
-    color: '#60a5fa',
-    items: [
-      { name: 'components/', icon: 'folder', color: '#60a5fa' },
-      { name: 'hooks/', icon: 'folder', color: '#60a5fa' },
-      { name: 'package.json', icon: 'file', color: '#a1a1aa' },
-    ],
-  },
-  {
-    title: 'Core Server',
-    color: '#10b981',
-    items: [
-      { name: 'controllers/', icon: 'folder', color: '#10b981' },
-      { name: 'middleware/', icon: 'folder', color: '#10b981' },
-      { name: 'server.js', icon: 'file', color: '#a1a1aa' },
-    ],
-  },
-  {
-    title: 'DB Cluster',
-    color: '#c084fc',
-    items: [
-      { name: 'migrations/', icon: 'folder', color: '#c084fc' },
-      { name: 'seeds/', icon: 'folder', color: '#c084fc' },
-      { name: 'schema.sql', icon: 'file', color: '#f472b6' },
-    ],
-  },
-  {
-    title: 'System Docs',
-    color: '#a1a1aa',
-    items: [
-      { name: 'README.md', icon: 'file', color: '#38bdf8' },
-      { name: 'ARCH.md', icon: 'file', color: '#a1a1aa' },
-    ],
-  },
-];
-
-export function ProjectCards() {
-  const [deployed, setDeployed] = useState(true);
-
-  return (
-    <div className="mt-4 bg-bgPanel border border-borderSubtle rounded-xl p-3.5 flex flex-col gap-3.5 w-full max-w-4xl">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-borderSubtle/60 pb-2">
-        <div className="flex items-center gap-1.5">
-          <span className="font-semibold text-textMain">Project Tree Architecture</span>
-          <span className="text-[9px] text-textMuted bg-bgMain px-1.5 py-0.5 rounded border border-borderSubtle">main</span>
-          <div className="flex -space-x-1 ml-2">
-            <div className="w-4 h-4 rounded-full bg-indigo-500 border border-bgPanel text-[7px] text-white flex items-center justify-center">A</div>
-            <div className="w-4 h-4 rounded-full bg-emerald-500 border border-bgPanel text-[7px] text-white flex items-center justify-center">B</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2.5 text-textMuted">
-          <svg className="w-3.5 h-3.5 hover:text-textMain cursor-pointer" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-          <div className="w-px h-2.5 bg-borderSubtle" />
-          <svg className="w-3.5 h-3.5 hover:text-textMain cursor-pointer" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
-        </div>
-      </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {PROJECTS.map((p) => (
-          <div key={p.title} className="space-y-1.5">
-            <div className="text-textMain font-medium mb-0.5 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color }} /> {p.title}
-            </div>
-            {p.items.map((it) => (
-              <div key={it.name} className="text-textMuted hover:text-textMain cursor-pointer flex items-center gap-1.5">
-                <span style={{ color: it.color }}>{it.icon === 'folder' ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}</span> {it.name}
-              </div>
-            ))}
-          </div>
-        ))}
-
-        {/* Deploy */}
-        <div className="space-y-1.5">
-          <div className="text-textMain font-medium">Vercel Pipeline</div>
-          <div className="bg-bgMain border border-borderSubtle rounded-lg p-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="font-semibold text-textMain flex items-center gap-1">&#9650; Production</span>
-              <span className="text-[7px] text-brandGreen bg-brandGreen/10 px-1 py-0.5 rounded font-bold uppercase">Live</span>
-            </div>
-            <div className="text-[9px] text-textMuted truncate font-mono mb-2">app.infinityai.dev</div>
-            <button
-              onClick={() => setDeployed((d) => !d)}
-              className="w-full py-1 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded font-medium text-[9px] shadow-md"
-            >
-              {deployed ? 'Open Url' : 'Deploy'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+interface Entry {
+  name: string;
+  isDirectory: boolean;
+}
+interface Group {
+  title: string;
+  items: Entry[];
 }
 
+export function ProjectCards({
+  onOpenWorkspace,
+  onOpenDeploy,
+}: {
+  onOpenWorkspace: () => void;
+  onOpenDeploy: () => void;
+}) {
+  const [projectName, setProjectName] = useState('Project');
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        const cwd = settings.cwd ?? '.';
+        const normalized = cwd.replace(/\\/g, '/').replace(/\/$/, '');
+        setProjectName(normalized.split('/').pop() || 'Project');
+        const root = (await window.api.fileRead({ path: cwd })) as { type?: string; entries?: Entry[] };
+        const entries = root.entries ?? [];
+        const directories = entries.filter((entry) => entry.isDirectory && !entry.name.startsWith('.')).slice(0, 4);
+        const nextGroups = await Promise.all(
+          directories.map(async (directory) => {
+            try {
+              const child = (await window.api.fileRead({ path: `${cwd}/${directory.name}` })) as { entries?: Entry[] };
+              return {
+                title: directory.name,
+                items: (child.entries ?? []).filter((entry) => !entry.name.startsWith('.')).slice(0, 4),
+              };
+            } catch {
+              return { title: directory.name, items: [] };
+            }
+          }),
+        );
+        if (nextGroups.length < 4) {
+          const files = entries.filter((entry) => !entry.isDirectory && !entry.name.startsWith('.')).slice(0, 4);
+          if (files.length) nextGroups.push({ title: 'Root', items: files });
+        }
+        if (!cancelled) setGroups(nextGroups.slice(0, 4));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    window.addEventListener('storage', load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('storage', load);
+    };
+  }, []);
+
+  return (
+    <section className="mt-5 w-full rounded-xl border border-white/[0.07] bg-[#0c1019] p-6 shadow-[0_14px_36px_rgba(0,0,0,.16)]">
+      <div className="flex items-center justify-between pb-2 border-b border-white/[0.055]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[11px] font-semibold text-zinc-200 truncate">{projectName}</span>
+          <span className="rounded border border-white/[0.06] bg-white/[0.03] px-1.5 py-0.5 text-[8px] text-zinc-600">
+            workspace
+          </span>
+        </div>
+        <button onClick={onOpenWorkspace} className="icon-button w-6 h-6" aria-label="Open full workspace">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.75 3.75h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Zm-10 10h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Z"
+            />
+          </svg>
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-6 pt-4 min-h-[104px]">
+        {loading ? (
+          <div className="col-span-4 flex items-center text-[10px] text-zinc-600">Loading workspace…</div>
+        ) : groups.length === 0 ? (
+          <div className="col-span-4 flex items-center text-[10px] text-zinc-600">
+            Choose a project folder in Settings to populate the workspace.
+          </div>
+        ) : (
+          groups.map((group) => (
+            <button
+              key={group.title}
+              onClick={onOpenWorkspace}
+              className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 text-left hover:border-indigo-500/25 hover:bg-white/[0.03] transition-colors min-w-0"
+            >
+              <span className="block text-[10px] font-medium text-zinc-300 truncate mb-1.5">{group.title}</span>
+              {group.items.length === 0 ? (
+                <span className="text-[8px] text-zinc-700">Empty</span>
+              ) : (
+                group.items.map((item) => (
+                  <span key={item.name} className="flex items-center gap-1.5 py-0.5 text-[8px] text-zinc-600 truncate">
+                    <svg
+                      className={item.isDirectory ? 'w-2.5 h-2.5 text-blue-400' : 'w-2.5 h-2.5 text-zinc-500'}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d={
+                          item.isDirectory
+                            ? 'M3.75 6.75h6l1.5 2.25h9v9.75a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5v-12Z'
+                            : 'M6 3.75h8.25L18 7.5v12.75H6V3.75Z'
+                        }
+                      />
+                    </svg>
+                    <span className="truncate">{item.name}</span>
+                  </span>
+                ))
+              )}
+            </button>
+          ))
+        )}
+        <div className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 flex flex-col justify-between">
+          <div>
+            <span className="block text-[10px] font-medium text-zinc-300">Deploy</span>
+            <span className="block mt-1 text-[8px] text-zinc-600">Build and release this workspace.</span>
+          </div>
+          <button
+            onClick={onOpenDeploy}
+            className="mt-2 h-6 rounded-md bg-gradient-to-r from-indigo-600 to-violet-600 text-[8px] font-medium text-white hover:from-indigo-500 hover:to-violet-500"
+          >
+            Open deploy
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}

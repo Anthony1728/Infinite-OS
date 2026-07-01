@@ -102,6 +102,9 @@ export interface AgentExecutionConfig {
  */
 export function spawnSubagent(opts: SpawnOpts): { state: AgentRunState; done: Promise<string> } {
   const agent = getAgent(opts.agentId);
+  if (!agent) {
+    throw new Error("Agent not found: " + JSON.stringify(opts.agentId) + ". Check that the agent exists with listAgents().");
+  }
   const state: AgentRunState = {
     id: uuid(),
     agentId: opts.agentId,

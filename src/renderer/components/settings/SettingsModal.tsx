@@ -110,13 +110,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setStatus('testing');
     setStatusMessage('Checking provider connection…');
     try {
+      if (apiKey.trim()) {
+        await window.api.setProviderKey({ provider: activeProvider, key: apiKey.trim() });
+        setApiKeyLoaded(true);
+      }
       const res = await window.api.testProvider({ provider: activeProvider, apiKey });
       if (res.ok) {
         setStatus('ok');
-        if (apiKey) {
-          await window.api.setProviderKey({ provider: activeProvider, key: apiKey });
-          setApiKeyLoaded(true);
-        }
         const list = await window.api.listProviderModels({ provider: activeProvider, apiKey });
         const nextModels = list as { id: string; label: string; free: boolean }[];
         setModels(nextModels);
@@ -133,7 +133,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         window.dispatchEvent(new Event('storage'));
       } else {
         setStatus('fail');
-        setStatusMessage(res.error || 'The provider rejected this credential.');
+        setStatusMessage(
+          `Key saved, but the provider check failed: ${res.error || 'The provider rejected this credential.'}`,
+        );
       }
     } catch (error) {
       setStatus('fail');

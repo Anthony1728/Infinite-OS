@@ -11,6 +11,7 @@ import { webfetch } from './webfetch.js';
 import { websearch } from './websearch.js';
 import { todowrite } from './todowrite.js';
 import { agent as agentTool } from './agent.js';
+import { createCustomAgentTool } from './custom-agent.js';
 import { computerTool } from './computer.js';
 import { browserTool } from './browser.js';
 import { selfImprove } from './self-improve.js';
@@ -23,7 +24,7 @@ export function registerBuiltinTools(): void {
   for (const t of [
     // Existing tools
     bash, read, write, edit, glob, grep, webfetch, websearch,
-    todowrite, agentTool, computerTool, browserTool, selfImprove,
+    todowrite, agentTool, createCustomAgentTool, computerTool, browserTool, selfImprove,
     // Clipboard tools
     clipboardTool, clipboardReadTool, clipboardWriteTool, clipboardImageTool,
     // Notification tools

@@ -75,13 +75,15 @@ export function Sidebar({
   const { sessions, currentSessionId, loadSessions, createSession, selectSession, deleteSession } = useChatStore();
   const { runs } = useAgentsStore();
   const { user, logout } = useAuthStore();
-  const [currentModel, setCurrentModel] = useState('gemma-4-31b-it');
+  const [currentModel, setCurrentModel] = useState('No model selected');
+  const [providerConnected, setProviderConnected] = useState(false);
+  const [workspaceConnected, setWorkspaceConnected] = useState(false);
 
   const activeAgents = runs.filter((r) => r.status === 'running').length;
 
   useEffect(() => {
     loadSessions();
-    const updateModel = () => {
+    const updateModel = async () => {
       try {
         const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
         if (cur.model) {
@@ -92,11 +94,14 @@ export function Sidebar({
               ?.replace(/:free$/, '') ?? cur.model;
           setCurrentModel(name);
         }
+        setWorkspaceConnected(Boolean(cur.cwd && cur.cwd !== '.'));
+        const result = await window.api.testProvider({ provider: cur.provider ?? 'openrouter', apiKey: '' });
+        setProviderConnected(Boolean(result.ok));
       } catch {
-        /* ignore */
+        setProviderConnected(false);
       }
     };
-    updateModel();
+    void updateModel();
     window.addEventListener('storage', updateModel);
     return () => window.removeEventListener('storage', updateModel);
   }, [loadSessions]);
@@ -128,13 +133,13 @@ export function Sidebar({
         {!collapsed && (
           <button
             onClick={() => onNavChange('chats')}
-            className="flex items-center gap-2.5 min-w-0 text-left rounded-lg"
+            className="flex items-center gap-3 min-w-0 text-left rounded-lg"
             aria-label="Open chats"
           >
-            <span className="w-8 h-7 rounded-lg bg-white/[0.035] border border-white/[0.07] flex items-center justify-center shadow-sm">
-              <InfiniteLogo className="w-6 h-4" />
+            <span className="w-10 h-8 flex items-center justify-center">
+              <InfiniteLogo className="w-10 h-6" />
             </span>
-            <span className="text-[13px] font-semibold text-zinc-100 tracking-[-0.01em] truncate">InfiniteAI</span>
+            <span className="text-[12px] font-semibold text-zinc-100 tracking-[0.08em] truncate">INFINITE AI</span>
           </button>
         )}
         <button onClick={onToggleCollapse} className="icon-button w-7 h-7" title={collapsed ? 'Expand' : 'Collapse'}>
@@ -167,7 +172,7 @@ export function Sidebar({
       )}
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 space-y-0.5 custom-scrollbar">
+      <nav className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
         {NAV.map((n) => {
           const isActive = activeView === n.id;
           return (
@@ -175,7 +180,7 @@ export function Sidebar({
               key={n.id}
               onClick={() => onNavChange(n.id)}
               title={collapsed ? n.label : undefined}
-              className={`group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
+              className={`group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2.5 rounded-lg transition-all duration-150 text-xs ${
                 isActive
                   ? 'bg-white/[0.06] text-white font-medium'
                   : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
@@ -201,7 +206,7 @@ export function Sidebar({
         {/* Starred section - only show when there are active starred items */}
         {!collapsed && starredItems.length > 0 && (
           <>
-            <div className="pt-6 pb-2 px-2.5 text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
+            <div className="pt-7 pb-2.5 px-2.5 text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
               Starred
             </div>
             {starredItems.map((item) => (
@@ -220,7 +225,7 @@ export function Sidebar({
         {/* Recent Sessions */}
         {!collapsed && sessions.length > 0 && (
           <>
-            <div className="pt-6 pb-2 px-2.5 text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
+            <div className="pt-7 pb-2.5 px-2.5 text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
               Recent
             </div>
             {sessions.slice(0, 3).map((s) => (
@@ -271,7 +276,7 @@ export function Sidebar({
 
       {/* Bottom: Model + User */}
       {!collapsed && (
-        <div className="p-3 border-t border-white/[0.06] space-y-2">
+        <div className="p-3.5 border-t border-white/[0.06] space-y-2.5">
           {/* Model pill */}
           <button
             onClick={onOpenSettings}
@@ -316,6 +321,28 @@ export function Sidebar({
               </span>
             </div>
           )}
+
+          <div className="px-1.5 pt-1 border-t border-white/[0.05]">
+            <div className="text-[8px] uppercase tracking-[0.14em] text-zinc-700 mb-1.5">Connected</div>
+            <div className="space-y-1 text-[9px]">
+              <div className="flex items-center gap-2 text-zinc-500">
+                <span className="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-emerald-400/20" />
+                Local PC
+              </div>
+              <div className="flex items-center gap-2 text-zinc-500">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full border ${providerConnected ? 'border-emerald-400 bg-emerald-400/20' : 'border-amber-400 bg-amber-400/10'}`}
+                />
+                AI provider
+              </div>
+              <div className="flex items-center gap-2 text-zinc-500">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full border ${workspaceConnected ? 'border-emerald-400 bg-emerald-400/20' : 'border-zinc-600'}`}
+                />
+                Workspace
+              </div>
+            </div>
+          </div>
 
           {/* User */}
           <div className="flex items-center gap-2.5 pt-1 border-t border-white/[0.06] cursor-pointer hover:bg-white/[0.03] rounded-lg px-1.5 py-2 transition-all duration-150 group">

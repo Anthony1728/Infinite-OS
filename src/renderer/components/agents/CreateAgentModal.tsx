@@ -18,6 +18,7 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
   const [maxTurns, setMaxTurns] = useState(20);
   const [creating, setCreating] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -45,6 +46,8 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
       });
       setDone(true);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      setError(msg);
       console.error('Failed to create agent:', err);
     }
     setCreating(false);
@@ -242,6 +245,11 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
                   {creating ? 'Creating...' : 'Create Agent'}
                 </button>
               </div>
+              {error && (
+                <div className="mt-3 px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg text-xs text-red-400">
+                  <strong>Failed to create agent:</strong> {error}
+                </div>
+              )}
             </>
           )}
         </div>

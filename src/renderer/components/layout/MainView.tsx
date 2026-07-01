@@ -6,14 +6,15 @@ import { SettingsView } from '../views/SettingsView';
 import { AgentsView } from '../views/AgentsView';
 import { AutomationView } from '../views/AutomationView';
 import { WorkspaceView } from '../views/WorkspaceView';
+import { InfiniteCanvas } from '../workspace/InfiniteCanvas';
 import { useSessionStore } from '../../stores/session';
 
 function ProjectsView() {
   return (
-    <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
-      <h1 className="text-2xl font-bold mb-4 text-white">Projects</h1>
-      <p className="text-gray-500 text-sm mb-6">Manage your projects and deployments.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="flex-1 overflow-y-auto p-8 animate-fade-in">
+      <h1 className="text-2xl font-bold mb-5 text-white">Projects</h1>
+      <p className="text-gray-500 text-sm mb-7">Manage your projects and deployments.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {[
           {
             name: 'SaaS Dashboard',
@@ -74,9 +75,10 @@ function ProjectsView() {
 interface MainViewProps {
   activeView: string;
   onViewChange: (view: string) => void;
+  onOpenDeploy: () => void;
 }
 
-export function MainView({ activeView, onViewChange }: MainViewProps) {
+export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewProps) {
   const { restoreSession, setCurrentView } = useSessionStore();
 
   useEffect(() => {
@@ -90,16 +92,16 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
   const renderContent = () => {
     switch (activeView) {
       case 'chats':
-        return <ChatView onViewChange={onViewChange} />;
+        return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'agents':
         return <AgentsView />;
       case 'projects':
         return <ProjectsView />;
       case 'documents':
         return (
-          <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
-            <h1 className="text-2xl font-bold mb-4 text-white">Documents</h1>
-            <p className="text-gray-500 text-sm mb-6">Your files and documents.</p>
+          <div className="flex-1 overflow-y-auto p-8 animate-fade-in">
+            <h1 className="text-2xl font-bold mb-5 text-white">Documents</h1>
+            <p className="text-gray-500 text-sm mb-7">Your files and documents.</p>
             <div
               className="bg-[#1a1a1f] border border-white/[0.06] rounded-xl p-4"
               style={{ height: 'calc(100vh - 200px)' }}
@@ -114,10 +116,12 @@ export function MainView({ activeView, onViewChange }: MainViewProps) {
         return <MemoryPanel onClose={() => onViewChange('chats')} />;
       case 'workspace':
         return <WorkspaceView />;
+      case 'canvas':
+        return <InfiniteCanvas />;
       case 'settings':
         return <SettingsView />;
       default:
-        return <ChatView onViewChange={onViewChange} />;
+        return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
     }
   };
 

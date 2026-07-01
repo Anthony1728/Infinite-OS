@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
-import { useChatStore } from '../../stores/chat';
 import { useAuthStore } from '../../stores/auth';
 
 interface TopBarProps {
@@ -20,172 +19,140 @@ interface SystemMetrics {
 
 export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, onOpenDeploy }: TopBarProps) {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-  const { runs } = useAgentsStore();
-  const { streaming } = useChatStore();
-  const { isAuthenticated, user } = useAuthStore();
-
-  const activeAgents = runs.filter((r) => r.status === 'running').length;
-  const [isOnline, setIsOnline] = useState(false);
-
-  // Check online status
-  useEffect(() => {
-    const checkOnline = async () => {
-      try {
-        const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
-        const provider = settings.provider ?? 'openrouter';
-        const hasKey = await window.api.hasProviderKey({ provider });
-        setIsOnline(!!hasKey);
-      } catch {
-        setIsOnline(false);
-      }
-    };
-    checkOnline();
-    window.addEventListener('storage', checkOnline);
-    return () => window.removeEventListener('storage', checkOnline);
-  }, []);
+  const { runs, chatTasks, subTasks } = useAgentsStore();
+  const user = useAuthStore((state) => state.user);
+  const activeAgents = runs.filter((run) => run.status === 'running').length;
+  const activeTasks =
+    chatTasks.filter((task) => task.status === 'working').length +
+    subTasks.filter((task) => task.status === 'running' || task.status === 'pending').length;
 
   useEffect(() => {
-    const fetchMetrics = async () => {
+    const update = async () => {
       try {
-        const m = await window.api.getMetrics();
-        setMetrics(m);
+        setMetrics(await window.api.getMetrics());
       } catch {
-        setMetrics({ cpu: 0, cpuCores: 4, ram: 0, ramUsed: '0.0', ramTotal: '16.0' });
+        setMetrics({ cpu: 0, cpuCores: 0, ram: 0, ramUsed: '0.0', ramTotal: '0.0' });
       }
     };
-
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 3000);
-    return () => clearInterval(interval);
+    void update();
+    const interval = window.setInterval(update, 3000);
+    return () => window.clearInterval(interval);
   }, []);
 
   return (
-    <div className="h-11 border-b border-borderSubtle bg-bgPanel/90 backdrop-blur-xl flex items-center justify-between px-3 flex-shrink-0 shadow-[0_1px_0_rgba(255,255,255,0.015)]">
-      {/* Left: sidebar toggle + search */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onToggleSidebar}
-          className="icon-button w-8 h-8"
-          aria-label="Toggle sidebar"
-          title="Toggle sidebar (Ctrl+B)"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+    <header className="h-14 flex-shrink-0 border-b border-white/[0.055] bg-[#090c13]/95 backdrop-blur-xl px-4 grid grid-cols-[1fr_auto_1fr] items-center">
+      <div className="flex items-center">
+        <button onClick={onToggleSidebar} className="icon-button w-8 h-8 xl:hidden" aria-label="Toggle sidebar">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
+            <path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" />
           </svg>
         </button>
+      </div>
+
+      <div className="flex items-center gap-2">
         <button
           onClick={onOpenCommand}
-          className="flex items-center gap-2 h-8 px-3 rounded-lg bg-white/[0.025] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.045] transition-all duration-150 text-textMuted text-xs w-48 md:w-60"
+          className="hidden md:flex h-8 w-64 items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.018] px-3 text-[10px] text-zinc-600 hover:border-indigo-500/30 hover:text-zinc-300 transition-colors"
         >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607z"
+              d="m21 21-4.35-4.35m1.35-5.4a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z"
             />
           </svg>
-          <span className="flex-1 text-left">Search commands, files…</span>
-          <span className="text-[9px] bg-white/5 px-1.5 py-0.5 rounded font-mono border border-white/5">Ctrl+K</span>
+          <span className="flex-1 text-left">Search anything…</span>
+          <span className="font-mono text-[8px]">⌘ K</span>
         </button>
-      </div>
-
-      {/* Center: System metrics + status */}
-      <div className="hidden xl:flex items-center gap-4">
-        {/* Online status */}
-        <div className="flex items-center gap-1.5">
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-live-pulse' : 'bg-amber-400'}`}
+        <div className="hidden lg:flex items-center gap-1.5">
+          <MetricCard
+            label="CPU"
+            value={`${Math.round(metrics?.cpu ?? 0)}%`}
+            values={[4, 7, 5, 9, 6, 8, 11, 5]}
+            color="#60a5fa"
           />
-          <span className="text-[10px] text-textMuted">{isOnline ? 'AI Online' : 'Brain Mode'}</span>
+          <MetricCard
+            label="RAM"
+            value={`${metrics?.ramUsed ?? '0.0'} GB`}
+            values={[6, 8, 7, 9, 10, 8, 9, 6]}
+            color="#22d3ee"
+          />
+          <MetricCard label="Agents" value={String(activeAgents)} values={[4, 5, 7, 4, 9, 6, 10, 5]} color="#4ade80" />
+          <MetricCard label="Tasks" value={String(activeTasks)} values={[3, 8, 4, 10, 5, 9, 6, 11]} color="#c084fc" />
         </div>
-
-        {/* CPU */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-textMuted uppercase tracking-wide">CPU</span>
-          <span className="text-xs font-semibold text-textMain">{metrics?.cpu ?? 0}%</span>
-          <div className="flex items-end gap-px h-3">
-            {Array.from({ length: 6 }, (_, i) => (
-              <div
-                key={i}
-                className="w-0.5 rounded-full bg-indigo-500/60"
-                style={{
-                  height: `${Math.max(20, Math.min(100, (metrics?.cpu ?? 0) * [0.72, 0.9, 0.62, 1, 0.78, 0.86][i] + 16))}%`,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* RAM */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-textMuted uppercase tracking-wide">RAM</span>
-          <span className="text-xs font-semibold text-textMain">{metrics?.ramUsed ?? '0.0'} GB</span>
-        </div>
-
-        {/* Active agents badge */}
-        {activeAgents > 0 && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-live-pulse" />
-            <span className="text-[10px] text-indigo-300 font-semibold">
-              {activeAgents} agent{activeAgents !== 1 ? 's' : ''}
-            </span>
-          </div>
-        )}
-
-        {/* Streaming indicator */}
-        {streaming && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-            <span className="text-[10px] text-violet-300 font-semibold">AI thinking…</span>
-          </div>
-        )}
       </div>
 
-      {/* Right: panel toggle + deploy + avatar */}
-      <div className="flex items-center gap-2">
-        {/* Deploy shortcut - only visible when authenticated */}
-        {isAuthenticated && (
-          <button
-            onClick={onOpenDeploy}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-medium text-textMuted hover:text-textMain bg-white/[0.02] border border-borderSubtle hover:border-indigo-500/30 transition-all"
-            title="Deploy (Ctrl+D)"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15.59 14.37a6 6 0 0 1-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 0 0 6.16-12.12A14.98 14.98 0 0 0 9.631 8.41m5.96 5.96a14.926 14.926 0 0 1-5.841 2.58m-.119-8.54a6 6 0 0 0-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 0 0-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 0 1-2.448-2.448 14.9 14.9 0 0 1 .06-.312m-2.24 2.39a4.493 4.493 0 0 0-1.757 4.306 4.493 4.493 0 0 0 4.306-1.758M16.5 9a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"
-              />
-            </svg>
-            Deploy
-            <span className="text-[9px] bg-white/5 px-1 py-0.5 rounded font-mono">⌃D</span>
-          </button>
-        )}
-
-        {/* Right panel toggle */}
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          onClick={onOpenDeploy}
+          className="icon-button w-8 h-8 hidden md:inline-flex"
+          title="Deploy"
+          aria-label="Open deploy"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M15.6 14.4a6 6 0 0 1-5.85 7.35v-4.8m5.85-2.55A15 15 0 0 0 21.75 2.25 15 15 0 0 0 9.6 8.4m6 6a15 15 0 0 1-5.85 2.55M9.6 8.4a6 6 0 0 0-7.35 5.85h4.8m2.55-5.85a15 15 0 0 0-2.55 5.85"
+            />
+          </svg>
+        </button>
         <button
           onClick={onToggleRightPanel}
           className="icon-button w-8 h-8"
-          aria-label="Toggle details panel"
-          title="Toggle right panel"
+          title="Toggle activity panel"
+          aria-label="Toggle activity panel"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z"
+              d="M9 4.5v15m10.5 0h-15A1.5 1.5 0 0 1 3 18V6a1.5 1.5 0 0 1 1.5-1.5h15A1.5 1.5 0 0 1 21 6v12a1.5 1.5 0 0 1-1.5 1.5Z"
             />
           </svg>
         </button>
-
-        {/* User avatar */}
         <div
-          className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white shadow-md ring-1 ring-white/10"
+          className="relative w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-cyan-500 p-[2px]"
           title={user?.name || 'User'}
         >
-          <span className="text-[10px] font-semibold">{user?.name?.charAt(0)?.toUpperCase() || 'U'}</span>
+          <div className="w-full h-full rounded-full bg-[#121722] flex items-center justify-center text-[9px] font-semibold text-white">
+            {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+          </div>
+          <span className="absolute right-0 bottom-0 w-2 h-2 rounded-full bg-emerald-400 border-2 border-[#090c13]" />
         </div>
       </div>
+    </header>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  values,
+  color,
+}: {
+  label: string;
+  value: string;
+  values: number[];
+  color: string;
+}) {
+  const points = values.map((height, index) => `${index * 5},${12 - height}`).join(' ');
+  return (
+    <div className="h-8 min-w-[64px] rounded-lg border border-white/[0.065] bg-white/[0.018] px-2 flex items-center gap-2">
+      <span>
+        <span className="block text-[7px] uppercase tracking-wide text-zinc-600">{label}</span>
+        <span className="block text-[9px] font-medium text-zinc-300">{value}</span>
+      </span>
+      <svg className="w-9 h-3" viewBox="0 0 35 12" fill="none" aria-hidden="true">
+        <polyline
+          points={points}
+          stroke={color}
+          strokeWidth="1"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
     </div>
   );
 }

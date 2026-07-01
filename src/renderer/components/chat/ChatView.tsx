@@ -6,6 +6,8 @@ import { useChatStore } from '../../stores/chat';
 import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { ProjectCards } from '../layout/ProjectCards';
+import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 
 const SLASH_COMMANDS = [
   {
@@ -64,7 +66,13 @@ const SLASH_COMMANDS = [
   },
 ];
 
-export function ChatView({ onViewChange }: { onViewChange: (view: string) => void }) {
+export function ChatView({
+  onViewChange,
+  onOpenDeploy,
+}: {
+  onViewChange: (view: string) => void;
+  onOpenDeploy: () => void;
+}) {
   const messages = useChatStore((s) => s.messages);
   const currentSessionId = useChatStore((s) => s.currentSessionId);
   const streaming = useChatStore((s) => s.streaming);
@@ -205,6 +213,9 @@ export function ChatView({ onViewChange }: { onViewChange: (view: string) => voi
           />
         )}
       </div>
+      <div className="flex-shrink-0 px-10 pb-6">
+        <ProjectCards onOpenWorkspace={() => onViewChange('workspace')} onOpenDeploy={onOpenDeploy} />
+      </div>
     </div>
   );
 }
@@ -227,7 +238,7 @@ function ChatWorkspaceHeader({
     },
     {
       label: 'Infinite Canvas',
-      action: () => onViewChange('workspace'),
+      action: () => onViewChange('canvas'),
       path: 'M3.75 3.75h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Zm-10 10h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Z',
     },
     {
@@ -253,19 +264,19 @@ function ChatWorkspaceHeader({
     },
   ];
   return (
-    <div className="flex-shrink-0 px-5 pt-5">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-xl font-semibold tracking-[-0.02em] text-zinc-100">
+    <div className="flex-shrink-0 px-10 pt-12 pb-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-zinc-100 leading-tight">
           {greeting}, {firstName}
         </h1>
-        <p className="text-[12px] text-textMuted mt-1">InfiniteAI is ready to build, analyze, and automate with you.</p>
-        <div className="mt-4 flex items-center gap-1 overflow-x-auto rounded-xl border border-white/[0.07] bg-[#0c0f17]/70 p-1 custom-scrollbar">
+        <p className="text-sm text-textMuted mt-3">InfiniteAI is ready to build, analyze, and automate with you.</p>
+        <div className="mt-8 flex items-center gap-3 overflow-x-auto rounded-xl border border-white/[0.07] bg-[#0c0f17]/70 p-2 custom-scrollbar">
           {modes.map((mode, index) => (
             <button
               key={mode.label}
               onClick={mode.action}
               aria-current={index === 0 ? 'page' : undefined}
-              className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-[11px] transition-all ${index === 0 ? 'border border-cyan-400/30 bg-cyan-400/[0.07] text-zinc-100 shadow-sm' : 'border border-transparent text-textMuted hover:bg-white/[0.035] hover:text-zinc-200'}`}
+              className={`flex h-10 shrink-0 items-center gap-2.5 rounded-lg px-4 text-xs transition-all ${index === 0 ? 'border border-cyan-400/30 bg-cyan-400/[0.07] text-zinc-100 shadow-sm' : 'border border-transparent text-textMuted hover:bg-white/[0.035] hover:text-zinc-200'}`}
             >
               <svg
                 className={`h-4 w-4 ${index === 0 ? 'text-cyan-400' : 'text-indigo-400'}`}
@@ -303,6 +314,25 @@ function InputBar({
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceAssistant();
+
+  useEffect(() => {
+    if (transcript) setInput(transcript);
+  }, [transcript, setInput]);
+
+  const attachTextFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      setInput(`Please analyze ${file.name}. The file is too large to attach inline; open it from the workspace.`);
+    } else {
+      const content = await file.text();
+      setInput(`${input}${input ? '\n\n' : ''}Attached file: ${file.name}\n\n${content}`);
+    }
+    event.target.value = '';
+    inputRef.current?.focus();
+  };
 
   const isSlashCommand = input.startsWith('/');
   const slashQuery = isSlashCommand ? input.slice(1).toLowerCase() : '';
@@ -411,9 +441,24 @@ function InputBar({
         </div>
       )}
 
+      <div className="mb-3 flex items-center gap-3 overflow-x-auto custom-scrollbar">
+        {['Add dark mode', 'Add email notifications', 'Integrate Stripe', 'Add team settings'].map((suggestion) => (
+          <button
+            key={suggestion}
+            onClick={() => {
+              setInput(suggestion);
+              inputRef.current?.focus();
+            }}
+            className="h-7 shrink-0 rounded-full border border-white/[0.07] bg-white/[0.018] px-3 text-[9px] text-zinc-500 hover:border-indigo-500/25 hover:text-zinc-200 transition-colors"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+
       {/* Input container with glow effect when online */}
       <div
-        className={`relative bg-bgCard border rounded-2xl overflow-hidden transition-all duration-300 shadow-lg ${
+        className={`relative min-h-[124px] bg-[#0d111b] border rounded-2xl overflow-hidden transition-all duration-300 shadow-lg ${
           isOnline
             ? 'border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.15),0_0_40px_rgba(34,211,238,0.05)] focus-within:border-cyan-400/60 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.2),0_0_50px_rgba(34,211,238,0.1)]'
             : 'border-borderSubtle focus-within:border-indigo-500/40 shadow-black/10'
@@ -427,14 +472,105 @@ function InputBar({
           placeholder={placeholder || (isOnline ? 'Ask Infinity anything...' : 'Ask the Infinite AI Brain anything...')}
           rows={1}
           aria-label="Message InfiniteAI"
-          className="w-full bg-transparent text-textMain text-sm px-4 py-3 pr-14 outline-none resize-none placeholder:text-textMuted/50"
+          className="w-full min-h-[68px] bg-transparent text-textMain text-sm px-5 pt-5 pb-2 pr-16 outline-none resize-none placeholder:text-textMuted/50"
         />
-        <div className="absolute right-2 bottom-2">
+        <div className="absolute left-4 right-4 bottom-3 flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".txt,.md,.json,.ts,.tsx,.js,.jsx,.css,.html,.py,.rs,.go,.java,.csv,.xml,.yaml,.yml"
+            onChange={attachTextFile}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
+            title="Attach a text or code file"
+            aria-label="Attach file"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </button>
+          <button
+            onClick={() => {
+              setInput('/browser ');
+              inputRef.current?.focus();
+            }}
+            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
+            title="Browse the web"
+            aria-label="Browse the web"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 21a9 9 0 1 0 0-18m0 18c2.1 0 3.75-4.03 3.75-9S14.1 3 12 3m0 18c-2.1 0-3.75-4.03-3.75-9S9.9 3 12 3M3.4 9h17.2M3.4 15h17.2"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={() => {
+              setInput('/code ');
+              inputRef.current?.focus();
+            }}
+            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
+            title="Open code workflow"
+            aria-label="Open code workflow"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="m8.25 6.75-5.25 5.25 5.25 5.25m7.5-10.5L21 12l-5.25 5.25"
+              />
+            </svg>
+          </button>
+          <button
+            disabled={!isSupported}
+            onClick={isListening ? stopListening : startListening}
+            className={`icon-button w-8 h-8 border ${isListening ? 'border-red-400/40 bg-red-500/10 text-red-400' : 'border-white/[0.05] bg-white/[0.025]'}`}
+            title={
+              isSupported ? (isListening ? 'Stop voice input' : 'Start voice input') : 'Voice input is unavailable'
+            }
+            aria-label="Voice input"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 15.75a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6.75a3 3 0 0 0 3 3Zm6-4.5v1.5a6 6 0 0 1-12 0v-1.5M12 18.75v3"
+              />
+            </svg>
+          </button>
+          <button
+            onClick={() => {
+              setInput('/agent ');
+              inputRef.current?.focus();
+            }}
+            className="ml-1 flex items-center gap-2 h-8 px-2 rounded-lg text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.035] transition-colors"
+          >
+            <svg
+              className="w-3.5 h-3.5 text-cyan-400"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z"
+              />
+            </svg>
+            Agent Mode <span className="text-zinc-700">⌄</span>
+          </button>
+          <div className="flex-1" />
           <button
             onClick={() => onSend(input)}
             disabled={!input.trim()}
             aria-label="Send message"
-            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 text-white shadow-md ${
+            className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 text-white shadow-md ${
               isOnline
                 ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 disabled:from-zinc-600 disabled:to-zinc-700'
                 : 'bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-400 hover:to-cyan-400 disabled:from-zinc-600 disabled:to-zinc-700'
@@ -447,35 +583,6 @@ function InputBar({
                 d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
               />
             </svg>
-          </button>
-        </div>
-      </div>
-      {/* Composer controls */}
-      <div className="flex items-center justify-between mt-2 px-1">
-        <span className="text-[9px] text-textMuted">Enter to send · Shift+Enter for a new line</span>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] text-textMuted">Type / for commands</span>
-          <button
-            onClick={() => {
-              setInput('/agent ');
-              inputRef.current?.focus();
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/[0.08] text-xs text-textMuted hover:text-textMain transition-all"
-          >
-            <svg
-              className="w-3.5 h-3.5 text-indigo-400"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
-              />
-            </svg>
-            Agent
           </button>
         </div>
       </div>
@@ -545,8 +652,8 @@ function RealChat({
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4 custom-scrollbar">
-        <div className="flex flex-col gap-5 w-full max-w-4xl mx-auto">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="flex flex-col gap-8 w-full px-10 py-8">
           {messages.map((m) => (
             <MessageBubble key={m.id} message={m} />
           ))}
@@ -561,8 +668,8 @@ function RealChat({
           )}
         </div>
       </div>
-      <div className="flex-shrink-0 px-5 py-3">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-shrink-0 px-10 py-6">
+        <div>
           <InputBar
             input={input}
             setInput={setInput}
@@ -591,7 +698,9 @@ function MessageBubble({ message }: { message: Message }) {
   if (!hasText && toolUseBlocks.length === 0) return null;
 
   return (
-    <div className="flex gap-3">
+    <div
+      className={`flex gap-5 rounded-xl border px-5 py-4 shadow-[0_8px_24px_rgba(0,0,0,.1)] ${isUser ? 'border-blue-500/10 bg-blue-500/[0.025]' : 'border-white/[0.065] bg-[#0c1018]'}`}
+    >
       {isAssistant ? (
         <div className="brand-avatar w-8 h-8 flex-shrink-0 mt-0.5">
           <InfiniteLogo className="w-5 h-3" />
@@ -660,7 +769,11 @@ function MessageBubble({ message }: { message: Message }) {
 
 function ThinkingBubble() {
   return (
-    <div className="flex gap-3 items-center" role="status" aria-live="polite">
+    <div
+      className="flex gap-3 items-center rounded-xl border border-white/[0.065] bg-[#0c1018] px-3 py-2.5"
+      role="status"
+      aria-live="polite"
+    >
       <div className="brand-avatar w-12 h-10 flex-shrink-0">
         <InfiniteLogo className="w-9 h-6" animated />
       </div>
@@ -705,15 +818,15 @@ function DemoChat({
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="max-w-4xl mx-auto px-5 py-12 flex flex-col items-center justify-center min-h-[60vh]">
+        <div className="px-8 py-24 flex flex-col items-center justify-center min-h-[60vh]">
           {/* Canonical brand mark */}
-          <div className="w-36 h-24 mb-7 flex items-center justify-center relative">
+          <div className="w-36 h-24 mb-10 flex items-center justify-center relative">
             <div className="absolute inset-5 bg-indigo-500/10 rounded-full blur-2xl" />
             <InfiniteLogo className="relative w-32 h-20" animated labelled />
           </div>
 
-          <h2 className="text-lg font-semibold text-textMain mb-2">What are we working on?</h2>
-          <p className="text-sm text-textMuted mb-8">Start with a prompt or choose a workspace mode above.</p>
+          <h2 className="text-lg font-semibold text-textMain mb-3">What are we working on?</h2>
+          <p className="text-sm text-textMuted mb-10">Start with a prompt or choose a workspace mode above.</p>
 
           {/* Minimal quick actions */}
           <div className="flex gap-3 mb-8">
@@ -766,8 +879,8 @@ function DemoChat({
       </div>
 
       {/* Input bar */}
-      <div className="flex-shrink-0 px-5 py-3 border-t border-borderSubtle/40">
-        <div className="max-w-4xl mx-auto">
+      <div className="flex-shrink-0 px-10 py-8">
+        <div>
           <InputBar input={input} setInput={setInput} inputRef={inputRef} onSend={onSend} isOnline={isOnline} />
         </div>
       </div>

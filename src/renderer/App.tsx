@@ -120,7 +120,7 @@ export function App() {
 
   // Main app
   return (
-    <div className="app-shell h-screen w-full flex overflow-hidden text-[11px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
+    <div className="app-shell h-screen w-full flex overflow-hidden text-[12px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
       <Sidebar
         activeView={activeView}
         onNavChange={setActiveView}
@@ -137,7 +137,7 @@ export function App() {
           onOpenDeploy={() => setDeployOpen(true)}
         />
         <main className="flex-1 min-h-0 overflow-hidden">
-          <MainView activeView={activeView} onViewChange={setActiveView} />
+          <MainView activeView={activeView} onViewChange={setActiveView} onOpenDeploy={() => setDeployOpen(true)} />
         </main>
       </div>
       {rightPanelOpen && <RightPanel onViewChange={setActiveView} />}

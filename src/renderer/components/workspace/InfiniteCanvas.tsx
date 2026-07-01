@@ -16,8 +16,20 @@ import {
   X,
   GripVertical,
 } from 'lucide-react';
+import { useChatStore } from '../../stores/chat';
+import { useAgentsStore } from '../../stores/agents';
 
-type NodeTypeId = 'ai' | 'code' | 'webhook' | 'condition' | 'timer' | 'email' | 'deploy' | 'transform' | 'agent' | 'research';
+type NodeTypeId =
+  | 'ai'
+  | 'code'
+  | 'webhook'
+  | 'condition'
+  | 'timer'
+  | 'email'
+  | 'deploy'
+  | 'transform'
+  | 'agent'
+  | 'research';
 
 interface NodeTypeConfig {
   id: NodeTypeId;
@@ -78,7 +90,12 @@ const NODE_TYPES: NodeTypeConfig[] = [
     selectedBorderClass: 'border-green-400',
     icon: <Code2 size={16} />,
     configFields: [
-      { key: 'language', label: 'Language', type: 'select', options: ['python', 'javascript', 'typescript', 'rust', 'go'] },
+      {
+        key: 'language',
+        label: 'Language',
+        type: 'select',
+        options: ['python', 'javascript', 'typescript', 'rust', 'go'],
+      },
       { key: 'code', label: 'Code', type: 'textarea', placeholder: 'Write your code here...' },
       { key: 'timeout', label: 'Timeout (ms)', type: 'text', placeholder: '30000' },
     ],
@@ -94,7 +111,12 @@ const NODE_TYPES: NodeTypeConfig[] = [
     configFields: [
       { key: 'url', label: 'URL', type: 'text', placeholder: 'https://api.example.com/webhook' },
       { key: 'method', label: 'Method', type: 'select', options: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] },
-      { key: 'headers', label: 'Headers (JSON)', type: 'textarea', placeholder: '{"Content-Type": "application/json"}' },
+      {
+        key: 'headers',
+        label: 'Headers (JSON)',
+        type: 'textarea',
+        placeholder: '{"Content-Type": "application/json"}',
+      },
     ],
   },
   {
@@ -243,6 +265,32 @@ export function InfiniteCanvas() {
   const dragNodeId = useRef<string | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('infinite-canvas-workflow');
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as { nodes?: CanvasNode[]; connections?: Connection[] };
+      setNodes(Array.isArray(parsed.nodes) ? parsed.nodes : []);
+      setConnections(Array.isArray(parsed.connections) ? parsed.connections : []);
+      setConsoleLogs(['[Load] Restored saved workflow.']);
+    } catch {
+      setConsoleLogs(['[Load] Saved workflow could not be read.']);
+    }
+  }, []);
+
+  const addNode = useCallback((typeId: NodeTypeId, x?: number, y?: number) => {
+    const node: CanvasNode = {
+      id: genId(),
+      typeId,
+      x: x ?? 120 + Math.random() * 180,
+      y: y ?? 100 + Math.random() * 140,
+      config: {},
+    };
+    setNodes((previous) => [...previous, node]);
+    setSelectedNodeId(node.id);
+    setSelectedConnId(null);
+  }, []);
+
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (e.target !== canvasRef.current && !(e.target as HTMLElement).closest('[data-canvas-bg]')) return;
@@ -292,9 +340,7 @@ export function InfiniteCanvas() {
         const rect = canvasRef.current!.getBoundingClientRect();
         const cx = (e.clientX - rect.left - pan.x) / zoom - dragOffset.current.x;
         const cy = (e.clientY - rect.top - pan.y) / zoom - dragOffset.current.y;
-        setNodes((prev) =>
-          prev.map((n) => (n.id === dragNodeId.current ? { ...n, x: cx, y: cy } : n)),
-        );
+        setNodes((prev) => prev.map((n) => (n.id === dragNodeId.current ? { ...n, x: cx, y: cy } : n)));
       }
       if (connectingFrom) {
         const rect = canvasRef.current!.getBoundingClientRect();
@@ -350,7 +396,9 @@ export function InfiniteCanvas() {
         if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
         if (selectedNodeId) {
           setNodes((prev) => prev.filter((n) => n.id !== selectedNodeId));
-          setConnections((prev) => prev.filter((c) => c.sourceNodeId !== selectedNodeId && c.targetNodeId !== selectedNodeId));
+          setConnections((prev) =>
+            prev.filter((c) => c.sourceNodeId !== selectedNodeId && c.targetNodeId !== selectedNodeId),
+          );
           setSelectedNodeId(null);
         } else if (selectedConnId) {
           setConnections((prev) => prev.filter((c) => c.id !== selectedConnId));
@@ -375,18 +423,9 @@ export function InfiniteCanvas() {
       const rect = canvasRef.current!.getBoundingClientRect();
       const canvasX = (e.clientX - rect.left - pan.x) / zoom;
       const canvasY = (e.clientY - rect.top - pan.y) / zoom;
-      const newNode: CanvasNode = {
-        id: genId(),
-        typeId,
-        x: canvasX - NODE_WIDTH / 2,
-        y: canvasY - NODE_HEIGHT / 2,
-        config: {},
-      };
-      setNodes((prev) => [...prev, newNode]);
-      setSelectedNodeId(newNode.id);
-      setSelectedConnId(null);
+      addNode(typeId, canvasX - NODE_WIDTH / 2, canvasY - NODE_HEIGHT / 2);
     },
-    [pan, zoom],
+    [pan, zoom, addNode],
   );
 
   const handleNodeMouseDown = useCallback(
@@ -429,56 +468,126 @@ export function InfiniteCanvas() {
     try {
       const data = JSON.stringify({ nodes, connections }, null, 2);
       localStorage.setItem('infinite-canvas-workflow', data);
-      setConsoleLogs((prev) => [...prev, `[Save] Workflow saved (${nodes.length} nodes, ${connections.length} connections)`]);
+      setConsoleLogs((prev) => [
+        ...prev,
+        `[Save] Workflow saved (${nodes.length} nodes, ${connections.length} connections)`,
+      ]);
     } catch {
       setConsoleLogs((prev) => [...prev, '[Save] Error saving workflow']);
     }
   }, [nodes, connections]);
 
-  const handleRun = useCallback(() => {
+  const handleRun = useCallback(async () => {
     if (running) return;
     setRunning(true);
-    const logs: string[] = [];
-    logs.push('[Run] Starting workflow execution...');
-    const sorted = [...nodes].sort((a, b) => a.y - b.y);
+    setConsoleLogs((previous) => [...previous, '[Run] Starting workflow execution…']);
     const inDegree = new Map<string, number>();
-    nodes.forEach((n) => inDegree.set(n.id, 0));
-    connections.forEach((c) => { inDegree.set(c.targetNodeId, (inDegree.get(c.targetNodeId) ?? 0) + 1); });
-    const queue: string[] = [];
-    inDegree.forEach((deg, id) => {
-      if (deg === 0) queue.push(id);
-    });
+    nodes.forEach((node) => inDegree.set(node.id, 0));
+    connections.forEach((connection) =>
+      inDegree.set(connection.targetNodeId, (inDegree.get(connection.targetNodeId) ?? 0) + 1),
+    );
+    const queue = nodes.filter((node) => inDegree.get(node.id) === 0).map((node) => node.id);
+    const order: string[] = [];
+    while (queue.length) {
+      const id = queue.shift()!;
+      order.push(id);
+      connections
+        .filter((connection) => connection.sourceNodeId === id)
+        .forEach((connection) => {
+          const degree = (inDegree.get(connection.targetNodeId) ?? 1) - 1;
+          inDegree.set(connection.targetNodeId, degree);
+          if (degree === 0) queue.push(connection.targetNodeId);
+        });
+    }
 
-    let step = 0;
-    const executeStep = () => {
-      if (step >= queue.length && step >= sorted.length) {
-        logs.push('[Run] Workflow execution complete.');
-        setConsoleLogs((prev) => [...prev, ...logs]);
-        setRunning(false);
-        return;
-      }
-      const nodeId = step < queue.length ? queue[step] : sorted[step]?.id;
-      if (nodeId) {
-        const node = nodes.find((n) => n.id === nodeId);
-        if (node) {
-          const nt = getNodeType(node.typeId);
-          logs.push(`[Step ${step + 1}] Executing ${nt.label} node (${node.id.slice(0, 8)}...)`);
-          const outConns = connections.filter((c) => c.sourceNodeId === nodeId);
-          if (outConns.length > 0) {
-            logs.push(`  → Routing to ${outConns.length} downstream node(s)`);
+    try {
+      if (!nodes.length) throw new Error('Add at least one node before running.');
+      if (order.length !== nodes.length) throw new Error('The workflow contains a circular connection.');
+      for (let index = 0; index < order.length; index++) {
+        const node = nodes.find((item) => item.id === order[index]);
+        if (!node) continue;
+        const type = getNodeType(node.typeId);
+        setConsoleLogs((previous) => [...previous, `[Step ${index + 1}] ${type.label}`]);
+        switch (node.typeId) {
+          case 'ai': {
+            const prompt = node.config.prompt?.trim();
+            if (!prompt) throw new Error('AI Task requires a prompt.');
+            await useChatStore.getState().sendMessage(prompt);
+            break;
           }
+          case 'code': {
+            const code = node.config.code?.trim();
+            if (!code) throw new Error('Code Execution requires code.');
+            await useChatStore
+              .getState()
+              .sendMessage(`Execute this ${node.config.language || 'code'} safely and report the result:\n\n${code}`);
+            break;
+          }
+          case 'webhook': {
+            if (!node.config.url) throw new Error('Web Hook requires a URL.');
+            const session = (await window.api.browserCreateSession({ name: `Canvas ${type.label}` })) as { id: string };
+            await window.api.browserNavigate({ sessionId: session.id, url: node.config.url });
+            break;
+          }
+          case 'condition':
+            if (!node.config.expression) throw new Error('Condition requires an expression.');
+            setConsoleLogs((previous) => [...previous, `  Condition registered: ${node.config.expression}`]);
+            break;
+          case 'timer': {
+            const delay = Math.min(60_000, Math.max(0, Number(node.config.duration) || 1_000));
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            break;
+          }
+          case 'email':
+            if (!node.config.to) throw new Error('Email requires a recipient.');
+            await window.api.emailSend({
+              to: node.config.to,
+              subject: node.config.subject || 'Infinite Canvas',
+              text: node.config.body || '',
+            });
+            break;
+          case 'deploy': {
+            const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+            await window.api.deployQuickPush({ cwd: current.cwd ?? '.', message: 'Deploy from Infinite Canvas' });
+            break;
+          }
+          case 'transform':
+            if (node.config.mapping) JSON.parse(node.config.mapping);
+            break;
+          case 'agent': {
+            const store = useAgentsStore.getState();
+            const requested = (node.config.agentType || '').toLowerCase();
+            const agent =
+              store.types.find(
+                (item) => item.id.toLowerCase().includes(requested) || item.name.toLowerCase().includes(requested),
+              ) ?? store.types[0];
+            if (!agent) throw new Error('No agent types are configured.');
+            if (!(await store.spawn(agent.id, node.config.task || 'Complete the Infinite Canvas task')))
+              throw new Error('Agent could not be started.');
+            break;
+          }
+          case 'research':
+            if (!node.config.query) throw new Error('Research requires a query.');
+            await useChatStore
+              .getState()
+              .sendMessage(`Research deeply and cite reliable sources: ${node.config.query}`);
+            break;
         }
       }
-      step++;
-      setTimeout(executeStep, 300);
-    };
-    setTimeout(executeStep, 300);
+      setConsoleLogs((previous) => [...previous, '[Run] Workflow execution complete.']);
+    } catch (error) {
+      setConsoleLogs((previous) => [...previous, `[Error] ${error instanceof Error ? error.message : String(error)}`]);
+    } finally {
+      setRunning(false);
+    }
   }, [nodes, connections, running]);
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedNodeId) {
       setNodes((prev) => prev.filter((n) => n.id !== selectedNodeId));
-      setConnections((prev) => prev.filter((c) => c.sourceNodeId !== selectedNodeId && c.targetNodeId !== selectedNodeId));
+      setConnections((prev) =>
+        prev.filter((c) => c.sourceNodeId !== selectedNodeId && c.targetNodeId !== selectedNodeId),
+      );
       setSelectedNodeId(null);
     } else if (selectedConnId) {
       setConnections((prev) => prev.filter((c) => c.id !== selectedConnId));
@@ -512,13 +621,17 @@ export function InfiniteCanvas() {
               <div
                 key={nt.id}
                 draggable
+                onClick={() => addNode(nt.id)}
                 onDragStart={(e) => {
                   e.dataTransfer.setData('application/node-type', nt.id);
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
                 className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-grab border ${nt.borderClass} bg-[#14141a] hover:bg-[#1a1a22] transition-colors active:cursor-grabbing`}
               >
-                <div className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0" style={{ color: nt.color }}>
+                <div
+                  className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
+                  style={{ color: nt.color }}
+                >
                   {nt.icon}
                 </div>
                 <div className="min-w-0">
@@ -587,22 +700,24 @@ export function InfiniteCanvas() {
                   />
                 );
               })}
-              {connectingFrom && mouseCanvas && (() => {
-                const sourceNode = nodes.find((n) => n.id === connectingFrom.nodeId);
-                if (!sourceNode) return null;
-                const src = getOutputPortPos(sourceNode);
-                const snt = getNodeType(sourceNode.typeId);
-                return (
-                  <path
-                    d={makeBezier(src.x, src.y, mouseCanvas.x, mouseCanvas.y)}
-                    fill="none"
-                    stroke={snt.color}
-                    strokeWidth={1.5}
-                    strokeOpacity={0.5}
-                    strokeDasharray="6 4"
-                  />
-                );
-              })()}
+              {connectingFrom &&
+                mouseCanvas &&
+                (() => {
+                  const sourceNode = nodes.find((n) => n.id === connectingFrom.nodeId);
+                  if (!sourceNode) return null;
+                  const src = getOutputPortPos(sourceNode);
+                  const snt = getNodeType(sourceNode.typeId);
+                  return (
+                    <path
+                      d={makeBezier(src.x, src.y, mouseCanvas.x, mouseCanvas.y)}
+                      fill="none"
+                      stroke={snt.color}
+                      strokeWidth={1.5}
+                      strokeOpacity={0.5}
+                      strokeDasharray="6 4"
+                    />
+                  );
+                })()}
             </svg>
 
             {/* Nodes */}
@@ -791,7 +906,18 @@ export function InfiniteCanvas() {
             <div className="text-white/20 italic">No output yet. Run the workflow to see logs.</div>
           ) : (
             consoleLogs.map((log, i) => (
-              <div key={i} className={log.startsWith('[Run]') || log.startsWith('[Step') ? 'text-green-400/80' : log.startsWith('[Save]') ? 'text-blue-400/80' : log.includes('→') ? 'text-white/50' : 'text-white/60'}>
+              <div
+                key={i}
+                className={
+                  log.startsWith('[Run]') || log.startsWith('[Step')
+                    ? 'text-green-400/80'
+                    : log.startsWith('[Save]')
+                      ? 'text-blue-400/80'
+                      : log.includes('→')
+                        ? 'text-white/50'
+                        : 'text-white/60'
+                }
+              >
                 {log}
               </div>
             ))
@@ -801,4 +927,3 @@ export function InfiniteCanvas() {
     </div>
   );
 }
-

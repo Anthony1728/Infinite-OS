@@ -1,57 +1,39 @@
 import sharp from 'sharp';
 import pngToIco from 'png-to-ico';
-import { join } from 'path';
+import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
 
 const resourcesDir = join(import.meta.dirname, '..', 'resources');
+const path =
+  'M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z';
 
 async function generateIcon() {
-  // Create the ∞ logo as SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#818cf8"/>
-      <stop offset="50%" style="stop-color:#6366f1"/>
-      <stop offset="100%" style="stop-color:#4f46e5"/>
-    </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="4" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-  <rect width="256" height="256" rx="48" fill="#0e0e10"/>
-  <g transform="translate(128,128)" filter="url(#glow)">
-    <path d="M0,0 
-      C55,-95 95,-55 95,0 
-      C95,55 55,95 0,95 
-      C-55,95 -95,55 -95,0 
-      C-95,-55 -55,-95 0,0 Z" 
-      fill="none" stroke="url(#g)" stroke-width="14" stroke-linecap="round"/>
-  </g>
-</svg>`;
+    <defs><linearGradient id="g" x1="20" y1="50" x2="180" y2="50" gradientUnits="userSpaceOnUse"><stop stop-color="#8b5cf6"/><stop offset=".5" stop-color="#22d3ee"/><stop offset="1" stop-color="#ec4899"/></linearGradient></defs>
+    <rect x="8" y="8" width="240" height="240" rx="54" fill="#0b0d13"/>
+    <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#fff" stroke-opacity=".08"/>
+    <g transform="matrix(1.268 0 0 1.6 1.2 48)">
+      <path d="${path}" fill="none" stroke="#fff" stroke-opacity=".08" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${path}" fill="none" stroke="url(#g)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </svg>`;
 
-  // Generate PNGs at different sizes
-  const png16 = await sharp(Buffer.from(svg)).resize(16, 16).png().toBuffer();
-  const png32 = await sharp(Buffer.from(svg)).resize(32, 32).png().toBuffer();
-  const png48 = await sharp(Buffer.from(svg)).resize(48, 48).png().toBuffer();
-  const png64 = await sharp(Buffer.from(svg)).resize(64, 64).png().toBuffer();
-  const png128 = await sharp(Buffer.from(svg)).resize(128, 128).png().toBuffer();
-  const png256 = await sharp(Buffer.from(svg)).resize(256, 256).png().toBuffer();
-
-  // Save individual PNGs
-  const { writeFileSync } = await import('fs');
-  writeFileSync(join(resourcesDir, 'icon.png'), png256);
-  writeFileSync(join(resourcesDir, 'icon_256x256.png'), png256);
-  writeFileSync(join(resourcesDir, 'icon_128x128.png'), png128);
-  writeFileSync(join(resourcesDir, 'icon_64x64.png'), png64);
-  writeFileSync(join(resourcesDir, 'icon_48x48.png'), png48);
-  writeFileSync(join(resourcesDir, 'icon_32x32.png'), png32);
-  writeFileSync(join(resourcesDir, 'icon_16x16.png'), png16);
-
-  // Generate ICO file (contains 16, 32, 48, 256)
-  const icoBuffer = await pngToIco([png16, png32, png48, png256]);
-  writeFileSync(join(resourcesDir, 'icon.ico'), icoBuffer);
-
-  console.log('Generated: icon.ico, icon.png, and all size variants');
+  const sizes = [16, 32, 48, 64, 128, 256];
+  const buffers = new Map();
+  for (const size of sizes) {
+    const buffer = await sharp(Buffer.from(svg)).resize(size, size).png().toBuffer();
+    buffers.set(size, buffer);
+    await writeFile(join(resourcesDir, size === 256 ? 'icon.png' : `icon_${size}x${size}.png`), buffer);
+  }
+  await writeFile(join(resourcesDir, 'icon_256x256.png'), buffers.get(256));
+  await writeFile(
+    join(resourcesDir, 'icon.ico'),
+    await pngToIco([buffers.get(16), buffers.get(32), buffers.get(48), buffers.get(256)]),
+  );
+  console.log('Generated canonical InfiniteAI icon assets.');
 }
 
-generateIcon().catch(console.error);
+generateIcon().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

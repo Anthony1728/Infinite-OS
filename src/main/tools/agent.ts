@@ -20,8 +20,7 @@ export const agent: Tool = {
     properties: {
       subagent_type: {
         type: 'string',
-        enum: ['research', 'code', 'design', 'data', 'seo', 'general'],
-        description: 'The type of subagent to spawn. Determines system prompt, tools, and behaviour.',
+        description: 'The type of subagent to spawn (e.g. research, code, design, data, seo, general, or a custom-xxx id).',
       },
       prompt: { type: 'string', description: 'The task description for the subagent. Be specific.' },
       run_in_background: { type: 'boolean', description: 'If true, return immediately and continue without waiting.', default: false },

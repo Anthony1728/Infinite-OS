@@ -2,12 +2,64 @@
 // shown in the right-panel Agent tab.
 
 import type { AgentType, AgentId } from './types.js';
+import { getCustomAgent, listCustomAgents } from './custom-store.js';
+
+export function getAgent(id: AgentId): AgentType | undefined {
+  // Check built-in agents first
+  const builtIn = AGENTS[id];
+  if (builtIn) return builtIn;
+
+  // Fallback to custom agents from the database
+  if (id.startsWith('custom-')) {
+    const custom = getCustomAgent(id);
+    if (custom) {
+      return {
+        id: custom.id as AgentId,
+        name: custom.name,
+        description: custom.description,
+        icon: custom.icon,
+        color: custom.color,
+        systemPrompt: custom.systemPrompt,
+        allowedTools: custom.allowedTools,
+        maxTurns: custom.maxTurns,
+      };
+    }
+  }
+
+  return undefined;
+}
+
+export function listAgents(): AgentType[] {
+  // Start with built-in agents
+  const agents = Object.values(AGENTS);
+
+  // Add custom agents from the database
+  try {
+    const customAgents = listCustomAgents();
+    for (const custom of customAgents) {
+      agents.push({
+        id: custom.id as AgentId,
+        name: custom.name,
+        description: custom.description,
+        icon: custom.icon,
+        color: custom.color,
+        systemPrompt: custom.systemPrompt,
+        allowedTools: custom.allowedTools,
+        maxTurns: custom.maxTurns,
+      });
+    }
+  } catch {
+    // better-sqlite3 may not be available during build
+  }
+
+  return agents;
+}
 
 const ALL_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite'];
 const READ_ONLY = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite'];
 const CODE_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'TodoWrite'];
 
-export const AGENTS: Record<AgentId, AgentType> = {
+export const AGENTS: Record<string, AgentType> = {
   general: {
     id: 'general',
     name: 'General Agent',
@@ -106,12 +158,3 @@ export const AGENTS: Record<AgentId, AgentType> = {
     maxTurns: 20,
   },
 };
-
-export function getAgent(id: AgentId): AgentType {
-  return AGENTS[id] ?? AGENTS.general;
-}
-
-export function listAgents(): AgentType[] {
-  return Object.values(AGENTS);
-}
-
