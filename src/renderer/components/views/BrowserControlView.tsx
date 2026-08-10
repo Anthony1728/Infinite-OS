@@ -239,39 +239,48 @@ export function BrowserControlView() {
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#0a0a0f] overflow-hidden animate-fade-in">
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="p-4 border-b border-white/10">
-            <div className="flex items-center gap-3 mb-3">
+    <div className="flex-1 flex flex-col bg-[#0a0a0f] overflow-hidden animate-fade-in h-full">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 h-full">
+          <div className="p-4 border-b border-white/10 bg-[#0a0a0f]/80 backdrop-blur-md z-10">
+            <div className="flex items-center justify-between mb-4">
               <h1 className="text-lg font-bold text-textMain flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
                   <Globe className="w-4 h-4 text-white" />
                 </div>
                 Browser Control
               </h1>
+              <div className="flex items-center gap-2">
+                <div className="px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-[10px] font-medium text-green-400 uppercase tracking-wider">Bridge Active</span>
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={handleBack} className="p-2 rounded-lg bg-[#14141a] border border-white/10 text-textMuted hover:text-textMain hover:border-white/20 transition-all">
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <button onClick={handleForward} className="p-2 rounded-lg bg-[#14141a] border border-white/10 text-textMuted hover:text-textMain hover:border-white/20 transition-all">
-                <ArrowRight className="w-4 h-4" />
-              </button>
-              <button onClick={handleRefresh} className="p-2 rounded-lg bg-[#14141a] border border-white/10 text-textMuted hover:text-textMain hover:border-white/20 transition-all">
-                <RotateCw className="w-4 h-4" />
-              </button>
-              <div className="flex-1 flex items-center gap-2 bg-[#14141a] border border-white/10 rounded-lg px-3 py-1.5">
+              <div className="flex items-center gap-1 p-1 rounded-lg bg-[#14141a] border border-white/10">
+                <button onClick={handleBack} aria-label="Go back" className="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5 transition-all">
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <button onClick={handleForward} aria-label="Go forward" className="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5 transition-all">
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <button onClick={handleRefresh} aria-label="Refresh page" className="p-2 rounded-md text-textMuted hover:text-textMain hover:bg-white/5 transition-all">
+                  <RotateCw className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 flex items-center gap-2 bg-[#14141a] border border-white/10 rounded-lg px-3 py-1.5 focus-within:border-blue-500/50 transition-all">
                 <Search className="w-3.5 h-3.5 text-textMuted flex-shrink-0" />
                 <input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleNavigate()}
-                  placeholder="Enter URL..."
+                  placeholder="Enter URL or search query..."
                   className="flex-1 bg-transparent text-sm text-textMain outline-none placeholder:text-textMuted/50"
+                  aria-label="URL input"
                 />
               </div>
-              <button onClick={handleNavigate} className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-medium hover:from-blue-500 hover:to-indigo-500 transition-all">
+              <button onClick={handleNavigate} className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-medium hover:from-blue-500 hover:to-indigo-500 active:scale-95 transition-all shadow-lg shadow-blue-600/20">
                 Go
               </button>
             </div>
@@ -288,175 +297,186 @@ export function BrowserControlView() {
                 onLoad={() => setPageTitle(currentUrl)}
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-center">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center mx-auto mb-4">
-                    <Globe className="w-10 h-10 text-blue-400/50" />
+              <div className="w-full h-full flex items-center justify-center p-6">
+                <div className="text-center max-w-xs">
+                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 flex items-center justify-center mx-auto mb-6 border border-blue-500/10">
+                      <Globe className="w-10 h-10 text-blue-400/60" />
                   </div>
-                  <p className="text-textMuted text-sm">Enter a URL to start browsing</p>
+                  <h3 className="text-textMain font-medium mb-2">No Page Loaded</h3>
+                  <p className="text-textMuted text-sm leading-relaxed">Enter a URL above to start controlling your web experience with Infinite AI</p>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="border-t border-white/10 bg-[#14141a] p-3">
-            <div className="flex items-center gap-4">
+          <div className="border-t border-white/10 bg-[#14141a]/80 backdrop-blur-md p-3">
+            <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="text-[10px] font-medium text-textMuted uppercase tracking-wider flex-shrink-0">Inspector</span>
-                <span className="text-xs text-textMain truncate max-w-[200px]" title={pageTitle}>{pageTitle || 'No page loaded'}</span>
-                <span className="text-[10px] text-textMuted truncate">{currentUrl}</span>
+                <span className="text-[10px] font-bold text-textMuted uppercase tracking-wider flex-shrink-0">Current Page</span>
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-xs text-textMain font-medium truncate" title={pageTitle}>{pageTitle || 'None'}</span>
+                  <span className="text-[10px] text-textMuted truncate opacity-60">{currentUrl || 'no-url'}</span>
+                </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <input
-                  value={inspectorSelector}
-                  onChange={(e) => setInspectorSelector(e.target.value)}
-                  placeholder="CSS selector..."
-                  className="w-40 bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-blue-500/50 placeholder:text-textMuted/50"
-                />
+                <div className="relative group">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-textMuted/50 uppercase pointer-events-none">DOM</span>
+                  <input
+                    value={inspectorSelector}
+                    onChange={(e) => setInspectorSelector(e.target.value)}
+                    placeholder="CSS selector..."
+                    className="w-48 bg-[#0a0a0f] border border-white/10 rounded-md pl-8 pr-2 py-1 text-xs text-textMain outline-none focus:border-blue-500/50 placeholder:text-textMuted/50 transition-all"
+                    aria-label="CSS Selector Inspector"
+                  />
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="w-80 border-l border-white/10 bg-[#0a0a0f] flex flex-col overflow-hidden flex-shrink-0">
-          <div className="flex-1 overflow-y-auto min-h-0">
-            <div className="p-3 border-b border-white/10">
-              <h2 className="text-xs font-semibold text-textMain uppercase tracking-wider flex items-center gap-1.5 mb-3">
+        <div className="w-full md:w-80 border-l border-white/10 bg-[#0a0a0f] flex flex-col overflow-hidden flex-shrink-0 h-full">
+          <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10">
+            <div className="p-4 border-b border-white/10">
+              <h2 className="text-xs font-bold text-textMain uppercase tracking-widest flex items-center gap-2 mb-4">
                 <Terminal className="w-3.5 h-3.5 text-blue-400" />
                 Automation Tools
               </h2>
 
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[10px] font-medium text-textMuted uppercase tracking-wider mb-1.5 block">Click Element</label>
-                  <div className="flex gap-1.5">
-                    <input value={clickSelector} onChange={(e) => setClickSelector(e.target.value)} placeholder="CSS selector" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-orange-500/50 placeholder:text-textMuted/50" />
-                    <button onClick={handleClick} className="px-3 py-1.5 rounded-md bg-orange-500/20 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/30 transition-all flex items-center gap-1">
+              <div className="space-y-5">
+                <div className="group/tool">
+                  <label className="text-[10px] font-bold text-textMuted uppercase tracking-wider mb-2 block group-hover/tool:text-orange-400 transition-colors">Click Element</label>
+                  <div className="flex gap-2">
+                    <input value={clickSelector} onChange={(e) => setClickSelector(e.target.value)} placeholder="e.g. #submit-btn" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-orange-500/50 placeholder:text-textMuted/50 transition-all" />
+                    <button onClick={handleClick} className="px-3 py-1.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-medium hover:bg-orange-500/20 active:scale-95 transition-all flex items-center gap-1">
                       <MousePointerClick className="w-3 h-3" />
                       Click
                     </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-medium text-textMuted uppercase tracking-wider mb-1.5 block">Fill Form</label>
-                  <div className="flex gap-1.5 mb-1.5">
-                    <input value={fillSelector} onChange={(e) => setFillSelector(e.target.value)} placeholder="CSS selector" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-green-500/50 placeholder:text-textMuted/50" />
-                    <input value={fillValue} onChange={(e) => setFillValue(e.target.value)} placeholder="Value" className="w-20 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-green-500/50 placeholder:text-textMuted/50" />
+                <div className="group/tool">
+                  <label className="text-[10px] font-bold text-textMuted uppercase tracking-wider mb-2 block group-hover/tool:text-green-400 transition-colors">Fill Form</label>
+                  <div className="flex gap-2 mb-2">
+                    <input value={fillSelector} onChange={(e) => setFillSelector(e.target.value)} placeholder="CSS selector" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-green-500/50 placeholder:text-textMuted/50 transition-all" />
+                    <input value={fillValue} onChange={(e) => setFillValue(e.target.value)} placeholder="Value" className="w-24 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-green-500/50 placeholder:text-textMuted/50 transition-all" />
                   </div>
-                  <button onClick={handleFill} className="w-full px-3 py-1.5 rounded-md bg-green-500/20 border border-green-500/30 text-green-400 text-xs font-medium hover:bg-green-500/30 transition-all flex items-center justify-center gap-1">
+                  <button onClick={handleFill} className="w-full px-3 py-1.5 rounded-md bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium hover:bg-green-500/20 active:scale-95 transition-all flex items-center justify-center gap-1">
                     <Type className="w-3 h-3" />
-                    Fill
+                    Fill Input
                   </button>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-medium text-textMuted uppercase tracking-wider mb-1.5 block">Extract Text</label>
-                  <div className="flex gap-1.5 mb-1.5">
-                    <input value={extractSelector} onChange={(e) => setExtractSelector(e.target.value)} placeholder="CSS selector" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-purple-500/50 placeholder:text-textMuted/50" />
-                    <button onClick={handleExtract} className="px-3 py-1.5 rounded-md bg-purple-500/20 border border-purple-500/30 text-purple-400 text-xs font-medium hover:bg-purple-500/30 transition-all flex items-center gap-1">
+                <div className="group/tool">
+                  <label className="text-[10px] font-bold text-textMuted uppercase tracking-wider mb-2 block group-hover/tool:text-purple-400 transition-colors">Extract Content</label>
+                  <div className="flex gap-2 mb-2">
+                    <input value={extractSelector} onChange={(e) => setExtractSelector(e.target.value)} placeholder="CSS selector" className="flex-1 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-purple-500/50 placeholder:text-textMuted/50 transition-all" />
+                    <button onClick={handleExtract} className="px-3 py-1.5 rounded-md bg-purple-500/10 border border-purple-500/30 text-purple-400 text-xs font-medium hover:bg-purple-500/20 active:scale-95 transition-all flex items-center gap-1">
                       <Copy className="w-3 h-3" />
                       Extract
                     </button>
                   </div>
                   {extractResult && (
-                    <div className="bg-[#14141a] border border-purple-500/20 rounded-md px-2 py-1.5 text-xs text-purple-300 mb-1.5 break-all">
+                    <div className="bg-purple-500/5 border border-purple-500/20 rounded-md px-2 py-2 text-xs text-purple-300 mb-2 break-all font-mono leading-relaxed">
                       {extractResult}
                     </div>
                   )}
                 </div>
 
-                <div className="flex gap-1.5">
-                  <button onClick={handleScreenshot} className="flex-1 px-3 py-1.5 rounded-md bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/30 transition-all flex items-center justify-center gap-1">
+                <div className="flex gap-2">
+                  <button onClick={handleScreenshot} className="flex-1 px-3 py-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1">
                     <Camera className="w-3 h-3" />
                     Screenshot
                   </button>
                   <div className="flex items-center gap-1.5 flex-1">
                     <input type="number" min="1" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} className="w-14 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-yellow-500/50 text-center" />
-                    <button onClick={handleWait} className="flex-1 px-3 py-1.5 rounded-md bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-xs font-medium hover:bg-yellow-500/30 transition-all flex items-center justify-center gap-1">
+                    <button onClick={handleWait} className="flex-1 px-3 py-1.5 rounded-md bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-medium hover:bg-yellow-500/20 active:scale-95 transition-all flex items-center justify-center gap-1">
                       <Clock className="w-3 h-3" />
                       Wait
                     </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-medium text-textMuted uppercase tracking-wider mb-1.5 block">Run Script</label>
+                <div className="group/tool">
+                  <label className="text-[10px] font-bold text-textMuted uppercase tracking-wider mb-2 block group-hover/tool:text-cyan-400 transition-colors">Custom JS Script</label>
                   <textarea
                     value={scriptCode}
                     onChange={(e) => setScriptCode(e.target.value)}
-                    placeholder="document.querySelector('.title').textContent"
+                    placeholder="document.title"
                     rows={3}
-                    className="w-full bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-cyan-500/50 placeholder:text-textMuted/50 font-mono resize-none mb-1.5"
+                    className="w-full bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-textMain outline-none focus:border-cyan-500/50 placeholder:text-textMuted/50 font-mono resize-none mb-2 transition-all"
                   />
-                  <button onClick={handleExecuteScript} className="w-full px-3 py-1.5 rounded-md bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/30 transition-all flex items-center justify-center gap-1">
+                  <button onClick={handleExecuteScript} className="w-full px-3 py-1.5 rounded-md bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-medium hover:bg-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1">
                     <Code className="w-3 h-3" />
-                    Execute
+                    Execute Script
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="p-3 border-b border-white/10">
-              <h2 className="text-xs font-semibold text-textMain uppercase tracking-wider flex items-center gap-1.5 mb-3">
+            <div className="p-4 border-b border-white/10">
+              <h2 className="text-xs font-bold text-textMain uppercase tracking-widest flex items-center gap-2 mb-4">
                 <ListOrdered className="w-3.5 h-3.5 text-indigo-400" />
                 Sequence Builder
               </h2>
 
-              <div className="bg-[#14141a] border border-white/10 rounded-lg p-2.5 mb-3">
-                <div className="flex items-center gap-1.5 mb-2">
+              <div className="bg-[#14141a] border border-white/10 rounded-lg p-3 mb-4 shadow-inner">
+                <div className="flex items-center gap-2 mb-3">
                   <select
                     value={addStepType}
                     onChange={(e) => setAddStepType(e.target.value as SequenceStep['type'])}
-                    className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none"
+                    className="flex-1 bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 appearance-none cursor-pointer"
                   >
                     {(['navigate', 'click', 'fill', 'extract', 'wait', 'script'] as const).map((t) => (
                       <option key={t} value={t}>{stepTypeLabels[t]}</option>
                     ))}
                   </select>
-                  <button onClick={addSequenceStep} className="p-1.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 transition-all">
+                  <button onClick={addSequenceStep} className="p-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-500 active:scale-90 transition-all shadow-lg shadow-indigo-600/20">
                     <Plus className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                {addStepType === 'navigate' && (
-                  <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="URL" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 mb-1.5" />
-                )}
-                {['click', 'fill', 'extract'].includes(addStepType) && (
-                  <input value={addStepSelector} onChange={(e) => setAddStepSelector(e.target.value)} placeholder="CSS selector" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 mb-1.5" />
-                )}
-                {addStepType === 'fill' && (
-                  <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="Value" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 mb-1.5" />
-                )}
-                {addStepType === 'wait' && (
-                  <input type="number" min="1" value={addStepSeconds} onChange={(e) => setAddStepSeconds(e.target.value)} placeholder="Seconds" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 mb-1.5" />
-                )}
-                {addStepType === 'script' && (
-                  <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="JavaScript code" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 font-mono mb-1.5" />
-                )}
+                <div className="space-y-2">
+                  {addStepType === 'navigate' && (
+                    <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="Target URL" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 transition-all" />
+                  )}
+                  {['click', 'fill', 'extract'].includes(addStepType) && (
+                    <input value={addStepSelector} onChange={(e) => setAddStepSelector(e.target.value)} placeholder="CSS selector" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 transition-all" />
+                  )}
+                  {addStepType === 'fill' && (
+                    <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="Input value" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 transition-all" />
+                  )}
+                  {addStepType === 'wait' && (
+                    <input type="number" min="1" value={addStepSeconds} onChange={(e) => setAddStepSeconds(e.target.value)} placeholder="Wait time (s)" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 transition-all" />
+                  )}
+                  {addStepType === 'script' && (
+                    <input value={addStepValue} onChange={(e) => setAddStepValue(e.target.value)} placeholder="JavaScript expression" className="w-full bg-[#0a0a0f] border border-white/10 rounded-md px-2 py-1 text-xs text-textMain outline-none focus:border-indigo-500/50 placeholder:text-textMuted/50 font-mono transition-all" />
+                  )}
+                </div>
               </div>
 
               {sequenceSteps.length > 0 && (
-                <div className="space-y-1 mb-3">
+                <div className="space-y-1.5 mb-4">
                   {sequenceSteps.map((step, i) => (
-                    <div key={step.id} className="flex items-center gap-1.5 bg-[#14141a] border border-white/10 rounded-md px-2 py-1.5">
-                      <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${stepTypeColors[step.type]}`}>
+                    <div key={step.id} className="flex items-center gap-2 bg-[#14141a] border border-white/5 hover:border-white/20 rounded-md px-2 py-2 transition-all group">
+                      <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 ${stepTypeColors[step.type]} shadow-sm`}>
                         {stepTypeIcons[step.type]}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-[10px] text-textMuted mr-1">{i + 1}.</span>
-                        <span className="text-xs text-textMain font-medium">{stepTypeLabels[step.type]}</span>
-                        {step.selector && <span className="text-[10px] text-textMuted ml-1 truncate">{step.selector}</span>}
-                        {step.value && <span className="text-[10px] text-textMuted ml-1 truncate">{step.value}</span>}
-                        {step.type === 'wait' && <span className="text-[10px] text-textMuted ml-1">{step.seconds}s</span>}
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-[9px] font-bold text-textMuted uppercase opacity-50">{i + 1}</span>
+                          <span className="text-xs text-textMain font-medium">{stepTypeLabels[step.type]}</span>
+                        </div>
+                        <div className="text-[10px] text-textMuted truncate opacity-70">
+                          {step.selector || step.value || `${step.seconds}s` || 'No detail'}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-0.5 flex-shrink-0">
-                        <button onClick={() => moveStep(i, 'up')} disabled={i === 0} className="p-0.5 rounded text-textMuted hover:text-textMain disabled:opacity-30 transition-all">
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => moveStep(i, 'up')} disabled={i === 0} className="p-1 rounded text-textMuted hover:text-textMain disabled:opacity-20 transition-all">
                           <ChevronUp className="w-3 h-3" />
                         </button>
-                        <button onClick={() => moveStep(i, 'down')} disabled={i === sequenceSteps.length - 1} className="p-0.5 rounded text-textMuted hover:text-textMain disabled:opacity-30 transition-all">
+                        <button onClick={() => moveStep(i, 'down')} disabled={i === sequenceSteps.length - 1} className="p-1 rounded text-textMuted hover:text-textMain disabled:opacity-20 transition-all">
                           <ChevronDown className="w-3 h-3" />
                         </button>
-                        <button onClick={() => removeStep(step.id)} className="p-0.5 rounded text-textMuted hover:text-red-400 transition-all">
+                        <button onClick={() => removeStep(step.id)} className="p-1 rounded text-textMuted hover:text-red-400 transition-all">
                           <X className="w-3 h-3" />
                         </button>
                       </div>
@@ -466,54 +486,61 @@ export function BrowserControlView() {
               )}
 
               {sequenceSteps.length === 0 && (
-                <p className="text-[10px] text-textMuted text-center py-2 mb-3">Add steps to build a sequence</p>
+                <div className="text-center py-6 border-2 border-dashed border-white/5 rounded-xl mb-4">
+                  <p className="text-[11px] text-textMuted italic">Your sequence is empty</p>
+                </div>
               )}
 
               <button
                 onClick={runSequence}
                 disabled={sequenceRunning || sequenceSteps.length === 0}
-                className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-semibold hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5"
+                className="w-full px-4 py-2.5 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold hover:from-indigo-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
               >
                 {sequenceRunning ? (
                   <>
                     <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Running...
+                    Executing Sequence...
                   </>
                 ) : (
                   <>
-                    <Play className="w-3 h-3" />
+                    <Play className="w-3.5 h-3.5 fill-current" />
                     Run Sequence ({sequenceSteps.length})
                   </>
                 )}
               </button>
-
               {sequenceSteps.length > 0 && (
-                <button onClick={() => setSequenceSteps([])} className="w-full mt-1.5 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-all flex items-center justify-center gap-1">
+                <button onClick={() => setSequenceSteps([])} className="w-full mt-2 px-3 py-1.5 rounded-md text-red-400/60 text-[10px] font-medium hover:text-red-400 hover:bg-red-500/5 transition-all flex items-center justify-center gap-1">
                   <Trash2 className="w-3 h-3" />
-                  Clear Sequence
+                  Clear All Steps
                 </button>
               )}
             </div>
 
-            <div className="p-3">
-              <h2 className="text-xs font-semibold text-textMain uppercase tracking-wider flex items-center gap-1.5 mb-2">
+            <div className="p-4">
+              <h2 className="text-xs font-bold text-textMain uppercase tracking-widest flex items-center gap-2 mb-3">
                 <Activity className="w-3.5 h-3.5 text-green-400" />
-                Activity Log
+                Live Activity
               </h2>
-              <div className="space-y-1 max-h-60 overflow-y-auto">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
                 {activityLog.length === 0 ? (
-                  <p className="text-[10px] text-textMuted text-center py-3">No activity yet</p>
+                  <div className="text-center py-8">
+                    <p className="text-[11px] text-textMuted italic opacity-50">Waiting for first action...</p>
+                  </div>
                 ) : (
                   activityLog.map((entry) => (
-                    <div key={entry.id} className="bg-[#14141a] border border-white/5 rounded-md px-2 py-1.5">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-[10px] font-medium text-blue-400">{entry.action}</span>
-                        <span className="text-[9px] text-textMuted ml-auto">
-                          {entry.timestamp.toLocaleTimeString()}
+                    <div key={entry.id} className="group bg-[#14141a] border border-white/5 hover:border-blue-500/30 rounded-lg px-3 py-2 transition-all">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold text-blue-400 uppercase tracking-tighter">{entry.action}</span>
+                        <span className="text-[9px] text-textMuted opacity-50 font-mono">
+                          {entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </span>
                       </div>
-                      <div className="text-[10px] text-textMuted truncate">{entry.detail}</div>
-                      <div className="text-[10px] text-green-400/70 truncate">{entry.result}</div>
+                      <div className="text-[10px] text-textMuted truncate opacity-80 group-hover:opacity-100 transition-opacity font-medium">
+                        {entry.detail}
+                      </div>
+                      <div className="text-[10px] text-green-400/80 truncate font-mono mt-0.5 bg-green-500/5 px-1 rounded">
+                        {entry.result}
+                      </div>
                     </div>
                   ))
                 )}
@@ -525,4 +552,3 @@ export function BrowserControlView() {
     </div>
   );
 }
-

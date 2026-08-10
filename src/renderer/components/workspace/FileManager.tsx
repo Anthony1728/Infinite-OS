@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { joinSystemPath, normalizeSystemPath, parentSystemPath, type SystemRoots } from '../../lib/systemPaths';
 
 interface DirEntry {
   name: string;
@@ -48,7 +49,7 @@ function isEditable(name: string): boolean {
 }
 
 export function FileManager() {
-  const [cwd] = useState(() => {
+  const [cwd, setCwd] = useState(() => {
     try {
       const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
       return cur.cwd ?? '.';
@@ -64,15 +65,18 @@ export function FileManager() {
   const [search, setSearch] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [addressPath, setAddressPath] = useState(cwd);
+  const [systemRoots, setSystemRoots] = useState<SystemRoots>({ home: '', common: [], drives: [] });
 
   const loadDir = useCallback(async (dirPath: string) => {
+    const targetPath = normalizeSystemPath(dirPath);
     setLoading(true);
     setError(null);
     setSelectedFile(null);
     setFileContent('');
     setDirty(false);
     try {
-      const result: DirData | { error: string } = await window.api.fileRead({ path: dirPath });
+      const result: DirData | { error: string } = await window.api.fileRead({ path: targetPath });
       if ('error' in result) {
         setError(result.error);
         setEntries([]);
@@ -82,13 +86,18 @@ export function FileManager() {
           return a.name.localeCompare(b.name);
         });
         setEntries(sorted);
-        setPath(dirPath);
+        setPath(targetPath);
+        setAddressPath(targetPath);
       }
     } catch (e) {
       setError((e as Error).message);
       setEntries([]);
     }
     setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void window.api.fileSystemRoots().then((roots: SystemRoots) => setSystemRoots(roots));
   }, []);
 
   const loadFile = useCallback(async (filePath: string) => {
@@ -125,21 +134,82 @@ export function FileManager() {
     setLoading(false);
   }, [selectedFile, fileContent]);
 
-  const navigateUp = useCallback(() => {
-    if (!path) return;
-    const parts = path.replace(/\\/g, '/').split('/');
-    parts.pop();
-    const parent = parts.join('/') || '/';
-    pushHistory(parent);
-    loadDir(parent);
-  }, [path, loadDir]);
+  useEffect(() => {
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && selectedFile) {
+        event.preventDefault();
+        void saveFile();
+      }
+    };
+    window.addEventListener('keydown', handleSaveShortcut);
+    return () => window.removeEventListener('keydown', handleSaveShortcut);
+  }, [saveFile, selectedFile]);
 
-  const pushHistory = (p: string) => {
+  const createFile = useCallback(async () => {
+    const name = window.prompt('New file name');
+    if (!name?.trim()) return;
+    const filePath = joinSystemPath(path, name.trim());
+    const result = await window.api.fileWrite({ path: filePath, content: '' }) as { error?: string };
+    if (result?.error) { setError(result.error); return; }
+    await loadDir(path);
+    await loadFile(filePath);
+  }, [loadDir, loadFile, path]);
+
+  const createFolder = useCallback(async () => {
+    const name = window.prompt('New folder name');
+    if (!name?.trim()) return;
+    const folderPath = joinSystemPath(path, name.trim());
+    const result = await window.api.fileMkdir({ path: folderPath }) as { error?: string };
+    if (result?.error) { setError(result.error); return; }
+    await loadDir(path);
+  }, [loadDir, path]);
+
+  const chooseFolder = useCallback(async () => {
+    const folder = await window.api.pickDirectory();
+    if (!folder) return;
+    setCwd(folder);
+    setHistory([folder]);
+    setHistoryIndex(0);
+    await loadDir(folder);
+  }, [loadDir]);
+
+  const renameSelected = useCallback(async () => {
+    if (!selectedFile) return;
+    const oldName = selectedFile.split(/[\\/]/).pop() ?? selectedFile;
+    const name = window.prompt('Rename file', oldName)?.trim();
+    if (!name || name === oldName) return;
+    const newPath = selectedFile.replace(/[^\\/]+$/, name);
+    const result = await window.api.fileRename({ oldPath: selectedFile, newPath }) as { error?: string };
+    if (result?.error) { setError(result.error); return; }
+    setSelectedFile(newPath);
+    await loadDir(path);
+    await loadFile(newPath);
+  }, [loadDir, loadFile, path, selectedFile]);
+
+  const deleteSelected = useCallback(async () => {
+    if (!selectedFile || !window.confirm(`Delete ${selectedFile.split(/[\\/]/).pop()}?`)) return;
+    const result = await window.api.fileDelete({ path: selectedFile }) as { error?: string };
+    if (result?.error) { setError(result.error); return; }
+    setSelectedFile(null);
+    setFileContent('');
+    setDirty(false);
+    await loadDir(path);
+  }, [loadDir, path, selectedFile]);
+
+  const pushHistory = useCallback((p: string) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push(p);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
-  };
+  }, [history, historyIndex]);
+
+  const navigateUp = useCallback(() => {
+    if (!path) return;
+    const parent = parentSystemPath(path);
+    if (parent === path) return;
+    pushHistory(parent);
+    void loadDir(parent);
+  }, [loadDir, path, pushHistory]);
 
   const goBack = () => {
     if (historyIndex > 0) {
@@ -156,7 +226,7 @@ export function FileManager() {
   };
 
   const openEntry = (entry: DirEntry) => {
-    const fullPath = path.replace(/\\/g, '/').replace(/\/?$/, '/') + entry.name;
+    const fullPath = joinSystemPath(path, entry.name);
     if (entry.isDirectory) {
       pushHistory(fullPath);
       loadDir(fullPath);
@@ -166,16 +236,24 @@ export function FileManager() {
   };
 
   useEffect(() => {
-    pushHistory(cwd);
-    loadDir(cwd);
-  }, []);
+    setHistory([cwd]);
+    setHistoryIndex(0);
+    void loadDir(cwd);
+  }, [cwd, loadDir]);
+
+  const navigateTo = useCallback((target: string) => {
+    const normalized = normalizeSystemPath(target);
+    if (!normalized) return;
+    pushHistory(normalized);
+    void loadDir(normalized);
+  }, [loadDir, pushHistory]);
 
   const filteredEntries = search
     ? entries.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
     : entries;
 
   const relativePath = selectedFile
-    ? selectedFile.replace(path.replace(/\\/g, '/').replace(/\/?$/, '/'), '')
+    ? selectedFile.split(/[\\/]/).pop() ?? selectedFile
     : '';
 
   return (
@@ -203,6 +281,9 @@ export function FileManager() {
             title="Refresh">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
           </button>
+          <button onClick={() => void chooseFolder()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Open another folder">Open Folder</button>
+          <button onClick={() => void createFile()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a file in this folder">New File</button>
+          <button onClick={() => void createFolder()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a folder here">New Folder</button>
           <div className="flex-1 min-w-0">
             <input
               value={search}
@@ -218,29 +299,52 @@ export function FileManager() {
               Save
             </button>
           )}
+          {selectedFile && <button onClick={() => void renameSelected()} className="h-7 rounded-lg border border-white/8 px-2 text-[10px] text-textMuted hover:text-textMain">Rename</button>}
+          {selectedFile && <button onClick={() => void deleteSelected()} className="h-7 rounded-lg border border-red-500/15 px-2 text-[10px] text-red-400/80 hover:bg-red-500/10">Delete</button>}
         </div>
+        <form
+          className="mb-2 flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            navigateTo(addressPath);
+          }}
+        >
+          <span className="text-[10px] font-medium uppercase tracking-wider text-textMuted/60">Path</span>
+          <input
+            value={addressPath}
+            onChange={(event) => setAddressPath(event.target.value)}
+            className="h-7 flex-1 rounded-lg border border-white/8 bg-white/5 px-2.5 font-mono text-[11px] text-textMain outline-none focus:ring-1 focus:ring-indigo-500/40"
+            aria-label="System file path"
+            spellCheck={false}
+          />
+          <button type="submit" className="h-7 rounded-lg border border-white/8 px-3 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain">Go</button>
+        </form>
         <div className="flex items-center gap-1 text-[10px] text-textMuted/70 truncate">
-          {path.split(/[/\\]/).filter(Boolean).map((part, i, arr) => (
-            <span key={i} className="flex items-center gap-1">
-              {i > 0 && <span className="text-textMuted/30">/</span>}
-              <button
-                onClick={() => {
-                  const root = path.startsWith('/') ? '' : arr[0];
-                  const target = i === 0 ? (root || '/') : arr.slice(0, i + 1).join('/');
-                  pushHistory(target);
-                  loadDir(target);
-                }}
-                className="hover:text-indigo-400 transition-colors cursor-pointer"
-              >
-                {part}
-              </button>
-            </span>
-          ))}
+          <span className="font-mono" title={path}>{path}</span>
         </div>
       </div>
 
       {/* Content area */}
       <div className="flex-1 min-h-0 flex">
+        <aside className="w-44 flex-shrink-0 overflow-y-auto border-r border-borderSubtle bg-bgPanel/20 p-2 custom-scrollbar">
+          <div className="mb-1 px-2 text-[9px] font-semibold uppercase tracking-wider text-textMuted/50">Locations</div>
+          {[...systemRoots.common, ...systemRoots.drives].map((location) => (
+            <button
+              key={`${location.kind}:${location.path}`}
+              type="button"
+              onClick={() => navigateTo(location.path)}
+              title={location.path}
+              className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                normalizeSystemPath(path) === normalizeSystemPath(location.path)
+                  ? 'bg-indigo-500/15 text-indigo-300'
+                  : 'text-textMuted hover:bg-white/[0.04] hover:text-textMain'
+              }`}
+            >
+              <span>{location.kind === 'drive' ? '▣' : location.name === 'Home' ? '⌂' : '◇'}</span>
+              <span className="truncate">{location.name}</span>
+            </button>
+          ))}
+        </aside>
         {/* File tree */}
         <div className={`${selectedFile ? 'w-56 border-r border-borderSubtle' : 'flex-1'} overflow-y-auto custom-scrollbar transition-all`}>
           {loading && entries.length === 0 && (
@@ -255,7 +359,7 @@ export function FileManager() {
             </div>
           )}
           {filteredEntries.map((entry) => {
-            const fullPath = path.replace(/\\/g, '/').replace(/\/?$/, '/') + entry.name;
+            const fullPath = joinSystemPath(path, entry.name);
             const isSelected = selectedFile === fullPath;
             return (
               <button

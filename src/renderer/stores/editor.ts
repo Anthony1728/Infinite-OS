@@ -14,9 +14,11 @@ interface EditorState {
   openFile: string | null;
   openFileContent: string | null;
   openFileLanguage: string | null;
+  launchFile: string | null;
   showAnimation: boolean;
 
-  openInEditor: (name: string, content: string, language?: string) => void;
+  openInEditor: (name: string, content: string, language?: string, launch?: boolean) => void;
+  clearLaunch: () => void;
   saveFile: (name: string, content: string) => void;
   clearAnimation: () => void;
 }
@@ -42,14 +44,16 @@ export const useEditorStore = create<EditorState>((set) => ({
   openFile: null,
   openFileContent: null,
   openFileLanguage: null,
+  launchFile: null,
   showAnimation: false,
 
-  openInEditor: (name: string, content: string, language?: string) => {
+  openInEditor: (name: string, content: string, language?: string, launch = false) => {
     const lang = language ?? inferLanguage(name);
     set({
       openFile: name,
       openFileContent: content,
       openFileLanguage: lang,
+      launchFile: launch ? name : null,
       showAnimation: true,
     });
     // Auto-clear animation after 1 second
@@ -57,6 +61,8 @@ export const useEditorStore = create<EditorState>((set) => ({
       set({ showAnimation: false });
     }, 1000);
   },
+
+  clearLaunch: () => set({ launchFile: null }),
 
   saveFile: (name: string, content: string) => {
     set((state) => {

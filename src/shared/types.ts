@@ -13,6 +13,13 @@ export type ContentBlock =
       tool_use_id: string;
       content: string | ContentBlock[];
       is_error?: boolean;
+    }
+  | {
+      type: 'question';
+      question: string;
+      options: Array<{ label: string; description?: string }>;
+      allowCustom?: boolean;
+      questionId: string;
     };
 
 export interface Message {
@@ -22,6 +29,8 @@ export interface Message {
   timestamp: number;
   model?: string;
   provider?: string;
+  requested_model?: string;
+  requested_provider?: string;
   usage?: TokenUsage;
   stop_reason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence';
 }
@@ -43,6 +52,10 @@ export interface Session {
   provider: string;
   message_count: number;
   preview?: string;
+  pinned?: boolean;
+  folder?: string;
+  parent_session_id?: string;
+  branch_message_id?: string;
 }
 
 export interface ModelInfo {
@@ -59,7 +72,24 @@ export interface ProviderInfo {
   id: string;
   label: string;
   requiresApiKey: boolean;
+  acceptsApiKey?: boolean;
   baseUrl?: string;
   freeModels: ModelInfo[];
   homepage?: string;
+}
+
+export type EnginePhase = 'dormant' | 'bootstrapping' | 'active';
+
+export interface EngineStatus {
+  phase: EnginePhase;
+  totalInteractions: number;
+  successfulInteractions: number;
+  categoriesCovered: string[];
+  modelsUsed: string[];
+  bestModel: string | null;
+  bestModelSuccessRate: number;
+  progressPercent: number;
+  thresholdMet: boolean;
+  startedAt: number;
+  lastInteractionAt: number;
 }

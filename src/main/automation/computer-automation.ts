@@ -11,7 +11,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -46,9 +46,11 @@ export interface KeyboardAction {
 
 export interface WindowInfo {
   title: string;
+  processName?: string;
   pid: number;
   rect: Rect;
   isFocused: boolean;
+  handle?: number;
 }
 
 export interface ProcessInfo {
@@ -57,6 +59,29 @@ export interface ProcessInfo {
   memory: number;
   cpu: number;
   windowTitle?: string;
+}
+
+export interface FocusedElementInfo {
+  name: string;
+  controlType: string;
+  automationId: string;
+  className: string;
+  boundingRect: Rect;
+}
+
+export interface InteractiveElementInfo extends FocusedElementInfo {
+  isEnabled: boolean;
+}
+
+export interface DesktopState {
+  timestamp: number;
+  screen: { width: number; height: number };
+  cursor: Point;
+  activeWindow: WindowInfo | null;
+  focusedElement: FocusedElementInfo | null;
+  windows: WindowInfo[];
+  clipboardText?: string;
+  recentActions: Array<{ action: string; timestamp: number; success: boolean }>;
 }
 
 // Constants
@@ -249,8 +274,8 @@ public class Mouse {
    * Type text
    */
   async typeText(text: string, delay: number = 0): Promise<void> {
-    // Escape special characters
-    const escaped = text.replace(/[{}()\[\]^~]/g, (c) => `{${c}}`);
+    // Escape special characters for SendKeys and single quotes for PowerShell
+    const escaped = text.replace(/[{}()[\]^~]/g, (c) => `{${c}}`).replace(/'/g, "''");
     await this.executePowerShell(
       `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
     );
@@ -347,7 +372,7 @@ public class Keyboard {
   /**
    * Capture the entire screen
    */
-  async captureScreen(): Promise<{ path: string; base64: string; width: number; height: number }> {
+  async captureScreen(transient = false): Promise<{ path: string; base64: string; width: number; height: number }> {
     const { width, height } = await this.getScreenSize();
     const id = randomUUID();
     const path = join(this.screenshotsDir, `screen-${id}.png`);
@@ -357,7 +382,21 @@ public class Keyboard {
     );
 
     const base64 = readFileSync(path).toString('base64');
+    if (transient) {
+      try { unlinkSync(path); } catch { /* best-effort cleanup for live frames */ }
+    }
     this.logAction('captureScreen()', true);
+    return { path, base64, width, height };
+  }
+
+  async captureLiveFrame(): Promise<{ path: string; base64: string; width: number; height: number }> {
+    const { width, height } = await this.getScreenSize();
+    const path = join(this.screenshotsDir, 'live-frame.png');
+    await this.executePowerShell(
+      `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bmp = New-Object System.Drawing.Bitmap(${width}, ${height}); $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen(0, 0, 0, 0, $bmp.Size); $bmp.Save('${path.replace(/\\/g, '\\\\')}'); $g.Dispose(); $bmp.Dispose()`
+    );
+    const base64 = readFileSync(path).toString('base64');
+    this.logAction('captureLiveFrame()', true);
     return { path, base64, width, height };
   }
 
@@ -393,31 +432,77 @@ public class Keyboard {
    * Get list of all windows
    */
   async getWindows(): Promise<WindowInfo[]> {
-    const result = await this.executePowerShell(
-      `Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | ForEach-Object {
-        $rect = [System.Windows.Forms.Form]::ActiveForm.Bounds
-        Write-Output "$($_.MainWindowTitle)|$($_.Id)|$($rect.X)|$($rect.Y)|$($rect.Width)|$($rect.Height)"
-      }`
+    const result = await this.executePowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class WinApi {
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+}
+"@
+$foreground = [WinApi]::GetForegroundWindow()
+$items = Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowHandle -ne 0 } | ForEach-Object {
+  $rect = New-Object WinApi+RECT
+  [void][WinApi]::GetWindowRect($_.MainWindowHandle, [ref]$rect)
+  [pscustomobject]@{
+    title = $_.MainWindowTitle
+    processName = $_.ProcessName
+    pid = $_.Id
+    handle = [int64]$_.MainWindowHandle
+    x = $rect.Left
+    y = $rect.Top
+    width = [Math]::Max(0, $rect.Right - $rect.Left)
+    height = [Math]::Max(0, $rect.Bottom - $rect.Top)
+    isFocused = ($_.MainWindowHandle -eq $foreground)
+  }
+}
+$items | ConvertTo-Json -Depth 4
+`
     );
 
     if (!result) return [];
-    
-    return result.split('\n')
-      .filter(line => line.trim())
-      .map(line => {
-        const [title, pid, x, y, w, h] = line.split('|');
-        return {
-          title: title?.trim() || 'Unknown',
-          pid: parseInt(pid) || 0,
-          rect: {
-            x: parseInt(x) || 0,
-            y: parseInt(y) || 0,
-            width: parseInt(w) || 0,
-            height: parseInt(h) || 0,
-          },
-          isFocused: false,
-        };
-      });
+
+    try {
+      const parsed = JSON.parse(result) as Array<{
+        title?: string;
+        processName?: string;
+        pid?: number;
+        handle?: number;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        isFocused?: boolean;
+      }> | {
+        title?: string;
+        processName?: string;
+        pid?: number;
+        handle?: number;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        isFocused?: boolean;
+      };
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      return items.map((item) => ({
+        title: item.title || item.processName || 'Unknown',
+        processName: item.processName,
+        pid: item.pid || 0,
+        handle: item.handle,
+        rect: {
+          x: item.x || 0,
+          y: item.y || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+        },
+        isFocused: Boolean(item.isFocused),
+      }));
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -432,13 +517,25 @@ public class Keyboard {
    * Focus a window by title
    */
   async focusWindow(title: string): Promise<boolean> {
-    const result = await this.executePowerShell(
-      `Get-Process | Where-Object {$_.MainWindowTitle -like '*${title}*'} | Select-Object -First 1 | ForEach-Object {
-        $hwnd = (Get-Process -Id $_.Id).MainWindowHandle
-        if ($hwnd) { [void][System.Windows.Forms.Form]::Capture($hwnd); [System.Windows.Forms.Form]::Activate($hwnd) }
-      }`
+    const safeTitle = title.replace(/'/g, "''");
+    const result = await this.executePowerShell(`
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class WinApi {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+$p = Get-Process | Where-Object { $_.MainWindowTitle -like '*${safeTitle}*' } | Select-Object -First 1
+if ($p -and $p.MainWindowHandle -ne 0) {
+  [void][WinApi]::ShowWindow($p.MainWindowHandle, 9)
+  [void][WinApi]::SetForegroundWindow($p.MainWindowHandle)
+  Write-Output "focused"
+}
+`
     );
-    return !!result;
+    return result.includes('focused');
   }
 
   /**
@@ -515,6 +612,159 @@ public class Keyboard {
       `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::GetText()`
     );
     return result || '';
+  }
+
+  async getFocusedElement(): Promise<FocusedElementInfo | null> {
+    const result = await this.executePowerShell(`
+try {
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+  $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+  if (-not $el) { return }
+  $rect = $el.Current.BoundingRectangle
+  [pscustomobject]@{
+    name = $el.Current.Name
+    controlType = $el.Current.ControlType.ProgrammaticName
+    automationId = $el.Current.AutomationId
+    className = $el.Current.ClassName
+    x = [int]$rect.X
+    y = [int]$rect.Y
+    width = [int]$rect.Width
+    height = [int]$rect.Height
+  } | ConvertTo-Json -Depth 3
+} catch {}
+`);
+    if (!result) return null;
+    try {
+      const item = JSON.parse(result) as {
+        name?: string;
+        controlType?: string;
+        automationId?: string;
+        className?: string;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+      };
+      return {
+        name: item.name || '',
+        controlType: item.controlType || '',
+        automationId: item.automationId || '',
+        className: item.className || '',
+        boundingRect: {
+          x: item.x || 0,
+          y: item.y || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Return a compact Windows UI Automation tree for the foreground window.
+   * This gives text-only models reliable labels and screen coordinates instead
+   * of forcing them to guess from pixels. The list is deliberately bounded so
+   * a complex application cannot flood the model context.
+   */
+  async getInteractiveElements(limit = 180): Promise<InteractiveElementInfo[]> {
+    const safeLimit = Math.max(1, Math.min(300, Math.trunc(limit)));
+    const result = await this.executePowerShell(`
+try {
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class InfiniteForegroundWindow {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@
+  $handle = [InfiniteForegroundWindow]::GetForegroundWindow()
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+  if (-not $root) { Write-Output '[]'; return }
+  $all = $root.FindAll(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition
+  )
+  $items = [System.Collections.Generic.List[object]]::new()
+  for ($i = 0; $i -lt $all.Count -and $items.Count -lt ${safeLimit}; $i++) {
+    try {
+      $el = $all.Item($i)
+      $rect = $el.Current.BoundingRectangle
+      $name = [string]$el.Current.Name
+      $automationId = [string]$el.Current.AutomationId
+      if ($el.Current.IsOffscreen -or $rect.Width -lt 2 -or $rect.Height -lt 2) { continue }
+      if ([string]::IsNullOrWhiteSpace($name) -and [string]::IsNullOrWhiteSpace($automationId)) { continue }
+      $items.Add([pscustomobject]@{
+        name = $name
+        controlType = ([string]$el.Current.ControlType.ProgrammaticName).Replace('ControlType.', '')
+        automationId = $automationId
+        className = [string]$el.Current.ClassName
+        isEnabled = [bool]$el.Current.IsEnabled
+        x = [int]$rect.X
+        y = [int]$rect.Y
+        width = [int]$rect.Width
+        height = [int]$rect.Height
+      })
+    } catch {}
+  }
+  Write-Output (ConvertTo-Json -InputObject @($items) -Depth 3 -Compress)
+} catch { Write-Output '[]' }
+`);
+    if (!result) return [];
+    try {
+      const parsed = JSON.parse(result) as Array<{
+        name?: string;
+        controlType?: string;
+        automationId?: string;
+        className?: string;
+        isEnabled?: boolean;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+      }>;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item) => ({
+        name: item.name || '',
+        controlType: item.controlType || '',
+        automationId: item.automationId || '',
+        className: item.className || '',
+        isEnabled: item.isEnabled !== false,
+        boundingRect: {
+          x: item.x || 0,
+          y: item.y || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+        },
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  async getDesktopState(): Promise<DesktopState> {
+    const [screen, cursor, windows, focusedElement, clipboardText] = await Promise.all([
+      this.getScreenSize(),
+      this.getCursorPosition(),
+      this.getWindows(),
+      this.getFocusedElement(),
+      this.getClipboard().catch(() => ''),
+    ]);
+
+    return {
+      timestamp: Date.now(),
+      screen,
+      cursor,
+      activeWindow: windows.find((window) => window.isFocused) || null,
+      focusedElement,
+      windows,
+      clipboardText: clipboardText ? clipboardText.slice(0, 500) : undefined,
+      recentActions: this.getActionLog(12),
+    };
   }
 
   /**

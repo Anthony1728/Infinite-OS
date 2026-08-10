@@ -23,7 +23,9 @@ export const edit: Tool = {
     };
     try {
       const abs = resolve(ctx.cwd, file_path);
-      const original = await readFile(abs, 'utf8');
+      const signal = ctx.abortSignal;
+      const fsOpts = signal ? { signal } as const : undefined;
+      const original = await readFile(abs, { encoding: 'utf8', ...fsOpts });
 
       let updated: string;
       if (replace_all) {
@@ -35,7 +37,7 @@ export const edit: Tool = {
         updated = original.replace(old_string, new_string);
       }
 
-      await writeFile(abs, updated, 'utf8');
+      await writeFile(abs, updated, { encoding: 'utf8', ...fsOpts });
       return { content: `Edited ${file_path} successfully` };
     } catch (e) {
       return { content: `Error editing ${file_path}: ${(e as Error).message}`, is_error: true };

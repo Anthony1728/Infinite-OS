@@ -310,14 +310,28 @@ export function AgentsView() {
                   </div>
 
                   {/* Expanded preview */}
-                  {isExpanded && (run.preview || run.result || run.error) && (
+                  {isExpanded && (
                     <div className="border-t border-borderSubtle bg-bgCard/50 px-4 py-3 animate-slide-down">
                       <div className="text-[10px] uppercase tracking-wider text-textMuted mb-2 font-semibold">
                         {run.status === 'running' ? 'Live Output' : run.status === 'completed' ? 'Result' : 'Error'}
                       </div>
-                      <pre className="text-xs text-textMain/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto custom-scrollbar leading-relaxed font-mono">
-                        {run.result || run.error || run.preview || '…'}
-                      </pre>
+                      {run.activity?.length ? (
+                        <div className="max-h-64 space-y-2 overflow-y-auto custom-scrollbar">
+                          {run.activity.map((item) => (
+                            <div key={item.id} className="flex gap-2 text-xs">
+                              <span className={`mt-1 h-2 w-2 flex-none rounded-full ${item.kind === 'error' ? 'bg-red-400' : item.kind === 'result' ? 'bg-emerald-400' : item.kind === 'tool' ? 'bg-cyan-400' : 'bg-indigo-400'}`} />
+                              <div className="min-w-0">
+                                <div className="font-medium text-textMain">{item.label}</div>
+                                {item.detail && <pre className="mt-0.5 whitespace-pre-wrap break-words font-mono text-[10px] leading-4 text-textMuted">{item.detail}</pre>}
+                              </div>
+                              <span className="ml-auto flex-none text-[9px] text-textMuted">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <pre className="text-xs text-textMain/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto custom-scrollbar leading-relaxed font-mono">{run.result || run.error || run.preview || 'Starting…'}</pre>
+                      )}
+                      {(run.result || run.error) && <pre className="mt-3 border-t border-borderSubtle pt-3 text-xs text-textMain/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto custom-scrollbar leading-relaxed font-mono">{run.result || run.error}</pre>}
                     </div>
                   )}
                 </div>

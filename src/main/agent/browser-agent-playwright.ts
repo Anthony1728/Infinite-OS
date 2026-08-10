@@ -54,6 +54,43 @@ export interface BrowserSession {
   context: BrowserContext;
 }
 
+export type BrowserSessionSummary = Omit<BrowserSession, 'page' | 'context'>;
+
+interface EvaluatedElement {
+  textContent?: string | null;
+  innerText?: string;
+  href?: string;
+  action?: string;
+  method?: string;
+  name?: string;
+  id?: string;
+  type?: string;
+  tagName?: string;
+  value?: string;
+  currentSrc?: string;
+  src?: string;
+  alt?: string;
+  querySelectorAll?(selector: string): ArrayLike<EvaluatedElement>;
+}
+
+interface EvaluatedScrollableElement {
+  scrollHeight: number;
+  clientHeight: number;
+  scrollTo(x: number, y: number): void;
+  scrollBy(x: number, y: number): void;
+}
+
+interface EvaluatedDocument {
+  body?: EvaluatedElement;
+  querySelectorAll(selector: string): ArrayLike<EvaluatedElement>;
+  scrollingElement?: EvaluatedScrollableElement;
+  documentElement?: EvaluatedScrollableElement;
+}
+
+interface EvaluatedGlobal {
+  document?: EvaluatedDocument;
+}
+
 function now() {
   return Date.now();
 }
@@ -106,10 +143,8 @@ export class BrowserAgentPlaywright {
       page.title().catch(() => ''),
       page.evaluate(() => {
         try {
-          const d: any =
-            (globalThis as any) &&
-            (globalThis as any)['document'] ? (globalThis as any)['document'] : undefined;
-          const body = (d as any)?.body;
+          const d = (globalThis as unknown as EvaluatedGlobal).document;
+          const body = d?.body;
           const innerText = body?.innerText;
           return String(innerText ?? '').slice(0, 200_000);
         } catch {
@@ -119,8 +154,8 @@ export class BrowserAgentPlaywright {
 
       page.evaluate(() => {
         try {
-          const asAnyDoc: any = (globalThis as any)['document'];
-          const list: any[] = Array.from(asAnyDoc.querySelectorAll('a[href]'));
+          const doc = (globalThis as unknown as EvaluatedGlobal).document;
+          const list = Array.from(doc?.querySelectorAll('a[href]') ?? []);
           return list.slice(0, 200).map((a) => ({
             text: String(a?.textContent ?? '').trim().slice(0, 200),
             href: String(a?.href ?? ''),
@@ -132,10 +167,10 @@ export class BrowserAgentPlaywright {
 
       page.evaluate(() => {
         try {
-          const asAnyDoc: any = (globalThis as any)['document'];
-          const formsEl: any[] = Array.from(asAnyDoc.querySelectorAll('form'));
+          const doc = (globalThis as unknown as EvaluatedGlobal).document;
+          const formsEl = Array.from(doc?.querySelectorAll('form') ?? []);
           return formsEl.slice(0, 50).map((f) => {
-            const inputs: any[] = Array.from(
+            const inputs = Array.from(
               f?.querySelectorAll?.('input, select, textarea') ?? [],
             );
             return {
@@ -155,8 +190,8 @@ export class BrowserAgentPlaywright {
 
       page.evaluate(() => {
         try {
-          const asAnyDoc: any = (globalThis as any)['document'];
-          const imgs: any[] = Array.from(asAnyDoc.querySelectorAll('img'));
+          const doc = (globalThis as unknown as EvaluatedGlobal).document;
+          const imgs = Array.from(doc?.querySelectorAll('img') ?? []);
           return imgs.slice(0, 50).map((img) => ({
             src: String(img?.currentSrc ?? img?.src ?? ''),
             alt: String(img?.alt ?? '').slice(0, 200),
@@ -285,11 +320,12 @@ export class BrowserAgentPlaywright {
 
     try {
       const values = await session.page.$$eval(selector, (els) => {
-        const list = Array.from(els as any[]).slice(0, 200);
+        const list = Array.from(els).slice(0, 200);
         return list.map((el) => {
-          const href = String((el as any)?.href ?? '');
+          const evaluated = el as unknown as EvaluatedElement;
+          const href = String(evaluated.href ?? '');
           if (href) return href;
-          const t = String((el as any)?.innerText ?? (el as any)?.textContent ?? '');
+          const t = String(evaluated.innerText ?? evaluated.textContent ?? '');
           return t.trim();
         });
       });
@@ -357,7 +393,7 @@ export class BrowserAgentPlaywright {
 
     try {
       await session.page.evaluate((dir) => {
-        const doc = (globalThis as any)['document'];
+        const doc = (globalThis as unknown as EvaluatedGlobal).document;
         const el = doc?.scrollingElement ?? doc?.documentElement;
         if (!el) return;
 
@@ -416,11 +452,14 @@ export class BrowserAgentPlaywright {
     this.sessions.delete(sessionId);
   }
 
-  listSessions(): BrowserSession[] {
-    return Array.from(this.sessions.values()).map((s) => ({
-      ...s,
-      page: undefined as any,
-      context: undefined as any,
+  listSessions(): BrowserSessionSummary[] {
+    return Array.from(this.sessions.values()).map((session) => ({
+      id: session.id,
+      name: session.name,
+      url: session.url,
+      actions: session.actions,
+      createdAt: session.createdAt,
+      lastActive: session.lastActive,
     }));
   }
 

@@ -301,7 +301,7 @@ export class PluginStore {
         try {
           const result = execSync('docker ps -a --format "{{.Names}}\t{{.Status}}\t{{.Image}}"', { encoding: 'utf-8' });
           return { success: true, result: result || 'No containers found' };
-        } catch (e) {
+        } catch {
           return { success: false, error: 'Docker not running or not installed' };
         }
       }
@@ -309,7 +309,7 @@ export class PluginStore {
         try {
           const result = execSync('docker images --format "{{.Repository}}:{{.Tag}}\t{{.Size}}"', { encoding: 'utf-8' });
           return { success: true, result: result || 'No images found' };
-        } catch (e) {
+        } catch {
           return { success: false, error: 'Docker not running or not installed' };
         }
       }

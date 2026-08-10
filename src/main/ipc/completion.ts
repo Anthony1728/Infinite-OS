@@ -17,7 +17,7 @@ export function registerCompletionIpc(): void {
   }) => {
     try {
       // Read file content
-      let content = args.context;
+      const content = args.context;
       
       const completions = engine.getCompletions(
         args.filePath,

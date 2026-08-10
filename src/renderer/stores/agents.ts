@@ -22,7 +22,19 @@ export interface AgentRun {
   error?: string;
   preview?: string;
   toolCallCount: number;
+  activity?: AgentActivity[];
 }
+
+export interface AgentActivity {
+  id: string;
+  timestamp: number;
+  kind: 'status' | 'tool' | 'result' | 'error';
+  label: string;
+  detail?: string;
+}
+
+let unsubscribeAgentEvents: (() => void) | null = null;
+let runsPoll: ReturnType<typeof setInterval> | null = null;
 
 export interface ChatTask {
   id: string;
@@ -31,6 +43,7 @@ export interface ChatTask {
   startedAt: number;
   completedAt?: number;
   filesCreated?: string[];
+  error?: string;
 }
 
 export interface OrchestratorSubTask {
@@ -59,7 +72,7 @@ interface AgentsState {
   getRunsByStatus: (status: AgentRun['status']) => AgentRun[];
   addChatTask: (title: string) => string;
   completeChatTask: (id: string, files?: string[]) => void;
-  failChatTask: (id: string) => void;
+  failChatTask: (id: string, error?: string) => void;
   addSubTask: (taskId: string, subTaskId: string, agentType: string, description: string) => void;
   completeSubTask: (subTaskId: string, result: string, files?: string[]) => void;
   failSubTask: (subTaskId: string, error: string) => void;
@@ -77,7 +90,8 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     set({ types });
 
     // Subscribe to live events
-    window.api.onAgentEvent((e: unknown) => {
+    unsubscribeAgentEvents?.();
+    unsubscribeAgentEvents = window.api.onAgentEvent((e: unknown) => {
       const ev = e as { type: string; run?: AgentRun; runId?: string };
       if (ev.type === 'start' && ev.run) {
         set((s) => ({ runs: [ev.run!, ...s.runs.filter((r) => r.id !== ev.run!.id)] }));
@@ -91,18 +105,29 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         set((s) => ({
           runs: s.runs.map((r) => (r.id === ev.runId ? { ...r, toolCallCount: r.toolCallCount + 1 } : r)),
         }));
+      } else if (ev.type === 'activity' && ev.runId) {
+        const item = (e as { activity: AgentActivity }).activity;
+        set((s) => ({
+          runs: s.runs.map((r) => r.id === ev.runId
+            ? { ...r, activity: [...(r.activity ?? []), item].slice(-100), preview: item.detail || item.label }
+            : r),
+        }));
       } else if (ev.type === 'complete' && ev.runId) {
         const result = (e as { result: string }).result;
         set((s) => ({
           runs: s.runs.map((r) =>
-            r.id === ev.runId ? { ...r, status: 'completed', completedAt: Date.now(), result } : r
+            r.id === ev.runId && (r.status === 'queued' || r.status === 'running')
+              ? { ...r, status: 'completed', completedAt: Date.now(), result }
+              : r
           ),
         }));
       } else if (ev.type === 'fail' && ev.runId) {
         const error = (e as { error: string }).error;
         set((s) => ({
           runs: s.runs.map((r) =>
-            r.id === ev.runId ? { ...r, status: 'failed', completedAt: Date.now(), error } : r
+            r.id === ev.runId && (r.status === 'queued' || r.status === 'running')
+              ? { ...r, status: 'failed', completedAt: Date.now(), error }
+              : r
           ),
         }));
       }
@@ -110,7 +135,8 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
 
     // Poll for runs (covers state set by other windows / restarts)
     await get().refreshRuns();
-    setInterval(() => { void get().refreshRuns(); }, 3000);
+    if (runsPoll) clearInterval(runsPoll);
+    runsPoll = setInterval(() => { void get().refreshRuns(); }, 3000);
   },
 
   refreshRuns: async () => {
@@ -151,15 +177,19 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       provider: settings.provider ?? 'openrouter',
       model: settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
     })) as AgentRun;
+    set((s) => ({ runs: [run, ...s.runs.filter((item) => item.id !== run.id)] }));
     return run;
   },
 
   abort: async (runId) => {
-    try {
-      await window.api.abortMessage({ sessionId: runId });
-    } catch { /* best effort */ }
+    const result = await window.api.abortAgent({ runId }) as { ok: boolean; error?: string };
+    if (!result.ok) throw new Error(result.error || 'Could not cancel the agent run.');
     set((s) => ({
-      runs: s.runs.map((r) => (r.id === runId ? { ...r, status: 'cancelled', completedAt: Date.now() } : r)),
+      runs: s.runs.map((r) =>
+        r.id === runId && (r.status === 'queued' || r.status === 'running')
+          ? { ...r, status: 'cancelled', completedAt: Date.now() }
+          : r
+      ),
     }));
   },
 
@@ -181,15 +211,19 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   completeChatTask: (id, files) => {
     set((s) => ({
       chatTasks: s.chatTasks.map(t =>
-        t.id === id ? { ...t, status: 'completed', completedAt: Date.now(), filesCreated: files } : t
+        t.id === id && t.status === 'working'
+          ? { ...t, status: 'completed', completedAt: Date.now(), filesCreated: files }
+          : t
       ),
     }));
   },
 
-  failChatTask: (id) => {
+  failChatTask: (id, error) => {
     set((s) => ({
       chatTasks: s.chatTasks.map(t =>
-        t.id === id ? { ...t, status: 'failed', completedAt: Date.now() } : t
+        t.id === id && t.status === 'working'
+          ? { ...t, status: 'failed', completedAt: Date.now(), error }
+          : t
       ),
     }));
   },
@@ -209,7 +243,9 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   completeSubTask: (subTaskId, result, files) => {
     set((s) => ({
       subTasks: s.subTasks.map(t =>
-        t.id === subTaskId ? { ...t, status: 'completed', completedAt: Date.now(), result, filesCreated: files } : t
+        t.id === subTaskId && (t.status === 'pending' || t.status === 'running')
+          ? { ...t, status: 'completed', completedAt: Date.now(), result, filesCreated: files }
+          : t
       ),
     }));
   },
@@ -217,7 +253,9 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   failSubTask: (subTaskId, error) => {
     set((s) => ({
       subTasks: s.subTasks.map(t =>
-        t.id === subTaskId ? { ...t, status: 'failed', completedAt: Date.now(), error } : t
+        t.id === subTaskId && (t.status === 'pending' || t.status === 'running')
+          ? { ...t, status: 'failed', completedAt: Date.now(), error }
+          : t
       ),
     }));
   },

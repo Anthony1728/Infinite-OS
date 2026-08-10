@@ -2,7 +2,7 @@
 
 import { ipcMain } from 'electron';
 import { getOCR } from '../ocr/index.js';
-import { getVoice } from '../voice/index.js';
+import { getVoiceAsync } from '../voice/index.js';
 import { getCredentials } from '../security/encryption.js';
 import { getPersistentMemory } from '../memory/persistent.js';
 
@@ -22,21 +22,30 @@ export function registerGapIpc(): void {
 
   // ── Voice ──
   ipcMain.handle('voice:stt', async (_e, { audioBuffer, format }: { audioBuffer: string; format: string }) => {
+    const voice = await getVoiceAsync();
     const buffer = Buffer.from(audioBuffer, 'base64');
-    return getVoice().speechToText(buffer, format);
+    return voice.speechToText(buffer, format);
   });
 
-  ipcMain.handle('voice:tts', async (_e, { text, voice }: { text: string; voice?: string }) => {
-    const buffer = await getVoice().textToSpeech(text, voice);
+  ipcMain.handle('voice:tts', async (_e, { text, voice: voiceName }: { text: string; voice?: string }) => {
+    const voice = await getVoiceAsync();
+    const buffer = await voice.textToSpeech(text, voiceName);
     return buffer.toString('base64');
   });
 
   ipcMain.handle('voice:status', async () => {
-    return { available: getVoice().isAvailable(), voices: getVoice().getVoices() };
+    const voice = await getVoiceAsync();
+    return { available: voice.isAvailable(), voices: voice.getVoices() };
   });
 
   ipcMain.handle('voice:setKey', async (_e, { apiKey }: { apiKey: string }) => {
-    getVoice().setApiKey(apiKey);
+    const voice = await getVoiceAsync();
+    voice.setApiKey(apiKey);
+    // Persist to secrets store so key survives restarts.
+    try {
+      const { setApiKey } = await import('../settings/secrets.js');
+      await setApiKey('openai-tts', apiKey);
+    } catch { /* ignore */ }
     return { ok: true };
   });
 

@@ -64,7 +64,7 @@ function AssistantBubble({ time, text, children }: { time: string; text: string;
       </div>
       <div className="max-w-3xl flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1 text-xs text-fg-subtle">
-          <span className="font-medium text-fg">InfiniteAI OS</span>
+          <span className="font-medium text-fg">Infinite OS</span>
           <span>·</span>
           <span>{time}</span>
           <span className="ml-1">⋯</span>

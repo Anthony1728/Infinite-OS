@@ -4,17 +4,11 @@
   "private": true,
   "main": "out/main/index.js",
   "description": "Open-source AI-powered desktop and cloud workspace.",
-  "author": "Infinite AI contributors",
+  "author": "Infinite OS contributors",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -35,7 +29,7 @@
   },
   "build": {
     "appId": "com.infiniteai.os",
-    "productName": "Infinite AI",
+    "productName": "Infinite OS",
     "directories": {
       "output": "dist"
     },
@@ -70,22 +64,31 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@monaco-editor/react": "^4.7.0",
     "@vscode/ripgrep": "^1.15.0",
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^12.11.1",
+    "chart.js": "^4.5.1",
+    "chartjs-node-canvas": "^5.0.0",
     "chokidar": "^3.6.0",
     "cmdk": "^1.1.1",
+    "docx": "^9.7.1",
+    "dompurify": "3.4.11",
     "electron-store": "^10.0.0",
     "electron-updater": "^6.3.0",
+    "exceljs": "^4.4.0",
     "fast-glob": "^3.3.2",
     "fastify": "^5.8.5",
+    "form-data": "4.0.6",
     "framer-motion": "^12.40.0",
+    "hono": "4.12.25",
     "imapflow": "^1.4.2",
     "lucide-react": "^1.17.0",
     "node-fetch": "^3.3.2",
     "nodemailer": "^9.0.1",
     "openai": "^4.67.0",
+    "pdf-lib": "^1.17.1",
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
     "playwright-core": "1.60.0",
+    "pptxgenjs": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.1",
@@ -95,7 +98,7 @@
     "remark-math": "^6.0.0",
     "shiki": "^1.22.0",
     "tinyglobby": "^0.2.0",
-    "uuid": "^10.0.0",
+    "uuid": "11.1.1",
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
     "zod": "^3.23.8",
@@ -110,11 +113,11 @@
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.4.0",
     "@typescript-eslint/parser": "^8.4.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "5.1.4",
     "autoprefixer": "^10.4.20",
-    "electron": "^32.0.0",
-    "electron-builder": "^25.0.0",
-    "electron-vite": "^2.3.0",
+    "electron": "39.8.5",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.35.0",
     "eslint-plugin-react-hooks": "^4.6.2",
@@ -124,7 +127,7 @@
     "sharp": "^0.35.2",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",
-    "vite": "^5.4.2",
-    "vitest": "^2.0.5"
+    "vite": "6.4.3",
+    "vitest": "3.2.6"
   }
 }

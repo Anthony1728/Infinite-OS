@@ -12,7 +12,7 @@ interface KnowledgeEntry {
 }
 
 interface BrainAction {
-  type: 'command' | 'write_file' | 'mkdir' | 'build_app' | 'build_website' | 'computer_open' | 'computer_type' | 'computer_click' | 'computer_mouse' | 'computer_captureScreen' | 'computer_closeApp' | 'computer_pressKey' | 'computer_wait' | 'computer_stats' | 'browser_open' | 'browser_search' | 'browser_type' | 'browser_click' | 'answer' | 'email_list' | 'email_read' | 'email_send';
+  type: 'command' | 'write_file' | 'mkdir' | 'build_app' | 'build_website' | 'computer_open' | 'computer_type' | 'computer_click' | 'computer_mouse' | 'computer_captureScreen' | 'computer_desktop_state' | 'computer_closeApp' | 'computer_pressKey' | 'computer_wait' | 'computer_stats' | 'browser_open' | 'browser_search' | 'browser_type' | 'browser_click' | 'answer' | 'email_list' | 'email_read' | 'email_send';
   command?: string;
   path?: string;
   content?: string;
@@ -39,14 +39,20 @@ interface BrainState {
   lastLearned: number;
   initialized: boolean;
   cwd: string;
+  enginePhase: 'dormant' | 'bootstrapping' | 'active';
+  engineProgress: number;
+  engineStatusText: string;
 
   learnFromInteraction: (input: string, output: string, source: 'api' | 'user' | 'system') => void;
   searchKnowledge: (query: string) => KnowledgeEntry[];
+  executeLocalAction: (input: string) => Promise<string | null>;
   generateOfflineResponse: (input: string) => Promise<string>;
   getKnowledgeStats: () => { total: number; categories: Record<string, number>; recentActivity: number };
   exportKnowledge: () => string;
   importKnowledge: (data: string) => void;
   setCwd: (cwd: string) => void;
+  refreshEngineStatus: () => Promise<void>;
+  checkEngineReady: () => boolean;
 }
 
 // ─── SEED KNOWLEDGE ───────────────────────────────────────────────
@@ -55,6 +61,8 @@ interface BrainState {
 interface SeedEntry { input: string; output: string; tags: string[]; category: KnowledgeEntry['category'] }
 
 const SEED_KNOWLEDGE: SeedEntry[] = [
+  { input: 'what is infinite os', output: "Infinite OS is the full application: an AI-powered Windows operating workspace that combines chat, coding, browser and PC control, automation, learning, business tools, files, agents, and local memory. Infinite AI is the brain inside Infinite OS.", tags: ['identity', 'infinite-os', 'capabilities'], category: 'conversation' },
+  { input: 'infinite os', output: "Infinite OS is the application. Infinite AI is the brain inside it. Together they let you chat, code, automate Windows, control browser/PC tasks, learn from documents, manage files, and build new features from one interface.", tags: ['identity', 'infinite-os', 'capabilities'], category: 'conversation' },
   // ── Greetings & Conversation ──
   { input: 'hi', output: "Hey! I'm the Infinite AI Brain — ask me anything. I can write code, explain concepts, help with projects, or just chat. What do you need?", tags: ['greeting', 'general'], category: 'conversation' },
   { input: 'hello', output: "Hello! I'm ready to help. I can code, research, explain, build, and learn from everything we discuss. What's on your mind?", tags: ['greeting', 'general'], category: 'conversation' },
@@ -157,6 +165,76 @@ interface PatternRule {
   handler: (input: string, match: RegExpMatchArray) => BrainAction;
 }
 
+function browseTargetAction(target: string): BrainAction {
+  const value = target.trim();
+  if (/^https?:\/\//i.test(value)) return { type: 'browser_open', url: value };
+  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(value)) return { type: 'browser_open', url: `https://${value}` };
+  return { type: 'browser_search', value, url: `https://www.google.com/search?q=${encodeURIComponent(value)}` };
+}
+
+function compactLearningText(input: string): string {
+  return input
+    .replace(/^\/(learn|quiz|summarize)\s*/i, '')
+    .replace(/^(create|make|generate)\s+(a\s+)?(quiz|summary)\s+(from|with|for)\s*/i, '')
+    .replace(/^(teach|explain|summarize)\s+(me\s+)?/i, '')
+    .trim();
+}
+
+function makeQuizResponse(input: string): string {
+  const source = compactLearningText(input) || 'the material you attach or paste';
+  return `Here is a fast quiz built from ${source.slice(0, 120)}:
+
+1. What is the main idea?
+Answer: Identify the central concept, goal, or problem the material explains.
+
+2. Which three details matter most?
+Answer: Pull out the strongest definitions, steps, numbers, examples, or warnings.
+
+3. How would you apply this in real life?
+Answer: Turn the concept into one action a student, entrepreneur, or business owner could take.
+
+4. What is a common mistake to avoid?
+Answer: Look for a confusing term, skipped step, false assumption, or risk in the material.
+
+5. Explain it back in your own words.
+Answer: A good answer is short, specific, and uses an example.
+
+Paste the PDF text or attach a text export and I can make this specific, graded, and harder.`;
+}
+
+function makeSummaryResponse(input: string): string {
+  const source = compactLearningText(input) || 'the material you attach or paste';
+  return `Summary workspace for ${source.slice(0, 120)}:
+
+- Core idea: What the material is really saying.
+- Key points: The 5-7 facts, steps, or arguments worth remembering.
+- Actions: What to do next as a learner, founder, operator, or team lead.
+- Risks: What could be misunderstood, delayed, or done badly.
+- Study checklist: Terms to know, examples to practice, and questions to answer.
+
+Paste the document text or attach a supported text file and I will fill this in with the actual content.`;
+}
+
+function makeTeachingResponse(input: string): string {
+  const topic = compactLearningText(input) || 'the topic';
+  const useSoccer = /\b(soccer|football)\b/i.test(input);
+  const analogy = useSoccer
+    ? 'Think of it like soccer: the concept is the game plan, the examples are passes, and the quiz is the shot on goal that proves you understood.'
+    : 'I will teach it with plain language, examples, checks for understanding, and a short practice path.';
+
+  return `Let's learn ${topic.slice(0, 120)}.
+
+${analogy}
+
+1. Big picture: What problem does this solve?
+2. Core formula: Definition -> example -> practice -> feedback.
+3. Fast example: Apply the idea to one simple real-world situation.
+4. Business angle: Ask how it saves time, earns money, reduces risk, or improves decisions.
+5. Student angle: Turn it into flashcards, a 5-question quiz, and one worked example.
+
+Send the PDF text, notes, or a specific topic and I will turn it into a lesson, quiz, summary, study plan, or business brief.`;
+}
+
 const INTENT_PATTERNS: PatternRule[] = [
   // Slash commands
   { pattern: /^\/terminal$/i, handler: () => ({ type: 'computer_open', appName: 'cmd', command: 'cmd' }) },
@@ -164,9 +242,39 @@ const INTENT_PATTERNS: PatternRule[] = [
   { pattern: /^\/shell$/i, handler: () => ({ type: 'computer_open', appName: 'powershell', command: 'powershell' }) },
   { pattern: /^\/shell\s+(.+)/i, handler: (_, match) => ({ type: 'command', command: match[1], cwd: '.' }) },
   { pattern: /^\/browser$/i, handler: () => ({ type: 'computer_open', appName: 'chrome', command: 'chrome' }) },
-  { pattern: /^\/browser\s+(.+)/i, handler: (_, match) => ({ type: 'browser_open', url: match[1] }) },
+  { pattern: /^\/browser\s+(.+)/i, handler: (_, match) => browseTargetAction(match[1]) },
+  { pattern: /^\/pc$/i, handler: () => ({ type: 'computer_captureScreen', reason: 'Inspect the current desktop before controlling the PC' }) },
+  { pattern: /^\/pc\s*(state|context|screen|desktop|status)$/i, handler: () => ({ type: 'computer_desktop_state' }) },
+  { pattern: /^\/pc\s+(.+)/i, handler: (_, match) => ({ type: 'command', command: match[1], cwd: '.' }) },
   { pattern: /^\/code$/i, handler: () => ({ type: 'computer_open', appName: 'code', command: 'code' }) },
   { pattern: /^\/code\s+(.+)/i, handler: (_, match) => ({ type: 'computer_open', appName: 'code', command: `code ${match[1]}` }) },
+
+  // Learning is part of the main AI OS chat, not a separate tab.
+  { pattern: /^\/quiz\b|(\b(create|make|generate)\b.*\bquiz\b)|(\bquiz\b.*\b(pdf|notes|document|chapter|topic)\b)/i, handler: (input) => ({ type: 'answer', answer: makeQuizResponse(input) }) },
+  { pattern: /^\/summarize\b|\b(summarize|summary|condense|brief)\b.*\b(pdf|notes|document|article|page|this)\b/i, handler: (input) => ({ type: 'answer', answer: makeSummaryResponse(input) }) },
+  { pattern: /^\/learn\b|\b(teach|explain|coach|help\s+me\s+learn)\b/i, handler: (input) => ({ type: 'answer', answer: makeTeachingResponse(input) }) },
+
+  // Browser and PC control from natural chat.
+  { pattern: /\b(open|launch|start)\b.*\b(chrome|edge|browser|firefox)\b.*\b(search|find|look\s+up)\b.*\bamazon\b(?:\s+(?:for|about))?\s+(.+)/i, handler: (_, match) => {
+    const query = match[4].trim();
+    return { type: 'browser_search', appName: match[2].toLowerCase(), value: query, url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` };
+  }},
+  { pattern: /\b(search|find|look\s+up)\b\s+\bamazon\b(?:\s+(?:for|about))?\s+(.+)/i, handler: (_, match) => {
+    const query = match[2].trim();
+    return { type: 'browser_search', value: query, url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` };
+  }},
+  { pattern: /\b(open|launch|start)\b.*\b(chrome|edge|browser|firefox)\b.*\b(search|google|find|look\s+up)\b(?:\s+(?:for|about|on))?\s+(.+)/i, handler: (_, match) => browseTargetAction(match[4]) },
+  { pattern: /\b(search|find|look\s+up)\b(?:\s+(?:for|about))?\s+(.+?)\s+\b(on|in)\s+\b(amazon)\b/i, handler: (_, match) => {
+    const query = match[2].trim();
+    return { type: 'browser_search', value: query, url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` };
+  }},
+  { pattern: /\b(order|buy|purchase|get)\b\s+(.+?)\s+\b(from|on)\s+\bamazon\b/i, handler: (_, match) => {
+    const query = match[2].trim();
+    return { type: 'browser_search', value: query, url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` };
+  }},
+
+  // Infinite OS identity
+  { pattern: /\b(what is|who are you|what are you|define|explain)\b.*\binfinite\s*os\b/i, handler: () => ({ type: 'answer', answer: 'Infinite OS is the full application: an AI-powered Windows operating workspace that combines chat, coding, browser and PC control, automation, learning, business tools, files, agents, and local memory. Infinite AI is the brain inside Infinite OS.' }) },
 
   // Greetings
   { pattern: /^(hi|hello|hey|howdy|sup|yo|what's up|greetings)\b/i, handler: () => ({ type: 'answer', answer: "Hey! I'm the Infinite AI Brain. Ask me anything — code, math, concepts, builds, or just chat. What do you need?" }) },
@@ -228,7 +336,7 @@ const INTENT_PATTERNS: PatternRule[] = [
 
   // Generic build game fallback
   { pattern: /\b(build|create|make|write|generate)\b.*\b(game)\b/i, handler: () => {
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Infinite Game</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0f;display:flex;justify-content:center;align-items:center;height:100vh;font-family:'Segoe UI',sans-serif}canvas{border:2px solid #1a1a2e;border-radius:8px}</style></head><body><canvas id="g" width="800" height="600"></canvas><script>const c=document.getElementById('g'),x=c.getContext('2d'),W=800,H=600;let p={x:W/2,y:H-60,w:40,h:40,vx:0},en=[],sc=0,go=false;const K={};document.addEventListener('keydown',e=>{K[e.key]=true;e.preventDefault()});document.addEventListener('keyup',e=>K[e.key]=false);function se(){en.push({x:Math.random()*(W-40)+20,y:-30,w:30,h:30,vy:3+Math.random()*3})}function loop(){if(go)return;x.fillStyle='#0a0a0f';x.fillRect(0,0,W,H);if(K.ArrowLeft&&p.x>20)p.vx=-5;else if(K.ArrowRight&&p.x<W-20)p.vx=5;else p.vx*=.8;p.x+=p.vx;x.fillStyle='#e94560';x.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);if(Math.random()<.03)se();en=en.filter(e=>{e.y+=e.vy;if(e.y>H)return false;if(Math.abs(p.x-e.x)<35&&Math.abs(p.y-e.y)<35){go=true;alert('Game Over! Score: '+sc);location.reload();return false}return true});en.forEach(e=>{x.fillStyle='#533483';x.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h)});sc++;x.fillStyle='#fff';x.font='20px Arial';x.fillText('Score: '+sc,10,30);requestAnimationFrame(loop)}loop()<\/script></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Infinite Game</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0a0a0f;display:flex;justify-content:center;align-items:center;height:100vh;font-family:'Segoe UI',sans-serif}canvas{border:2px solid #1a1a2e;border-radius:8px}</style></head><body><canvas id="g" width="800" height="600"></canvas><script>const c=document.getElementById('g'),x=c.getContext('2d'),W=800,H=600;let p={x:W/2,y:H-60,w:40,h:40,vx:0},en=[],sc=0,go=false;const K={};document.addEventListener('keydown',e=>{K[e.key]=true;e.preventDefault()});document.addEventListener('keyup',e=>K[e.key]=false);function se(){en.push({x:Math.random()*(W-40)+20,y:-30,w:30,h:30,vy:3+Math.random()*3})}function loop(){if(go)return;x.fillStyle='#0a0a0f';x.fillRect(0,0,W,H);if(K.ArrowLeft&&p.x>20)p.vx=-5;else if(K.ArrowRight&&p.x<W-20)p.vx=5;else p.vx*=.8;p.x+=p.vx;x.fillStyle='#e94560';x.fillRect(p.x-p.w/2,p.y-p.h/2,p.w,p.h);if(Math.random()<.03)se();en=en.filter(e=>{e.y+=e.vy;if(e.y>H)return false;if(Math.abs(p.x-e.x)<35&&Math.abs(p.y-e.y)<35){go=true;alert('Game Over! Score: '+sc);location.reload();return false}return true});en.forEach(e=>{x.fillStyle='#533483';x.fillRect(e.x-e.w/2,e.y-e.h/2,e.w,e.h)});sc++;x.fillStyle='#fff';x.font='20px Arial';x.fillText('Score: '+sc,10,30);requestAnimationFrame(loop)}loop()</script></body></html>`;
     return { type: 'build_website', path: 'game/index.html', content: html };
   }},
 
@@ -424,6 +532,9 @@ const INTENT_PATTERNS: PatternRule[] = [
   { pattern: /\b(status|check|what's|show)\b.*\b(system|computer|pc|machine|resources|cpu|ram|memory|disk)\b/i, handler: () => {
     return { type: 'command', command: 'systeminfo | findstr /B /C:"OS Name" /C:"Total Physical Memory" /C:"Available Physical Memory"', cwd: '.' };
   }},
+  { pattern: /\b(what'?s|what is|show|inspect|read|check|understand|context)\b.*\b(on|happening on|open on|active on)\b.*\b(my\s+)?(screen|desktop|pc|computer)\b/i, handler: (): BrainAction => {
+    return { type: 'computer_desktop_state' };
+  }},
 
   // ── Email ──
   { pattern: /\b(check|read|see|show|list|get|view|fetch)\b.*\b(email|emails|mail|inbox|messages)\b/i, handler: (): BrainAction => {
@@ -473,6 +584,20 @@ const INTENT_PATTERNS: PatternRule[] = [
 
 // ─── ACTION EXECUTION ──────────────────────────────────────────────
 // Actually executes Brain actions via IPC — runs commands, writes files, controls computer & browser
+
+function formatOperatorResult(result: {
+  ok: boolean;
+  mode: string;
+  url?: string;
+  title?: string;
+  error?: string;
+  steps: string[];
+}): string {
+  const steps = result.steps.map((step) => `- ${step}`).join('\n');
+  return result.ok
+    ? `**Operator agent completed · ${result.mode}**\n\n${steps}\n\nVerified: ${result.title || result.url || 'completed'}`
+    : `**Operator agent failed**\n\n${steps}\n\nError: ${result.error || 'unknown error'}`;
+}
 
 async function executeBrainAction(action: BrainAction, cwd: string): Promise<string> {
   try {
@@ -551,7 +676,9 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
             if (!validation.approved) {
               return `⚠️ **Brain Safety Block:** ${validation.reason}\n\nThe command \`${action.command}\` was blocked by the safety governor.`;
             }
-          } catch { /* safety check unavailable, proceed */ }
+          } catch {
+            return 'Safety validation was unavailable, so Infinite OS did not execute this dangerous command.';
+          }
         }
         const result = await window.api.terminalExecute({ command: action.command || '', cwd: action.cwd || cwd });
         const output = result.stdout || result.stderr || '(no output)';
@@ -570,7 +697,9 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
             if (!validation.approved) {
               return `⚠️ **Brain Safety Block:** ${validation.reason}\n\nWriting to \`${action.path}\` was blocked.`;
             }
-          } catch { /* safety check unavailable, proceed */ }
+          } catch {
+            return 'Safety validation was unavailable, so Infinite OS did not write this sensitive file.';
+          }
         }
         await window.api.fileWrite({ path: action.path || 'output.txt', content: action.content || '' });
         return `**File created:** \`${action.path}\`\n\n\`\`\`\n${action.content}\n\`\`\`\n\n✅ File written successfully.`;
@@ -615,7 +744,7 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
       }
 
       case 'computer_click': {
-        await window.api.computerClickMouse({ x: action.x || 0, y: action.y || 0, button: 'left' });
+        await window.api.computerClick({ x: action.x || 0, y: action.y || 0, button: 'left' });
         return `✅ Clicked at (${action.x}, ${action.y})`;
       }
 
@@ -626,16 +755,42 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
 
       case 'browser_open': {
         if (action.url) {
-          await window.api.systemOpenUrl({ url: action.url });
-          return `✅ Opened ${action.url} in your browser`;
+          const result = await window.api.operatorBrowserNavigate({ url: action.url }) as {
+            ok: boolean; mode: string; url?: string; title?: string; error?: string; steps: string[];
+          };
+          return formatOperatorResult(result);
+          const app = action.appName && action.appName !== 'browser' ? action.appName : 'chrome';
+          const opened = await window.api.computerOpenApp({ name: app });
+          if ((opened as { ok?: boolean }).ok === false) return `Could not launch ${app}.`;
+          await new Promise((resolve) => setTimeout(resolve, 1400));
+          await window.api.computerFocusWindow({
+            title: app === 'edge' ? 'Edge' : app === 'firefox' ? 'Firefox' : 'Chrome',
+          });
+          await window.api.computerHotkey({ keys: ['ctrl', 'l'] });
+          await window.api.computerTypeText({ text: action.url, delay: 8 });
+          await window.api.computerPressKey({ key: 'enter' });
+          return `**$ browser open ${action.url}**\n\nOpened ${action.url} in your browser`;
         }
         return '❌ No URL provided';
       }
 
       case 'browser_search': {
-        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(action.value || '')}`;
-        await window.api.systemOpenUrl({ url: searchUrl });
-        return `✅ Searching Google for: "${action.value}"`;
+        const searchUrl = action.url || `https://www.google.com/search?q=${encodeURIComponent(action.value || '')}`;
+        const result = await window.api.operatorBrowserNavigate({ url: searchUrl }) as {
+          ok: boolean; mode: string; url?: string; title?: string; error?: string; steps: string[];
+        };
+        return formatOperatorResult(result);
+        const app = action.appName && action.appName !== 'browser' ? action.appName : 'chrome';
+        const opened = await window.api.computerOpenApp({ name: app });
+        if ((opened as { ok?: boolean }).ok === false) return `Could not launch ${app}.`;
+        await new Promise((resolve) => setTimeout(resolve, 1400));
+        await window.api.computerFocusWindow({
+          title: app === 'edge' ? 'Edge' : app === 'firefox' ? 'Firefox' : 'Chrome',
+        });
+        await window.api.computerHotkey({ keys: ['ctrl', 'l'] });
+        await window.api.computerTypeText({ text: searchUrl, delay: 8 });
+        await window.api.computerPressKey({ key: 'enter' });
+        return `**$ browser search "${action.value}"**\n\nOpened ${searchUrl}`;
       }
 
       case 'browser_type': {
@@ -664,6 +819,13 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
           if (base64) return `📸 **Screenshot captured.**\n\n![Screenshot](data:image/png;base64,${base64})`;
           return '📸 Screenshot captured but no image data returned.';
         } catch (e: unknown) { const error = e instanceof Error ? e : new Error(String(e)); return `❌ Screenshot failed: ${error.message}`; }
+      }
+
+      case 'computer_desktop_state': {
+        const result = await window.api.computerGetDesktopState();
+        const state = (result as { ok?: boolean; state?: unknown; error?: string }).state;
+        if (!state) return `❌ Could not read desktop state: ${(result as { error?: string }).error || 'unknown error'}`;
+        return `**$ computer desktop_state**\n\n\`\`\`json\n${JSON.stringify(state, null, 2)}\n\`\`\``;
       }
 
       case 'computer_closeApp': {
@@ -748,6 +910,9 @@ export const useBrainStore = create<BrainState>((set, get) => ({
   lastLearned: 0,
   initialized: false,
   cwd: '.',
+  enginePhase: 'dormant',
+  engineProgress: 0,
+  engineStatusText: 'Engine not started',
 
   setCwd: (cwd) => set({ cwd }),
 
@@ -806,6 +971,44 @@ export const useBrainStore = create<BrainState>((set, get) => ({
       .sort((a, b) => b.score - a.score)
       .slice(0, 10)
       .map(item => item.entry);
+  },
+
+  executeLocalAction: async (input) => {
+    const state = get();
+    // Local intent patterns are deliberately single-step. Compound requests
+    // must reach the agent loop so it can complete every requested action.
+    const actionCount = (input.match(/\b(open|launch|start|run|write|type|paste|put|enter|input|click|search|create|save|send)\b/gi) ?? []).length;
+    if (/\b(and then|then|after that|paste|spreadsheet|excel|google sheets|compare|results)\b/i.test(input) ||
+        (actionCount >= 2 && /\b(and|then|after(?:\s+that)?|before|while)\b/i.test(input))) return null;
+    const directActionTypes = new Set<BrainAction['type']>([
+      'command',
+      'computer_open',
+      'computer_type',
+      'computer_click',
+      'computer_mouse',
+      'computer_captureScreen',
+      'computer_desktop_state',
+      'computer_closeApp',
+      'computer_pressKey',
+      'computer_wait',
+      'computer_stats',
+      'browser_open',
+      'browser_search',
+      'browser_type',
+      'browser_click',
+      'email_list',
+      'email_read',
+      'email_send',
+    ]);
+
+    for (const rule of INTENT_PATTERNS) {
+      const match = input.match(rule.pattern);
+      if (!match) continue;
+      const action = rule.handler(input, match);
+      if (!directActionTypes.has(action.type)) return null;
+      return await executeBrainAction(action, state.cwd);
+    }
+    return null;
   },
 
   generateOfflineResponse: async (input) => {
@@ -883,6 +1086,31 @@ export const useBrainStore = create<BrainState>((set, get) => ({
       console.error('[brain] Failed to import knowledge:', e);
     }
   },
+
+  refreshEngineStatus: async () => {
+    try {
+      const status = await window.api.engineStatus();
+      if (status) {
+        const phase = status.phase as 'dormant' | 'bootstrapping' | 'active';
+        const textMap: Record<string, string> = {
+          dormant: 'Waiting for API key or Ollama...',
+          bootstrapping: `Learning from interactions (${status.progressPercent}%)`,
+          active: 'Engine ready — routing intelligently',
+        };
+        set({
+          enginePhase: phase,
+          engineProgress: status.progressPercent,
+          engineStatusText: textMap[phase] || 'Unknown',
+        });
+      }
+    } catch {
+      /* engine not yet available */
+    }
+  },
+
+  checkEngineReady: () => {
+    return get().enginePhase === 'active';
+  },
 }));
 
 // Initialize seed knowledge on first load
@@ -906,4 +1134,3 @@ if (!initState.initialized && initState.knowledge.length === 0) {
   });
   console.log(`[brain] Loaded ${seedEntries.length} seed knowledge entries`);
 }
-

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface TrackerStatus {
   isTracking: boolean;
@@ -39,15 +39,7 @@ export function ActivityTrackerView() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10));
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    loadAnalysis();
-  }, [selectedDate]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [s, r, p] = await Promise.all([
@@ -62,16 +54,24 @@ export function ActivityTrackerView() {
       console.error('Failed to load tracker data:', err);
     }
     setLoading(false);
-  };
+  }, []);
 
-  const loadAnalysis = async () => {
+  const loadAnalysis = useCallback(async () => {
     try {
       const a = await window.api.trackerAnalyzeDay({ date: selectedDate });
       setAnalysis(a as DayAnalysis);
     } catch (err) {
       console.error('Failed to load analysis:', err);
     }
-  };
+  }, [selectedDate]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    void loadAnalysis();
+  }, [loadAnalysis]);
 
   const handleToggleTracking = async () => {
     if (status?.isTracking) {

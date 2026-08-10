@@ -40,7 +40,7 @@ export class OfflineManager {
     this.config = {
       checkInterval: config?.checkInterval ?? 30000,
       localModelProvider: config?.localModelProvider ?? 'ollama',
-      localModelId: config?.localModelId ?? 'llama3.1:8b',
+      localModelId: config?.localModelId ?? 'qwen2.5:3b',
       cacheSize: config?.cacheSize ?? 1000,
       enableGracefulDegradation: config?.enableGracefulDegradation ?? true,
     };
@@ -152,9 +152,9 @@ export class OfflineManager {
       anthropic: 'claude-3-5-sonnet-20241022',
       openai: 'gpt-4o',
       gemini: 'gemini-2.0-flash-exp',
-      ollama: 'llama3.1:8b',
+      ollama: 'qwen2.5:3b',
     };
-    return models[provider] ?? 'llama3.1:8b';
+    return models[provider] ?? 'qwen2.5:3b';
   }
 
   getCapabilities(): OfflineCapability[] {

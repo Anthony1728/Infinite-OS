@@ -27,18 +27,24 @@ export function registerComputerAutomationIpc(): void {
     }
   });
 
-  ipcMain.handle('computer:click', async (_event, args: {
-    x: number;
-    y: number;
-    button?: 'left' | 'right' | 'middle';
-  }) => {
-    try {
-      await computer.click(args.x, args.y, args.button);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
+  ipcMain.handle(
+    'computer:click',
+    async (
+      _event,
+      args: {
+        x: number;
+        y: number;
+        button?: 'left' | 'right' | 'middle';
+      },
+    ) => {
+      try {
+        await computer.click(args.x, args.y, args.button);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   ipcMain.handle('computer:doubleClick', async (_event, args: { x: number; y: number }) => {
     try {
@@ -58,46 +64,64 @@ export function registerComputerAutomationIpc(): void {
     }
   });
 
-  ipcMain.handle('computer:drag', async (_event, args: {
-    fromX: number;
-    fromY: number;
-    toX: number;
-    toY: number;
-    holdTime?: number;
-  }) => {
-    try {
-      await computer.drag(args.fromX, args.fromY, args.toX, args.toY, args.holdTime);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
+  ipcMain.handle(
+    'computer:drag',
+    async (
+      _event,
+      args: {
+        fromX: number;
+        fromY: number;
+        toX: number;
+        toY: number;
+        holdTime?: number;
+      },
+    ) => {
+      try {
+        await computer.drag(args.fromX, args.fromY, args.toX, args.toY, args.holdTime);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
-  ipcMain.handle('computer:scroll', async (_event, args: {
-    x: number;
-    y: number;
-    amount: number;
-  }) => {
-    try {
-      await computer.scroll(args.x, args.y, args.amount);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
+  ipcMain.handle(
+    'computer:scroll',
+    async (
+      _event,
+      args: {
+        x: number;
+        y: number;
+        amount: number;
+      },
+    ) => {
+      try {
+        await computer.scroll(args.x, args.y, args.amount);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
-  ipcMain.handle('computer:hover', async (_event, args: {
-    x: number;
-    y: number;
-    duration?: number;
-  }) => {
-    try {
-      await computer.hover(args.x, args.y, args.duration);
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
+  ipcMain.handle(
+    'computer:hover',
+    async (
+      _event,
+      args: {
+        x: number;
+        y: number;
+        duration?: number;
+      },
+    ) => {
+      try {
+        await computer.hover(args.x, args.y, args.duration);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   // Keyboard control
   ipcMain.handle('computer:typeText', async (_event, args: { text: string; delay?: number }) => {
@@ -130,31 +154,56 @@ export function registerComputerAutomationIpc(): void {
   // Screen capture
   ipcMain.handle('computer:captureScreen', async () => {
     try {
-      const result = await computer.captureScreen();
+      const result = await computer.captureScreen(true);
       return { ok: true, ...result };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
-  ipcMain.handle('computer:captureRegion', async (_event, args: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  }) => {
+  // Lightweight continuous live-feed frame (overwrites a single file)
+  ipcMain.handle('computer:liveFrame', async () => {
     try {
-      const result = await computer.captureRegion(args.x, args.y, args.width, args.height);
+      const result = await computer.captureLiveFrame();
       return { ok: true, ...result };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  ipcMain.handle(
+    'computer:captureRegion',
+    async (
+      _event,
+      args: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      },
+    ) => {
+      try {
+        const result = await computer.captureRegion(args.x, args.y, args.width, args.height);
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   ipcMain.handle('computer:getScreenSize', async () => {
     try {
       const size = await computer.getScreenSize();
       return { ok: true, ...size };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('computer:getDesktopState', async () => {
+    try {
+      const state = await computer.getDesktopState();
+      return { ok: true, state };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -263,24 +312,26 @@ export function registerComputerAutomationIpc(): void {
   });
 
   // Execute shell command
-  ipcMain.handle('computer:execute', async (_event, args: {
-    command: string;
-    cwd?: string;
-  }) => {
-    try {
-      const result = await computer.execute(args.command, args.cwd);
-      return { ok: true, ...result };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
-
-  // Stats
-  ipcMain.handle('computer:stats', async () => {
-    return { ok: true, ...computer.getStats() };
-  });
+  ipcMain.handle(
+    'computer:execute',
+    async (
+      _event,
+      args: {
+        command: string;
+        cwd?: string;
+      },
+    ) => {
+      try {
+        const result = await computer.execute(args.command, args.cwd);
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   ipcMain.handle('computer:actionLog', async (_event, args?: { count?: number }) => {
     return { ok: true, log: computer.getActionLog(args?.count) };
   });
+
 }

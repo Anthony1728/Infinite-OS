@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   DollarSign, Users, Handshake, ListTodo, TrendingUp, TrendingDown,
   Plus, Search, X, Send, Mail, Phone, Building2, Tag,
@@ -59,11 +59,13 @@ interface InvoiceItem {
 
 interface Invoice {
   id: string;
+  contactId: string;
   client: string;
   items: InvoiceItem[];
   total: number;
   status: 'draft' | 'sent' | 'paid' | 'overdue';
   createdAt: number;
+  dueDate: number;
 }
 
 interface Activity {
@@ -75,6 +77,25 @@ interface Activity {
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const now = () => Date.now();
+
+// Backend API calls
+const api = {
+  listContacts: () => (window as any).api.businessListContacts(),
+  createContact: (data: any) => (window as any).api.businessCreateContact(data),
+  updateContact: (id: string, updates: any) => (window as any).api.businessUpdateContact({ id, updates }),
+  deleteContact: (id: string) => (window as any).api.businessDeleteContact({ id }),
+  listLeads: () => (window as any).api.businessListLeads(),
+  createLead: (data: any) => (window as any).api.businessCreateLead(data),
+  updateLeadStatus: (id: string, status: string) => (window as any).api.businessUpdateLeadStatus({ id, status }),
+  listInvoices: () => (window as any).api.businessListInvoices(),
+  createInvoice: (data: any) => (window as any).api.businessCreateInvoice(data),
+  updateInvoiceStatus: (id: string, status: string) => (window as any).api.businessUpdateInvoiceStatus({ id, status }),
+  listDeals: () => (window as any).api.businessListDeals(),
+  createDeal: (data: any) => (window as any).api.businessCreateDeal(data),
+  updateDealStage: (id: string, stage: string) => (window as any).api.businessUpdateDealStage({ id, stage }),
+  getAnalytics: () => (window as any).api.businessAnalytics(),
+  getStats: () => (window as any).api.businessStats(),
+};
 
 export function BusinessOSView() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -112,6 +133,27 @@ export function BusinessOSView() {
   const [newInvoiceClient, setNewInvoiceClient] = useState('');
   const [newInvoiceItems, setNewInvoiceItems] = useState<InvoiceItem[]>([{ description: '', qty: 1, rate: 0 }]);
 
+  // Load data from backend on mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [contactsData, leadsData, invoicesData, dealsData] = await Promise.all([
+          api.listContacts(),
+          api.listLeads(),
+          api.listInvoices(),
+          api.listDeals(),
+        ]);
+        if (contactsData) setContacts(contactsData);
+        if (leadsData) setDeals(leadsData);
+        if (invoicesData) setInvoices(invoicesData);
+        if (dealsData) setDeals(dealsData);
+      } catch (e) {
+        console.error('Failed to load business data:', e);
+      }
+    };
+    loadData();
+  }, []);
+
   const addActivity = (text: string, type: string) => {
     setActivities(prev => [{ id: uid(), text, time: now(), type }, ...prev]);
   };
@@ -146,8 +188,13 @@ export function BusinessOSView() {
 
   const dealsByStage = (stage:Deal['stage']) => deals.filter(d => d.stage === stage);
 
-  const moveDealToStage = (dealId: string, stage: Deal['stage']) => {
-    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage } : d));
+  const moveDealToStage = async (dealId: string, stage: Deal['stage']) => {
+    try {
+      await api.updateDealStage(dealId, stage);
+      setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage } : d));
+    } catch (e) {
+      console.error('Failed to update deal stage:', e);
+    }
   };
 
   const filteredTasks = tasks
@@ -160,30 +207,41 @@ export function BusinessOSView() {
       return b.createdAt - a.createdAt;
     });
 
-  const addContact = () => {
+  const addContact = async () => {
     if (!newContact.name) return;
-    const c: Contact = {
-      id: uid(), name: newContact.name, email: newContact.email,
-      company: newContact.company, phone: newContact.phone,
-      tags: newContact.tags.split(',').map(t => t.trim()).filter(Boolean),
-      notes: newContact.notes, createdAt: now(),
-    };
-    setContacts(prev => [...prev, c]);
-    setNewContact({ name: '', email: '', company: '', phone: '', tags: '', notes: '' });
-    setShowAddContact(false);
-    addActivity(`Contact added: ${c.name}`, 'contact');
+    try {
+      const c = await api.createContact({
+        name: newContact.name,
+        email: newContact.email,
+        company: newContact.company,
+        phone: newContact.phone,
+        tags: newContact.tags.split(',').map(t => t.trim()).filter(Boolean),
+        notes: newContact.notes,
+      });
+      setContacts(prev => [...prev, c]);
+      setNewContact({ name: '', email: '', company: '', phone: '', tags: '', notes: '' });
+      setShowAddContact(false);
+      addActivity(`Contact added: ${c.name}`, 'contact');
+    } catch (e) {
+      console.error('Failed to create contact:', e);
+    }
   };
 
-  const addDeal = () => {
+  const addDeal = async () => {
     if (!newDeal.title) return;
-    const d: Deal = {
-      id: uid(), title: newDeal.title, value: Number(newDeal.value) || 0,
-      contactId: newDeal.contactId, stage: 'lead', createdAt: now(),
-    };
-    setDeals(prev => [...prev, d]);
-    setNewDeal({ title: '', value: '', contactId: '' });
-    setShowAddDeal(false);
-    addActivity(`Deal created: ${d.title}`, 'deal');
+    try {
+      const d = await api.createDeal({
+        title: newDeal.title,
+        value: Number(newDeal.value) || 0,
+        contactId: newDeal.contactId,
+      });
+      setDeals(prev => [...prev, d]);
+      setNewDeal({ title: '', value: '', contactId: '' });
+      setShowAddDeal(false);
+      addActivity(`Deal created: ${d.title}`, 'deal');
+    } catch (e) {
+      console.error('Failed to create deal:', e);
+    }
   };
 
   const sendEmail = () => {
@@ -218,22 +276,31 @@ export function BusinessOSView() {
     addActivity(`Task created: ${t.title}`, 'task');
   };
 
-  const addInvoice = () => {
+  const addInvoice = async () => {
     if (!newInvoiceClient) return;
-    const total = newInvoiceItems.reduce((s, i) => s + i.qty * i.rate, 0);
-    const inv: Invoice = {
-      id: uid(), client: newInvoiceClient, items: [...newInvoiceItems],
-      total, status: 'draft', createdAt: now(),
-    };
-    setInvoices(prev => [...prev, inv]);
-    setNewInvoiceClient('');
-    setNewInvoiceItems([{ description: '', qty: 1, rate: 0 }]);
-    setShowAddInvoice(false);
-    addActivity(`Invoice created for ${inv.client}`, 'invoice');
+    try {
+      const inv = await api.createInvoice({
+        client: newInvoiceClient,
+        items: [...newInvoiceItems],
+        contactId: '',
+      });
+      setInvoices(prev => [...prev, inv]);
+      setNewInvoiceClient('');
+      setNewInvoiceItems([{ description: '', qty: 1, rate: 0 }]);
+      setShowAddInvoice(false);
+      addActivity(`Invoice created for ${inv.client}`, 'invoice');
+    } catch (e) {
+      console.error('Failed to create invoice:', e);
+    }
   };
 
-  const markInvoicePaid = (id: string) => {
-    setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: 'paid' as const } : i));
+  const markInvoicePaid = async (id: string) => {
+    try {
+      await api.updateInvoiceStatus(id, 'paid');
+      setInvoices(prev => prev.map(i => i.id === id ? { ...i, status: 'paid' as const } : i));
+    } catch (e) {
+      console.error('Failed to update invoice:', e);
+    }
   };
 
   const addInvoiceItemRow = () => {
@@ -296,7 +363,7 @@ export function BusinessOSView() {
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
               <BarChart3 size={18} className="text-white" />
             </div>
-            <h1 className="text-lg font-semibold text-white">Business OS</h1>
+            <h1 className="text-lg font-semibold text-white">Business Command Center</h1>
           </div>
         </div>
         <div className="flex gap-1 bg-[#14141a] p-1 rounded-xl w-max border border-white/10">

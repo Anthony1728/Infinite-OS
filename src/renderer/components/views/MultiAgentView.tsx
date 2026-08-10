@@ -34,13 +34,17 @@ export function MultiAgentView() {
   const [dispatchLog, setDispatchLog] = useState<{ agentId: string; task: string; status: 'pending' | 'running' | 'done' | 'failed' }[]>([]);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { loadTeams(); loadTasks(); loadStats(); }, []);
+  useEffect(() => {
+    void loadTeams();
+    void loadTasks();
+    void loadStats();
+  }, [loadStats, loadTasks, loadTeams]);
 
   // Refresh stats every 5s
   useEffect(() => {
     const t = setInterval(() => { loadStats(); loadTasks(); }, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [loadStats, loadTasks]);
 
   const handleCreate = async () => {
     if (!formData.name.trim()) return;

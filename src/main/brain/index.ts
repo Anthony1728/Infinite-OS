@@ -9,7 +9,6 @@ export type { BrainConfig, BrainEvent, LearningEntry, ModelPerformance, SystemHe
 
 export { DecisionRouter } from './router.js';
 
-export { SafetyGovernor } from './safety.js';
 
 export { OfflineManager } from './offline.js';
 

@@ -6,7 +6,10 @@ import type { Tool, ToolResult } from './base.js';
 import { createCustomAgent } from '../agents/custom-store.js';
 import { listCustomAgents } from '../agents/custom-store.js';
 
-const VALID_TOOLS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite', 'Browser', 'Notification'];
+const VALID_TOOLS = [
+  'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite',
+  'Browser', 'Computer', 'Email', 'BuildFeature', 'RollbackFeature', 'Notification',
+];
 
 export const createCustomAgentTool: Tool = {
   name: 'create_custom_agent',

@@ -38,14 +38,29 @@ export const gemini: ProviderAdapter = {
     const model = genai.getGenerativeModel({
       model: req.model,
       systemInstruction: req.system,
+      tools: req.tools?.length ? [{ functionDeclarations: req.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema,
+      })) }] as never : undefined,
     });
 
     try {
       const contents = toGeminiContents(req.messages);
       const result = await model.generateContentStream({ contents });
       for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) yield { type: 'text_delta', text };
+        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+        for (const part of parts) {
+          if ('text' in part && part.text) yield { type: 'text_delta', text: part.text };
+          if ('functionCall' in part && part.functionCall) {
+            const id = crypto.randomUUID();
+            const name = part.functionCall.name;
+            const input = part.functionCall.args ?? {};
+            yield { type: 'tool_use_start', id, name };
+            yield { type: 'tool_use_delta', id, partial_json: JSON.stringify(input) };
+            yield { type: 'tool_use_end', id, name, input };
+          }
+        }
       }
       const final = await result.response;
       yield {
@@ -82,6 +97,9 @@ function toGeminiContents(messages: Message[]): Content[] {
     } else if (m.role === 'user') {
       for (const b of m.content) {
         if (b.type === 'text' && b.text) parts.push({ text: b.text });
+        else if (b.type === 'image') {
+          parts.push({ inlineData: { mimeType: b.source.mediaType, data: b.source.data } });
+        }
         else if (b.type === 'tool_result') {
           const name = toolIdToName.get(b.tool_use_id) || b.tool_use_id;
           parts.push({

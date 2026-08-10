@@ -569,6 +569,78 @@ export class InfiniteBrain {
   getModelPerformance(): ModelPerformance[] {
     return Array.from(this.modelPerformance.values());
   }
+
+  /** Check if the brain has accumulated enough knowledge to be operational */
+  hasEnoughKnowledge(options?: {
+    minEntries?: number;
+    minModels?: number;
+    minSuccessRate?: number;
+  }): { enough: boolean; entries: number; models: number; bestRate: number; details: string } {
+    const minEntries = options?.minEntries ?? 10;
+    const minModels = options?.minModels ?? 1;
+    const minSuccessRate = options?.minSuccessRate ?? 0.6;
+
+    const entries = this.learningMemory.length;
+    const models = this.modelPerformance.size;
+    let bestRate = 0;
+
+    for (const [, perf] of this.modelPerformance) {
+      if (perf.totalTasks >= 3 && perf.successRate > bestRate) {
+        bestRate = perf.successRate;
+      }
+    }
+
+    const enough = entries >= minEntries && models >= minModels && bestRate >= minSuccessRate;
+
+    const reasons: string[] = [];
+    if (entries < minEntries) reasons.push(`Need ${minEntries - entries} more learning entries`);
+    if (models < minModels) reasons.push(`Need ${minModels - models} more models with performance data`);
+    if (bestRate < minSuccessRate) reasons.push(`Best model success rate ${(bestRate * 100).toFixed(1)}% is below ${(minSuccessRate * 100).toFixed(0)}%`);
+
+    return {
+      enough,
+      entries,
+      models,
+      bestRate,
+      details: enough ? 'Brain has enough knowledge to operate' : reasons.join('; '),
+    };
+  }
+
+  /** Bootstrap from seed knowledge — convert seed entries into learning memory */
+  bootstrapFromSeed(seedEntries: Array<{ input: string; output: string; category: string }>): void {
+    for (const seed of seedEntries) {
+      this.recordOutcome({
+        taskType: seed.category,
+        input: seed.input,
+        modelUsed: 'seed-knowledge',
+        output: seed.output,
+        success: true,
+        duration: 0,
+        tokens: { input: seed.input.length, output: seed.output.length },
+        metadata: { source: 'seed' },
+      });
+    }
+  }
+
+  /** Get the total learning progress toward operational threshold */
+  getLearningProgress(): { totalEntries: number; categories: string[]; topModels: Array<{ model: string; successRate: number }> } {
+    const categories = new Set<string>();
+    for (const entry of this.learningMemory) {
+      categories.add(entry.taskType);
+    }
+
+    const topModels = Array.from(this.modelPerformance.values())
+      .filter(p => p.totalTasks >= 2)
+      .sort((a, b) => b.successRate - a.successRate)
+      .slice(0, 5)
+      .map(p => ({ model: p.modelId, successRate: p.successRate }));
+
+    return {
+      totalEntries: this.learningMemory.length,
+      categories: Array.from(categories),
+      topModels,
+    };
+  }
 }
 
 // Singleton

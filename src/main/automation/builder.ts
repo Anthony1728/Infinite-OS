@@ -14,6 +14,9 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { toolRegistry } from '../tools/base.js';
+import { executeToolCall } from '../agent/tool-execution.js';
+import { spawnSubagent } from '../agent/runtime.js';
+import { settings } from '../settings/store.js';
 import { execSync } from 'node:child_process';
 
 export interface AutomationConfig {
@@ -59,6 +62,21 @@ export interface WorkflowRun {
   result?: string;
   error?: string;
   actionResults: Array<{ actionId: string; status: string; result: string }>;
+}
+
+export interface AutomationRunProgress {
+  type: 'run_started' | 'action_started' | 'action_progress' | 'action_completed' | 'action_failed' | 'run_completed';
+  runId: string;
+  workflowId: string;
+  workflowName: string;
+  actionId?: string;
+  actionType?: Action['type'];
+  actionIndex?: number;
+  totalActions: number;
+  message: string;
+  result?: string;
+  status?: WorkflowRun['status'];
+  timestamp: number;
 }
 
 export interface AutomationTemplate {
@@ -154,6 +172,97 @@ export class AutomationBuilder {
         ],
         tags: ['monitor', 'alerts'],
       },
+      {
+        id: 'security_audit',
+        name: 'Security Audit',
+        description: 'Weekly security scan of dependencies and secrets',
+        category: 'security',
+        trigger: { type: 'schedule', config: { cron: '0 8 * * 1' } },
+        actions: [
+          { id: 'audit_deps', type: 'agent_run', config: { agent: 'general', task: 'Run npm audit and check for known vulnerabilities in dependencies. Report any high or critical issues found.' } },
+          { id: 'check_secrets', type: 'agent_run', config: { agent: 'general', task: 'Scan the codebase for accidentally committed secrets, API keys, or credentials. Check .env files, config files, and git history.' } },
+          { id: 'report', type: 'notify', config: { message: 'Security audit complete. Check the report for details.' } },
+        ],
+        tags: ['security', 'audit', 'weekly'],
+      },
+      {
+        id: 'performance_benchmark',
+        name: 'Performance Benchmark',
+        description: 'Run performance tests and track metrics',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '0 6 * * 0' } },
+        actions: [
+          { id: 'build', type: 'tool_call', config: { tool: 'bash', input: { command: 'npm run build 2>&1 | tail -20' } } },
+          { id: 'test', type: 'tool_call', config: { tool: 'bash', input: { command: 'npx vitest run 2>&1 | tail -20' } } },
+          { id: 'bundle_check', type: 'agent_run', config: { agent: 'general', task: 'Analyze the build output and test results. Compare with previous runs if available. Report bundle size, test pass rate, and any performance regressions.' } },
+        ],
+        tags: ['performance', 'benchmark', 'weekly'],
+      },
+      {
+        id: 'dependency_updates',
+        name: 'Dependency Updates',
+        description: 'Check and propose dependency updates',
+        category: 'maintenance',
+        trigger: { type: 'schedule', config: { cron: '0 9 * * 3' } },
+        actions: [
+          { id: 'check_updates', type: 'agent_run', config: { agent: 'general', task: 'Run npm outdated to check for available dependency updates. Categorize updates as major, minor, or patch. List any breaking changes.' } },
+          { id: 'security_check', type: 'agent_run', config: { agent: 'general', task: 'Run npm audit to check if any updates fix security vulnerabilities. Prioritize security updates.' } },
+          { id: 'report', type: 'notify', config: { message: 'Dependency update check complete. Review the proposed updates.' } },
+        ],
+        tags: ['dependencies', 'updates', 'weekly'],
+      },
+      {
+        id: 'code_quality',
+        name: 'Code Quality Report',
+        description: 'Analyze code quality metrics and technical debt',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '0 7 * * 2' } },
+        actions: [
+          { id: 'lint', type: 'tool_call', config: { tool: 'bash', input: { command: 'npx eslint src/ --format json 2>/dev/null | head -100' } } },
+          { id: 'analyze', type: 'agent_run', config: { agent: 'general', task: 'Analyze the codebase for code quality issues: complexity, duplication, dead code, type safety. Suggest improvements and prioritize by impact.' } },
+          { id: 'report', type: 'notify', config: { message: 'Code quality report generated.' } },
+        ],
+        tags: ['code quality', 'analysis', 'weekly'],
+      },
+      {
+        id: 'disk_cleanup',
+        name: 'Disk Cleanup',
+        description: 'Clean temporary files and caches',
+        category: 'system',
+        trigger: { type: 'schedule', config: { cron: '0 4 * * 0' } },
+        actions: [
+          { id: 'clean_npm', type: 'tool_call', config: { tool: 'bash', input: { command: 'npm cache clean --force 2>/dev/null; echo "npm cache cleaned"' } } },
+          { id: 'clean_temp', type: 'tool_call', config: { tool: 'bash', input: { command: 'Remove-Item -Path "$env:TEMP\\*" -Recurse -Force -ErrorAction SilentlyContinue; Write-Output "Temp files cleaned"' } } },
+          { id: 'report', type: 'agent_run', config: { agent: 'general', task: 'Check disk space before and after cleanup. Report how much space was freed.' } },
+        ],
+        tags: ['cleanup', 'system', 'weekly'],
+      },
+      {
+        id: 'git_sync',
+        name: 'Git Sync',
+        description: 'Auto-fetch and report git status',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '*/30 * * * *' } },
+        actions: [
+          { id: 'fetch', type: 'tool_call', config: { tool: 'git', input: { action: 'fetch' } } },
+          { id: 'status', type: 'tool_call', config: { tool: 'git', input: { action: 'status' } } },
+          { id: 'report', type: 'agent_run', config: { agent: 'general', task: 'Summarize the git status. Are there uncommitted changes? Is the branch ahead/behind remote? Any merge conflicts?' } },
+        ],
+        tags: ['git', 'sync', 'monitoring'],
+      },
+      {
+        id: 'docs_generator',
+        name: 'Auto Documentation',
+        description: 'Generate documentation from code comments',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '0 22 * * 5' } },
+        actions: [
+          { id: 'scan', type: 'agent_run', config: { agent: 'general', task: 'Scan the codebase for JSDoc/TSDoc comments and exported functions. Identify which functions lack documentation.' } },
+          { id: 'generate', type: 'agent_run', config: { agent: 'general', task: 'Generate documentation for undocumented functions. Add JSDoc comments to source files or create a docs folder with markdown files.' } },
+          { id: 'report', type: 'notify', config: { message: 'Documentation generation complete.' } },
+        ],
+        tags: ['documentation', 'automation', 'weekly'],
+      },
     ];
   }
 
@@ -228,7 +337,13 @@ export class AutomationBuilder {
     return true;
   }
 
-  async runWorkflow(workflowId: string): Promise<WorkflowRun> {
+  deleteWorkflow(workflowId: string): boolean {
+    const deleted = this.workflows.delete(workflowId);
+    if (deleted) this.saveData();
+    return deleted;
+  }
+
+  async runWorkflow(workflowId: string, onProgress?: (event: AutomationRunProgress) => void): Promise<WorkflowRun> {
     const workflow = this.workflows.get(workflowId);
     if (!workflow) throw new Error('Workflow not found');
 
@@ -243,9 +358,33 @@ export class AutomationBuilder {
     workflow.status = 'running';
     workflow.lastRun = Date.now();
     workflow.runCount++;
+    const emit = (event: Omit<AutomationRunProgress, 'runId' | 'workflowId' | 'workflowName' | 'totalActions' | 'timestamp'>) => {
+      onProgress?.({
+        ...event,
+        runId: run.id,
+        workflowId,
+        workflowName: workflow.name,
+        totalActions: workflow.actions.length,
+        timestamp: Date.now(),
+      });
+    };
+    const runController = new AbortController();
+    emit({ type: 'run_started', message: `Started ${workflow.name}` });
 
-    // Execute actions sequentially
-    for (const action of workflow.actions) {
+    // Execute actions sequentially with durable per-action retry counts.
+    const actionAttempts = new Map<string, number>();
+    let actionIndex = 0;
+    while (actionIndex < workflow.actions.length) {
+      const action = workflow.actions[actionIndex];
+      const attempt = (actionAttempts.get(action.id) ?? 0) + 1;
+      actionAttempts.set(action.id, attempt);
+      emit({
+        type: 'action_started',
+        actionId: action.id,
+        actionType: action.type,
+        actionIndex,
+        message: `Running ${action.type.replace(/_/g, ' ')}`,
+      });
       try {
         let result = '';
 
@@ -255,26 +394,60 @@ export class AutomationBuilder {
             const toolInput = (action.config.input as Record<string, unknown>) || {};
             const tool = toolRegistry.get(toolName);
             if (tool) {
-              const toolResult = await tool.execute(toolInput, {
+              const toolResult = await executeToolCall({
+                tool,
+                toolUse: { type: 'tool_use', id: action.id, name: toolName, input: toolInput },
                 cwd: homedir(),
-                abortSignal: AbortSignal.timeout(30000),
+                parentSignal: runController.signal,
                 sessionId: workflow.id,
-                onUpdate: () => {},
+                onUpdate: (update) => emit({
+                  type: 'action_progress',
+                  actionId: action.id,
+                  actionType: action.type,
+                  actionIndex,
+                  message: typeof update.content === 'string' ? update.content : JSON.stringify(update.content),
+                }),
               });
               result = typeof toolResult.content === 'string' ? toolResult.content : JSON.stringify(toolResult.content);
+              if (toolResult.is_error) throw new Error(result);
             } else {
-              result = `Tool not found: ${toolName}`;
+              throw new Error(`Tool not found: ${toolName}`);
             }
             break;
           }
           case 'agent_run': {
-            result = `Agent ${action.config.agent} started for: ${action.config.task}`;
+            const agentId = String(action.config.agent ?? 'general') as Parameters<typeof spawnSubagent>[0]['agentId'];
+            const task = String(action.config.task ?? '');
+            if (!task.trim()) throw new Error('agent_run requires a task.');
+            const provider = String(settings.get<string>('provider') ?? 'openrouter');
+            const model = String(settings.get<string>('model') ?? 'meta-llama/llama-3.3-70b-instruct:free');
+            const spawned = spawnSubagent({
+              agentId,
+              task,
+              sessionId: workflow.id,
+              cwd: homedir(),
+              provider,
+              model,
+              parentHistory: [],
+              background: false,
+              retry: { maxAttempts: 3, backoff: true },
+              sink: (event) => emit({
+                type: 'action_progress',
+                actionId: action.id,
+                actionType: action.type,
+                actionIndex,
+                message: JSON.stringify(event).slice(0, 2_000),
+              }),
+            });
+            result = await spawned.done;
+            if (!result.trim()) throw new Error(`Agent ${agentId} did not produce a verified result.`);
             break;
           }
           case 'condition': {
             const condition = action.config.condition as string;
-            // Simple condition evaluation
-            result = `Evaluated condition: ${condition} → true`;
+            const condResult = evaluateCondition(condition);
+            result = `Evaluated condition: ${condition} → ${condResult}`;
+            if (!condResult) throw new Error(`Condition false: ${condition}`);
             break;
           }
           case 'delay': {
@@ -289,53 +462,56 @@ export class AutomationBuilder {
           }
           case 'script': {
             const script = action.config.script as string;
-            if (script.endsWith('.js') || script.endsWith('.ts')) {
-              result = `Script executed: ${script}`;
-            } else {
-              try {
-                result = execSync(script, { encoding: 'utf-8', timeout: 30000 });
-              } catch (e) {
-                result = `Script error: ${(e as Error).message}`;
+            try {
+              if (script.endsWith('.ts')) {
+                const { execSync: runTs } = await import('node:child_process');
+                result = runTs(`npx tsx "${script}"`, { encoding: 'utf-8', timeout: 30_000, cwd: homedir() });
+              } else if (script.endsWith('.js')) {
+                const { execSync: runJs } = await import('node:child_process');
+                result = runJs(`node "${script}"`, { encoding: 'utf-8', timeout: 30_000, cwd: homedir() });
+              } else {
+                result = execSync(script, { encoding: 'utf-8', timeout: 30_000 });
               }
+            } catch (e) {
+              result = `Script error: ${(e as Error).message}`;
             }
             break;
           }
           case 'computer_action': {
-            const { getComputerControl } = await import('../agent/computer-singleton.js');
-            const computerControl = getComputerControl();
+            const { getComputerAutomation } = await import('../automation/computer-automation.js');
+            const computer = getComputerAutomation();
             const actionType = action.config.action as string;
             switch (actionType) {
               case 'mouse_click':
-                await computerControl.clickMouse(
+                await computer.click(
                   Number(action.config.x) || 0,
                   Number(action.config.y) || 0,
-                  (action.config.button as 'left' | 'right') || 'left',
+                  (action.config.button as 'left' | 'right' | 'middle') || 'left',
                 );
                 result = `Clicked at (${action.config.x}, ${action.config.y})`;
                 break;
               case 'mouse_move':
-                await computerControl.moveMouse(
+                await computer.moveMouse(
                   Number(action.config.x) || 0,
                   Number(action.config.y) || 0,
                 );
                 result = `Moved mouse to (${action.config.x}, ${action.config.y})`;
                 break;
               case 'type_text':
-                await computerControl.typeText(String(action.config.text || ''));
+                await computer.typeText(String(action.config.text || ''));
                 result = `Typed: ${action.config.text}`;
                 break;
               case 'key_press':
-                await computerControl.pressKey(String(action.config.key || 'enter'));
+                await computer.pressKey(String(action.config.key || 'enter'));
                 result = `Pressed key: ${action.config.key}`;
                 break;
               case 'screenshot':
-                await computerControl.captureScreen();
+                await computer.captureScreen();
                 result = 'Screenshot captured';
                 break;
               case 'open_app':
-                await computerControl.openApplication(
+                await computer.openApp(
                   String(action.config.name || action.config.path || ''),
-                  action.config.path ? String(action.config.path) : undefined,
                 );
                 result = `Opened app: ${action.config.name || action.config.path}`;
                 break;
@@ -347,18 +523,34 @@ export class AutomationBuilder {
         }
 
         run.actionResults.push({ actionId: action.id, status: 'completed', result });
+        emit({ type: 'action_completed', actionId: action.id, actionType: action.type, actionIndex, message: `${action.type.replace(/_/g, ' ')} completed`, result });
+        actionIndex++;
       } catch (err) {
-        run.actionResults.push({ actionId: action.id, status: 'failed', result: String(err) });
+        const result = err instanceof Error ? err.message : String(err);
+        if (action.onError === 'retry' && attempt < 3) {
+          emit({ type: 'action_progress', actionId: action.id, actionType: action.type, actionIndex, message: `Retrying ${action.type.replace(/_/g, ' ')} (attempt ${attempt + 1}/3): ${result}` });
+          continue;
+        }
+        run.actionResults.push({ actionId: action.id, status: 'failed', result });
+        emit({ type: 'action_failed', actionId: action.id, actionType: action.type, actionIndex, message: `${action.type.replace(/_/g, ' ')} failed`, result });
         if (action.onError === 'stop') break;
+        actionIndex++;
       }
     }
 
-    run.status = 'completed';
+    const failures = run.actionResults.filter((action) => action.status === 'failed');
+    run.status = failures.length ? 'failed' : 'completed';
     run.completedAt = Date.now();
+    run.result = run.status === 'completed'
+      ? `${run.actionResults.length} of ${workflow.actions.length} actions completed successfully.`
+      : `${failures.length} action${failures.length === 1 ? '' : 's'} failed.`;
+    if (failures.length) run.error = failures.map((failure) => failure.result).join('\n');
     workflow.status = 'idle';
+    workflow.lastError = run.error;
 
     this.runs.set(run.id, run);
     this.saveData();
+    emit({ type: 'run_completed', message: run.result, result: run.error ?? run.result, status: run.status });
     return run;
   }
 
@@ -397,4 +589,49 @@ export class AutomationBuilder {
     };
   }
 }
+
+/** Simple condition evaluator for automation workflows. */
+function evaluateCondition(condition: string): boolean {
+  const trimmed = condition.trim().toLowerCase();
+  // Handle simple boolean strings
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  // Handle comparison patterns: "metric operator value"
+  const match = trimmed.match(/^(.+?)\s*(>=|<=|!=|>|<|==|contains|equals)\s*(.+)$/);
+  if (match) {
+    const [, left, op, right] = match;
+    const leftVal = resolveMetric(left!.trim());
+    const rightNum = parseFloat(right!);
+    const rightStr = right!.trim();
+    if (typeof leftVal === 'number' && !isNaN(rightNum)) {
+      switch (op) {
+        case '>': return leftVal > rightNum;
+        case '<': return leftVal < rightNum;
+        case '>=': return leftVal >= rightNum;
+        case '<=': return leftVal <= rightNum;
+        case '==': return leftVal === rightNum;
+        case '!=': return leftVal !== rightNum;
+      }
+    }
+    if (typeof leftVal === 'string') {
+      if (op === 'contains') return leftVal.includes(rightStr);
+      if (op === '==') return leftVal === rightStr;
+      if (op === '!=') return leftVal !== rightStr;
+    }
+  }
+  // Fallback: treat non-empty non-"false" as true
+  return trimmed !== '' && trimmed !== 'false';
+}
+
+/** Resolve simple metric names to live values. */
+function resolveMetric(name: string): string | number {
+  switch (name) {
+    case 'hour': return new Date().getHours();
+    case 'day': return new Date().getDay();
+    case 'timestamp': return Date.now();
+    default: return name;
+  }
+}
+
+export const automationBuilder = new AutomationBuilder();
 

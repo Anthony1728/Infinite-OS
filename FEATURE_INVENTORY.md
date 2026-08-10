@@ -15,7 +15,7 @@ The project has a massive architectural foundation with 53 subsystems across 87 
 |----------|--------|-----------|
 | Core AI | SUBSTANTIAL | agent/loop.ts, orchestrator |
 | Providers | WORKING | 7 providers integrated |
-| Tools | WORKING | 13 built-in tools |
+| Tools | WORKING | 50+ built-in tools |
 | Memory | WORKING | SQLite-backed |
 | Sessions | WORKING | JSONL transcripts |
 | MCP | WORKING | Full integration |
@@ -39,13 +39,20 @@ The project has a massive architectural foundation with 53 subsystems across 87 
 3. **Project Memory** - SQLite with tags and search
 4. **Multiple AI Providers** - 7 providers (OpenRouter, NVIDIA NIM, Groq, Anthropic, Gemini, Ollama, OpenAI)
 5. **Voice I/O** - Whisper STT + TTS
-6. **File Operations** - Read, Write, Edit, Glob, Grep
+6. **File Operations** - Read, Write, Edit, Glob, Grep, Delete, FileOps
 7. **Web Search/Fetch** - WebSearch, WebFetch tools
-8. **Browser Automation** - Playwright integration
+8. **Browser Automation** - Playwright + Operator (CDP) integration
 9. **Automation Workflows** - Full builder with triggers
-10. **Security** - Encrypted secrets, SafetyGovernor
-11. **Skills System** - Import from Claude Code/Cursor
+10. **Security** - Encrypted secrets, SafetyGovernor, Security tool (audit/secret scan)
+11. **Skills System** - Import from Claude Code/Cursor + bundled catalog + SkillManage authoring
 12. **MCP Integration** - Full MCP client
+13. **Git Tools** - Status/log/commit/branch/push/pull/diff
+14. **Clipboard** - Read/write/image clipboard tools
+15. **Notifications** - System notifications + progress + action buttons
+16. **Desktop Control** - Computer tool (mouse/keyboard/visual), System, GameAssistant
+17. **Deterministic Utilities** - Json, Text, Crypto, Time, Math, Timer tools
+18. **Project/Business/Deploy** - Project boards, CRM, deploy pipelines
+19. **Self-Improvement** - SelfImprove audit/fix + BuildFeature/RollbackFeature
 
 ### PARTIALLY IMPLEMENTED ⚠️
 
@@ -62,16 +69,9 @@ The project has a massive architectural foundation with 53 subsystems across 87 
 
 ### NOT IMPLEMENTED ❌
 
-1. **Workspace Semantic Indexing** - No vector embeddings
-2. **Interactive Terminal** - No PTY shell
-3. **Inline Code Completion** - No Copilot-style
-4. **Checkpoint/Resume** - No persistence for tasks
-5. **Debug Console** - No debugging support
-6. **Git Tools** - No branch/PR/commit tools
-7. **Clipboard API** - No clipboard access
-8. **Notifications** - No system notifications
-9. **Live Collaboration** - No multi-user
-10. **Cross-Platform Desktop** - Windows only
+1. **Workspace Semantic Indexing** - In progress (indexer exists, embeddings pending)
+2. **Live Collaboration** - No multi-user
+3. **Cross-Platform Desktop** - Windows focus
 
 ## Architecture Overview
 
@@ -81,9 +81,10 @@ The project has a massive architectural foundation with 53 subsystems across 87 
 - 14 IPC handler modules
 
 ### Tool System
-- 13 built-in tools registered in toolRegistry
+- 50+ built-in tools registered in toolRegistry (including deterministic utilities: Json, Text, Crypto, Time, Math, Timer)
 - MCP tools namespaced as mcp__server__tool
 - Permission levels: none, ask, allow, deny
+- Runtime checks enforce profile behavior (`:read-only`, `:workspace`, `:accept-edits`, `:full-system-access`)
 
 ### Agent System
 - 5 specialized agents + custom creation

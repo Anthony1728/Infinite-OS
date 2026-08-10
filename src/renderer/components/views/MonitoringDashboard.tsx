@@ -21,18 +21,16 @@ interface MetricCard {
   icon: string;
 }
 
-const STATUS_INDICATORS = [
-  { name: 'AI Core', ok: true, detail: 'All providers connected' },
-  { name: 'Agent Runtime', ok: true, detail: '6 agents registered' },
-  { name: 'Tool Registry', ok: true, detail: '11 tools available' },
-  { name: 'Memory Store', ok: true, detail: 'Active' },
-  { name: 'MCP Manager', ok: true, detail: 'Ready' },
-  { name: 'Orchestrator', ok: true, detail: 'Idle' },
-];
+interface StatusIndicator {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
 
 export function MonitoringDashboard() {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [history, setHistory] = useState<number[]>([]);
+  const [statusIndicators, setStatusIndicators] = useState<StatusIndicator[]>([]);
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -49,6 +47,38 @@ export function MonitoringDashboard() {
     };
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      const [engine, agents, tools, memory, mcp, orchestrator] = await Promise.allSettled([
+        window.api.engineStatus(),
+        window.api.listAgents(),
+        window.api.listTools(),
+        window.api.getMemoryStats(),
+        window.api.listMcpServers(),
+        window.api.orchestratorStatus(),
+      ]);
+      const listLength = (result: PromiseSettledResult<unknown>) =>
+        result.status === 'fulfilled' && Array.isArray(result.value) ? result.value.length : 0;
+      const engineValue = engine.status === 'fulfilled' ? engine.value as { phase?: string; progressPercent?: number } : null;
+      const activeOrchestrations = listLength(orchestrator);
+      setStatusIndicators([
+        {
+          name: 'AI Engine',
+          ok: engine.status === 'fulfilled',
+          detail: engineValue ? `${engineValue.phase ?? 'unknown'} Â· ${engineValue.progressPercent ?? 0}%` : 'Status unavailable',
+        },
+        { name: 'Agent Runtime', ok: agents.status === 'fulfilled', detail: agents.status === 'fulfilled' ? `${listLength(agents)} agents registered` : 'Status unavailable' },
+        { name: 'Tool Registry', ok: tools.status === 'fulfilled', detail: tools.status === 'fulfilled' ? `${listLength(tools)} tools available` : 'Status unavailable' },
+        { name: 'Memory Store', ok: memory.status === 'fulfilled', detail: memory.status === 'fulfilled' ? 'Responding' : 'Status unavailable' },
+        { name: 'MCP Manager', ok: mcp.status === 'fulfilled', detail: mcp.status === 'fulfilled' ? `${listLength(mcp)} servers connected` : 'Status unavailable' },
+        { name: 'Orchestrator', ok: orchestrator.status === 'fulfilled', detail: orchestrator.status === 'fulfilled' ? `${activeOrchestrations} active tasks` : 'Status unavailable' },
+      ]);
+    };
+    void fetchStatuses();
+    const interval = setInterval(() => { void fetchStatuses(); }, 10_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -129,7 +159,10 @@ export function MonitoringDashboard() {
           <div className="col-span-12 lg:col-span-4 bg-[#12121a] border border-white/[0.06] rounded-xl p-5">
             <h2 className="text-sm font-semibold text-white mb-4">System Status</h2>
             <div className="space-y-3">
-              {STATUS_INDICATORS.map((item) => (
+              {statusIndicators.length === 0 && (
+                <div className="text-[10px] text-gray-500">Checking live servicesâ€¦</div>
+              )}
+              {statusIndicators.map((item) => (
                 <div key={item.name} className="flex items-center gap-3">
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${item.ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
                   <div className="flex-1 min-w-0">

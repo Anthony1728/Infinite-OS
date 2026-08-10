@@ -127,11 +127,12 @@ export class BrowserAgent {
     } catch { /* silent */ }
   }
 
-  private saveData(): void {
+  private async saveData(): Promise<void> {
     try {
-      writeFileSync(
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(
         join(this.dataDir, 'sessions.json'),
-        JSON.stringify(Array.from(this.sessions.entries()), null, 2),
+        JSON.stringify(Array.from(this.sessions.entries())),
       );
     } catch { /* silent */ }
   }
@@ -148,7 +149,7 @@ export class BrowserAgent {
       lastActive: Date.now(),
     };
     this.sessions.set(session.id, session);
-    this.saveData();
+    void this.saveData();
     return session;
   }
 
@@ -218,13 +219,13 @@ export class BrowserAgent {
 
       action.result = JSON.stringify({ title, textLength: text.length, linksCount: links.length });
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return snapshot;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -251,13 +252,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = `Clicked: ${selector}`;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return action.result;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -282,13 +283,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = `Typed "${value}" into ${selector}`;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return action.result;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -317,13 +318,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = filepath;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return filepath;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -350,13 +351,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = JSON.stringify(data.slice(0, 100));
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return data.filter(d => d.length > 0).slice(0, 100);
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -390,13 +391,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = `Filled form with ${Object.keys(data).length} fields`;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return action.result;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -434,13 +435,13 @@ export class BrowserAgent {
       session.lastActive = Date.now();
       action.result = `Scrolled ${direction}`;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
 
       return action.result;
     } catch (e) {
       action.error = (e as Error).message;
       session.actions.push(action);
-      this.saveData();
+      void this.saveData();
       throw e;
     }
   }
@@ -498,7 +499,7 @@ export class BrowserAgent {
       pages.delete(sessionId);
     }
     this.sessions.delete(sessionId);
-    this.saveData();
+    void this.saveData();
   }
 
   getSession(sessionId: string): BrowserSession | undefined {
@@ -511,7 +512,7 @@ export class BrowserAgent {
 
   deleteSession(sessionId: string): boolean {
     const result = this.sessions.delete(sessionId);
-    this.saveData();
+    void this.saveData();
     return result;
   }
 

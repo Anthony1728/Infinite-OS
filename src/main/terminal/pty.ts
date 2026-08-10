@@ -6,12 +6,14 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { createRequire } from 'node:module';
 import { platform } from 'node:os';
 
 // Try to import node-pty
 let ptyModule: typeof import('node-pty') | null = null;
 try {
-  ptyModule = require('node-pty');
+  const requireModule = createRequire(import.meta.url);
+  ptyModule = requireModule('node-pty') as typeof import('node-pty');
 } catch {
   // node-pty not available - PTY functionality will be limited
 }

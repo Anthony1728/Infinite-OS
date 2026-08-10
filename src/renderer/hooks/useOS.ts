@@ -75,11 +75,6 @@ export function useOS(options: UseOSOptions = {}): UseOSReturn {
   const [connected, setConnected] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Check health on mount
-  useEffect(() => {
-    checkHealth().then(setConnected);
-  }, []);
-
   const checkHealth = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetch(`${ORCHESTRATOR_URL}/api/health`, {
@@ -91,6 +86,11 @@ export function useOS(options: UseOSOptions = {}): UseOSReturn {
       return false;
     }
   }, []);
+
+  // Check health on mount
+  useEffect(() => {
+    void checkHealth().then(setConnected);
+  }, [checkHealth]);
 
   const getTools = useCallback(async (): Promise<ToolInfo[]> => {
     try {

@@ -1,14 +1,16 @@
 // IPC handler registration — wires every channel declared in shared/ipc.ts to a main-process function.
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog, shell } from 'electron';
+import { writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { IPC } from '../../shared/ipc.js';
 import { settings } from '../settings/store.js';
-import { setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
+import { deleteApiKey, setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
 import { listProviders, getProvider } from '../providers/registry.js';
 import { toolRegistry } from '../tools/base.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
-import { runAgent } from '../agent/loop.js';
+import { interjectAgent, runAgent } from '../agent/loop.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
 import { listAgents } from '../agents/registry.js';
 import {
@@ -20,13 +22,14 @@ import {
   customAgentToAgentType,
 } from '../agents/custom-store.js';
 import * as memoryStore from '../memory/store.js';
-import { listRunStates, spawnSubagent, clearCompletedRuns } from '../agent/runtime.js';
+import { abortSubagent, listRunStates, spawnSubagent, clearCompletedRuns } from '../agent/runtime.js';
 import type { AgentId } from '../agents/types.js';
 import { v4 as uuid } from 'uuid';
 import type { Message } from '../../shared/types.js';
-import { cpus, totalmem, freemem, loadavg, platform, hostname } from 'node:os';
+import { collectSystemMetrics } from '../system/metrics.js';
 import { registerBrainIpc } from './brain.js';
 import { registerBrowserIpc } from './browser.js';
+import { registerBridgeIpc } from './bridge.js';
 import { registerComputerIpc } from './computer.js';
 import { registerAutomationIpc } from './automation.js';
 import { registerWebsiteIpc } from './website.js';
@@ -36,7 +39,24 @@ import { registerPluginIpc } from './plugin.js';
 import { registerCloudIpc } from './cloud.js';
 import { registerMultiAgentIpc } from './multi-agent.js';
 import { registerWorkspaceIpc } from './workspace.js';
+import { registerAuthIpc } from './auth.js';
+import { registerTerminalIpc } from '../terminal/handler.js';
+import { registerCheckpointIpc } from './checkpoint.js';
+import { registerClipboardIpc } from './clipboard.js';
+import { registerCompletionIpc } from './completion.js';
+import { registerComputerAutomationIpc } from './computer-automation.js';
+import { registerDebugIpc } from './debug.js';
+import { registerGapIpc } from './gaps.js';
+import { registerGitHubIpc } from './github.js';
+import { registerIndexingIpc } from './indexing.js';
+import { registerNotificationIpc } from './notification.js';
+import { registerOllamaIpc } from './ollama.js';
+import { registerQueueIpc } from './queue.js';
+import { registerGitIpc } from './git.js';
+import { registerLearningIpc } from './learning.js';
+import { registerWindowIpc } from './window.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
+import { getEngine } from '../engine/intelligence.js';
 import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
 import { orchestrator, type OrchestratorEvent } from '../agent/orchestrator.js';
@@ -46,12 +66,41 @@ import { deploySystem } from '../deploy/index.js';
 import { testingFramework } from '../testing/index.js';
 import { enterpriseManager } from '../enterprise/index.js';
 import { callCenter } from '../callcenter/index.js';
+import { browserOperator } from '../operator/browser-operator.js';
+import { windowsDictation } from '../voice/windows-dictation.js';
+import {
+  getEmailConfig,
+  hasEmailConfig,
+  listEmails,
+  readEmail,
+  saveEmailConfig,
+  sendEmail,
+  testConnection as testEmailConnection,
+  type EmailConfig,
+} from '../email/index.js';
 
 const activeRuns = new Map<string, AbortController>();
+const discardedRuns = new Set<string>();
 
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
+  registerWindowIpc(getMainWindow);
+  registerAuthIpc();
+  registerTerminalIpc();
+  registerCheckpointIpc();
+  registerClipboardIpc();
+  registerCompletionIpc();
+  registerComputerAutomationIpc();
+  registerDebugIpc();
+  registerGapIpc();
+  registerGitHubIpc();
+  registerIndexingIpc();
+  registerNotificationIpc();
+  registerOllamaIpc();
+  registerQueueIpc();
+  registerGitIpc();
+  registerLearningIpc(getMainWindow);
   // Chat
-  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, provider, model, cwd }) => {
+  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd }) => {
     const win = getMainWindow();
     if (!win) {
       console.error('[IPC] CHAT_SEND: No window available');
@@ -65,13 +114,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     activeRuns.set(sessionId, controller);
 
     const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
+    const storedUserMessage: Message = { ...userMessage, content: displayMessage ?? message };
     const history = await sessionStore.loadMessages(sessionId);
     console.log(`[IPC] CHAT_SEND: history length=${history.length}`);
-    await sessionStore.appendMessage(sessionId, userMessage);
+    await sessionStore.appendMessage(sessionId, storedUserMessage);
 
     try {
       console.log(`[IPC] CHAT_SEND: calling runAgent...`);
-      await runAgent(history, userMessage, {
+      const startTime = Date.now();
+      const completedMessages = await runAgent(history, userMessage, {
         sessionId,
         cwd,
         provider,
@@ -82,29 +133,123 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev });
         },
       });
+      const duration = Date.now() - startTime;
+
+      // Record this interaction in the Intelligence Engine for learning
+      try {
+        const engine = getEngine();
+        // Bootstrap if this is the first interaction
+        engine.tryBootstrap();
+
+        // Extract the user's text input
+        const userText = userMessage.content
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
+          .join(' ');
+
+        // Extract the assistant's text output
+        const lastAssistant = [...completedMessages].reverse().find(m => m.role === 'assistant');
+        const assistantText = lastAssistant
+          ? lastAssistant.content
+              .filter((c) => c.type === 'text')
+              .map((c) => c.text)
+              .join(' ')
+          : '';
+
+        // Determine if the interaction was successful (no tool_result errors)
+        const hasError = completedMessages.some(
+          (m) => m.content.some((c) => c.type === 'tool_result' && c.is_error),
+        );
+        const success = !hasError && assistantText.length > 10;
+
+        // Count tokens roughly
+        const inputTokens = userText.length;
+        const outputTokens = assistantText.length;
+
+        engine.recordInteraction({
+          taskType: detectTaskType(userText),
+          input: userText.slice(0, 500),
+          modelUsed: model,
+          provider,
+          output: assistantText.slice(0, 1000),
+          success,
+          duration,
+          tokens: { input: inputTokens, output: outputTokens },
+        });
+      } catch (engineErr) {
+        console.error('[IPC] CHAT_SEND: engine recording failed:', engineErr);
+      }
+
+      // A clear-history action may have deleted this session while the agent
+      // was winding down after cancellation. Never recreate a deleted chat.
+      const wasDiscarded = discardedRuns.delete(sessionId);
+      if (!wasDiscarded && (await sessionStore.loadSessionMeta(sessionId))) {
+        for (const message of completedMessages.slice(history.length + 1)) {
+          await sessionStore.appendMessage(sessionId, message);
+        }
+      }
       console.log(`[IPC] CHAT_SEND: runAgent completed`);
-    } catch (err: any) {
-      console.error('[IPC] CHAT_SEND: runAgent failed:', err?.message ?? err);
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String(err.message)
+            : String(err);
+      console.error('[IPC] CHAT_SEND: runAgent failed:', errorMessage);
       try {
         win.webContents.send(IPC.CHAT_STREAM_EVENT, {
           sessionId,
           type: 'error',
-          error: err?.message || 'Agent failed',
+          error: errorMessage || 'Agent failed',
         });
       } catch (sendErr) {
         console.error('[IPC] CHAT_SEND: failed to send error event:', sendErr);
       }
     }
 
-    activeRuns.delete(sessionId);
+    discardedRuns.delete(sessionId);
+    if (activeRuns.get(sessionId) === controller) activeRuns.delete(sessionId);
     return { ok: true };
   });
 
   ipcMain.handle(IPC.CHAT_ABORT, async (_e, { sessionId }) => {
     activeRuns.get(sessionId)?.abort();
-    activeRuns.delete(sessionId);
+    orchestrator.cancelSession(sessionId);
     return { ok: true };
   });
+
+  ipcMain.handle(IPC.CHAT_INTERJECT, async (_e, { sessionId, message }: { sessionId: string; message: string }) => {
+    if (!activeRuns.has(sessionId)) return { ok: false, error: 'No active task for this session.' };
+    interjectAgent(sessionId, message);
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.OPERATOR_BROWSER_SEARCH, async (_e, { query }: { query: string }) =>
+    browserOperator.searchAmazon(query),
+  );
+  ipcMain.handle(IPC.OPERATOR_BROWSER_NAVIGATE, async (_e, { url }: { url: string }) =>
+    browserOperator.navigate(url),
+  );
+  ipcMain.handle(IPC.OPERATOR_BROWSER_SHUTDOWN, async () => {
+    await browserOperator.shutdown();
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.EMAIL_TEST, async (_e, config: EmailConfig) => testEmailConnection(config));
+  ipcMain.handle(IPC.EMAIL_CONFIG_GET, async () => getEmailConfig());
+  ipcMain.handle(IPC.EMAIL_CONFIG_SAVE, async (_e, config: EmailConfig) => {
+    await saveEmailConfig(config);
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.EMAIL_HAS_CONFIG, async () => hasEmailConfig());
+  ipcMain.handle(IPC.EMAIL_LIST, async (_e, args: { folder?: string; limit?: number }) =>
+    listEmails(args?.folder ?? 'INBOX', args?.limit ?? 20),
+  );
+  ipcMain.handle(IPC.EMAIL_READ, async (_e, args: { uid: string; folder?: string }) =>
+    readEmail(args.uid, args.folder ?? 'INBOX'),
+  );
+  ipcMain.handle(IPC.EMAIL_SEND, async (_e, args: { to: string; subject: string; text: string; inReplyTo?: string }) =>
+    sendEmail(args.to, args.subject, args.text, args.inReplyTo),
+  );
 
   // Sessions
   ipcMain.handle(IPC.SESSION_LIST, async () => sessionStore.listSessions());
@@ -113,8 +258,50 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   );
   ipcMain.handle(IPC.SESSION_LOAD, async (_e, { sessionId }) => sessionStore.loadMessages(sessionId));
   ipcMain.handle(IPC.SESSION_DELETE, async (_e, { sessionId }) => {
+    if (activeRuns.has(sessionId)) discardedRuns.add(sessionId);
+    activeRuns.get(sessionId)?.abort();
+    activeRuns.delete(sessionId);
+    orchestrator.cancelSession(sessionId);
     await sessionStore.deleteSession(sessionId);
     return { ok: true };
+  });
+  ipcMain.handle(IPC.SESSION_CLEAR_ALL, async () => {
+    // A history wipe also stops in-flight tasks so they cannot recreate a
+    // transcript after the user has explicitly removed it.
+    for (const [sessionId, controller] of activeRuns) {
+      discardedRuns.add(sessionId);
+      controller.abort();
+    }
+    activeRuns.clear();
+    orchestrator.cancelAll();
+    const deleted = await sessionStore.clearAllSessions();
+    return { ok: true, deleted };
+  });
+  ipcMain.handle(IPC.SESSION_RENAME, async (_e, { sessionId, title }) => sessionStore.renameSession(sessionId, title));
+  ipcMain.handle(IPC.SESSION_PIN, async (_e, { sessionId, pinned }) => sessionStore.pinSession(sessionId, pinned));
+  ipcMain.handle(IPC.SESSION_SEARCH, async (_e, { query }) => sessionStore.searchSessions(query));
+  ipcMain.handle(IPC.SESSION_BRANCH, async (_e, { sessionId, messageId }) =>
+    sessionStore.branchSession(sessionId, messageId),
+  );
+  ipcMain.handle(IPC.SESSION_UPDATE_MESSAGE, async (_e, { sessionId, messageId, content }) =>
+    sessionStore.updateMessage(sessionId, messageId, content),
+  );
+  ipcMain.handle(IPC.SESSION_APPEND, async (_e, { sessionId, message }) => {
+    await sessionStore.appendMessage(sessionId, message as Message);
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.SESSION_EXPORT, async (_e, { sessionId, format = 'markdown' }) => {
+    const session = await sessionStore.loadSessionMeta(sessionId);
+    if (!session) throw new Error('Conversation not found');
+    const result = await dialog.showSaveDialog({
+      title: 'Export conversation',
+      defaultPath: `${session.title.replace(/[<>:"/\\|?*]/g, '-')}.${format === 'json' ? 'json' : 'md'}`,
+      filters:
+        format === 'json' ? [{ name: 'JSON', extensions: ['json'] }] : [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    await writeFile(result.filePath, await sessionStore.exportSession(sessionId, format), 'utf8');
+    return { ok: true, path: result.filePath };
   });
 
   // Settings
@@ -130,6 +317,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       id: p.id,
       label: p.label,
       requiresApiKey: p.requiresApiKey,
+      acceptsApiKey: p.acceptsApiKey ?? false,
       defaultBaseUrl: p.defaultBaseUrl,
       freeModels: p.freeModels,
       ...(p.homepage ? { homepage: p.homepage } : {}),
@@ -150,7 +338,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
   ipcMain.handle(IPC.PROVIDER_SET_KEY, async (_e, { provider, key }) => {
     const normalized = key?.trim();
-    if (!normalized) throw new Error('API key cannot be empty.');
+    if (!normalized) {
+      const p = getProvider(provider);
+      if (!p?.acceptsApiKey) throw new Error('API key cannot be empty.');
+      await deleteApiKey(provider);
+      return { ok: true, cleared: true };
+    }
     await setApiKey(provider, normalized);
     return { ok: true };
   });
@@ -170,7 +363,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       icon: a.icon,
       color: a.color,
       allowedTools: a.allowedTools,
-      maxTurns: a.maxTurns ?? 30,
+      maxTurns: a.maxTurns,
     }));
   });
   ipcMain.handle(IPC.AGENT_RUNS, async () => {
@@ -192,6 +385,10 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     });
     done.catch(() => {}); // don't await — fire and forget
     return state;
+  });
+  ipcMain.handle(IPC.AGENT_ABORT, async (_e, { runId }: { runId: string }) => {
+    const ok = abortSubagent(runId);
+    return ok ? { ok: true } : { ok: false, error: `No active agent run found for ${runId}.` };
   });
 
   // Custom Agents
@@ -258,38 +455,117 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       return { error: (e as Error).message };
     }
   });
+  ipcMain.handle(IPC.FILE_OPEN, async (_e, { path: filePath }: { path: string }) => {
+    try {
+      const { resolve } = await import('node:path');
+      const absolutePath = resolve(filePath);
+      const error = await shell.openPath(absolutePath);
+      return error ? { error } : { ok: true, path: absolutePath };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
+  ipcMain.handle(IPC.PICK_DIRECTORY, async () => {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  ipcMain.handle(IPC.FILE_SYSTEM_ROOTS, async () => {
+    const { access } = await import('node:fs/promises');
+    const { homedir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = homedir();
+    const candidates = [
+      { name: 'Home', path: home, kind: 'home' },
+      { name: 'Desktop', path: join(home, 'Desktop'), kind: 'common' },
+      { name: 'Downloads', path: join(home, 'Downloads'), kind: 'common' },
+      { name: 'Documents', path: join(home, 'Documents'), kind: 'common' },
+      { name: 'Pictures', path: join(home, 'Pictures'), kind: 'common' },
+    ];
+    const common = [];
+    for (const item of candidates) {
+      try {
+        await access(item.path);
+        common.push(item);
+      } catch { /* unavailable location */ }
+    }
+    const driveCandidates = process.platform === 'win32'
+      ? Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
+      : ['/'];
+    const drives: Array<{ name: string; path: string; kind: string }> = [];
+    await Promise.all(driveCandidates.map(async (path) => {
+      try {
+        await access(path);
+        drives.push({ name: process.platform === 'win32' ? `Local Disk (${path.slice(0, 2)})` : 'File System', path, kind: 'drive' });
+      } catch { /* drive is not mounted */ }
+    }));
+    drives.sort((a, b) => a.path.localeCompare(b.path));
+    return { home, common, drives };
+  });
+  ipcMain.handle(IPC.SYSTEM_OPEN_URL, async (_e, { url }: { url: string }) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { error: `Unsupported URL protocol: ${parsed.protocol}` };
+      }
+      await shell.openExternal(parsed.toString());
+      return { ok: true };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
+  ipcMain.handle(IPC.FILE_MKDIR, async (_e, { path: filePath }: { path: string }) => {
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(filePath, { recursive: true });
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.FILE_DELETE, async (_e, { path: filePath }: { path: string }) => {
+    const { rm } = await import('node:fs/promises');
+    await rm(filePath, { recursive: true, force: true });
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.FILE_RENAME, async (_e, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
+    const { mkdir, rename } = await import('node:fs/promises');
+    const { dirname } = await import('node:path');
+    await mkdir(dirname(newPath), { recursive: true });
+    await rename(oldPath, newPath);
+    return { ok: true };
+  });
+  ipcMain.handle(
+    IPC.TERMINAL_EXECUTE,
+    async (_e, { command, cwd }: { command: string; cwd?: string }) =>
+      new Promise<{ stdout: string; stderr: string; exitCode: number | null }>((resolve, reject) => {
+        if (!command?.trim()) return reject(new Error('Command is required'));
+        const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
+        const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command];
+        const child = spawn(shell, shellArgs, { cwd: cwd || process.cwd(), windowsHide: true, env: process.env });
+        let stdout = '';
+        let stderr = '';
+        child.stdout.on('data', (chunk: Buffer) => (stdout = (stdout + chunk.toString()).slice(-50_000)));
+        child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-50_000)));
+        const timeout = setTimeout(() => child.kill(), 120_000);
+        child.on('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        child.on('close', (exitCode) => {
+          clearTimeout(timeout);
+          resolve({ stdout, stderr, exitCode });
+        });
+      }),
+  );
 
   // App
   ipcMain.handle(IPC.APP_VERSION, async () => '0.1.0');
 
   // System Metrics
-  ipcMain.handle(IPC.METRICS_GET, async () => {
-    const cpuInfo = cpus();
-    const load = loadavg();
-    const totalMem = totalmem();
-    const freeMem = freemem();
-    const usedMem = totalMem - freeMem;
-    const cpuUsage = Math.min(100, Math.round((load[0] / cpuInfo.length) * 100));
-    const ramUsage = Math.round((usedMem / totalMem) * 100);
-    return {
-      cpu: cpuUsage,
-      cpuCores: cpuInfo.length,
-      ram: ramUsage,
-      ramUsed: (usedMem / 1073741824).toFixed(1),
-      ramTotal: (totalMem / 1073741824).toFixed(1),
-      load1: load[0].toFixed(2),
-      load5: load[1].toFixed(2),
-      load15: load[2].toFixed(2),
-      platform: platform(),
-      hostname: hostname(),
-    };
-  });
+  ipcMain.handle(IPC.METRICS_GET, async () => collectSystemMetrics());
 
   // Brain subsystem IPC
   registerBrainIpc();
 
   // Phase 2 IPC
   registerBrowserIpc();
+  registerBridgeIpc();
   registerComputerIpc();
   registerAutomationIpc();
 
@@ -315,43 +591,43 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
 
   // Skills IPC
-  ipcMain.handle('skills:list', async () => {
+  ipcMain.handle(IPC.SKILLS_LIST, async () => {
     const mgr = new SkillsManager();
     return mgr.listAllSkills();
   });
-  ipcMain.handle('skills:get', async (_e, { id }: { id: string }) => {
+  ipcMain.handle(IPC.SKILLS_GET, async (_e, { id }: { id: string }) => {
     const mgr = new SkillsManager();
     return mgr.getSkill(id) ?? null;
   });
-  ipcMain.handle('skills:create', async (_e, { skill }: { skill: Parameters<SkillsManager['addSkill']>[0] }) => {
+  ipcMain.handle(IPC.SKILLS_CREATE, async (_e, { skill }: { skill: Parameters<SkillsManager['addSkill']>[0] }) => {
     const mgr = new SkillsManager();
     return mgr.addSkill(skill);
   });
-  ipcMain.handle('skills:update', async (_e, { id, updates }: { id: string; updates: Record<string, unknown> }) => {
+  ipcMain.handle(IPC.SKILLS_UPDATE, async (_e, { id, updates }: { id: string; updates: Record<string, unknown> }) => {
     const mgr = new SkillsManager();
     return mgr.updateSkill(id, updates as Parameters<SkillsManager['updateSkill']>[1]);
   });
-  ipcMain.handle('skills:delete', async (_e, { id }: { id: string }) => {
+  ipcMain.handle(IPC.SKILLS_DELETE, async (_e, { id }: { id: string }) => {
     const mgr = new SkillsManager();
     return mgr.removeSkill(id);
   });
-  ipcMain.handle('skills:toggle', async (_e, { id }: { id: string }) => {
+  ipcMain.handle(IPC.SKILLS_TOGGLE, async (_e, { id }: { id: string }) => {
     const mgr = new SkillsManager();
     return mgr.toggleSkill(id);
   });
-  ipcMain.handle('skills:search', async (_e, { query }: { query: string }) => {
+  ipcMain.handle(IPC.SKILLS_SEARCH, async (_e, { query }: { query: string }) => {
     const mgr = new SkillsManager();
     return mgr.searchSkills(query);
   });
-  ipcMain.handle('skills:stats', async () => {
+  ipcMain.handle(IPC.SKILLS_STATS, async () => {
     const mgr = new SkillsManager();
     return mgr.getStats();
   });
-  ipcMain.handle('skills:import-claude', async (_e, { filePath }: { filePath: string }) => {
+  ipcMain.handle(IPC.SKILLS_IMPORT_CLAUDE, async (_e, { filePath }: { filePath: string }) => {
     const mgr = new SkillsManager();
     return mgr.importClaudeCodeSkill(filePath);
   });
-  ipcMain.handle('skills:relevant', async (_e, { task }: { task: string }) => {
+  ipcMain.handle(IPC.SKILLS_RELEVANT, async (_e, { task }: { task: string }) => {
     const mgr = new SkillsManager();
     return mgr.getRelevantSkills(task);
   });
@@ -383,9 +659,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
 
   // Orchestrator IPC
-  ipcMain.handle(IPC.ORCHESTRATOR_START, async (_e, { prompt, sessionId, cwd }) => {
+  ipcMain.handle(IPC.ORCHESTRATOR_START, async (_e, { prompt, displayPrompt, sessionId, cwd, provider, model }) => {
     const win = getMainWindow();
     if (!win) throw new Error('No window');
+    await sessionStore.appendMessage(sessionId, {
+      id: uuid(),
+      role: 'user',
+      content: [{ type: 'text', text: displayPrompt ?? prompt }],
+      timestamp: Date.now(),
+    });
 
     // Gather available providers
     const availableProviders = new Map<string, { apiKey?: string; baseUrl?: string }>();
@@ -395,7 +677,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     }
 
     // Analyze and decompose the task
-    const task = orchestrator.analyze(prompt, availableProviders);
+    const task = orchestrator.analyze(
+      prompt,
+      availableProviders,
+      provider && model ? { provider, model } : undefined,
+    );
 
     // Notify user about paid model if needed
     if (task.paidModelNotification) {
@@ -408,10 +694,56 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     }
 
     // Stream orchestrator events to renderer
-    const sink = (e: OrchestratorEvent) => win.webContents.send(IPC.ORCHESTRATOR_EVENT, { sessionId, ...e });
+    const sink = (e: OrchestratorEvent) => {
+      win.webContents.send(IPC.ORCHESTRATOR_EVENT, { sessionId, ...e });
+      if (e.type === 'task_completed' || e.type === 'task_failed') {
+        const data = e.data as {
+          totalSubTasks?: number;
+          completed?: number;
+          failed?: number;
+          errors?: string[];
+          report?: {
+            summary?: string;
+            failed?: Array<{ description: string; error: string; attempts: number }>;
+            retries?: Array<{ description: string; attempt: number; reason: string }>;
+          };
+        };
+        const text =
+          data.report?.summary ?? (e.type === 'task_completed'
+            ? `Task completed successfully: ${data.completed ?? 0} of ${data.totalSubTasks ?? data.completed ?? 0} sub-tasks passed.`
+            : `Task failed and was not marked complete: ${data.completed ?? 0} sub-task(s) passed and ${data.failed ?? 1} failed.${data.errors?.length ? ` ${data.errors.slice(0, 2).join(' ')}` : ''}`);
+        const detail = data.report?.failed?.length
+          ? `\n\nUnresolved phases:\n${data.report.failed.map((phase) => `- ${phase.description}: ${phase.error} (attempts: ${phase.attempts})`).join('\n')}`
+          : '';
+        void (async () => {
+          // Deleting/clearing a conversation also cancels its orchestrator.
+          // Do not recreate that transcript when cancellation winds down.
+          if (!(await sessionStore.loadSessionMeta(sessionId))) return;
+          await sessionStore.appendMessage(sessionId, {
+            id: uuid(),
+            role: 'assistant',
+            content: [{ type: 'text', text: `${text}${detail}` }],
+            timestamp: Date.now(),
+          });
+        })();
+      }
+    };
 
     // Execute autonomously in background
-    orchestrator.execute(task.id, sessionId, cwd, sink).catch(() => {});
+    orchestrator.execute(task.id, sessionId, cwd, sink).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      win.webContents.send(IPC.ORCHESTRATOR_EVENT, {
+        sessionId,
+        type: 'task_failed',
+        taskId: task.id,
+        data: {
+          totalSubTasks: task.subTasks.length,
+          completed: task.subTasks.filter((subTask) => subTask.status === 'completed').length,
+          failed: task.subTasks.filter((subTask) => subTask.status !== 'completed').length,
+          report: { summary: `Orchestrator crashed before completion: ${message}`, failed: [], retries: [] },
+        },
+      });
+    });
 
     return { taskId: task.id, subTasks: task.subTasks.length, model: task.modelSelection };
   });
@@ -443,8 +775,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Voice Assistant IPC (stubbed — VoiceManager supports speechToText/textToSpeech)
   ipcMain.handle(IPC.VOICE_CONFIG_GET, async () => ({}));
   ipcMain.handle(IPC.VOICE_CONFIG_SET, async () => ({ ok: true }));
-  ipcMain.handle(IPC.VOICE_START_LISTENING, async () => ({ ok: true }));
-  ipcMain.handle(IPC.VOICE_STOP_LISTENING, async () => ({ ok: true }));
+  ipcMain.handle(IPC.VOICE_START_LISTENING, async (event) => {
+    return windowsDictation.start((payload) => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC.VOICE_TRANSCRIPT_EVENT, payload);
+    });
+  });
+  ipcMain.handle(IPC.VOICE_STOP_LISTENING, async () => {
+    windowsDictation.stop();
+    return { ok: true };
+  });
   ipcMain.handle(IPC.VOICE_PROCESS_TRANSCRIPT, async (_e, { transcript }) => transcript);
   ipcMain.handle(IPC.VOICE_SET_WAKE_WORD, async () => ({ ok: true }));
   ipcMain.handle(IPC.VOICE_ADD_CUSTOM_COMMAND, async () => ({ ok: true }));
@@ -453,15 +792,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.VOICE_HISTORY, async () => []);
   ipcMain.handle(IPC.VOICE_CLEAR_HISTORY, async () => ({ ok: true }));
   ipcMain.handle(IPC.VOICE_SPEAK, async (_e, { text }) => {
-    const win = getMainWindow();
-    win?.webContents.send(IPC.CHAT_STREAM_EVENT, { type: 'voice_speak', text });
-    return { ok: true };
+    try {
+      const { getVoiceAsync } = await import('../voice/index.js');
+      const voice = await getVoiceAsync();
+      const buffer = await voice.textToSpeech(text);
+      return { ok: true, audio: buffer.toString('base64') };
+    } catch (err) {
+      // Fallback: notify renderer to use browser SpeechSynthesis.
+      const win = getMainWindow();
+      win?.webContents.send(IPC.CHAT_STREAM_EVENT, { type: 'voice_speak', text });
+      return { ok: true, fallback: true };
+    }
   });
-  ipcMain.handle(IPC.VOICE_STATUS, async () => ({
-    listening: false,
-    config: {},
-    wakeWord: 'hey infinity',
-  }));
+  // VOICE_STATUS is registered in gaps.ts (registerGapIpc) — do not duplicate
 
   // Video Clipping IPC
   ipcMain.handle(IPC.VIDEO_CREATE_PROJECT, async (_e, { name, sourceFile, description }) =>
@@ -592,4 +935,33 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   );
   ipcMain.handle(IPC.CALL_TEMPLATE_LIST, async () => callCenter.listTemplates());
   ipcMain.handle(IPC.CALL_ANALYTICS, async (_e, { since }) => callCenter.getAnalytics(since));
+
+  // Screenshot cleanup IPC
+  ipcMain.handle('screenshot:cleanup', async () => {
+    const { runScreenshotCleanup } = await import('../system/screenshot-cleanup.js');
+    return runScreenshotCleanup();
+  });
+  ipcMain.handle('screenshot:restore', async () => {
+    const { restoreTrashedScreenshots } = await import('../system/screenshot-cleanup.js');
+    return restoreTrashedScreenshots();
+  });
+  ipcMain.handle('screenshot:stats', async () => {
+    const { getScreenshotStats } = await import('../system/screenshot-cleanup.js');
+    return getScreenshotStats();
+  });
+
+  // Window controls are registered by registerWindowIpc() — no duplicates here.
+}
+
+function detectTaskType(input: string): string {
+  const lower = input.toLowerCase().slice(0, 200);
+  if (/\b(code|program|function|class|api|debug|error|fix|refactor|component|module|library)\b/.test(lower)) return 'coding';
+  if (/\b(build|create|make|generate|write|scaffold|bootstrap)\b/.test(lower)) return 'building';
+  if (/\b(explain|what|how|why|tell|describe|define|meaning|difference)\b/.test(lower)) return 'learning';
+  if (/\b(deploy|push|publish|release|ship|launch)\b/.test(lower)) return 'deployment';
+  if (/\b(test|check|verify|validate|assert|spec)\b/.test(lower)) return 'testing';
+  if (/\b(search|find|look|browse|navigate|go to)\b/.test(lower)) return 'research';
+  if (/\b(run|execute|start|stop|restart|command|terminal)\b/.test(lower)) return 'command';
+  if (/\b(hi|hello|hey|thanks|bye|goodbye)\b/.test(lower)) return 'conversation';
+  return 'general';
 }

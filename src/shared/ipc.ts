@@ -4,15 +4,25 @@ export const IPC = {
   // Chat
   CHAT_SEND: 'chat:send',
   CHAT_ABORT: 'chat:abort',
+  CHAT_INTERJECT: 'chat:interject',
   CHAT_STREAM_EVENT: 'chat:stream-event', // main → renderer push
+  OPERATOR_BROWSER_SEARCH: 'operator:browser-search',
+  OPERATOR_BROWSER_NAVIGATE: 'operator:browser-navigate',
+  OPERATOR_BROWSER_SHUTDOWN: 'operator:browser-shutdown',
 
   // Sessions
   SESSION_LIST: 'session:list',
   SESSION_CREATE: 'session:create',
   SESSION_LOAD: 'session:load',
   SESSION_DELETE: 'session:delete',
+  SESSION_CLEAR_ALL: 'session:clear-all',
   SESSION_RENAME: 'session:rename',
   SESSION_SEARCH: 'session:search',
+  SESSION_PIN: 'session:pin',
+  SESSION_EXPORT: 'session:export',
+  SESSION_BRANCH: 'session:branch',
+  SESSION_UPDATE_MESSAGE: 'session:update-message',
+  SESSION_APPEND: 'session:append',
 
   // Settings
   SETTINGS_GET: 'settings:get',
@@ -35,6 +45,7 @@ export const IPC = {
   AGENT_LIST: 'agent:list',
   AGENT_RUNS: 'agent:runs',
   AGENT_SPAWN: 'agent:spawn',
+  AGENT_ABORT: 'agent:abort',
   AGENT_EVENT: 'agent:event', // main → renderer push
 
   // Custom Agents
@@ -53,6 +64,18 @@ export const IPC = {
   MEMORY_SEARCH: 'memory:search',
   MEMORY_STATS: 'memory:stats',
 
+  // Skills
+  SKILLS_LIST: 'skills:list',
+  SKILLS_GET: 'skills:get',
+  SKILLS_CREATE: 'skills:create',
+  SKILLS_UPDATE: 'skills:update',
+  SKILLS_DELETE: 'skills:delete',
+  SKILLS_TOGGLE: 'skills:toggle',
+  SKILLS_SEARCH: 'skills:search',
+  SKILLS_STATS: 'skills:stats',
+  SKILLS_IMPORT_CLAUDE: 'skills:import-claude',
+  SKILLS_RELEVANT: 'skills:relevant',
+
   // MCP
   MCP_LIST_SERVERS: 'mcp:list-servers',
   MCP_CONNECT: 'mcp:connect',
@@ -63,7 +86,9 @@ export const IPC = {
   // Files
   FILE_READ: 'file:read',
   FILE_WRITE: 'file:write',
+  FILE_OPEN: 'file:open',
   PICK_DIRECTORY: 'file:pick-directory',
+  FILE_SYSTEM_ROOTS: 'file:system-roots',
 
   FILE_MKDIR: 'file:mkdir',
   FILE_DELETE: 'file:delete',
@@ -99,6 +124,12 @@ export const IPC = {
   BRAIN_MARKETPLACE_INSTALL: 'brain:marketplace:install',
   BRAIN_SDK_INFO: 'brain:sdk:info',
   BRAIN_SDK_CREATE_TOOL: 'brain:sdk:create-tool',
+  BRAIN_TEACH_START: 'brain:teach:start',
+  BRAIN_TEACH_STOP: 'brain:teach:stop',
+  BRAIN_TEACH_STATUS: 'brain:teach:status',
+  BRAIN_TEACH_EVENT: 'brain:teach:event',
+  BRAIN_LEARN_INTERACTION: 'brain:learn:interaction',
+  BRAIN_LEARN_STATS: 'brain:learn:stats',
 
   // Browser Agent
   BROWSER_CREATE_SESSION: 'browser:create-session',
@@ -125,10 +156,12 @@ export const IPC = {
   // Automation
   AUTOMATION_CREATE_WORKFLOW: 'automation:create-workflow',
   AUTOMATION_RUN_WORKFLOW: 'automation:run-workflow',
+  AUTOMATION_RUN_EVENT: 'automation:run-event',
   AUTOMATION_LIST_WORKFLOWS: 'automation:list-workflows',
   AUTOMATION_GET_WORKFLOW: 'automation:get-workflow',
   AUTOMATION_ENABLE_WORKFLOW: 'automation:enable-workflow',
   AUTOMATION_DISABLE_WORKFLOW: 'automation:disable-workflow',
+  AUTOMATION_DELETE_WORKFLOW: 'automation:delete-workflow',
   AUTOMATION_ADD_ACTION: 'automation:add-action',
   AUTOMATION_GET_TEMPLATES: 'automation:get-templates',
   AUTOMATION_GET_RUNS: 'automation:get-runs',
@@ -156,11 +189,14 @@ export const IPC = {
   APP_GENERATE_PAGE: 'app:generate-page',
   APP_GENERATE_API: 'app:generate-api',
   APP_BUILD: 'app:build',
+  APP_RENAME: 'app:rename',
+  APP_MOVE: 'app:move',
+  APP_RUN: 'app:run',
   APP_DELETE: 'app:delete',
   APP_TEMPLATES: 'app:templates',
   APP_STATS: 'app:stats',
 
-  // Business OS
+  // Business Command Center
   BUSINESS_CREATE_CONTACT: 'business:create-contact',
   BUSINESS_UPDATE_CONTACT: 'business:update-contact',
   BUSINESS_DELETE_CONTACT: 'business:delete-contact',
@@ -244,6 +280,7 @@ export const IPC = {
   VOICE_CONFIG_SET: 'voice:config:set',
   VOICE_START_LISTENING: 'voice:start-listening',
   VOICE_STOP_LISTENING: 'voice:stop-listening',
+  VOICE_TRANSCRIPT_EVENT: 'voice:transcript-event',
   VOICE_PROCESS_TRANSCRIPT: 'voice:process-transcript',
   VOICE_SET_WAKE_WORD: 'voice:set-wake-word',
   VOICE_ADD_CUSTOM_COMMAND: 'voice:add-custom-command',
@@ -446,6 +483,10 @@ export const IPC = {
   INDEX_FILE_REMOVE: 'index:file:remove',
   INDEX_REBUILD: 'index:rebuild',
 
+  // Engine
+  ENGINE_STATUS: 'engine:status',
+  ENGINE_BOOTSTRAP: 'engine:bootstrap',
+
   // Code Completion
   COMPLETION_REQUEST: 'completion:request',
   COMPLETION_CANCEL: 'completion:cancel',
@@ -477,6 +518,26 @@ export const IPC = {
   GIT_REBASE: 'git:rebase',
   GIT_STASH: 'git:stash',
   GIT_REMOTE: 'git:remote',
+
+  // Window controls
+  WINDOW_SET_FULLSCREEN: 'window:setFullScreen',
+  WINDOW_SET_ALWAYS_ON_TOP: 'window:setAlwaysOnTop',
+  WINDOW_IS_ALWAYS_ON_TOP: 'window:isAlwaysOnTop',
+  WINDOW_MINIMIZE: 'window:minimize',
+  WINDOW_MAXIMIZE: 'window:maximize',
+  WINDOW_RESTORE: 'window:restore',
+  WINDOW_CLOSE: 'window:close',
+  WINDOW_TOGGLE_FULLSCREEN: 'window:toggle-fullscreen',
+  WINDOW_ENTER_FULLSCREEN: 'window:enter-fullscreen',
+  WINDOW_EXIT_FULLSCREEN: 'window:exit-fullscreen',
+  WINDOW_IS_FULLSCREEN: 'window:is-fullscreen',
+  WINDOW_UNMAXIMIZE: 'window:unmaximize',
+  WINDOW_IS_MAXIMIZED: 'window:is-maximized',
+  WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed', // main → renderer push
+
+  // Browser Bridge (Infinite OS Bridge browser extension)
+  BRIDGE_STATUS: 'bridge:status',
+  BRIDGE_EXEC: 'bridge:exec',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];

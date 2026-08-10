@@ -3,18 +3,49 @@ import { useAppStore } from '../../../renderer/stores/app';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 export function AppBuilderView() {
-  const { projects, templates, stats, loadProjects, loadTemplates, loadStats, createProject, buildProject, deleteProject } = useAppStore();
+  const { projects, templates, stats, loadProjects, loadTemplates, loadStats, createProject, buildProject, deleteProject, renameProject, moveProject, runProject, generateComponent, generatePage, generateApi } = useAppStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [showCreate, setShowCreate] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', type: 'react' });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => { loadProjects(); loadTemplates(); loadStats(); }, [loadProjects, loadTemplates, loadStats]);
 
   const handleCreate = async () => {
     if (!newProject.name.trim()) return;
-    await createProject({ name: newProject.name, type: newProject.type });
-    setNewProject({ name: '', type: 'react' }); setShowCreate(false);
-    addToast({ type: 'success', title: 'Project created' });
+    try {
+      await createProject({ name: newProject.name, type: newProject.type });
+      setNewProject({ name: '', type: 'react' }); setShowCreate(false);
+      addToast({ type: 'success', title: 'Project created' });
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not create project', message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const handleBuild = async (id: string) => {
+    setBusyId(id);
+    try {
+      await buildProject(id);
+      addToast({ type: 'success', title: 'Project built' });
+    } catch (error) {
+      addToast({ type: 'error', title: 'Build failed', message: error instanceof Error ? error.message : String(error) });
+    } finally { setBusyId(null); }
+  };
+
+  const act = async (title: string, action: () => Promise<void>) => {
+    try { await action(); addToast({ type: 'success', title }); }
+    catch (error) { addToast({ type: 'error', title: `${title} failed`, message: error instanceof Error ? error.message : String(error) }); }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`Delete the project “${name}”?`)) return;
+    try {
+      await deleteProject(id);
+      addToast({ type: 'success', title: 'Project deleted' });
+    } catch (error) {
+      addToast({ type: 'error', title: 'Could not delete project', message: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   return (
@@ -57,7 +88,6 @@ export function AppBuilderView() {
               <option value="react">React App</option>
               <option value="electron">Electron App</option>
               <option value="express">Express API</option>
-              <option value="fullstack">Full Stack</option>
             </select>
           </div>
           <div className="flex gap-2 justify-end">
@@ -72,11 +102,11 @@ export function AppBuilderView() {
         <h2 className="text-sm font-semibold text-textMain mb-3">Templates</h2>
         <div className="grid grid-cols-3 gap-3">
           {templates.map((t, i) => (
-            <div key={t.id} className="card-premium hover:border-cyan-500/30 cursor-pointer animate-slide-up" style={{ animationDelay: `${i * 20}ms` }}>
+            <button key={t.id} onClick={() => { setNewProject({ name: '', type: t.type }); setShowCreate(true); }} className="card-premium text-left hover:border-cyan-500/30 cursor-pointer animate-slide-up" style={{ animationDelay: `${i * 20}ms` }}>
               <div className="font-medium text-textMain text-sm">{t.name}</div>
               <div className="text-xs text-textMuted mt-1">{t.description}</div>
               <span className="inline-block mt-2 px-2 py-0.5 bg-cyan-500/10 text-cyan-400 rounded text-[10px]">{t.type}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -103,12 +133,29 @@ export function AppBuilderView() {
               </div>
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${proj.status === 'built' ? 'bg-green-500/15 text-green-400' : proj.status === 'building' ? 'bg-amber-500/15 text-amber-400' : 'bg-gray-500/15 text-gray-400'}`}>{proj.status}</span>
-                <button onClick={() => buildProject(proj.id)} className="px-3 py-1.5 rounded-lg bg-bgCard border border-borderSubtle text-xs text-textMain hover:border-cyan-500/30 transition-all">Build</button>
-                <button onClick={() => deleteProject(proj.id)} className="text-textMuted hover:text-brandRed transition-colors p-1">
+                <button onClick={() => setSelectedId(selectedId === proj.id ? null : proj.id)} className="px-3 py-1.5 rounded-lg bg-bgCard border border-borderSubtle text-xs text-textMain hover:border-cyan-500/30 transition-all">{selectedId === proj.id ? 'Close' : 'Manage'}</button>
+                <button onClick={() => handleBuild(proj.id)} disabled={busyId === proj.id} className="px-3 py-1.5 rounded-lg bg-bgCard border border-borderSubtle text-xs text-textMain hover:border-cyan-500/30 disabled:opacity-50 transition-all">{busyId === proj.id ? 'Building…' : 'Build'}</button>
+                <button onClick={() => handleDelete(proj.id, proj.name)} className="text-textMuted hover:text-brandRed transition-colors p-1" aria-label={`Delete ${proj.name}`}>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                 </button>
               </div>
             </div>
+            {selectedId === proj.id && (
+              <div className="mt-4 border-t border-borderSubtle pt-4">
+                {proj.outputPath && <div className="mb-3 break-all rounded-lg bg-black/20 px-3 py-2 font-mono text-[10px] text-textMuted">{proj.outputPath}</div>}
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => { const name = window.prompt('Rename project', proj.name); if (name) void act('Project renamed', () => renameProject(proj.id, name)); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-cyan-500/30">Rename</button>
+                  <button onClick={() => void (async () => { const destination = await window.api.pickDirectory(); if (destination) await act('Project moved', () => moveProject(proj.id, destination)); })()} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-cyan-500/30">Move</button>
+                  <button disabled={!proj.outputPath} onClick={() => proj.outputPath && void window.api.fileOpen({ path: proj.outputPath })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs disabled:opacity-40 hover:border-cyan-500/30">Open Folder</button>
+                  <button disabled={!proj.outputPath} onClick={() => void act('Project started', () => runProject(proj.id))} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs disabled:opacity-40 hover:border-green-500/30">Run</button>
+                  <button onClick={() => { const name = window.prompt('Component name', 'Dashboard'); if (name) void act('Component added', () => generateComponent({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Component</button>
+                  <button onClick={() => { const name = window.prompt('Page name', 'Home'); if (name) void act('Page added', () => generatePage({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Page</button>
+                  {(proj.type === 'express' || proj.type === 'fullstack') && <button onClick={() => { const name = window.prompt('API route name', 'items'); if (name) void act('API route added', () => generateApi({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ API</button>}
+                </div>
+                <div className="mt-3 text-[10px] text-textMuted">{proj.files.map((file) => file.path).join(' · ') || 'No files yet'}</div>
+                {proj.lastBuildLog && <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-3 font-mono text-[10px] text-textMuted">{proj.lastBuildLog}</pre>}
+              </div>
+            )}
           </div>
         ))}
       </div>

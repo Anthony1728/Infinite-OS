@@ -50,7 +50,16 @@ export async function connectAll(cwd: string): Promise<void> {
   const config = await loadMcpConfig(cwd);
   for (const [name, cfg] of Object.entries(config)) {
     try {
-      await connect(name, cfg);
+      // A slow or broken optional MCP server must never hold the desktop
+      // window hostage during startup. The connection may still finish in
+      // the background; startup proceeds after the bounded wait.
+      await Promise.race([
+        connect(name, cfg),
+        new Promise<never>((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('connection timed out')), 8_000);
+          timer.unref?.();
+        }),
+      ]);
     } catch (e) {
       console.error(`[mcp] failed to connect ${name}:`, (e as Error).message);
     }

@@ -4,7 +4,7 @@
 
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
-import { getCheckpointManager } from '../checkpoint/manager.js';
+import { getCheckpointManager, type TaskState } from '../checkpoint/manager.js';
 
 export function registerCheckpointIpc(): void {
   const manager = getCheckpointManager();
@@ -15,25 +15,14 @@ export function registerCheckpointIpc(): void {
     name: string;
     description?: string;
     metadata?: Record<string, unknown>;
-    state: {
-      status: string;
-      progress: number;
-      currentStep: number;
-      totalSteps: number;
-      cwd: string;
-      history: unknown[];
-      variables: Record<string, unknown>;
-      modifiedFiles?: unknown[];
-      result?: unknown;
-      error?: string;
-    };
+    state: TaskState;
   }) => {
     try {
       const checkpoint = manager.create({
         taskId: args.taskId,
         name: args.name,
         description: args.description,
-        state: args.state as any,
+        state: args.state,
         metadata: args.metadata,
       });
       return { ok: true, checkpoint };

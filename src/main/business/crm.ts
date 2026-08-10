@@ -1,5 +1,5 @@
 /**
- * Business OS
+ * Business Command Center
  *
  * Complete business management system:
  * - CRM (Customer Relationship Management)

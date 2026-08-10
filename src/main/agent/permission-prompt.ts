@@ -8,20 +8,26 @@ type ToolUse = Extract<ContentBlock, { type: 'tool_use' }>;
 
 const pending = new Map<string, (allowed: boolean) => void>();
 
-export async function requestPermission(tu: ToolUse, _opts: { sessionId: string; cwd: string }): Promise<boolean> {
+export async function requestPermission(tu: ToolUse, opts: { sessionId: string; cwd: string; signal?: AbortSignal }): Promise<boolean> {
   const id = crypto.randomUUID();
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   if (!win) return false;
 
   return new Promise<boolean>((resolve) => {
-    pending.set(id, resolve);
+    let settled = false;
+    const settle = (allowed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+      pending.delete(id);
+      resolve(allowed);
+    };
+    const onAbort = () => settle(false);
+    const timer = setTimeout(() => settle(false), 5 * 60_000);
+    pending.set(id, settle);
     win.webContents.send(IPC.PERMISSION_REQUEST, { id, tool: tu.name, input: tu.input });
-    setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        resolve(false);
-      }
-    }, 5 * 60_000); // 5-min timeout
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 

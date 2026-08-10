@@ -55,7 +55,7 @@ export function SmartInputBar() {
               submit();
             }
           }}
-          placeholder="Ask InfiniteAI OS anything..."
+          placeholder="Ask Infinite OS anything..."
           rows={2}
           className="w-full bg-transparent text-sm placeholder:text-gray-600 focus:outline-none resize-none mb-3 min-h-[44px]"
         />

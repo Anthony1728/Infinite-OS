@@ -37,6 +37,10 @@ export function registerAppIpc(): void {
     return appBuilder.buildProject(projectId);
   });
 
+  ipcMain.handle(IPC.APP_RENAME, async (_e, { projectId, name }) => appBuilder.renameProject(projectId, name));
+  ipcMain.handle(IPC.APP_MOVE, async (_e, { projectId, destination }) => appBuilder.moveProject(projectId, destination));
+  ipcMain.handle(IPC.APP_RUN, async (_e, { projectId }) => appBuilder.runDev(projectId));
+
   ipcMain.handle(IPC.APP_DELETE, async (_e, { projectId }) => {
     return appBuilder.deleteProject(projectId);
   });

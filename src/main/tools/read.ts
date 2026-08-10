@@ -23,9 +23,11 @@ export const read: Tool = {
     try {
       const abs = resolve(ctx.cwd, file_path);
       const ext = abs.slice(abs.lastIndexOf('.')).toLowerCase();
+      const signal = ctx.abortSignal;
+      const fsOpts = signal ? { signal } as const : undefined;
 
       if (IMAGE_MIMES.has(ext)) {
-        const buf = await readFile(abs);
+        const buf = await readFile(abs, fsOpts);
         return {
           content: [{
             type: 'image',
@@ -38,7 +40,7 @@ export const read: Tool = {
         };
       }
 
-      const raw = await readFile(abs, 'utf8');
+      const raw = await readFile(abs, { encoding: 'utf8', ...fsOpts });
       const lines = raw.split('\n');
       const start = Math.max(0, offset);
       const slice = limit ? lines.slice(start, start + limit) : lines.slice(start);

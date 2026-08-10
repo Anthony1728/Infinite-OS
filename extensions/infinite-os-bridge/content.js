@@ -1,0 +1,520 @@
+// Infinite OS Bridge v3.0 — Content script.
+  // Injected into every page for fast DOM operations without script injection overhead.
+  // Communicates with background.js via chrome.runtime messages.
+
+  (() => {
+    'use strict';
+
+    const BRIDGE_NS = '__infinite_bridge__';
+    if (window[BRIDGE_NS]) return;
+    window[BRIDGE_NS] = true;
+
+    const INTERACTIVE = 'a, button, input, textarea, select, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="tab"], [role="option"], [onclick], label[for], details summary';
+    const TEXT_ATTRS = ['aria-label', 'title', 'placeholder', 'alt', 'name', 'value'];
+
+    // Incremental DOM snapshot cache
+    const snapshotCache = {
+      elements: new Map(),
+      lastSnapshot: null,
+      lastSnapshotTime: 0,
+      selectorIndex: new Map(),
+    };
+
+    function norm(s) {
+      return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+  function cssPath(el) {
+    if (!el || el.nodeType !== 1) return '';
+    if (el.id) return '#' + CSS.escape(el.id);
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && node !== document.documentElement) {
+      let sel = node.tagName.toLowerCase();
+      if (node.id) {
+        sel = '#' + CSS.escape(node.id);
+        parts.unshift(sel);
+        break;
+      }
+      if (node.classList?.length) {
+        sel += '.' + Array.from(node.classList).slice(0, 3).map(c => CSS.escape(c)).join('.');
+      }
+      const parent = node.parentElement;
+      if (parent) {
+        const same = Array.from(parent.children).filter(c => c.tagName === node.tagName);
+        if (same.length > 1) sel += ':nth-of-type(' + (same.indexOf(node) + 1) + ')';
+      }
+      parts.unshift(sel);
+      node = parent;
+    }
+    return parts.join(' > ');
+  }
+
+  function visible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && Number(cs.opacity) !== 0;
+  }
+
+  function describe(el) {
+    if (!el) return null;
+    const role = el.getAttribute('role') || (el.tagName === 'A' ? 'link' : el.tagName === 'BUTTON' ? 'button' : el.tagName.toLowerCase());
+    return {
+      tag: el.tagName.toLowerCase(),
+      role,
+      text: (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+      aria: el.getAttribute('aria-label') || '',
+      title: el.getAttribute('title') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      name: el.getAttribute('name') || '',
+      value: (el.value != null ? String(el.value) : '') || (el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text || '' : ''),
+      href: el.getAttribute('href') || '',
+      selector: cssPath(el),
+      visible: visible(el),
+      rect: (() => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
+      })(),
+    };
+  }
+
+  function findCandidate(selector, text) {
+    let el = null;
+    if (selector) {
+      try { el = document.querySelector(selector); } catch {}
+    }
+    if (!el && text) {
+      const q = norm(text);
+      const candidates = Array.from(document.querySelectorAll(INTERACTIVE));
+      const scored = [];
+      for (const c of candidates) {
+        if (!visible(c)) continue;
+        let label = norm((c.innerText || c.textContent || '').slice(0, 200));
+        if (!label) {
+          for (const attr of TEXT_ATTRS) {
+            const v = c.getAttribute(attr);
+            if (v) { label = norm(v); break; }
+          }
+        }
+        if (!label) continue;
+        let score = -1;
+        if (label === q) score = 100;
+        else if (label.startsWith(q)) score = 60;
+        else if (label.includes(q)) score = 40;
+        if (score > 0) scored.push({ el: c, score });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      el = scored.length ? scored[0].el : null;
+    }
+    return el;
+  }
+
+  function dispatch(el, type, detail) {
+    const evt = new Event(type, { bubbles: true, cancelable: true });
+    if (detail) Object.assign(evt, detail);
+    el.dispatchEvent(evt);
+  }
+
+  function setNativeValue(input, value) {
+    const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+      : input instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+      : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+  }
+
+  // Incremental DOM snapshot helper
+  function buildSelectorIndex(elements) {
+    const index = new Map();
+    for (const el of elements) {
+      if (el.id) {
+        index.set('#' + CSS.escape(el.id), el);
+      }
+      if (el.classList?.length) {
+        for (const cls of el.classList) {
+          const key = '.' + CSS.escape(cls);
+          if (!index.has(key)) index.set(key, el);
+        }
+      }
+    }
+    return index;
+  }
+
+  function getIncrementalSnapshot(forceFull = false) {
+    const now = Date.now();
+    const cache = snapshotCache;
+
+    // If we have a recent snapshot (< 2s) and not forced, return diff
+    if (!forceFull && cache.lastSnapshot && (now - cache.lastSnapshotTime < 2000)) {
+      const currentElements = Array.from(document.querySelectorAll(INTERACTIVE));
+      const currentSelectors = new Set();
+      const changes = { added: [], updated: [], removed: [] };
+
+      // Build current selector index
+      const newIndex = buildSelectorIndex(currentElements);
+
+      // Find added/updated
+      for (const el of currentElements) {
+        if (!visible(el)) continue;
+        const selector = cssPath(el);
+        currentSelectors.add(selector);
+
+        const cached = cache.elements.get(selector);
+        const described = describe(el);
+        if (!cached) {
+          changes.added.push(described);
+        } else {
+          // Quick comparison: rect + text + attributes
+          const rectChanged = JSON.stringify(cached.rect) !== JSON.stringify(described.rect);
+          const textChanged = cached.text !== described.text;
+          const attrChanged = cached.aria !== described.aria || cached.title !== described.title ||
+                              cached.placeholder !== described.placeholder || cached.value !== described.value;
+          if (rectChanged || textChanged || attrChanged) {
+            changes.updated.push(described);
+          }
+        }
+        cache.elements.set(selector, described);
+      }
+
+      // Find removed
+      for (const [selector, cached] of cache.elements) {
+        if (!currentSelectors.has(selector)) {
+          changes.removed.push({ selector, tag: cached.tag });
+          cache.elements.delete(selector);
+        }
+      }
+
+      // Update selector index
+      cache.selectorIndex = newIndex;
+
+      return { incremental: true, changes, timestamp: now };
+    }
+
+    // Full snapshot
+    const snapshot = [];
+    const seen = new Set();
+    const all = Array.from(document.querySelectorAll(INTERACTIVE));
+    cache.elements.clear();
+
+    for (const el of all) {
+      if (!visible(el) || snapshot.length >= 300) continue;
+      const d = describe(el);
+      if (seen.has(d.selector)) continue;
+      seen.add(d.selector);
+      snapshot.push(d);
+      cache.elements.set(d.selector, d);
+    }
+
+    cache.selectorIndex = buildSelectorIndex(all);
+    cache.lastSnapshot = { snapshot, timestamp: now };
+    cache.lastSnapshotTime = now;
+
+    return { incremental: false, snapshot, timestamp: now };
+  }
+
+  // ── Fast operations (no script injection needed) ──────────────────────────────
+  const fastOps = {
+    getState(params) {
+      const forceFull = params?.forceFull === true;
+      const snapResult = getIncrementalSnapshot(forceFull);
+
+      const forms = Array.from(document.forms).map(f => ({
+        action: f.action || '', method: f.method || '',
+        fields: Array.from(f.elements).filter(e => ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(e.tagName)).slice(0, 40).map(e => describe(e)),
+      }));
+      const links = Array.from(document.querySelectorAll('a[href]')).map(a => ({
+        text: (a.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 150), href: a.href,
+      })).slice(0, 300);
+
+      if (snapResult.incremental) {
+        return {
+          url: location.href, title: document.title, readyState: document.readyState,
+          text: (document.body?.innerText || '').slice(0, 60000),
+          incremental: true,
+          changes: snapResult.changes,
+          forms, links,
+          performance: {
+            loadTime: performance.timing?.loadEventEnd - performance.timing?.navigationStart || 0,
+            domReady: performance.timing?.domContentLoadedEventEnd - performance.timing?.navigationStart || 0,
+            resources: performance.getEntriesByType?.('resource')?.length || 0,
+          },
+        };
+      }
+
+      return {
+        url: location.href, title: document.title, readyState: document.readyState,
+        text: (document.body?.innerText || '').slice(0, 60000), snapshot: snapResult.snapshot, forms, links,
+        performance: {
+          loadTime: performance.timing?.loadEventEnd - performance.timing?.navigationStart || 0,
+          domReady: performance.timing?.domContentLoadedEventEnd - performance.timing?.navigationStart || 0,
+          resources: performance.getEntriesByType?.('resource')?.length || 0,
+        },
+      };
+    },
+
+    getHtml() {
+      return { html: document.documentElement.outerHTML };
+    },
+
+    getLinks() {
+      return {
+        links: Array.from(document.querySelectorAll('a[href]')).map(a => ({
+          text: (a.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 150),
+          href: a.href,
+          title: a.title || '',
+          target: a.target || '',
+        })).slice(0, 300),
+      };
+    },
+
+    getFormFields() {
+      return {
+        fields: Array.from(document.forms).flatMap(f =>
+          Array.from(f.elements).filter(e => ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName)).map(e => describe(e))
+        ),
+      };
+    },
+
+    getElement(params) {
+      // Fast path: try selector index first
+      if (params.selector) {
+        const cached = snapshotCache.selectorIndex.get(params.selector);
+        if (cached && visible(cached)) return describe(cached);
+        // Try direct querySelector as fallback
+        try {
+          const el = document.querySelector(params.selector);
+          if (el && visible(el)) return describe(el);
+        } catch {}
+      }
+      // Fallback to text-based search
+      const el = findCandidate(params.selector, params.text);
+      return el ? describe(el) : null;
+    },
+
+    getElements(params) {
+      if (params.selector) {
+        // Use selector index if it's a simple class or ID selector
+        const index = snapshotCache.selectorIndex;
+        if (params.selector.startsWith('#') || params.selector.startsWith('.')) {
+          const el = index.get(params.selector);
+          return { elements: el ? [describe(el)] : [] };
+        }
+      }
+      const els = params.selector ? Array.from(document.querySelectorAll(params.selector)).slice(0, 100) : [];
+      return { elements: els.map(describe) };
+    },
+
+    click(params) {
+      const el = findCandidate(params.selector, params.text);
+      if (!el) return { error: 'No clickable element found' };
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      const target = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) || el;
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));
+      target.click();
+      if (el.tagName === 'SUMMARY' && el.parentElement) {
+        const details = el.parentElement.closest('details');
+        if (details) details.open = !details.open;
+      }
+      return { clicked: true, selector: cssPath(target), text: (target.innerText || '').slice(0, 120) };
+    },
+
+    type(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'No element found for selector "' + params.selector + '"' };
+      el.focus();
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable) {
+        if (el.isContentEditable) { el.textContent = params.text; dispatch(el, 'input'); }
+        else { setNativeValue(el, params.text); dispatch(el, 'input'); dispatch(el, 'change'); }
+      }
+      return { typed: params.text.length, selector: cssPath(el) };
+    },
+
+    fill(params) {
+      const results = [];
+      for (const [sel, value] of Object.entries(params.fields || {})) {
+        const el = findCandidate(sel);
+        if (!el) { results.push({ selector: sel, ok: false, error: 'not found' }); continue; }
+        el.focus();
+        if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable) {
+          if (el.isContentEditable) { el.textContent = String(value); dispatch(el, 'input'); }
+          else { setNativeValue(el, String(value)); dispatch(el, 'input'); dispatch(el, 'change'); }
+        } else if (el instanceof HTMLSelectElement) {
+          const opt = Array.from(el.options).find(o => o.value === String(value) || o.text === String(value));
+          if (opt) { el.value = opt.value; dispatch(el, 'change'); }
+        }
+        results.push({ selector: sel, ok: true });
+      }
+      return { filled: results.filter(r => r.ok).length, results };
+    },
+
+    select(params) {
+      const el = findCandidate(params.selector);
+      if (!el || !(el instanceof HTMLSelectElement)) return { error: 'No <select> found' };
+      const value = String(params.value);
+      const opt = Array.from(el.options).find(o => o.value === value || norm(o.text) === norm(value));
+      if (!opt) return { error: 'Option "' + value + '" not found' };
+      el.value = opt.value;
+      dispatch(el, 'change');
+      return { selected: opt.value, text: opt.text };
+    },
+
+    scroll(params) {
+      const dir = params.direction || 'down';
+      const delta = Number(params.delta || params.pixels || 0);
+      let x = 0, y = 0;
+      if (dir === 'down') y = delta || window.innerHeight * 0.8;
+      else if (dir === 'up') y = -(delta || window.innerHeight * 0.8);
+      else if (dir === 'left') x = -(delta || window.innerWidth * 0.8);
+      else if (dir === 'right') x = delta || window.innerWidth * 0.8;
+      else if (dir === 'top') y = -document.body.scrollHeight;
+      else if (dir === 'bottom') y = document.body.scrollHeight;
+      window.scrollBy({ top: y, left: x, behavior: 'instant' });
+      return { direction: dir, x: window.scrollX, y: window.scrollY };
+    },
+
+    pressKey(params) {
+      const key = params.key || 'Enter';
+      const el = document.activeElement || document.body;
+      const codes = { Enter: 13, Tab: 9, Escape: 27, ' ': 32, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Backspace: 8, Delete: 46, Home: 36, End: 35, PageDown: 34, PageUp: 33 };
+      const keyCode = codes[key] ?? 0;
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, keyCode, bubbles: true, cancelable: true }));
+      return { key };
+    },
+
+    highlight(params) {
+      const el = findCandidate(params.selector, params.text);
+      if (!el) return { error: 'highlight: element not found' };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const oldOutline = el.style.outline;
+      const oldBg = el.style.backgroundColor;
+      el.style.outline = '3px solid #22c55e';
+      el.style.backgroundColor = 'rgba(34,197,94,0.25)';
+      setTimeout(() => { el.style.outline = oldOutline; el.style.backgroundColor = oldBg; }, 2200);
+      return { highlighted: cssPath(el) };
+    },
+
+    hover(params) {
+      const el = findCandidate(params.selector, params.text);
+      if (!el) return { error: 'hover: element not found' };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));
+      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));
+      return { hovered: cssPath(el) };
+    },
+
+    focus(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'focus: element not found' };
+      el.focus();
+      return { focused: cssPath(el) };
+    },
+
+    clear(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'clear: element not found' };
+      el.focus();
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        setNativeValue(el, '');
+        dispatch(el, 'input');
+        dispatch(el, 'change');
+      }
+      return { cleared: cssPath(el) };
+    },
+
+    setValue(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'setValue: element not found' };
+      el.focus();
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable) {
+        if (el.isContentEditable) { el.textContent = params.value; dispatch(el, 'input'); }
+        else { setNativeValue(el, params.value); dispatch(el, 'input'); dispatch(el, 'change'); }
+      }
+      return { setValue: true, selector: cssPath(el) };
+    },
+
+    getValue(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'getValue: element not found' };
+      return { value: el.value || el.textContent || '' };
+    },
+
+    drag(params) {
+      const from = findCandidate(params.from);
+      const to = findCandidate(params.to);
+      if (!from || !to) return { error: 'drag: source or target not found' };
+      const fromRect = from.getBoundingClientRect();
+      const toRect = to.getBoundingClientRect();
+      const fromX = fromRect.x + fromRect.width / 2;
+      const fromY = fromRect.y + fromRect.height / 2;
+      const toX = toRect.x + toRect.width / 2;
+      const toY = toRect.y + toRect.height / 2;
+      from.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: fromX, clientY: fromY }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: toX, clientY: toY }));
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: toX, clientY: toY }));
+      return { dragged: true };
+    },
+
+    rightClick(params) {
+      const el = findCandidate(params.selector, params.text);
+      if (!el) return { error: 'rightClick: element not found' };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true,
+        clientX: r.x + r.width / 2, clientY: r.y + r.height / 2,
+        button: 2,
+      }));
+      return { rightClicked: cssPath(el) };
+    },
+
+    getScreenshot() {
+      // Can't capture from content script, but can signal background
+      return { needsBackground: true, op: 'screenshot' };
+    },
+
+    batch(params) {
+      const ops = params.ops || [];
+      const results = [];
+      for (const item of ops) {
+        if (item && typeof item.op === 'string' && fastOps[item.op]) {
+          try { results.push({ op: item.op, ...fastOps[item.op](item.params || {}) }); }
+          catch (e) { results.push({ op: item.op, error: String(e?.message || e) }); }
+        }
+      }
+      return { results };
+    },
+  };
+
+  // ── Message listener ─────────────────────────────────────────────────────────
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type === 'bridge-content-op') {
+      const { op, params } = msg;
+      if (fastOps[op]) {
+        try {
+          const result = fastOps[op](params || {});
+          sendResponse({ ok: !result.error, data: result });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e?.message || e) });
+        }
+      } else {
+        sendResponse({ ok: false, error: 'Unknown content op: ' + op });
+      }
+      return true;
+    }
+    if (msg?.type === 'bridge-ping') {
+      sendResponse({ ok: true, data: { pong: Date.now(), contentScript: true } });
+      return true;
+    }
+    return false;
+  });
+
+  // Signal readiness
+  chrome.runtime.sendMessage({ type: 'content-script-ready', url: location.href }).catch(() => {});
+})();

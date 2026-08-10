@@ -12,13 +12,23 @@ interface Group {
 export function ProjectCards({
   onOpenWorkspace,
   onOpenDeploy,
+  expanded: controlledExpanded,
+  onExpandedChange,
 }: {
   onOpenWorkspace: () => void;
   onOpenDeploy: () => void;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   const [projectName, setProjectName] = useState('Project');
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = controlledExpanded ?? localExpanded;
+  const setExpanded = (value: boolean) => {
+    if (controlledExpanded === undefined) setLocalExpanded(value);
+    onExpandedChange?.(value);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -62,15 +72,48 @@ export function ProjectCards({
   }, []);
 
   return (
-    <section className="mt-5 w-full rounded-xl border border-white/[0.07] bg-[#0c1019] p-6 shadow-[0_14px_36px_rgba(0,0,0,.16)]">
-      <div className="flex items-center justify-between pb-2 border-b border-white/[0.055]">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[11px] font-semibold text-zinc-200 truncate">{projectName}</span>
-          <span className="rounded border border-white/[0.06] bg-white/[0.03] px-1.5 py-0.5 text-[8px] text-zinc-600">
-            workspace
+    <section
+      className={`mt-5 w-full rounded-xl border bg-[#0c1019] p-4 transition-[border-color,box-shadow] duration-300 ${expanded ? 'border-indigo-500/20 shadow-[0_18px_44px_rgba(0,0,0,.22)]' : 'border-white/[0.07] shadow-[0_10px_28px_rgba(0,0,0,.12)]'}`}
+    >
+      <div className={`flex items-center justify-between ${expanded ? 'pb-3 border-b border-white/[0.055]' : ''}`}>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="flex-1 flex items-center gap-3 min-w-0 text-left group"
+        >
+          <span
+            className={`w-8 h-8 rounded-lg border flex items-center justify-center ${expanded ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300' : 'border-white/[0.06] bg-white/[0.025] text-zinc-500'}`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.75 3.75h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Zm-10 10h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Z"
+              />
+            </svg>
           </span>
-        </div>
-        <button onClick={onOpenWorkspace} className="icon-button w-6 h-6" aria-label="Open full workspace">
+          <span className="min-w-0">
+            <span className="text-[11px] font-semibold text-zinc-200 truncate">{projectName}</span>
+            <span className="block text-[8px] text-zinc-600 mt-0.5">
+              {expanded ? 'Workspace files and deployment' : `${groups.length || 0} sections · Click to expand`}
+            </span>
+          </span>
+          <svg
+            className={`ml-auto w-3.5 h-3.5 text-zinc-600 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m6.75 9 5.25 5.25L17.25 9" />
+          </svg>
+        </button>
+        <button
+          onClick={onOpenWorkspace}
+          className="icon-button w-8 h-8 ml-2"
+          aria-label="Open full workspace"
+          title="Open full workspace"
+        >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
@@ -80,63 +123,68 @@ export function ProjectCards({
           </svg>
         </button>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-6 pt-4 min-h-[104px]">
-        {loading ? (
-          <div className="col-span-4 flex items-center text-[10px] text-zinc-600">Loading workspace…</div>
-        ) : groups.length === 0 ? (
-          <div className="col-span-4 flex items-center text-[10px] text-zinc-600">
-            Choose a project folder in Settings to populate the workspace.
-          </div>
-        ) : (
-          groups.map((group) => (
-            <button
-              key={group.title}
-              onClick={onOpenWorkspace}
-              className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 text-left hover:border-indigo-500/25 hover:bg-white/[0.03] transition-colors min-w-0"
-            >
-              <span className="block text-[10px] font-medium text-zinc-300 truncate mb-1.5">{group.title}</span>
-              {group.items.length === 0 ? (
-                <span className="text-[8px] text-zinc-700">Empty</span>
-              ) : (
-                group.items.map((item) => (
-                  <span key={item.name} className="flex items-center gap-1.5 py-0.5 text-[8px] text-zinc-600 truncate">
-                    <svg
-                      className={item.isDirectory ? 'w-2.5 h-2.5 text-blue-400' : 'w-2.5 h-2.5 text-zinc-500'}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      viewBox="0 0 24 24"
+      {expanded && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-5 pt-4 min-h-[104px] animate-fade-in">
+          {loading ? (
+            <div className="col-span-4 flex items-center text-[10px] text-zinc-600">Loading workspace…</div>
+          ) : groups.length === 0 ? (
+            <div className="col-span-4 flex items-center text-[10px] text-zinc-600">
+              Choose a project folder in Settings to populate the workspace.
+            </div>
+          ) : (
+            groups.map((group) => (
+              <button
+                key={group.title}
+                onClick={onOpenWorkspace}
+                className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 text-left hover:border-indigo-500/25 hover:bg-white/[0.03] transition-colors min-w-0"
+              >
+                <span className="block text-[10px] font-medium text-zinc-300 truncate mb-1.5">{group.title}</span>
+                {group.items.length === 0 ? (
+                  <span className="text-[8px] text-zinc-700">Empty</span>
+                ) : (
+                  group.items.map((item) => (
+                    <span
+                      key={item.name}
+                      className="flex items-center gap-1.5 py-0.5 text-[8px] text-zinc-600 truncate"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d={
-                          item.isDirectory
-                            ? 'M3.75 6.75h6l1.5 2.25h9v9.75a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5v-12Z'
-                            : 'M6 3.75h8.25L18 7.5v12.75H6V3.75Z'
-                        }
-                      />
-                    </svg>
-                    <span className="truncate">{item.name}</span>
-                  </span>
-                ))
-              )}
+                      <svg
+                        className={item.isDirectory ? 'w-2.5 h-2.5 text-blue-400' : 'w-2.5 h-2.5 text-zinc-500'}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d={
+                            item.isDirectory
+                              ? 'M3.75 6.75h6l1.5 2.25h9v9.75a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5v-12Z'
+                              : 'M6 3.75h8.25L18 7.5v12.75H6V3.75Z'
+                          }
+                        />
+                      </svg>
+                      <span className="truncate">{item.name}</span>
+                    </span>
+                  ))
+                )}
+              </button>
+            ))
+          )}
+          <div className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 flex flex-col justify-between">
+            <div>
+              <span className="block text-[10px] font-medium text-zinc-300">Deploy</span>
+              <span className="block mt-1 text-[8px] text-zinc-600">Build and release this workspace.</span>
+            </div>
+            <button
+              onClick={onOpenDeploy}
+              className="mt-2 h-6 rounded-md bg-gradient-to-r from-indigo-600 to-violet-600 text-[8px] font-medium text-white hover:from-indigo-500 hover:to-violet-500"
+            >
+              Open deploy
             </button>
-          ))
-        )}
-        <div className="rounded-lg border border-white/[0.05] bg-white/[0.018] p-2.5 flex flex-col justify-between">
-          <div>
-            <span className="block text-[10px] font-medium text-zinc-300">Deploy</span>
-            <span className="block mt-1 text-[8px] text-zinc-600">Build and release this workspace.</span>
           </div>
-          <button
-            onClick={onOpenDeploy}
-            className="mt-2 h-6 rounded-md bg-gradient-to-r from-indigo-600 to-violet-600 text-[8px] font-medium text-white hover:from-indigo-500 hover:to-violet-500"
-          >
-            Open deploy
-          </button>
         </div>
-      </div>
+      )}
     </section>
   );
 }

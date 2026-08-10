@@ -3,6 +3,16 @@
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 import { getOllamaBrain } from '../ollama/brain.js';
+import { getEngine } from '../engine/intelligence.js';
+
+function detectTaskType(input: string): string {
+  const lower = input.toLowerCase();
+  if (/\b(code|debug|function|class|api|error)\b/.test(lower)) return 'coding';
+  if (/\b(build|create|make|generate|website|app)\b/.test(lower)) return 'building';
+  if (/\b(test|verify|check|validate)\b/.test(lower)) return 'testing';
+  if (/\b(explain|what|how|why|question)\b/.test(lower)) return 'learning';
+  return 'general';
+}
 
 export function registerOllamaIpc(): void {
   const brain = getOllamaBrain();
@@ -12,7 +22,21 @@ export function registerOllamaIpc(): void {
   });
 
   ipcMain.handle(IPC.OLLAMA_ASK, async (_e, { prompt, systemPrompt, model }: { prompt: string; systemPrompt?: string; model?: string }) => {
-    return brain.ask(prompt, systemPrompt, model);
+    const started = Date.now();
+    const output = await brain.ask(prompt, systemPrompt, model);
+    const engine = getEngine();
+    engine.updateOllamaStatus(Boolean(output));
+    engine.tryBootstrap();
+    if (output) {
+      engine.recordInteraction({
+        taskType: detectTaskType(prompt), input: prompt.slice(0, 500),
+        modelUsed: model || (await brain.getStats()).model, provider: 'ollama',
+        output: output.slice(0, 1000), success: output.length > 10,
+        duration: Date.now() - started,
+        tokens: { input: prompt.length, output: output.length },
+      });
+    }
+    return output;
   });
 
   ipcMain.handle(IPC.OLLAMA_ANALYZE_IMAGE, async (_e, { imageBase64, question }: { imageBase64: string; question: string }) => {
@@ -25,7 +49,8 @@ export function registerOllamaIpc(): void {
 
   ipcMain.handle(IPC.OLLAMA_STATUS, async () => {
     const available = await brain.isAvailable();
-    const stats = brain.getStats();
+    getEngine().updateOllamaStatus(available);
+    const stats = await brain.getStats();
     return { available, ...stats };
   });
 

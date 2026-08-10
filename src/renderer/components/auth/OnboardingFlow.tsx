@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/auth';
 
 export function OnboardingFlow() {
-  const [step, setStep] = useState<'loading' | 'welcome' | 'setup' | 'initializing' | 'complete'>('loading');
+  const [step, setStep] = useState<'loading' | 'welcome' | 'setup' | 'initializing' | 'complete'>('welcome');
   const [progress, setProgress] = useState(0);
   const [setupProgress, setSetupProgress] = useState(0);
   const { user, completeOnboarding, updateProfile } = useAuthStore();
@@ -73,7 +73,7 @@ export function OnboardingFlow() {
             filter="url(#loadGlow)"
           />
         </svg>
-        <div className="text-gray-500 text-sm mb-4">Initializing InfiniteAI OS...</div>
+        <div className="text-gray-500 text-sm mb-4">Initializing Infinite OS...</div>
         <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-300"
@@ -121,7 +121,7 @@ export function OnboardingFlow() {
         </svg>
 
           <h1 className="text-4xl font-bold text-white mb-3">
-            Welcome to <span className="gradient-text">Infinite AI</span>
+            Welcome to <span className="gradient-text">Infinite OS</span>
           </h1>
           <p className="text-gray-400 text-lg mb-2">Your AI Operating System</p>
           <p className="text-gray-500 text-sm mb-8">

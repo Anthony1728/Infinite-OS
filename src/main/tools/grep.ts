@@ -1,5 +1,5 @@
 import { rgPath } from '@vscode/ripgrep';
-import { spawn } from 'node:child_process';
+import { spawnWithTimeout } from './spawn-timeout.js';
 import type { Tool, ToolResult } from './base.js';
 
 export const grep: Tool = {
@@ -29,25 +29,20 @@ export const grep: Tool = {
     if (globFilter) rgArgs.push('--glob', globFilter);
     rgArgs.push('--', pattern, path);
 
-    return new Promise<ToolResult>((resolve) => {
-      try {
-        const child = spawn(rgPath, rgArgs);
-        let out = '';
-        let err = '';
-        child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-        child.stderr.on('data', (d: Buffer) => (err += d.toString()));
-        child.on('error', (e) => resolve({ content: `Grep error: ${e.message}`, is_error: true }));
-        child.on('close', (code) => {
-          if (code === 1) return resolve({ content: '(no matches)' });
-          if (code !== 0 && code !== null) {
-            return resolve({ content: err || out || `ripgrep exited with code ${code}`, is_error: true });
-          }
-          resolve({ content: out.trim() || '(no matches)' });
-        });
-      } catch (e) {
-        resolve({ content: `Grep error: ${(e as Error).message}`, is_error: true });
-      }
+    const result = await spawnWithTimeout({
+      command: rgPath,
+      args: rgArgs,
+      timeoutMs: 60_000,
+      signal: ctx.abortSignal,
     });
+    if (result.timedOut) {
+      return { content: 'Grep timed out after 60 seconds; the search may be too broad or the directory too large.', is_error: true };
+    }
+    if (result.exitCode === 1) return { content: '(no matches)' };
+    if (result.exitCode !== 0 && result.exitCode !== null) {
+      return { content: result.stderr || result.stdout || `ripgrep exited with code ${result.exitCode}`, is_error: true };
+    }
+    return { content: result.stdout.trim() || '(no matches)' };
   },
 };
 

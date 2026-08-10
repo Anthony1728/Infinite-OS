@@ -236,7 +236,7 @@ export class CloudSync {
 
       backup.status = 'completed';
       backup.size = totalSize;
-    } catch (e) {
+    } catch {
       backup.status = 'failed';
     }
 

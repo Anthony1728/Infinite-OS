@@ -250,7 +250,12 @@ export class MultiAgentSystem {
   }
 
   // Orchestration
-  async executeTeamTask(teamId: string, taskType: string, input: Record<string, unknown>): Promise<AgentTask[]> {
+  async executeTeamTask(teamId: string, taskType: string, input: Record<string, unknown>, context?: {
+    sessionId?: string;
+    cwd?: string;
+    model?: string;
+    provider?: string;
+  }): Promise<{ tasks: AgentTask[]; results?: Map<string, { result: string; error?: string }> }> {
     const team = this.teams.get(teamId);
     if (!team) throw new Error('Team not found');
 
@@ -270,7 +275,44 @@ export class MultiAgentSystem {
 
     team.status = 'active';
     this.saveData();
-    return tasks;
+
+    // If context provided, actually execute the agents in parallel
+    if (context?.sessionId && context?.cwd) {
+      const { spawnBatch } = await import('../agent/runtime.js');
+      const agentTasks = team.agents.map((agentId) => ({
+        agentId: agentId as any,
+        task: `${taskType}: ${JSON.stringify(input)}`,
+      }));
+
+      const results = await spawnBatch(agentTasks, {
+        sessionId: context.sessionId,
+        cwd: context.cwd,
+        model: context.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+        provider: context.provider ?? 'openrouter',
+        parentHistory: [],
+        sink: () => {},
+      }, {
+        maxConcurrent: Math.min(team.agents.length, 10),
+        executionMode: 'parallel',
+      });
+
+      // Update task statuses
+      const finalMap = results[0];
+      for (const task of tasks) {
+        const result = finalMap.get(task.assignedTo as any);
+        if (result?.error) {
+          this.failTask(task.id, result.error);
+        } else {
+          this.completeTask(task.id, result?.result ?? 'Completed');
+        }
+      }
+
+      team.status = 'idle';
+      this.saveData();
+      return { tasks, results: finalMap };
+    }
+
+    return { tasks };
   }
 
   getStats(): {

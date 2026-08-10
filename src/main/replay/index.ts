@@ -224,7 +224,7 @@ export class TaskReplayEngine extends EventEmitter {
 
       task.status = 'completed';
       this.emit('computerTaskCompleted', task);
-    } catch (err: unknown) {
+    } catch {
       task.status = 'failed';
       this.emit('computerTaskFailed', task);
     }
@@ -244,6 +244,9 @@ export class TaskReplayEngine extends EventEmitter {
     this.emit('executionStarted', execution);
 
     for (let i = 0; i < execution.steps.length; i++) {
+      while (this.isExecutionPaused(execution) && !controller.signal.aborted) {
+        await new Promise(r => setTimeout(r, 50));
+      }
       if (controller.signal.aborted) {
         execution.status = 'cancelled';
         break;
@@ -353,6 +356,10 @@ export class TaskReplayEngine extends EventEmitter {
         await delay(300);
         break;
     }
+  }
+
+  private isExecutionPaused(execution: ReplayExecution): boolean {
+    return execution.status === 'paused';
   }
 
   private parseNaturalLanguage(description: string): Array<{ type: string; params: Record<string, unknown>; description: string }> {
@@ -477,7 +484,7 @@ export class TaskReplayEngine extends EventEmitter {
     const execution = this.executions.get(executionId);
     if (!execution || execution.status !== 'paused') return false;
     execution.status = 'running';
-    this.runExecution(executionId).catch(() => {});
+    this.emit('executionResumed', execution);
     return true;
   }
 

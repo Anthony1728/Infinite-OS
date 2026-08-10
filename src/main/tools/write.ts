@@ -19,8 +19,9 @@ export const write: Tool = {
     const { file_path, content } = args as { file_path: string; content: string };
     try {
       const abs = resolve(ctx.cwd, file_path);
+      const signal = ctx.abortSignal;
       await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content, 'utf8');
+      await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });
       return { content: `Wrote ${content.length} bytes to ${file_path}` };
     } catch (e) {
       return { content: `Error writing ${file_path}: ${(e as Error).message}`, is_error: true };

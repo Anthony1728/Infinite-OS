@@ -23,6 +23,7 @@ export const websearch: Tool = {
           'Accept': 'text/html,application/xhtml+xml',
           'Accept-Language': 'en-US,en;q=0.9',
         },
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) return { content: `Search failed: HTTP ${res.status}`, is_error: true };
       const html = await res.text();

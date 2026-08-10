@@ -12,7 +12,8 @@ import { randomUUID } from 'node:crypto';
 import type { Message, ContentBlock } from '../../shared/types.js';
 import { getProvider } from '../providers/registry.js';
 import { getApiKey } from '../settings/secrets.js';
-import { toolRegistry } from '../tools/base.js';
+import { toolRegistry, unknownToolMessage } from '../tools/base.js';
+import { executeToolCall } from '../agent/tool-execution.js';
 
 // Types from core-types (inline to avoid import issues)
 export interface ChatMessage {
@@ -104,7 +105,7 @@ export class CoreAgent {
     this.options = {
       defaultProvider: options.defaultProvider ?? 'openrouter',
       defaultModel: options.defaultModel ?? 'meta-llama/llama-3.3-70b-instruct:free',
-      maxTurns: options.maxTurns ?? 25,
+      maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
       onEvent: options.onEvent ?? (() => {}),
     };
   }
@@ -288,7 +289,7 @@ export class CoreAgent {
 
     for (let turn = 0; turn < (maxTurns ?? this.options.maxTurns); turn++) {
       // Build system prompt
-      const system = systemPrompt ?? `You are Infinite AI, a helpful AI assistant. You have access to tools to help the user. Always be helpful and concise.`;
+      const system = systemPrompt ?? `You are Infinite AI, the brain inside Infinite OS. Infinite OS is the full AI-powered Windows workspace application. You have access to tools to help the user. Always be helpful and concise.`;
 
       // Call the LLM
       const stream = provider.streamChat(
@@ -303,7 +304,6 @@ export class CoreAgent {
       );
 
       const assistantContent: ContentBlock[] = [];
-      let stopReason = 'end_turn';
       const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
 
       // Process stream
@@ -333,15 +333,14 @@ export class CoreAgent {
           if (tc) {
             tc.json = JSON.stringify(chunk.input);
           }
-        } else if (chunk.type === 'message_end') {
-          stopReason = chunk.stop_reason;
         } else if (chunk.type === 'error') {
           throw new Error(chunk.error ?? 'Stream error');
         }
       }
 
       // Process tool calls if any
-      if (stopReason === 'tool_use' && pendingToolCalls.size > 0) {
+      if (pendingToolCalls.size > 0) {
+        const turnToolCalls: ToolCall[] = [];
         // Add assistant message with tool calls
         for (const [id, tc] of pendingToolCalls) {
           let input: Record<string, unknown> = {};
@@ -356,7 +355,9 @@ export class CoreAgent {
             name: tc.name,
             input,
           });
-          task.toolCalls.push({ id, name: tc.name, input });
+          const toolCall = { id, name: tc.name, input };
+          task.toolCalls.push(toolCall);
+          turnToolCalls.push(toolCall);
         }
 
         const assistantMsg: Message = {
@@ -376,8 +377,14 @@ export class CoreAgent {
         });
 
         // Execute tool calls
-        for (const toolCall of task.toolCalls) {
+        for (const toolCall of turnToolCalls) {
           const result = await this.executeToolCall(toolCall, task);
+          messages.push({
+            id: randomUUID(),
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: toolCall.id, content: result }],
+            timestamp: Date.now(),
+          });
           this.emit({
             type: 'tool_result',
             taskId: task.id,
@@ -421,7 +428,7 @@ export class CoreAgent {
     const messages = await this.buildMessages(task);
 
     for (let turn = 0; turn < (maxTurns ?? this.options.maxTurns); turn++) {
-      const system = systemPrompt ?? `You are Infinite AI, a helpful AI assistant. You have access to tools to help the user. Always be helpful and concise.`;
+      const system = systemPrompt ?? `You are Infinite AI, the brain inside Infinite OS. Infinite OS is the full AI-powered Windows workspace application. You have access to tools to help the user. Always be helpful and concise.`;
 
       const stream = provider.streamChat(
         {
@@ -585,20 +592,25 @@ export class CoreAgent {
     const builtInTool = toolRegistry.get(name);
     if (builtInTool) {
       try {
-        const result = await builtInTool.execute(input, {
+        const result = await executeToolCall({
+          tool: builtInTool,
+          toolUse: { type: 'tool_use', id: toolCall.id, name: builtInTool.name, input },
           sessionId: task.config.provider,
           cwd: process.cwd(),
-          abortSignal: AbortSignal.timeout(30000),
+          parentSignal: new AbortController().signal,
           onUpdate: () => {},
         });
-        return typeof result === 'string' ? result : JSON.stringify(result);
+        return typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
       } catch (error) {
-        const errorMsg = `Tool ${name} failed: ${error instanceof Error ? error.message : String(error)}`;
+        const errorMsg = `Tool ${builtInTool.name} failed: ${error instanceof Error ? error.message : String(error)}`;
         return errorMsg;
       }
     }
 
-    return `Unknown tool: ${name}`;
+    if (!name?.trim()) {
+      return 'The model emitted a tool call with an empty tool name. Always include a non-empty tool name in every tool_use block.';
+    }
+    return unknownToolMessage(name);
   }
 }
 

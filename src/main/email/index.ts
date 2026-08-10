@@ -6,6 +6,8 @@ import nodemailer from 'nodemailer';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { safeStorage } from 'electron';
+import { getCredentials } from '../security/encryption.js';
 
 export interface EmailConfig {
   imapHost: string;
@@ -38,13 +40,44 @@ let lastConfigUser = '';
 const CONFIG_DIR = join(homedir(), '.infinite-ai');
 const CONFIG_FILE = join(CONFIG_DIR, 'email.json');
 
-async function getConfig(): Promise<EmailConfig | null> {
+type StoredEmailConfig = Omit<EmailConfig, 'password'> & {
+  passwordEncrypted?: string;
+  credentialId?: string;
+  password?: string;
+};
+
+async function readStoredConfig(): Promise<StoredEmailConfig | null> {
   try {
-    const raw = await readFile(CONFIG_FILE, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(await readFile(CONFIG_FILE, 'utf8')) as StoredEmailConfig;
   } catch {
     return null;
   }
+}
+
+async function getConfig(): Promise<EmailConfig | null> {
+  const stored = await readStoredConfig();
+  if (!stored) return null;
+  let password = '';
+  if (stored.passwordEncrypted && safeStorage.isEncryptionAvailable()) {
+    password = safeStorage.decryptString(Buffer.from(stored.passwordEncrypted, 'base64'));
+  } else if (stored.credentialId) {
+    password = getCredentials().getCredential(stored.credentialId) ?? '';
+  } else if (stored.password) {
+    // One-time migration from the legacy plaintext format.
+    password = stored.password;
+    await saveEmailConfig({ ...stored, password } as EmailConfig);
+  }
+  if (!password) return null;
+  return {
+    imapHost: stored.imapHost,
+    imapPort: stored.imapPort,
+    imapSecure: stored.imapSecure,
+    smtpHost: stored.smtpHost,
+    smtpPort: stored.smtpPort,
+    smtpSecure: stored.smtpSecure,
+    user: stored.user,
+    password,
+  };
 }
 
 async function getClient(config: EmailConfig): Promise<ImapFlow> {
@@ -54,9 +87,29 @@ async function getClient(config: EmailConfig): Promise<ImapFlow> {
     secure: config.imapSecure,
     auth: { user: config.user, pass: config.password },
     logger: false,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
-  await client.connect();
-  return client;
+  // ImapFlow can emit a late socket error after connect/logout. Always keep an
+  // error listener attached so a mail outage is returned to the caller rather
+  // than becoming an uncaught Electron main-process exception.
+  client.on('error', (error: Error) => {
+    console.warn(`[email] IMAP client error (${config.imapHost}): ${error.message}`);
+  });
+  try {
+    await client.connect();
+    return client;
+  } catch (error) {
+    await client.logout().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function closeClient(client: ImapFlow): Promise<void> {
+  await client.logout().catch((error: unknown) => {
+    console.warn(`[email] IMAP logout failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 function getTransporter(config: EmailConfig): Transporter {
@@ -91,7 +144,14 @@ function formatAddr(addr: EmailAddress[] | EmailAddress | undefined): string {
 export async function testConnection(config: EmailConfig): Promise<{ ok: boolean; error?: string }> {
   try {
     const client = await getClient(config);
-    await client.logout();
+    await closeClient(client);
+    const smtp = nodemailer.createTransport({
+      host: config.smtpHost,
+      port: config.smtpPort,
+      secure: config.smtpSecure,
+      auth: { user: config.user, pass: config.password },
+    });
+    await smtp.verify();
     return { ok: true };
   } catch (e: unknown) {
     const error = e instanceof Error ? e : new Error(String(e));
@@ -140,7 +200,7 @@ export async function listEmails(folder = 'INBOX', limit = 20): Promise<EmailMes
       lock.release();
     }
   } finally {
-    await client.logout();
+    await closeClient(client);
   }
 
   return emails.reverse();
@@ -182,7 +242,7 @@ export async function readEmail(uid: string, folder = 'INBOX'): Promise<EmailMes
       lock.release();
     }
   } finally {
-    await client.logout();
+    await closeClient(client);
   }
 }
 
@@ -208,12 +268,32 @@ export async function sendEmail(to: string, subject: string, text: string, inRep
 
 export async function saveEmailConfig(config: EmailConfig): Promise<void> {
   await mkdir(CONFIG_DIR, { recursive: true });
-  await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+  const current = await readStoredConfig();
+  const { password, ...metadata } = config;
+  const stored: StoredEmailConfig = { ...metadata };
+  if (password) {
+    if (safeStorage.isEncryptionAvailable()) {
+      stored.passwordEncrypted = safeStorage.encryptString(password).toString('base64');
+    } else {
+      const credentialId = 'email:primary-password';
+      getCredentials().saveCredential(credentialId, 'email', password);
+      stored.credentialId = credentialId;
+    }
+  } else if (current?.passwordEncrypted) {
+    stored.passwordEncrypted = current.passwordEncrypted;
+  } else if (current?.credentialId) {
+    stored.credentialId = current.credentialId;
+  } else {
+    throw new Error('Email password is required.');
+  }
+  await writeFile(CONFIG_FILE, JSON.stringify(stored, null, 2), { encoding: 'utf8', mode: 0o600 });
   transporter = null; // reset cached transporter
+  lastConfigUser = '';
 }
 
 export async function getEmailConfig(): Promise<EmailConfig | null> {
-  return getConfig();
+  const config = await getConfig();
+  return config ? { ...config, password: '' } : null;
 }
 
 export async function hasEmailConfig(): Promise<boolean> {

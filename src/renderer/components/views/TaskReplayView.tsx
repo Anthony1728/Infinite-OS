@@ -91,7 +91,7 @@ export function TaskReplayView() {
   };
 
   const NL_TASK_EXAMPLES = [
-    'Open Chrome and search for "InfiniteAI OS" on Google',
+    'Open Chrome and search for "Infinite OS" on Google',
     'Install the latest version of Node.js',
     'Open VS Code and create a new file called test.py',
     'Go to amazon.com and find the cheapest USB cable',

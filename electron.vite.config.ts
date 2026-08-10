@@ -42,8 +42,17 @@ export default defineConfig({
     },
     build: {
       outDir: 'out/renderer',
+      minify: 'esbuild',
+      cssCodeSplit: true,
       rollupOptions: {
         input: resolve('src/renderer/index.html'),
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-ui': ['framer-motion', 'lucide-react', 'cmdk'],
+            'vendor-ai': ['@anthropic-ai/sdk', 'openai', '@google/generative-ai'],
+          },
+        },
       },
     },
     server: { port: 5173 },

@@ -12,7 +12,7 @@ export interface ModelSelection {
 }
 
 // Priority order: free models that support tools, then free without tools, then paid
-const FREE_PROVIDER_PRIORITY = ['ollama', 'openrouter', 'groq'];
+const FREE_PROVIDER_PRIORITY = ['ollama', 'opencode', 'openrouter', 'groq'];
 
 export function selectBestModel(
   taskType: 'code' | 'research' | 'design' | 'data' | 'seo' | 'general',
@@ -54,7 +54,7 @@ export function selectBestModel(
 
   // 2. Check Ollama (always free, local)
   const ollama = providerRegistry.ollama;
-  if (ollama) {
+  if (ollama?.defaultModel) {
     return {
       provider: 'ollama',
       model: ollama.defaultModel,
@@ -83,7 +83,7 @@ export function selectBestModel(
   // 4. No free models available — use OpenRouter default (paid)
   return {
     provider: 'openrouter',
-    model: 'meta-llama/llama-3.3-72b-instruct',
+    model: 'meta-llama/llama-3.3-70b-instruct',
     free: false,
     reason: 'No free models available. Using paid model. Consider adding a free provider API key.',
   };

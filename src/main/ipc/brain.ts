@@ -1,8 +1,33 @@
 // Brain IPC handler registration — wires all brain channels to main-process brain instances.
 
-import { ipcMain } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
-import { brain, safety, offline, reasoning, workflow, monitor, improvement, marketplace, sdk } from '../index.js';
+import { brain, offline, reasoning, workflow, monitor, improvement, marketplace, sdk } from '../index.js';
+import { getEngine } from '../engine/intelligence.js';
+import { getBrainTeachingManager, type TeachingFocus, type TeachingStatus } from '../brain/teacher.js';
+import { getLearningMemoryStats, ingestResponse } from '../brain/learning.js';
+import { SafetyGovernor, type ActionRequest } from '../brain/safety.js';
+
+const safetyGovernor = new SafetyGovernor();
+
+function teachingFocus(value: unknown): TeachingFocus {
+  const focus = typeof value === 'string' ? value.toLowerCase() : '';
+  if (/\b(?:code|coding|typescript|javascript|python|react|api|debug|test|database|frontend|backend)\b/.test(focus)) return 'coding';
+  if (/\b(?:tool|search|browser|terminal|file|agent|automation|failover)\b/.test(focus)) return 'tools';
+  if (/\b(?:general|chat|talk|explain|writing|conversation)\b/.test(focus)) return 'general';
+  return 'balanced';
+}
+
+function teachingStatus(status: TeachingStatus) {
+  return {
+    ...status,
+    active: status.state === 'running',
+    lessonsCompleted: status.lessonsAdded,
+    lessonsLearned: status.totalStoredLessons,
+    provider: status.currentProvider ?? undefined,
+    model: status.currentModel ?? undefined,
+  };
+}
 
 export function registerBrainIpc(): void {
   // Brain Status
@@ -22,10 +47,19 @@ export function registerBrainIpc(): void {
     return decision;
   });
 
-  // Safety Validate
-  ipcMain.handle(IPC.BRAIN_SAFETY_VALIDATE, async (_e, { action }) => {
-    const result = safety.validate(action);
-    return result;
+  // Safety validation is a real policy check, not an unconditional approval.
+  ipcMain.handle(IPC.BRAIN_SAFETY_VALIDATE, async (_event, args: { action?: Partial<ActionRequest> }) => {
+    const input = args?.action ?? {};
+    const request: ActionRequest = {
+      id: input.id ?? crypto.randomUUID(),
+      type: input.type ?? 'execute',
+      target: input.target ?? 'unknown',
+      payload: input.payload ?? {},
+      source: input.source ?? 'brain',
+      timestamp: input.timestamp ?? Date.now(),
+      riskLevel: input.riskLevel ?? 'medium',
+    };
+    return safetyGovernor.validate(request);
   });
 
   // Offline Status
@@ -111,6 +145,68 @@ export function registerBrainIpc(): void {
     return { ok: true, id };
   });
 
+  // Time-boxed background teaching. Provider failures remain inside the
+  // manager; the renderer receives only useful state and progress.
+  const teacher = getBrainTeachingManager();
+  let teachingSource: 'curriculum' | 'topic' | 'conversation' | 'last-task' | 'online' = 'curriculum';
+  let teachingTopic = '';
+  ipcMain.handle(IPC.BRAIN_TEACH_START, async (_event, args: {
+    durationMinutes?: number;
+    source?: 'curriculum' | 'topic' | 'conversation' | 'last-task' | 'online';
+    topic?: string;
+    context?: string;
+    focus?: string;
+    provider?: string;
+    model?: string;
+  } = {}) => {
+    const durationMinutes = args.durationMinutes === 60 ? 60 : 10;
+    const requestedSource = args.source ?? (args.topic ? 'topic' : 'curriculum');
+    const requestedTopic = typeof args.topic === 'string' ? args.topic.trim().slice(0, 300) : '';
+    const alreadyRunning = teacher.getStatus().state === 'running';
+    if (!alreadyRunning) {
+      teachingSource = requestedSource;
+      teachingTopic = requestedTopic;
+    }
+    const status = await teacher.start({
+      durationMinutes,
+      focus: teachingFocus(args.focus),
+      ...(requestedTopic ? { customTopic: requestedTopic } : {}),
+      ...(typeof args.context === 'string' && args.context.trim() ? { currentContext: args.context.slice(0, 8_000) } : {}),
+      onlineResearch: requestedSource === 'online',
+      ...(args.provider && args.model ? { preferred: { provider: args.provider, model: args.model } } : {}),
+    });
+    return { ...teachingStatus(status), source: teachingSource, topic: teachingTopic || undefined };
+  });
+  ipcMain.handle(IPC.BRAIN_TEACH_STOP, async () => ({ ...teachingStatus(teacher.stop()), source: teachingSource, topic: teachingTopic || undefined }));
+  ipcMain.handle(IPC.BRAIN_TEACH_STATUS, async () => ({ ...teachingStatus(teacher.getStatus()), source: teachingSource, topic: teachingTopic || undefined }));
+  teacher.onEvent((event) => {
+    const payload = { ...event, status: { ...teachingStatus(event.status), source: teachingSource, topic: teachingTopic || undefined } };
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(IPC.BRAIN_TEACH_EVENT, payload);
+    }
+  });
+  ipcMain.handle(IPC.BRAIN_LEARN_INTERACTION, async (_event, args: {
+    request?: string;
+    response?: string;
+    provider?: string;
+    model?: string;
+    durationMs?: number;
+    success?: boolean;
+  } = {}) => {
+    if (args.success !== true || !args.request?.trim() || !args.response?.trim()) return { learned: false };
+    const learned = ingestResponse({
+      request: args.request,
+      taskContext: '',
+      response: args.response,
+      provider: args.provider || 'infinite-os',
+      model: args.model || 'local-brain',
+      durationMs: args.durationMs ?? 0,
+      successfulTools: [],
+    });
+    return { learned: Boolean(learned) };
+  });
+  ipcMain.handle(IPC.BRAIN_LEARN_STATS, async () => getLearningMemoryStats());
+
   // ── System Doctor ──
   ipcMain.handle('brain:doctor:health', async () => {
     const health = monitor.getOverallHealth();
@@ -177,6 +273,19 @@ export function registerBrainIpc(): void {
 
   ipcMain.handle('brain:memory:events', async (_e, { count }: { count?: number }) => {
     return brain.getRecentEvents(count ?? 20);
+  });
+
+  // ── Intelligence Engine ──
+  ipcMain.handle(IPC.ENGINE_STATUS, async () => {
+    const engine = getEngine();
+    return engine.getStatus();
+  });
+
+  ipcMain.handle(IPC.ENGINE_BOOTSTRAP, async () => {
+    const engine = getEngine();
+    const bootstrapped = engine.tryBootstrap();
+    const status = engine.getStatus();
+    return { bootstrapped, status };
   });
 }
 

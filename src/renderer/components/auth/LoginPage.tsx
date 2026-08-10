@@ -48,7 +48,7 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             <path d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z" stroke="url(#authGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-          <p className="text-gray-500 text-sm mt-2">Sign in to InfiniteAI OS</p>
+          <p className="text-gray-500 text-sm mt-2">Sign in to Infinite OS</p>
         </div>
 
         {/* Form */}

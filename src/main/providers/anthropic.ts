@@ -49,11 +49,36 @@ export const anthropic: ProviderAdapter = {
           description: t.description,
           input_schema: t.input_schema as Anthropic.Tool.InputSchema,
         })),
-      } as never);
+      } as never, { signal: req.signal });
+
+      const toolCalls = new Map<string, { id: string; name: string; json: string }>();
 
       for await (const event of stream) {
+        if (event.type === 'message_start') {
+          yield { type: 'message_start', id: event.message.id, model: event.message.model };
+        }
+        if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
+          toolCalls.set(event.index.toString(), { id: event.content_block.id, name: event.content_block.name, json: '' });
+          yield { type: 'tool_use_start', id: event.content_block.id, name: event.content_block.name };
+        }
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
           yield { type: 'text_delta', text: event.delta.text };
+        }
+        if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {
+          const call = toolCalls.get(event.index.toString());
+          if (call) call.json += event.delta.partial_json;
+          if (call) yield { type: 'tool_use_delta', id: call.id, partial_json: event.delta.partial_json };
+        }
+        if (event.type === 'content_block_stop') {
+          const call = toolCalls.get(event.index.toString());
+          if (call) {
+            try {
+              yield { type: 'tool_use_end', id: call.id, name: call.name, input: JSON.parse(call.json) };
+            } catch {
+              yield { type: 'tool_use_end', id: call.id, name: call.name, input: {} };
+            }
+            toolCalls.delete(event.index.toString());
+          }
         }
         if (event.type === 'message_stop') {
           const final = await stream.finalMessage();

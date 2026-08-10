@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -131,10 +131,15 @@ export class ComputerControlAgent {
     } catch { /* silent */ }
   }
 
-  private saveData(): void {
+  private async saveData(): Promise<void> {
     try {
-      writeFileSync(join(this.dataDir, 'applications.json'), JSON.stringify(Array.from(this.applications.entries()), null, 2));
-      writeFileSync(join(this.dataDir, 'actions.json'), JSON.stringify({ mouse: this.mouseActions.slice(-500), keyboard: this.keyboardActions.slice(-500) }, null, 2));
+      const appEntries = JSON.stringify(Array.from(this.applications.entries()));
+      const actionData = JSON.stringify({ mouse: this.mouseActions.slice(-500), keyboard: this.keyboardActions.slice(-500) });
+      const { writeFile } = await import('fs/promises');
+      await Promise.all([
+        writeFile(join(this.dataDir, 'applications.json'), appEntries),
+        writeFile(join(this.dataDir, 'actions.json'), actionData),
+      ]);
     } catch { /* silent */ }
   }
 
@@ -152,7 +157,7 @@ export class ComputerControlAgent {
     try {
       if (process.platform === 'win32') {
         // Use PowerShell to move mouse on Windows
-        await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})"`);
+        await psExec(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`);
       }
     } catch {
       action.success = false;
@@ -160,7 +165,7 @@ export class ComputerControlAgent {
 
     this.mouseActions.push(action);
     if (this.mouseActions.length > 500) this.mouseActions.shift();
-    this.saveData();
+    void this.saveData();
     return action;
   }
 
@@ -182,14 +187,14 @@ export class ComputerControlAgent {
       if (process.platform === 'win32') {
         // Use PowerShell with user32.dll for mouse clicks
         const btn = button === 'left' ? '2' : button === 'right' ? '8' : '16';
-        await psExec(`powershell -Command "Add-Type @' using System; using System.Runtime.InteropServices; public class Mouse { [DllImport(\\"user32.dll\\")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo); }'@; [Mouse]::mouse_event(${btn}, 0, 0, 0, 0); Start-Sleep -Milliseconds 50; [Mouse]::mouse_event(4, 0, 0, 0, 0)"`);
+        await psExec(`Add-Type @' using System; using System.Runtime.InteropServices; public class Mouse { [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo); }'@; [Mouse]::mouse_event(${btn}, 0, 0, 0, 0); Start-Sleep -Milliseconds 50; [Mouse]::mouse_event(4, 0, 0, 0, 0)`);
       }
     } catch {
       action.success = false;
     }
 
     this.mouseActions.push(action);
-    this.saveData();
+    void this.saveData();
     return action;
   }
 
@@ -219,7 +224,7 @@ export class ComputerControlAgent {
         await this.moveMouse(x, y);
         // Use user32.dll mouse_event for scroll (MOUSEEVENTF_WHEEL = 0x0800)
         const scrollDelta = amount * 120;
-        await psExec(`powershell -Command "Add-Type @' using System; using System.Runtime.InteropServices; public class Mouse { [DllImport(\\"user32.dll\\")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo); }'@; [Mouse]::mouse_event(0x0800, 0, 0, ${scrollDelta}, 0)"`);
+        await psExec(`Add-Type @' using System; using System.Runtime.InteropServices; public class Mouse { [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, int dwExtraInfo); }'@; [Mouse]::mouse_event(0x0800, 0, 0, ${scrollDelta}, 0)`);
       }
     } catch {
       action.success = false;
@@ -227,7 +232,7 @@ export class ComputerControlAgent {
 
     this.mouseActions.push(action);
     if (this.mouseActions.length > 500) this.mouseActions.shift();
-    this.saveData();
+    void this.saveData();
     return action;
   }
 
@@ -244,14 +249,14 @@ export class ComputerControlAgent {
 
     try {
       if (process.platform === 'win32') {
-        await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${text.replace(/'/g, "''")}')"`);
+        await psExec(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${text.replace(/'/g, "''")}')`);
       }
     } catch {
       action.success = false;
     }
 
     this.keyboardActions.push(action);
-    this.saveData();
+    void this.saveData();
     return action;
   }
 
@@ -273,14 +278,14 @@ export class ComputerControlAgent {
           ctrl: '^', alt: '%', shift: '+',
         };
         const sendKeys = keys.map((k) => keyMap[k.toLowerCase()] ?? k).join('');
-        await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${sendKeys}')"`);
+        await psExec(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${sendKeys}')`);
       }
     } catch {
       action.success = false;
     }
 
     this.keyboardActions.push(action);
-    this.saveData();
+    void this.saveData();
     return action;
   }
 
@@ -303,29 +308,25 @@ export class ComputerControlAgent {
 
     try {
       if (process.platform === 'win32') {
-        // Ensure directory exists
         if (!existsSync(this.config.screenCaptureDir)) {
           mkdirSync(this.config.screenCaptureDir, { recursive: true });
         }
         
-        // Get screen dimensions first
-        const dimResult = await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds"`);
-        const dimMatch = dimResult.stdout.match(/Width=(\d+).*Height=(\d+)/s);
+        // Combined: get dimensions + screenshot in a single PowerShell call
+        const result = await psExec(`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height); $gfx = [System.Drawing.Graphics]::FromImage($bmp); $gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); $bmp.Save('${path.replace(/\\/g, '\\\\')}'); $bmp.Dispose(); $gfx.Dispose(); Write-Output "W=$($bounds.Width) H=$($bounds.Height)"`);
+        const dimMatch = result.stdout.match(/W=(\d+)\s+H=(\d+)/);
         if (dimMatch) {
           capture.width = parseInt(dimMatch[1]);
           capture.height = parseInt(dimMatch[2]);
         }
-
-        // Take screenshot
-        await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bmp = New-Object System.Drawing.Bitmap(${capture.width}, ${capture.height}); $gfx = [System.Drawing.Graphics]::FromImage($bmp); $gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); $bmp.Save('${path.replace(/\\/g, '\\\\')}'); $bmp.Dispose(); $gfx.Dispose()"`);
       }
-    } catch (e) {
+    } catch {
       // Return a capture object even on error
     }
 
     this.captures.push(capture);
     if (this.captures.length > 100) this.captures.shift();
-    this.saveData();
+    void this.saveData();
 
     // Read and return base64 image data
     let imageData = '';
@@ -338,10 +339,44 @@ export class ComputerControlAgent {
     return { ...capture, imageData };
   }
 
+  // Lightweight live-feed frame: overwrites a single fixed file so a continuous
+  // stream does not accumulate thousands of PNGs on disk.
+  async captureLiveFrame(): Promise<ScreenCapture> {
+    const path = join(this.config.screenCaptureDir, 'live-frame.png');
+    const capture: ScreenCapture = { id: 'live', path, width: 1920, height: 1080, timestamp: Date.now() };
+    try {
+      if (process.platform === 'win32') {
+        if (!existsSync(this.config.screenCaptureDir)) {
+          mkdirSync(this.config.screenCaptureDir, { recursive: true });
+        }
+        // Combined: get dimensions + screenshot in a single PowerShell call
+        const result = await psExec(`Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height); $gfx = [System.Drawing.Graphics]::FromImage($bmp); $gfx.CopyFromScreen(0, 0, 0, 0, $bmp.Size); $bmp.Save('${path.replace(/\\/g, '\\\\')}'); $bmp.Dispose(); $gfx.Dispose(); Write-Output "W=$($bounds.Width) H=$($bounds.Height)"`);
+        const dimMatch = result.stdout.match(/W=(\d+)\s+H=(\d+)/);
+        if (dimMatch) {
+          capture.width = parseInt(dimMatch[1]);
+          capture.height = parseInt(dimMatch[2]);
+        }
+      }
+    } catch {
+      // Return a capture object even on error
+    }
+
+    let imageData = '';
+    try {
+      if (existsSync(path)) {
+        imageData = readFileSync(path).toString('base64');
+      }
+    } catch {
+      // silent
+    }
+
+    return { ...capture, imageData };
+  }
+
   async getScreenSize(): Promise<{ width: number; height: number }> {
     try {
       if (process.platform === 'win32') {
-        const result = await psExec(`powershell -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds"`);
+        const result = await psExec(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::PrimaryScreen.Bounds`);
         const match = result.stdout.match(/Width=(\d+).*Height=(\d+)/s);
         if (match) {
           return { width: parseInt(match[1]), height: parseInt(match[2]) };
@@ -354,7 +389,7 @@ export class ComputerControlAgent {
   async getWindowList(): Promise<Array<{ title: string; pid: number; rect?: { x: number; y: number; width: number; height: number } }>> {
     try {
       if (process.platform === 'win32') {
-        const result = await psExec(`powershell -Command "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json"`);
+        const result = await psExec(`Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object ProcessName, Id, MainWindowTitle | ConvertTo-Json`);
         const processes = JSON.parse(result.stdout);
         return (Array.isArray(processes) ? processes : [processes]).map((p: { MainWindowTitle?: string; ProcessName?: string; Id?: number }) => ({
           title: p.MainWindowTitle || p.ProcessName || 'Unknown',
@@ -385,7 +420,7 @@ export class ComputerControlAgent {
     }
 
     this.applications.set(app.id, app);
-    this.saveData();
+    void this.saveData();
     return app;
   }
 
@@ -398,7 +433,7 @@ export class ComputerControlAgent {
         await psExec(`taskkill /IM "${app.name}" /F 2>nul`);
       }
       app.status = 'stopped';
-      this.saveData();
+      void this.saveData();
       return true;
     } catch {
       return false;

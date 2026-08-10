@@ -5,8 +5,11 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
-function selfExec(command: string, opts: { cwd: string; timeout: number }): Promise<{ stdout: string; stderr: string }> {
+type AuditProgress = (message: string) => void;
+
+function selfExec(command: string, opts: { cwd: string; timeout: number }, onProgress?: AuditProgress): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    onProgress?.(`$ ${command}`);
     const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/sh';
     const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command];
     const child = spawn(shell, shellArgs, { cwd: opts.cwd, timeout: opts.timeout, env: process.env, windowsHide: true });
@@ -53,32 +56,38 @@ export class SelfImprovementAgent {
     this.workspaceRoot = workspaceRoot;
   }
 
-  async runFullAudit(): Promise<HealthReport> {
+  async runFullAudit(onProgress?: AuditProgress): Promise<HealthReport> {
     const checks: CheckResult[] = [];
     const fixes: FixResult[] = [];
     const recommendations: string[] = [];
 
     // 1. TypeScript compilation check
-    const tsCheck = await this.checkTypeScript();
+    onProgress?.('Inspecting TypeScript compilation and project configuration...');
+    const tsCheck = await this.checkTypeScript(onProgress);
     checks.push(tsCheck);
 
     // 2. File integrity check
+    onProgress?.('Inspecting source-tree integrity...');
     const fileCheck = await this.checkFileIntegrity();
     checks.push(fileCheck);
 
     // 3. Tool registry check
+    onProgress?.('Checking tool imports and registrations...');
     const toolCheck = await this.checkToolRegistry();
     checks.push(toolCheck);
 
     // 4. Package dependency check
+    onProgress?.('Checking dependency metadata...');
     const depCheck = await this.checkDependencies();
     checks.push(depCheck);
 
     // 5. IPC handler completeness
+    onProgress?.('Checking main/preload IPC coverage...');
     const ipcCheck = await this.checkIPCHandlers();
     checks.push(ipcCheck);
 
     // 6. Auto-fix common issues
+    onProgress?.('Applying safe, deterministic fixes...');
     const autoFixes = await this.autoFix();
     fixes.push(...autoFixes);
 
@@ -111,15 +120,16 @@ export class SelfImprovementAgent {
       this.reportHistory.shift();
     }
 
+    onProgress?.(`Audit complete: ${overall}. ${fixes.filter((fix) => fix.action === 'fixed').length} file(s) fixed.`);
     return report;
   }
 
-  private async checkTypeScript(): Promise<CheckResult> {
+  private async checkTypeScript(onProgress?: AuditProgress): Promise<CheckResult> {
     try {
-      const { stdout, stderr } = await selfExec('npx tsc --noEmit -p tsconfig.node.json 2>&1', {
+      const { stdout, stderr } = await selfExec('npm run typecheck', {
         cwd: this.workspaceRoot,
-        timeout: 60000,
-      });
+        timeout: 120000,
+      }, onProgress);
       const output = stdout + stderr;
       if (output.includes('error TS')) {
         const errorCount = (output.match(/error TS/g) || []).length;
@@ -130,9 +140,9 @@ export class SelfImprovementAgent {
           details: output.slice(0, 2000),
         };
       }
-      return { name: 'TypeScript (main)', status: 'pass', message: 'No errors' };
+      return { name: 'TypeScript', status: 'pass', message: 'Main, preload, and renderer type-check passed' };
     } catch (e) {
-      return { name: 'TypeScript (main)', status: 'fail', message: (e as Error).message.slice(0, 500) };
+      return { name: 'TypeScript', status: 'fail', message: (e as Error).message.slice(0, 500) };
     }
   }
 
@@ -193,17 +203,49 @@ export class SelfImprovementAgent {
         return { name: 'Tool Registry', status: 'fail', message: 'registry.ts not found' };
       }
       const content = readFileSync(registryPath, 'utf-8');
-      const toolImports = (content.match(/import.*from.*\.\/.*\.js/g) || []).length;
-      const toolRegistrations = (content.match(/toolRegistry\.register/g) || []).length;
 
-      if (toolImports !== toolRegistrations) {
+      // Collect the local identifiers brought in by each `import { … } from './…js' line.
+      // Handles aliased imports like `import { agent as agentTool } from './agent.js'`
+      // (the local name is `agentTool`). Excludes non-tool imports such as `toolRegistry`.
+      const nonToolImports = new Set(['toolRegistry', 'ToolRegistry']);
+      const importBlockMatches = [...content.matchAll(/import\s+\{([^}]*)\}\s+from\s+['"]\.\/[^'"]+\.js['"]/g)];
+      const importedTools = new Set<string>();
+      for (const m of importBlockMatches) {
+        for (const raw of m[1].split(',')) {
+          const spec = raw.trim();
+          if (!spec) continue;
+          // `agent as agentTool` → local name is the part after `as`
+          const localName = spec.includes(' as ') ? spec.split(' as ')[1].trim() : spec;
+          if (!nonToolImports.has(localName)) importedTools.add(localName);
+        }
+      }
+
+      // Collect the tool identifiers actually passed into the registration loop.
+      // The registry registers via `for (const t of [ ... ]) toolRegistry.register(t)`,
+      // so we gather the comma-separated entries inside that array literal, skipping
+      // comment-only lines.
+      const loopMatch = content.match(/for\s*\(\s*const\s+\w+\s+of\s*\[([\s\S]*?)\]\s*\)/);
+      const registeredTools = new Set<string>();
+      if (loopMatch) {
+        for (const raw of loopMatch[1].split(',')) {
+          const name = raw.trim();
+          if (name && !name.startsWith('//')) registeredTools.add(name);
+        }
+      }
+
+      const toolImports = importedTools.size;
+      const toolRegistrations = registeredTools.size;
+      const unregistered = [...importedTools].filter((t) => !registeredTools.has(t));
+
+      if (toolImports !== toolRegistrations || unregistered.length > 0) {
         return {
           name: 'Tool Registry',
           status: 'warn',
-          message: `Import/registration mismatch: ${toolImports} imports vs ${toolRegistrations} registrations`,
+          message: `Import/registration mismatch: ${toolImports} imported tool(s) vs ${toolRegistrations} registered tool(s)` +
+            (unregistered.length > 0 ? ` — unregistered: ${unregistered.join(', ')}` : ''),
         };
       }
-      return { name: 'Tool Registry', status: 'pass', message: `${toolRegistrations} tools registered` };
+      return { name: 'Tool Registry', status: 'pass', message: `${toolRegistrations} tools imported and registered` };
     } catch (e) {
       return { name: 'Tool Registry', status: 'fail', message: (e as Error).message };
     }

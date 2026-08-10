@@ -39,6 +39,9 @@ export interface RoutingDecision {
 export class DecisionRouter {
   private config: RouterConfig;
   private taskHistory: Array<{ task: string; model: string; success: boolean; timestamp: number }> = [];
+  private analysisCache = new Map<string, { analysis: TaskAnalysis; timestamp: number }>();
+  private readonly CACHE_MAX_SIZE = 1000;
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(config?: Partial<RouterConfig>) {
     this.config = {
@@ -48,9 +51,66 @@ export class DecisionRouter {
       costOptimization: config?.costOptimization ?? true,
       speedPriority: config?.speedPriority ?? false,
     };
+    // Pre-compute model scores at startup
+    this.precomputeModelScores();
+  }
+
+  private modelScores: Record<string, number> = {};
+
+  private precomputeModelScores(): void {
+    // Pre-compute base scores for each model type combination
+    const types = ['general', 'coding', 'analysis', 'writing', 'debugging', 'planning', 'research'];
+    const complexities: Array<'simple' | 'medium' | 'complex'> = ['simple', 'medium', 'complex'];
+    
+    for (const type of types) {
+      for (const complexity of complexities) {
+        for (const tools of [true, false]) {
+          for (const vision of [true, false]) {
+            const key = `${type}:${complexity}:${tools}:${vision}`;
+            // We'll compute on first request and cache
+            this.modelScores[key] = 0;
+          }
+        }
+      }
+    }
+  }
+
+  private getCacheKey(prompt: string): string {
+    // Simple hash for cache key
+    let hash = 0;
+    for (let i = 0; i < prompt.length; i++) {
+      hash = ((hash << 5) - hash) + prompt.charCodeAt(i);
+      hash |= 0;
+    }
+    return String(hash);
+  }
+
+  private cacheGet(key: string): TaskAnalysis | null {
+    const entry = this.analysisCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > this.CACHE_TTL_MS) {
+      this.analysisCache.delete(key);
+      return null;
+    }
+    // Move to end (most recently used)
+    this.analysisCache.delete(key);
+    this.analysisCache.set(key, entry);
+    return entry.analysis;
+  }
+
+  private cacheSet(key: string, analysis: TaskAnalysis): void {
+    if (this.analysisCache.size >= this.CACHE_MAX_SIZE) {
+      const oldest = this.analysisCache.keys().next().value;
+      if (oldest) this.analysisCache.delete(oldest);
+    }
+    this.analysisCache.set(key, { analysis, timestamp: Date.now() });
   }
 
   analyzeTask(prompt: string, _context?: Record<string, unknown>): TaskAnalysis {
+    const cacheKey = this.getCacheKey(prompt);
+    const cached = this.cacheGet(cacheKey);
+    if (cached) return cached;
+
     const lowerPrompt = prompt.toLowerCase();
     
     // Detect task type
@@ -95,7 +155,7 @@ export class DecisionRouter {
     if (requiresTools) tags.push('tools');
     if (requiresVision) tags.push('vision');
 
-    return {
+    const analysis = {
       type,
       complexity,
       requiresTools,
@@ -103,6 +163,9 @@ export class DecisionRouter {
       estimatedTokens,
       tags,
     };
+
+    this.cacheSet(cacheKey, analysis);
+    return analysis;
   }
 
   route(analysis: TaskAnalysis, availableModels?: string[]): RoutingDecision {

@@ -4,6 +4,7 @@ import type { Message, ModelInfo, TokenUsage } from '../../shared/types.js';
 
 export interface ChatRequest {
   model: string;
+  cwd?: string;
   messages: Message[];
   system?: string;
   tools?: ToolSpec[];
@@ -25,6 +26,23 @@ export type StreamChunk =
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_delta'; id: string; partial_json: string }
   | { type: 'tool_use_end'; id: string; name: string; input: unknown }
+  | {
+      type: 'provider_progress';
+      id: string;
+      name: string;
+      status: 'running' | 'completed' | 'error';
+      input?: unknown;
+      detail?: string;
+    }
+  | {
+      type: 'provider_status';
+      status: 'connecting' | 'streaming' | 'failover' | 'cold_start' | 'rate_limited';
+      provider?: string;
+      model?: string;
+      from?: string;
+      to?: string;
+      reason?: string;
+    }
   | { type: 'message_end'; stop_reason: string; usage: TokenUsage }
   | { type: 'error'; error: string };
 
@@ -32,6 +50,8 @@ export interface ProviderAdapter {
   id: string;
   label: string;
   requiresApiKey: boolean;
+  /** The provider also works without a key, but can accept one for subscription models. */
+  acceptsApiKey?: boolean;
   defaultBaseUrl?: string;
   defaultModel: string;
   freeModels: ModelInfo[];

@@ -11,8 +11,6 @@ const COMMANDS = [
   { id: 'create-agent', label: 'Create Agent', icon: 'CA', category: 'Agents' },
   { id: 'multi-agent', label: 'Multi-Agent System', icon: 'MA', category: 'Agents' },
   { id: 'automations', label: 'Automation Studio', icon: 'AU', category: 'Automation' },
-  { id: 'browser', label: 'Browser Control', icon: 'BR', category: 'Tools' },
-  { id: 'computer', label: 'Computer Control', icon: 'PC', category: 'Tools' },
   { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace' },
   { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace' },
   { id: 'documents', label: 'Knowledge Hub', icon: 'KH', category: 'Knowledge' },

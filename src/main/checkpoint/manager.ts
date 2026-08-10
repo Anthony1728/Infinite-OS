@@ -1,12 +1,12 @@
 /**
  * Checkpoint System
- * 
+ *
  * Provides task state persistence and rollback capabilities.
  * Allows saving task state at any point and restoring later.
  */
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -27,7 +27,7 @@ export interface TaskState {
   progress: number;
   currentStep: number;
   totalSteps: number;
-  
+
   // Execution context
   cwd: string;
   history: Array<{
@@ -36,7 +36,7 @@ export interface TaskState {
     timestamp: number;
   }>;
   variables: Record<string, unknown>;
-  
+
   // Agent state
   agentContext?: {
     model: string;
@@ -44,7 +44,7 @@ export interface TaskState {
     toolsUsed: string[];
     permissionMode: string;
   };
-  
+
   // File system state (for rollback)
   modifiedFiles?: Array<{
     path: string;
@@ -52,7 +52,7 @@ export interface TaskState {
     newContent: string;
     operation: 'create' | 'modify' | 'delete';
   }>;
-  
+
   // Results
   result?: unknown;
   error?: string;
@@ -77,7 +77,7 @@ interface CheckpointStore {
 
 /**
  * Checkpoint Manager
- * 
+ *
  * Manages task checkpoints for persistence and rollback.
  */
 export class CheckpointManager {
@@ -121,7 +121,7 @@ export class CheckpointManager {
    */
   get(checkpointId: string): Checkpoint | null {
     for (const checkpoints of this.checkpoints.values()) {
-      const found = checkpoints.find(c => c.id === checkpointId);
+      const found = checkpoints.find((c) => c.id === checkpointId);
       if (found) return found;
     }
     return null;
@@ -153,7 +153,7 @@ export class CheckpointManager {
    */
   delete(checkpointId: string): boolean {
     for (const [taskId, checkpoints] of this.checkpoints.entries()) {
-      const index = checkpoints.findIndex(c => c.id === checkpointId);
+      const index = checkpoints.findIndex((c) => c.id === checkpointId);
       if (index !== -1) {
         checkpoints.splice(index, 1);
         if (checkpoints.length === 0) {
@@ -177,7 +177,10 @@ export class CheckpointManager {
   /**
    * Compare two checkpoints
    */
-  diff(checkpointId1: string, checkpointId2: string): {
+  diff(
+    checkpointId1: string,
+    checkpointId2: string,
+  ): {
     checkpoint1: Checkpoint;
     checkpoint2: Checkpoint;
     differences: string[];
@@ -247,16 +250,19 @@ export class CheckpointManager {
     if (state.modifiedFiles) {
       for (const file of state.modifiedFiles) {
         try {
-          if (file.operation === 'delete' && file.newContent) {
+          if (file.operation === 'create') {
+            if (existsSync(file.path)) unlinkSync(file.path);
+            rollbackActions.push(`Removed created file: ${file.path}`);
+          } else if (file.operation === 'delete' && file.originalContent !== undefined) {
             // Restore deleted file
-            writeFileSync(file.path, file.newContent, 'utf-8');
+            writeFileSync(file.path, file.originalContent, 'utf-8');
             rollbackActions.push(`Restored file: ${file.path}`);
           } else if (file.operation === 'modify' && file.originalContent !== undefined) {
             // Restore modified file
             writeFileSync(file.path, file.originalContent, 'utf-8');
             rollbackActions.push(`Reverted file: ${file.path}`);
           }
-        } catch (err) {
+        } catch {
           rollbackActions.push(`Failed to rollback: ${file.path}`);
         }
       }
@@ -307,7 +313,7 @@ export class CheckpointManager {
   private save(): void {
     try {
       this.ensureDir();
-      
+
       // Convert Map to object for JSON serialization
       const obj: Record<string, Checkpoint[]> = {};
       for (const [taskId, checkpoints] of this.checkpoints) {
@@ -319,10 +325,7 @@ export class CheckpointManager {
         metadata: { version: 1, lastUpdated: Date.now() },
       };
 
-      writeFileSync(
-        join(this.dataDir, 'checkpoints.json'),
-        JSON.stringify(this.store, null, 2)
-      );
+      writeFileSync(join(this.dataDir, 'checkpoints.json'), JSON.stringify(this.store, null, 2));
     } catch (err) {
       console.error('[CheckpointManager] Failed to save:', err);
     }
@@ -335,11 +338,11 @@ export class CheckpointManager {
     try {
       this.ensureDir();
       const filePath = join(this.dataDir, 'checkpoints.json');
-      
+
       if (existsSync(filePath)) {
         const data = JSON.parse(readFileSync(filePath, 'utf-8')) as CheckpointStore;
         this.store = data;
-        
+
         // Convert object back to Map
         this.checkpoints = new Map(Object.entries(data.checkpoints ?? {}));
       }

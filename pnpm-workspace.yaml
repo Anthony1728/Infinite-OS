@@ -1,4 +1,13 @@
 allowBuilds:
-  better-sqlite3: false
-  electron: false
-  esbuild: false
+  better-sqlite3: true
+  canvas: set this to true or false
+  electron: true
+  esbuild: true
+overrides:
+  dompurify: 3.4.11
+  esbuild: 0.25.12
+  form-data: 4.0.6
+  hono: 4.12.25
+  tar: 7.5.16
+  uuid: 11.1.1
+  vite: 6.4.3

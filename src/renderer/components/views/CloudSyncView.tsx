@@ -6,7 +6,12 @@ export function CloudSyncView() {
   const { devices, backups, records, stats, loadDevices, loadBackups, loadRecords, loadStats, registerDevice, createBackup, restoreBackup } = useCloudStore();
   const addToast = useNotificationStore((s) => s.addToast);
 
-  useEffect(() => { loadDevices(); loadBackups(); loadRecords(); loadStats(); }, []);
+  useEffect(() => {
+    void loadDevices();
+    void loadBackups();
+    void loadRecords();
+    void loadStats();
+  }, [loadBackups, loadDevices, loadRecords, loadStats]);
 
   const handleRegister = async () => {
     await registerDevice(`Device-${Date.now().toString(36)}`);

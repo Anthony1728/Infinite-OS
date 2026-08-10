@@ -2,15 +2,17 @@
 
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
-import { automationBuilder } from '../index.js';
+import { automationBuilder } from '../automation/builder.js';
 
 export function registerAutomationIpc(): void {
   ipcMain.handle(IPC.AUTOMATION_CREATE_WORKFLOW, async (_e, { name, description, trigger, actions }) => {
     return automationBuilder.createWorkflow({ name, description, trigger, actions });
   });
 
-  ipcMain.handle(IPC.AUTOMATION_RUN_WORKFLOW, async (_e, { workflowId }) => {
-    return automationBuilder.runWorkflow(workflowId);
+  ipcMain.handle(IPC.AUTOMATION_RUN_WORKFLOW, async (event, { workflowId }) => {
+    return automationBuilder.runWorkflow(workflowId, (progress) => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC.AUTOMATION_RUN_EVENT, progress);
+    });
   });
 
   ipcMain.handle(IPC.AUTOMATION_LIST_WORKFLOWS, async () => {
@@ -27,6 +29,10 @@ export function registerAutomationIpc(): void {
 
   ipcMain.handle(IPC.AUTOMATION_DISABLE_WORKFLOW, async (_e, { workflowId }) => {
     return automationBuilder.disableWorkflow(workflowId);
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_DELETE_WORKFLOW, async (_e, { workflowId }) => {
+    return automationBuilder.deleteWorkflow(workflowId);
   });
 
   ipcMain.handle(IPC.AUTOMATION_ADD_ACTION, async (_e, { workflowId, action }) => {

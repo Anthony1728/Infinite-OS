@@ -1,76 +1,40 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { ChatView } from '../chat/ChatView';
-import { FileManager } from '../workspace/FileManager';
-import { MemoryPanel } from '../memory/MemoryPanel';
-import { SettingsView } from '../views/SettingsView';
-import { AgentsView } from '../views/AgentsView';
-import { AutomationView } from '../views/AutomationView';
-import { WorkspaceView } from '../views/WorkspaceView';
-import { InfiniteCanvas } from '../workspace/InfiniteCanvas';
 import { useSessionStore } from '../../stores/session';
+import { useAiTabsStore, type AiWorkspaceTab } from '../../stores/aiTabs';
+import { useChatStore } from '../../stores/chat';
+import { DynamicTabView } from './DynamicTabView';
 
-function ProjectsView() {
-  return (
-    <div className="flex-1 overflow-y-auto p-8 animate-fade-in">
-      <h1 className="text-2xl font-bold mb-5 text-white">Projects</h1>
-      <p className="text-gray-500 text-sm mb-7">Manage your projects and deployments.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {[
-          {
-            name: 'SaaS Dashboard',
-            status: 'Deployed',
-            color: 'from-green-500 to-emerald-500',
-            icon: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
-          },
-          {
-            name: 'E-commerce Platform',
-            status: 'In Progress',
-            color: 'from-amber-500 to-orange-500',
-            icon: 'M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z',
-          },
-          {
-            name: 'Marketing Site',
-            status: 'Draft',
-            color: 'from-purple-500 to-pink-500',
-            icon: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418',
-          },
-        ].map((project, i) => (
-          <div
-            key={i}
-            className="bg-[#1a1a1f] border border-white/[0.06] rounded-xl p-4 hover:border-white/[0.1] cursor-pointer transition-all"
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <div
-                className={`w-10 h-10 rounded-xl bg-gradient-to-br ${project.color} flex items-center justify-center shadow-lg`}
-              >
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d={project.icon} />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <div className="font-medium text-white">{project.name}</div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${project.status === 'Deployed' ? 'bg-green-500/15 text-green-400' : project.status === 'In Progress' ? 'bg-amber-500/15 text-amber-400' : 'bg-gray-500/15 text-gray-400'}`}
-              >
-                {project.status}
-              </span>
-              <span className="text-[10px] text-gray-600">Updated 2h ago</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// Lazy-load heavy views that aren't needed on initial load
+const FileManager = lazy(() => import('../workspace/FileManager').then(m => ({ default: m.FileManager })));
+const MemoryPanel = lazy(() => import('../memory/MemoryPanel').then(m => ({ default: m.MemoryPanel })));
+const SettingsView = lazy(() => import('../views/SettingsView').then(m => ({ default: m.SettingsView })));
+const AgentsView = lazy(() => import('../views/AgentsView').then(m => ({ default: m.AgentsView })));
+const AutomationView = lazy(() => import('../views/AutomationView').then(m => ({ default: m.AutomationView })));
+const WorkspaceView = lazy(() => import('../views/WorkspaceView').then(m => ({ default: m.WorkspaceView })));
+const InfiniteCanvas = lazy(() => import('../workspace/InfiniteCanvas').then(m => ({ default: m.InfiniteCanvas })));
+const ActivityTrackerView = lazy(() => import('../views/ActivityTrackerView').then(m => ({ default: m.ActivityTrackerView })));
+const AppBuilderView = lazy(() => import('../views/AppBuilderView').then(m => ({ default: m.AppBuilderView })));
+const ProjectsView = lazy(() => import('../views/ProjectsView').then(m => ({ default: m.ProjectsView })));
+const BrowserControlView = lazy(() => import('../views/BrowserControlView').then(m => ({ default: m.BrowserControlView })));
+const BusinessOSView = lazy(() => import('../views/BusinessOSView').then(m => ({ default: m.BusinessOSView })));
+const CallCenterView = lazy(() => import('../views/CallCenterView').then(m => ({ default: m.CallCenterView })));
+const CloudSyncView = lazy(() => import('../views/CloudSyncView').then(m => ({ default: m.CloudSyncView })));
+const ComputerControlView = lazy(() => import('../views/ComputerControlView').then(m => ({ default: m.ComputerControlView })));
+const DeployView = lazy(() => import('../views/DeployView').then(m => ({ default: m.DeployView })));
+const EnterpriseView = lazy(() => import('../views/EnterpriseView').then(m => ({ default: m.EnterpriseView })));
+const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ default: m.KnowledgeView })));
+const MultiAgentView = lazy(() => import('../views/MultiAgentView').then(m => ({ default: m.MultiAgentView })));
+const OSHomeView = lazy(() => import('../views/OSHomeView').then(m => ({ default: m.OSHomeView })));
+const PluginStoreView = lazy(() => import('../views/PluginStoreView').then(m => ({ default: m.PluginStoreView })));
+const TaskReplayView = lazy(() => import('../views/TaskReplayView').then(m => ({ default: m.TaskReplayView })));
+const TestView = lazy(() => import('../views/TestView').then(m => ({ default: m.TestView })));
+const VideoView = lazy(() => import('../views/VideoView').then(m => ({ default: m.VideoView })));
+const VoiceView = lazy(() => import('../views/VoiceView').then(m => ({ default: m.VoiceView })));
+const WebsiteBuilderView = lazy(() => import('../views/WebsiteBuilderView').then(m => ({ default: m.WebsiteBuilderView })));
+const YouTubeLearningView = lazy(() => import('../views/YouTubeLearningView').then(m => ({ default: m.YouTubeLearningView })));
+const StandingOrdersView = lazy(() => import('../views/StandingOrdersView').then(m => ({ default: m.StandingOrdersView })));
+const ActiveMemoryView = lazy(() => import('../views/ActiveMemoryView').then(m => ({ default: m.ActiveMemoryView })));
 
 interface MainViewProps {
   activeView: string;
@@ -80,31 +44,36 @@ interface MainViewProps {
 
 export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewProps) {
   const { restoreSession, setCurrentView } = useSessionStore();
+  const aiTabs = useAiTabsStore((state) => state.tabs);
+  const activeAiTab = aiTabs.find((tab) => tab.id === activeView);
 
   useEffect(() => {
     restoreSession();
-  }, []);
+  }, [restoreSession]);
 
   useEffect(() => {
     setCurrentView(activeView);
-  }, [activeView]);
+  }, [activeView, setCurrentView]);
 
   const renderContent = () => {
+    if (activeAiTab) return <DynamicTabView tab={activeAiTab} onViewChange={onViewChange} />;
+
     switch (activeView) {
+      case 'home':
+        return <OSHomeView onOpenView={onViewChange} />;
       case 'chats':
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'agents':
         return <AgentsView />;
       case 'projects':
-        return <ProjectsView />;
+        return <ProjectsView onOpenWorkspace={() => onViewChange('workspace')} />;
       case 'documents':
         return (
-          <div className="flex-1 overflow-y-auto p-8 animate-fade-in">
-            <h1 className="text-2xl font-bold mb-5 text-white">Documents</h1>
-            <p className="text-gray-500 text-sm mb-7">Your files and documents.</p>
+          <div className="flex-1 overflow-hidden p-6 animate-fade-in flex flex-col">
+            <h1 className="text-2xl font-bold mb-1 text-white">Infinite OS Explorer</h1>
+            <p className="text-gray-500 text-sm mb-5">Browse, organize, open, and edit files without leaving Infinite OS.</p>
             <div
-              className="bg-[#1a1a1f] border border-white/[0.06] rounded-xl p-4"
-              style={{ height: 'calc(100vh - 200px)' }}
+              className="min-h-0 flex-1 bg-[#1a1a1f] border border-white/[0.06] rounded-xl overflow-hidden"
             >
               <FileManager />
             </div>
@@ -118,12 +87,152 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <WorkspaceView />;
       case 'canvas':
         return <InfiniteCanvas />;
+      case 'learning':
+      case 'knowledge':
+        return <KnowledgeView />;
+      case 'youtube-learning':
+        return <YouTubeLearningView />;
+      case 'browser':
+        return <BrowserControlView />;
+      case 'computer':
+        return <ComputerControlView />;
+      case 'research':
+        return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
+      case 'activity':
+        return <ActivityTrackerView />;
+      case 'multi-agent':
+        return <MultiAgentView />;
+      case 'cloud':
+        return <CloudSyncView />;
+      case 'business':
+        return <BusinessOSView />;
+      case 'callcenter':
+        return <CallCenterView />;
+      case 'plugins':
+        return <PluginStoreView />;
+      case 'app-builder':
+        return <AppBuilderView />;
+      case 'website-builder':
+        return <WebsiteBuilderView />;
+      case 'deploy':
+        return <DeployView />;
+      case 'testing':
+        return <TestView />;
+      case 'video':
+        return <VideoView />;
+      case 'voice':
+        return <VoiceView />;
+      case 'replay':
+        return <TaskReplayView />;
+      case 'standing-orders':
+        return <StandingOrdersView />;
+      case 'active-memory':
+        return <ActiveMemoryView />;
+      case 'enterprise':
+        return <EnterpriseView />;
       case 'settings':
         return <SettingsView />;
       default:
-        return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
+        return <OSHomeView onOpenView={onViewChange} />;
     }
   };
 
-  return <div className="flex flex-col h-full overflow-hidden animate-fade-in">{renderContent()}</div>;
+  return <div className="flex flex-col h-full overflow-hidden animate-fade-in"><Suspense fallback={<div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">Loading...</div>}>{renderContent()}</Suspense></div>;
+}
+
+function AiWorkspaceView({ tab, onViewChange }: { tab: AiWorkspaceTab; onViewChange: (view: string) => void }) {
+  const sendMessage = useChatStore((state) => state.sendMessage);
+
+  const continueInChat = (prompt: string) => {
+    onViewChange('chats');
+    void sendMessage(prompt);
+  };
+
+  const actions =
+    tab.kind === 'feature'
+      ? [
+          {
+            label: 'Build Feature',
+            prompt: `Implement this Infinite OS feature now: ${tab.prompt}. Inspect the source code, edit files, create any required components or side tabs, run validation, and report changed files.`,
+          },
+          {
+            label: 'Plan Changes',
+            prompt: `Create a concise implementation plan for this Infinite OS feature before editing: ${tab.prompt}`,
+          },
+        ]
+      : tab.kind === 'business'
+        ? [
+            { label: 'Expand Summary', prompt: `Turn this into a complete business summary with actions: ${tab.prompt}` },
+            { label: 'Create Tasks', prompt: `Create a practical execution checklist from this business summary: ${tab.prompt}` },
+          ]
+        : tab.kind === 'research'
+          ? [
+              { label: 'Research Now', prompt: `Research this deeply and cite useful sources: ${tab.prompt}` },
+              { label: 'Recommend Next', prompt: `Compare the options and recommend the best next move for: ${tab.prompt}` },
+            ]
+          : tab.kind === 'lesson'
+            ? [
+                { label: 'Teach Now', prompt: `Teach me this clearly with examples, an analogy, and a mini quiz: ${tab.prompt}` },
+                { label: 'Quiz Me', prompt: `Quiz me one question at a time on: ${tab.prompt}` },
+              ]
+        : [
+            { label: 'Generate Now', prompt: `Generate the ${tab.kind} for: ${tab.prompt}` },
+            { label: 'Make Harder', prompt: `Make this ${tab.kind} more advanced and include answers: ${tab.prompt}` },
+          ];
+
+  return (
+    <div className="flex h-full min-h-0 bg-[#080a10]">
+      <section className="flex-1 min-w-0 overflow-y-auto chat-scrollbar px-10 py-8">
+        <div className="max-w-4xl">
+          <div className="mb-6 flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-400/70">AI Workspace</div>
+              <h1 className="mt-2 text-2xl font-semibold text-zinc-100 tracking-[-0.02em]">{tab.title}</h1>
+              <p className="mt-2 max-w-2xl text-sm text-zinc-500">{tab.prompt}</p>
+            </div>
+            <button
+              onClick={() => onViewChange('chats')}
+              className="h-8 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 text-[10px] text-zinc-400 hover:text-zinc-100"
+            >
+              Back to Chat
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-white/[0.07] bg-[#0c1018] p-5 shadow-[0_16px_44px_rgba(0,0,0,.22)]">
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-zinc-300">{tab.content}</pre>
+          </div>
+        </div>
+      </section>
+
+      <aside className="hidden lg:flex w-[310px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0d14] p-4">
+        <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-cyan-300/80">Chat Driver</div>
+          <p className="mt-2 text-xs leading-5 text-zinc-400">
+            Use chat to fill this tab, edit Infinite OS source code, add new functionality, or create more side workspaces.
+          </p>
+        </div>
+        <div className="mt-4 space-y-2">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => continueInChat(action.prompt)}
+              className="w-full rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-left text-xs text-zinc-400 hover:border-cyan-400/25 hover:text-zinc-100 hover:bg-cyan-400/[0.035]"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() =>
+            continueInChat(
+              `Create another side tab related to this workspace. Current tab: ${tab.title}. Original request: ${tab.prompt}`,
+            )
+          }
+          className="mt-auto rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-xs text-zinc-400 hover:text-zinc-100"
+        >
+          Create Related Tab
+        </button>
+      </aside>
+    </div>
+  );
 }

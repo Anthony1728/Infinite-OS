@@ -1,8 +1,8 @@
 /*
- * Infinite AI OS - Agent System
+ * Infinite OS - Agent System
  *
  * Overview:
- * This file contains the complete Agent system for InfiniteAI OS, which allows users to create and run
+ * This file contains the complete Agent system for Infinite OS, which allows users to create and run
  * AI agents with access to tools, permissions, and provider integrations.
  *
  * Key Components:

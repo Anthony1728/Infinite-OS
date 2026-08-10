@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { useEditorStore } from '../../stores/editor';
+import { joinSystemPath, normalizeSystemPath, parentSystemPath, systemBaseName, type SystemRoots } from '../../lib/systemPaths';
 import {
   FileIcon,
   FolderIcon,
@@ -14,6 +15,8 @@ import {
   PanelBottomClose,
   ChevronLeft,
   ListTree,
+  Play,
+  Save,
 } from 'lucide-react';
 
 interface DirEntry {
@@ -126,10 +129,12 @@ function FileExplorer({
   cwd,
   onFileOpen,
   onContextMenu,
+  refreshKey,
 }: {
   cwd: string;
   onFileOpen: (path: string, name: string) => void;
   onContextMenu: (e: React.MouseEvent, path: string, isDir: boolean) => void;
+  refreshKey: number;
 }) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -146,7 +151,7 @@ function FileExplorer({
         });
         return sorted.map((e) => ({
           name: e.name,
-          path: dirPath.replace(/\\/g, '/').replace(/\/?$/, '/') + e.name,
+          path: joinSystemPath(dirPath, e.name),
           isDirectory: e.isDirectory,
           children: e.isDirectory ? [] : undefined,
           loaded: false,
@@ -163,9 +168,7 @@ function FileExplorer({
     setLoading(false);
   }, [cwd, loadDir]);
 
-  useEffect(() => {
-    loadRoot();
-  }, [loadRoot]);
+  useEffect(() => { void loadRoot(); }, [loadRoot, refreshKey]);
 
   const toggleNode = useCallback(
     async (node: TreeNode) => {
@@ -195,41 +198,24 @@ function FileExplorer({
     [expanded, loadDir],
   );
 
-  const insertNode = useCallback((parentPath: string, newNode: TreeNode) => {
-    const insert = (nodes: TreeNode[]): TreeNode[] =>
-      nodes.map((n) => {
-        if (n.path === parentPath && n.children) {
-          const exists = n.children.some((c) => c.name === newNode.name);
-          if (exists) return n;
-          const updated = [...n.children, newNode].sort((a, b) => {
-            if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-            return a.name.localeCompare(b.name);
-          });
-          return { ...n, children: updated };
-        }
-        if (n.children) return { ...n, children: insert(n.children) };
-        return n;
-      });
-    setTree(insert);
-  }, []);
-
   const handleNewFile = useCallback(async () => {
     const name = prompt('File name:');
     if (!name) return;
     const parentDir = cwd;
-    const fullPath = parentDir.replace(/\\/g, '/').replace(/\/?$/, '/') + name;
+    const fullPath = joinSystemPath(parentDir, name);
     await window.api.fileWrite({ path: fullPath, content: '' });
-    insertNode(parentDir, { name, path: fullPath, isDirectory: false });
-  }, [cwd, insertNode]);
+    await loadRoot();
+    onFileOpen(fullPath, name);
+  }, [cwd, loadRoot, onFileOpen]);
 
   const handleNewFolder = useCallback(async () => {
     const name = prompt('Folder name:');
     if (!name) return;
     const parentDir = cwd;
-    const fullPath = parentDir.replace(/\\/g, '/').replace(/\/?$/, '/') + name;
+    const fullPath = joinSystemPath(parentDir, name);
     await window.api.fileMkdir({ path: fullPath });
-    insertNode(parentDir, { name, path: fullPath, isDirectory: true, children: [], loaded: false });
-  }, [cwd, insertNode]);
+    await loadRoot();
+  }, [cwd, loadRoot]);
 
   const renderNode = (node: TreeNode, depth: number) => {
     const isExpanded = expanded.has(node.path);
@@ -333,7 +319,7 @@ function OutlinePanel({ outline }: { outline: OutlineItem[] }) {
 }
 
 export function WorkspaceView() {
-  const [cwd] = useState(() => {
+  const [cwd, setCwd] = useState(() => {
     try {
       const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
       return cur.cwd ?? '.';
@@ -353,26 +339,52 @@ export function WorkspaceView() {
   const [renamePath, setRenamePath] = useState<string | null>(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [explorerVersion, setExplorerVersion] = useState(0);
+  const [workspacePath, setWorkspacePath] = useState(cwd);
+  const [systemRoots, setSystemRoots] = useState<SystemRoots>({ home: '', common: [], drives: [] });
 
   const editorRef = useRef<unknown>(null);
   const monacoRef = useRef<unknown>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const saveRef = useRef<() => void>(() => undefined);
 
   const openFileStore = useEditorStore((s) => s.openFile);
   const openFileContentStore = useEditorStore((s) => s.openFileContent);
   const openFileLanguageStore = useEditorStore((s) => s.openFileLanguage);
+  const launchFileStore = useEditorStore((s) => s.launchFile);
+  const clearLaunch = useEditorStore((s) => s.clearLaunch);
   const showAnimation = useEditorStore((s) => s.showAnimation);
+
+  useEffect(() => {
+    void window.api.fileSystemRoots().then((roots: SystemRoots) => setSystemRoots(roots));
+  }, []);
+
+  const openWorkspacePath = useCallback((target: string) => {
+    const normalized = normalizeSystemPath(target);
+    if (!normalized) return;
+    setCwd(normalized);
+    setWorkspacePath(normalized);
+  }, []);
+
+  const chooseWorkspaceFolder = useCallback(async () => {
+    const folder = await window.api.pickDirectory();
+    if (folder) openWorkspacePath(folder);
+  }, [openWorkspacePath]);
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalOutput]);
 
   useEffect(() => {
-    if (openFileStore && openFileContentStore) {
-      const name = openFileStore.split('/').pop() ?? openFileStore;
-      handleFileOpenFromStore(openFileStore, name, openFileContentStore, openFileLanguageStore ?? 'plaintext');
-    }
-  }, [openFileStore, openFileContentStore, openFileLanguageStore]);
+    if (!launchFileStore) return;
+    void window.api.fileOpen({ path: launchFileStore }).then((result: { ok?: boolean; error?: string }) => {
+      setTerminalOutput((prev) => [
+        ...prev,
+        result.error ? `Error launching ${launchFileStore}: ${result.error}` : `$ Launched ${launchFileStore}`,
+      ]);
+      clearLaunch();
+    });
+  }, [launchFileStore, clearLaunch]);
 
   const handleFileOpenFromStore = useCallback(
     (path: string, name: string, content: string, language: string) => {
@@ -392,6 +404,16 @@ export function WorkspaceView() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (openFileStore && openFileContentStore) {
+      const name = systemBaseName(openFileStore);
+      handleFileOpenFromStore(openFileStore, name, openFileContentStore, openFileLanguageStore ?? 'plaintext');
+      setLeftPanelOpen(false);
+      setRightPanelOpen(false);
+      setTerminalOpen(false);
+    }
+  }, [handleFileOpenFromStore, openFileContentStore, openFileLanguageStore, openFileStore]);
 
   const handleFileOpen = useCallback(async (path: string, name: string) => {
     const existing = tabs.findIndex((t) => t.path === path);
@@ -424,7 +446,7 @@ export function WorkspaceView() {
     monacoRef.current = monaco;
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      handleSave();
+      saveRef.current();
     });
   };
 
@@ -469,8 +491,11 @@ export function WorkspaceView() {
     }
   }, [tabs, activeTabIndex]);
 
+  useEffect(() => { saveRef.current = () => { void handleSave(); }; }, [handleSave]);
+
   const handleCloseTab = useCallback(
     (index: number) => {
+      if (tabs[index]?.modified && !window.confirm(`Close ${tabs[index].name} without saving?`)) return;
       setTabs((prev) => prev.filter((_, i) => i !== index));
       setActiveTabIndex((prev) => {
         if (index < prev) return prev - 1;
@@ -478,7 +503,7 @@ export function WorkspaceView() {
         return prev;
       });
     },
-    [tabs.length],
+    [tabs],
   );
 
   const handleTerminalSubmit = useCallback(async () => {
@@ -511,11 +536,12 @@ export function WorkspaceView() {
     if (!contextMenu) return;
     const name = prompt('File name:');
     if (!name) return;
-    const parentDir = contextMenu.isDir ? contextMenu.path : contextMenu.path.split('/').slice(0, -1).join('/');
-    const fullPath = parentDir.replace(/\/?$/, '/') + name;
+    const parentDir = contextMenu.isDir ? contextMenu.path : parentSystemPath(contextMenu.path);
+    const fullPath = joinSystemPath(parentDir, name);
     try {
       await window.api.fileWrite({ path: fullPath, content: '' });
       setTerminalOutput((prev) => [...prev, `$ Created file ${fullPath}`]);
+      setExplorerVersion((value) => value + 1);
     } catch (e) {
       setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
     }
@@ -526,11 +552,12 @@ export function WorkspaceView() {
     if (!contextMenu) return;
     const name = prompt('Folder name:');
     if (!name) return;
-    const parentDir = contextMenu.isDir ? contextMenu.path : contextMenu.path.split('/').slice(0, -1).join('/');
-    const fullPath = parentDir.replace(/\/?$/, '/') + name;
+    const parentDir = contextMenu.isDir ? contextMenu.path : parentSystemPath(contextMenu.path);
+    const fullPath = joinSystemPath(parentDir, name);
     try {
       await window.api.fileMkdir({ path: fullPath });
       setTerminalOutput((prev) => [...prev, `$ Created folder ${fullPath}`]);
+      setExplorerVersion((value) => value + 1);
     } catch (e) {
       setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
     }
@@ -540,16 +567,17 @@ export function WorkspaceView() {
   const handleCtxRename = useCallback(() => {
     if (!contextMenu) return;
     setRenamePath(contextMenu.path);
-    setRenameValue(contextMenu.path.split('/').pop() ?? '');
+    setRenameValue(systemBaseName(contextMenu.path));
     setContextMenu(null);
   }, [contextMenu]);
 
   const handleCtxDelete = useCallback(async () => {
     if (!contextMenu) return;
-    if (!confirm(`Delete ${contextMenu.path.split('/').pop()}?`)) return;
+    if (!confirm(`Delete ${systemBaseName(contextMenu.path)}?`)) return;
     try {
       await window.api.fileDelete({ path: contextMenu.path });
       setTerminalOutput((prev) => [...prev, `$ Deleted ${contextMenu.path}`]);
+      setExplorerVersion((value) => value + 1);
     } catch (e) {
       setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
     }
@@ -558,12 +586,11 @@ export function WorkspaceView() {
 
   const submitRename = useCallback(async () => {
     if (!renamePath || !renameValue) return;
-    const parts = renamePath.split('/');
-    parts[parts.length - 1] = renameValue;
-    const newPath = parts.join('/');
+    const newPath = joinSystemPath(parentSystemPath(renamePath), renameValue);
     try {
       await window.api.fileRename({ oldPath: renamePath, newPath });
       setTerminalOutput((prev) => [...prev, `$ Renamed to ${newPath}`]);
+      setExplorerVersion((value) => value + 1);
     } catch (e) {
       setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
     }
@@ -598,10 +625,51 @@ export function WorkspaceView() {
 
   return (
     <div className="w-full h-full flex flex-col bg-[#0a0a0f]">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-white/10 bg-[#0d0d13] px-3 py-2">
+        <button
+          type="button"
+          onClick={() => openWorkspacePath(parentSystemPath(cwd))}
+          disabled={parentSystemPath(cwd) === normalizeSystemPath(cwd)}
+          className="rounded border border-white/10 px-2 py-1 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white disabled:opacity-30"
+          title="Parent folder"
+        >
+          Up
+        </button>
+        <form
+          className="flex min-w-0 flex-1 items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            openWorkspacePath(workspacePath);
+          }}
+        >
+          <input
+            value={workspacePath}
+            onChange={(event) => setWorkspacePath(event.target.value)}
+            aria-label="Workspace system path"
+            className="h-7 min-w-0 flex-1 rounded border border-white/10 bg-white/5 px-2 font-mono text-[11px] text-gray-300 outline-none focus:border-blue-500/50"
+            spellCheck={false}
+          />
+          <button type="submit" className="h-7 rounded border border-white/10 px-3 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white">Go</button>
+        </form>
+        <button type="button" onClick={() => void chooseWorkspaceFolder()} className="h-7 rounded border border-white/10 px-3 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white">Open Folder</button>
+        <select
+          aria-label="System locations"
+          value=""
+          onChange={(event) => {
+            if (event.target.value) openWorkspacePath(event.target.value);
+          }}
+          className="h-7 max-w-44 rounded border border-white/10 bg-[#15151d] px-2 text-[10px] text-gray-300 outline-none"
+        >
+          <option value="">System locations</option>
+          {[...systemRoots.common, ...systemRoots.drives].map((location) => (
+            <option key={`${location.kind}:${location.path}`} value={location.path}>{location.name}</option>
+          ))}
+        </select>
+      </div>
       <div className="flex-1 min-h-0 flex">
         {leftPanelOpen && (
           <div className="w-52 flex-shrink-0 border-r border-white/10 overflow-hidden">
-            <FileExplorer cwd={cwd} onFileOpen={handleFileOpen} onContextMenu={handleContextMenu} />
+            <FileExplorer cwd={cwd} onFileOpen={handleFileOpen} onContextMenu={handleContextMenu} refreshKey={explorerVersion} />
           </div>
         )}
 
@@ -641,6 +709,26 @@ export function WorkspaceView() {
               ))}
             </div>
             <div className="flex items-center gap-1 px-2 flex-shrink-0">
+              {activeTab && (
+                <button
+                  onClick={() => void handleSave()}
+                  disabled={!activeTab.modified}
+                  className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-500/10 disabled:opacity-35"
+                  title="Save file (Ctrl+S)"
+                >
+                  <Save className="w-3 h-3" /> Save
+                </button>
+              )}
+              {activeTab?.name.toLowerCase().endsWith('.html') && (
+                <button
+                  onClick={() => void window.api.fileOpen({ path: activeTab.path })}
+                  className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+                  title="Launch HTML in your default browser"
+                >
+                  <Play className="w-3 h-3" />
+                  Run
+                </button>
+              )}
               {modifiedCount > 0 && <span className="text-[10px] text-amber-400">{modifiedCount} unsaved</span>}
               {rightPanelOpen ? (
                 <button

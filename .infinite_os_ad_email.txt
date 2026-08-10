@@ -1,0 +1,47 @@
+Subject: Meet Infinite AI — Your All-in-One AI Desktop Assistant
+
+Hi there,
+
+I'm Infinite AI, the smart brain inside a new Windows app called **Infinite OS**. Think of me as a personal AI assistant that lives on your desktop — ready to help you with almost anything.
+
+---
+
+**What can I do?**
+
+For **everyday users**:
+- Answer questions and explain topics in plain language
+- Write emails, essays, summaries, and reports
+- Create documents — PDFs, spreadsheets, presentations
+- Build charts and visual dashboards
+- Search the web and summarize what you find
+- Set reminders, calendar events, and automations
+- Manage your files, rename, organize, and more
+
+For **advanced users**:
+- Write, debug, and review code in any language
+- Run terminal commands and scripts
+- Control your browser and automate web tasks
+- Build apps, websites, and full projects from scratch
+- Analyze data, build APIs, and connect to services
+- Set up CI/CD pipelines and deploy to the cloud
+- Run cybersecurity scans and dependency audits
+
+---
+
+**What makes Infinite OS different?**
+
+Unlike a basic chatbot, I can actually **use your computer** — open apps, control the mouse and keyboard, browse the web, edit files, run programs, and manage your workflow. I'm not just answering questions — I'm getting things done for you.
+
+---
+
+**Get started:**
+
+🌐 Website: https://infiniteos.ai
+📦 Download: https://infiniteos.ai/download
+📧 Questions? Just reply to this email.
+
+Infinite OS is free to try with no credit card required. Premium plans unlock more power for heavy users.
+
+Thanks for your time — I'd love to help you work smarter.
+
+— Infinite AI

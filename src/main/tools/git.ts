@@ -5,7 +5,7 @@
  * Supports: clone, init, commit, push, pull, branch, merge, log, diff, status, stash, tag, fetch, rebase
  */
 
-import { spawn } from 'node:child_process';
+import { spawnWithTimeout } from './spawn-timeout.js';
 import type { Tool, ToolResult, ToolContext } from './base.js';
 
 interface GitBaseArgs {
@@ -58,40 +58,36 @@ interface GitArgs {
   command: string;
   cwd?: string;
   flags?: string[];
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+function checkGitResult(result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean }): ToolResult | null {
+  if (result.timedOut) return { content: 'Git command timed out after 120 seconds.', is_error: true };
+  if (result.exitCode !== 0) return { content: result.stderr || result.stdout, is_error: true };
+  return null;
 }
 
 /**
  * Execute a git command
  */
-async function runGitCommand(args: GitArgs): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const { command, cwd = process.cwd(), flags = [] } = args;
-  
-  return new Promise((resolve) => {
-    const shell = process.platform === 'win32' ? 'git.exe' : 'git';
-    const shellArgs = process.platform === 'win32' 
-      ? ['-NoProfile', '-Command', `git ${command} ${flags.join(' ')}`]
-      : ['-c', `git ${command} ${flags.join(' ')}`];
-    
-    const child = spawn(shell, shellArgs, {
-      cwd,
-      env: process.env,
-      windowsHide: true,
-    });
+async function runGitCommand(args: GitArgs): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> {
+  const { command, cwd = process.cwd(), flags = [], timeoutMs = 120_000, signal } = args;
 
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    child.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code ?? 0 });
-    });
-
-    child.on('error', (err) => {
-      resolve({ stdout: '', stderr: err.message, exitCode: 1 });
-    });
+  const result = await spawnWithTimeout({
+    command: 'git',
+    args: [command, ...flags],
+    cwd,
+    timeoutMs,
+    signal,
   });
+
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode ?? 0,
+    timedOut: result.timedOut,
+  };
 }
 
 /**
@@ -142,9 +138,8 @@ export const gitTool: Tool = {
       switch (subCommand) {
         case 'status': {
           const result = await runGitCommand({ command: 'status', cwd, flags: ['--porcelain', '-sb'] });
-          if (result.exitCode !== 0) {
-            return { content: result.stderr || result.stdout, is_error: true };
-          }
+          const gitError = checkGitResult(result);
+          if (gitError) return gitError;
           return { content: formatStatusOutput(result.stdout) };
         }
 
@@ -154,33 +149,29 @@ export const gitTool: Tool = {
             logFlags.push('--format=%H|%an|%ae|%at|%s');
           }
           const result = await runGitCommand({ command: 'log', cwd, flags: logFlags });
-          if (result.exitCode !== 0) {
-            return { content: result.stderr || result.stdout, is_error: true };
-          }
+          const gitError = checkGitResult(result);
+          if (gitError) return gitError;
           return { content: formatLogOutput(result.stdout) };
         }
 
         case 'diff': {
           const result = await runGitCommand({ command: 'diff', cwd, flags });
-          if (result.exitCode !== 0) {
-            return { content: result.stderr || result.stdout, is_error: true };
-          }
+          const gitError = checkGitResult(result);
+          if (gitError) return gitError;
           return { content: result.stdout || '(no changes)' };
         }
 
         case 'branch': {
           const result = await runGitCommand({ command: 'branch', cwd, flags: ['-a', ...flags] });
-          if (result.exitCode !== 0) {
-            return { content: result.stderr || result.stdout, is_error: true };
-          }
+          const gitError = checkGitResult(result);
+          if (gitError) return gitError;
           return { content: formatBranchOutput(result.stdout) };
         }
 
         default: {
-          const result = await runGitCommand({ command, cwd });
-          if (result.exitCode !== 0) {
-            return { content: result.stderr || result.stdout, is_error: true };
-          }
+          const result = await runGitCommand({ command: subCommand, cwd, flags });
+          const gitError = checkGitResult(result);
+          if (gitError) return gitError;
           return { content: result.stdout || 'Command executed successfully' };
         }
       }
@@ -219,7 +210,9 @@ export const gitStatusTool: Tool = {
 
       const flags = short ? ['--porcelain', '-sb'] : [];
       const result = await runGitCommand({ command: 'status', cwd, flags });
-
+      if (result.timedOut) {
+        return { content: 'Git status timed out after 120 seconds.', is_error: true };
+      }
       if (result.exitCode !== 0) {
         if (result.stderr.includes('Not a git repository')) {
           return { content: 'Not a Git repository', is_error: true };
@@ -286,9 +279,8 @@ export const gitLogTool: Tool = {
 
       const result = await runGitCommand({ command: 'log', cwd, flags });
 
-      if (result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout, is_error: true };
-      }
+      const gitError = checkGitResult(result);
+      if (gitError) return gitError;
 
       return { content: formatLogOutput(result.stdout) };
     } catch (error) {
@@ -344,9 +336,8 @@ export const gitCommitTool: Tool = {
 
       const result = await runGitCommand({ command: 'commit', cwd, flags });
 
-      if (result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout, is_error: true };
-      }
+      const gitError = checkGitResult(result);
+      if (gitError) return gitError;
 
       return { content: result.stdout || 'Commit created successfully' };
     } catch (error) {
@@ -399,18 +390,16 @@ export const gitBranchTool: Tool = {
 
       if (current) {
         const result = await runGitCommand({ command: 'rev-parse', cwd, flags: ['--abbrev-ref', 'HEAD'] });
-        if (result.exitCode !== 0) {
-          return { content: 'Not on a branch', is_error: true };
-        }
+        const gitError = checkGitResult(result);
+        if (gitError) return { content: result.exitCode !== 0 ? 'Not on a branch' : gitError.content, is_error: true };
         return { content: `Current branch: ${result.stdout.trim()}` };
       }
 
       if (deleteBranch) {
         flags = ['-D', deleteBranch];
         const result = await runGitCommand({ command, cwd, flags });
-        if (result.exitCode !== 0) {
-          return { content: result.stderr || result.stdout, is_error: true };
-        }
+        const gitError = checkGitResult(result);
+        if (gitError) return gitError;
         return { content: `Deleted branch: ${deleteBranch}` };
       }
 
@@ -418,18 +407,16 @@ export const gitBranchTool: Tool = {
         command = 'checkout';
         flags = ['-b', create];
         const result = await runGitCommand({ command, cwd, flags });
-        if (result.exitCode !== 0) {
-          return { content: result.stderr || result.stdout, is_error: true };
-        }
+        const gitError = checkGitResult(result);
+        if (gitError) return gitError;
         return { content: `Created and switched to branch: ${create}` };
       }
 
       if (list) {
         flags = ['-a'];
         const result = await runGitCommand({ command, cwd, flags });
-        if (result.exitCode !== 0) {
-          return { content: result.stderr || result.stdout, is_error: true };
-        }
+        const gitError = checkGitResult(result);
+        if (gitError) return gitError;
         return { content: formatBranchOutput(result.stdout) };
       }
 
@@ -496,9 +483,8 @@ export const gitPushTool: Tool = {
 
       const result = await runGitCommand({ command: 'push', cwd, flags });
 
-      if (result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout, is_error: true };
-      }
+      const gitError = checkGitResult(result);
+      if (gitError) return gitError;
 
       return { content: result.stdout || 'Pushed successfully' };
     } catch (error) {
@@ -550,9 +536,8 @@ export const gitPullTool: Tool = {
 
       const result = await runGitCommand({ command: 'pull', cwd, flags });
 
-      if (result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout, is_error: true };
-      }
+      const gitError = checkGitResult(result);
+      if (gitError) return gitError;
 
       return { content: result.stdout || 'Pulled successfully' };
     } catch (error) {
@@ -604,9 +589,8 @@ export const gitDiffTool: Tool = {
 
       const result = await runGitCommand({ command: 'diff', cwd, flags });
 
-      if (result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout, is_error: true };
-      }
+      const gitError = checkGitResult(result);
+      if (gitError) return gitError;
 
       return { content: result.stdout || (staged ? '(no staged changes)' : '(no changes)') };
     } catch (error) {

@@ -1,4 +1,4 @@
-import type { BrowserConfig as PWBrowserConfig, BrowserSession as PWBrowserSession, PageSnapshot } from './browser-agent-playwright.js';
+import type { BrowserConfig as PWBrowserConfig, BrowserSession as PWBrowserSession, BrowserSessionSummary as PWBrowserSessionSummary, PageSnapshot } from './browser-agent-playwright.js';
 
 import { BrowserAgentPlaywright as Impl } from './browser-agent-playwright.js';
 
@@ -39,6 +39,7 @@ export type BrowserAction = {
 };
 
 export type BrowserSession = PWBrowserSession;
+export type BrowserSessionSummary = PWBrowserSessionSummary;
 
 export class BrowserAgent {
   private impl: Impl;
@@ -104,7 +105,7 @@ export class BrowserAgent {
     return this.impl.closeSession(sessionId);
   }
 
-  listSessions(): BrowserSession[] {
+  listSessions(): BrowserSessionSummary[] {
     return this.impl.listSessions();
   }
 
@@ -116,4 +117,3 @@ export class BrowserAgent {
     return this.impl.getStats();
   }
 }
-

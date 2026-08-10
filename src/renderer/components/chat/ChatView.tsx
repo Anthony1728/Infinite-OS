@@ -1,15 +1,111 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Message } from '../../../shared/types';
-import { useChatStore } from '../../stores/chat';
+import type { ContentBlock, Message } from '../../../shared/types';
+import { inferExecutionMode, useChatStore, type ChatExecutionMode } from '../../stores/chat';
+import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
+import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { ProjectCards } from '../layout/ProjectCards';
+import { ToolCallCard } from '../tools/ToolCallCard';
+import { LiveActivityFeed } from './LiveActivityFeed';
+import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
+import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
+
+function InteractiveQuestion({ block, onAnswer }: { block: { question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }; onAnswer: (answer: string) => void }) {
+  const [customInput, setCustomInput] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const handleSelect = (label: string) => {
+    setSelected(label);
+    onAnswer(label);
+  };
+
+  const handleCustomSubmit = () => {
+    if (customInput.trim()) {
+      onAnswer(customInput.trim());
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0c1018] p-4 space-y-3">
+      <p className="text-sm font-medium text-zinc-200">{block.question}</p>
+      <div className="space-y-2">
+        {block.options.map((opt, i) => (
+          <button
+            key={i}
+            onClick={() => handleSelect(opt.label)}
+            className={`w-full text-left px-3 py-2 rounded-md border text-sm transition-colors ${
+              selected === opt.label
+                ? 'border-indigo-400 bg-indigo-400/10 text-indigo-200'
+                : 'border-white/10 hover:border-white/20 hover:bg-white/5 text-zinc-300'
+            }`}
+          >
+            <span className="font-medium">{opt.label}</span>
+            {opt.description && <span className="text-zinc-500 ml-2">{opt.description}</span>}
+          </button>
+        ))}
+      </div>
+      {block.allowCustom !== false && (
+        <div className="flex gap-2 pt-1">
+          <input
+            type="text"
+            value={customInput}
+            onChange={(e) => setCustomInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleCustomSubmit()}
+            placeholder="Type your own answer..."
+            className="flex-1 px-3 py-2 rounded-md border border-white/10 bg-black/20 text-zinc-200 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-indigo-400/50"
+          />
+          <button
+            onClick={handleCustomSubmit}
+            disabled={!customInput.trim()}
+            className="px-3 py-2 rounded-md bg-indigo-500/15 border border-indigo-400/25 text-indigo-200 text-sm font-medium disabled:opacity-50"
+          >
+            Submit
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface DeploymentStepResult {
+  name?: string;
+  status?: string;
+  output?: string;
+}
+
+interface DeploymentPipelineResult {
+  id?: string;
+  status?: string;
+  steps?: DeploymentStepResult[];
+}
+
+interface DeploymentEntityResult {
+  id: string;
+}
+
+interface DeploymentConfigResult {
+  commands?: { test?: string };
+}
+
+interface ImagePreview {
+  id: string;
+  data: string;
+  mediaType: string;
+  name: string;
+}
 
 const SLASH_COMMANDS = [
+  {
+    id: 'teach',
+    label: 'Teach Brain',
+    description: 'Train the Infinite Brain for 10 minutes or 1 hour',
+    icon: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z',
+  },
   {
     id: 'build',
     label: 'Build',
@@ -43,8 +139,32 @@ const SLASH_COMMANDS = [
   {
     id: 'browser',
     label: 'Browse Web',
-    description: 'Navigate and scrape websites',
+    description: 'Search, open sites, and act online from chat',
     icon: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418',
+  },
+  {
+    id: 'learn',
+    label: 'Learn',
+    description: 'Teach a topic, PDF, business idea, or subject fast',
+    icon: 'M4.5 6.75 12 3l7.5 3.75L12 10.5 4.5 6.75Zm0 4.5L12 15l7.5-3.75M6.75 13.5v3.75c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25V13.5',
+  },
+  {
+    id: 'quiz',
+    label: 'Quiz',
+    description: 'Create practice questions from notes or a PDF',
+    icon: 'M9 9.75h6M9 13.5h3m-6.75 6h13.5A2.25 2.25 0 0 0 21 17.25V6.75A2.25 2.25 0 0 0 18.75 4.5H5.25A2.25 2.25 0 0 0 3 6.75v10.5A2.25 2.25 0 0 0 5.25 19.5Z',
+  },
+  {
+    id: 'summarize',
+    label: 'Summarize',
+    description: 'Condense documents, pages, notes, and research',
+    icon: 'M4.5 6.75h15M4.5 10.5h15M4.5 14.25h9M4.5 18h6',
+  },
+  {
+    id: 'pc',
+    label: 'Control PC',
+    description: 'Open apps, click, type, capture screen, and automate',
+    icon: 'M3.75 5.25h16.5v10.5H3.75V5.25Zm5.25 15h6m-3-4.5v4.5',
   },
   {
     id: 'code',
@@ -59,12 +179,135 @@ const SLASH_COMMANDS = [
     icon: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z',
   },
   {
+    id: 'feature',
+    label: 'Add Feature',
+    description: 'Code a new capability into this workspace',
+    icon: 'M12 3v18m9-9H3m13.5-7.5 3 3m-15 9 3 3',
+  },
+  {
+    id: 'theme',
+    label: 'Customize UI',
+    description: 'Change colors, glow, glass, spacing, or template',
+    icon: 'M12 3a9 9 0 1 0 9 9c0-1.1-.9-2-2-2h-1.2a2 2 0 0 1-2-2V6.8A3.8 3.8 0 0 0 12 3Zm-4 8h.01M10 7h.01M8 15h.01M13 17h.01',
+  },
+  {
     id: 'research',
-    label: 'Research',
-    description: 'Deep research on a topic',
+    label: 'Deep Research',
+    description: 'Research with reliable sources directly in chat',
     icon: 'M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18',
   },
+  {
+    id: 'canvas',
+    label: 'Infinite Canvas',
+    description: 'Design and run visual AI workflows',
+    icon: 'M4.5 4.5h6v6h-6v-6Zm9 0h6v6h-6v-6Zm-9 9h6v6h-6v-6Zm9 0h6v6h-6v-6Z',
+  },
+  {
+    id: 'audit',
+    label: 'Audit Infinite OS',
+    description: 'Find bugs, run checks, and improve the app',
+    icon: 'M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  },
+  {
+    id: 'automate',
+    label: 'Run Automation',
+    description: 'Execute an automation workflow in chat',
+    icon: 'M3.75 13.5L14.25 2.25 12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
+  },
+  {
+    id: 'schedule',
+    label: 'Schedule Task',
+    description: 'Schedule an action for later (e.g., tomorrow at 9am)',
+    icon: 'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+  },
 ];
+
+const CHAT_MODE_STORAGE_KEY = 'infinite:chat-mode';
+const CHAT_AGENT_STORAGE_KEY = 'infinite:chat-agent';
+const CHAT_MODE_OPTIONS: Array<{
+  id: ChatExecutionMode;
+  label: string;
+  description: string;
+  color: string;
+  path: string;
+}> = [
+  {
+    id: 'chat', label: 'Chat Mode', description: 'Natural conversation and help', color: 'text-sky-400',
+    path: 'M7.5 8.25h9m-9 3H12m-8.25 7.5 3.6-3.6c.42-.42.99-.66 1.59-.66h8.31A2.25 2.25 0 0 0 19.5 15V6A2.25 2.25 0 0 0 17.25 3.75H6A2.25 2.25 0 0 0 3.75 6v12.75Z',
+  },
+  {
+    id: 'agent', label: 'Agent Mode', description: 'Plan, act, recover, and verify', color: 'text-cyan-400',
+    path: 'M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z',
+  },
+  {
+    id: 'research', label: 'Research Mode', description: 'Deep research with reliable sources', color: 'text-violet-400',
+    path: 'm21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
+  },
+  {
+    id: 'code', label: 'Code Mode', description: 'Inspect, implement, and validate code', color: 'text-blue-400',
+    path: 'm8.25 6.75-5.25 5.25 5.25 5.25m7.5-10.5L21 12l-5.25 5.25',
+  },
+  {
+    id: 'build', label: 'Creative Mode', description: 'Create a complete working outcome', color: 'text-fuchsia-400',
+    path: 'M12 3v18m9-9H3m13.5-7.5 3 3m-15 9 3 3',
+  },
+];
+
+function initialChatMode(): ChatExecutionMode {
+  const stored = localStorage.getItem(CHAT_MODE_STORAGE_KEY);
+  return CHAT_MODE_OPTIONS.some((option) => option.id === stored) ? (stored as ChatExecutionMode) : 'agent';
+}
+
+function initialChatAgent(): string {
+  return localStorage.getItem(CHAT_AGENT_STORAGE_KEY) ?? 'auto';
+}
+
+function workspaceTabForPrompt(text: string): { kind: AiTabKind; title: string } | null {
+  const lower = text.toLowerCase();
+  const wantsTab = /\b(tab|side\s*tab|workspace|panel)\b/.test(lower);
+  const mentionsDocument = /\b(pdf|document|docx|notes|file|article|page|transcript|report)\b/.test(lower);
+
+  if (/\b(quiz|test me|questions)\b/.test(lower)) {
+    return { kind: 'quiz', title: 'Generated Quiz' };
+  }
+
+  if (/\b(business summary|business brief|business plan|market summary|startup summary)\b/.test(lower)) {
+    return { kind: 'business', title: 'Business Summary' };
+  }
+
+  if (/\b(summarize|summary|brief|condense|extract key points)\b/.test(lower) && (wantsTab || mentionsDocument)) {
+    return { kind: 'summary', title: 'Smart Summary' };
+  }
+
+  if (
+    /\b(add|create|build|implement|edit|change)\b/.test(lower) &&
+    /\b(feature|functionality|source code|codebase|sidebar|side tab|tab)\b/.test(lower)
+  ) {
+    return { kind: 'feature', title: 'Feature Build' };
+  }
+
+  if (wantsTab && /\b(teach|learn|explain|study|understand|soccer terms|formula)\b/.test(lower)) {
+    return { kind: 'lesson', title: 'Learning Plan' };
+  }
+
+  if (wantsTab) return { kind: 'workspace', title: 'AI Workspace' };
+  return null;
+}
+
+function ChatAgentIcon({ icon, className = 'h-3.5 w-3.5' }: { icon?: string; className?: string }) {
+  const value = icon?.trim();
+  const isSvgPath = Boolean(value && /^[Mm]\s*-?[\d.]/.test(value));
+
+  if (isSvgPath) {
+    return (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d={value} />
+      </svg>
+    );
+  }
+
+  return <span className="text-xs leading-none" aria-hidden="true">{value || 'A'}</span>;
+}
 
 export function ChatView({
   onViewChange,
@@ -80,8 +323,22 @@ export function ChatView({
   const loadSessions = useChatStore((s) => s.loadSessions);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const openInEditor = useEditorStore((s) => s.openInEditor);
+  const createAiTab = useAiTabsStore((s) => s.createTab);
   const [input, setInput] = useState('');
+  const [chatMode, setChatMode] = useState<ChatExecutionMode>(initialChatMode);
+  const [selectedAgentId, setSelectedAgentId] = useState(initialChatAgent);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const selectChatMode = useCallback((mode: ChatExecutionMode) => {
+    setChatMode(mode);
+    localStorage.setItem(CHAT_MODE_STORAGE_KEY, mode);
+  }, []);
+
+  const selectAgent = useCallback((agentId: string) => {
+    setSelectedAgentId(agentId);
+    localStorage.setItem(CHAT_AGENT_STORAGE_KEY, agentId);
+  }, []);
 
   useEffect(() => {
     loadSessions();
@@ -91,8 +348,37 @@ export function ChatView({
   }, [initStreamListener]);
 
   const handleSend = useCallback(
-    (text: string) => {
-      if (!text.trim()) return;
+    (text: string, imageBlocks?: ContentBlock[]) => {
+      if (!text.trim() && !imageBlocks?.length) return;
+
+      const dispatch = (msg: string, mode?: ChatExecutionMode, agent?: string) =>
+        sendMessage(msg, imageBlocks, mode, agent);
+
+      if (/\b(configure|setup|set up|connect|add)\b.*\b(email|mailbox|smtp|imap)\b/i.test(text)) {
+        window.dispatchEvent(new Event('infinite:open-settings'));
+        setInput('');
+        return;
+      }
+
+      const isAppearanceRequest = /\b(change|make|switch|customi[sz]e|set|use)\b.*\b(ui|interface|theme|sidebar|bar|color|glow|glass|layout|corners|spacing)\b/i.test(text);
+      if (isAppearanceRequest) {
+        const patch = appearanceFromPrompt(text);
+        if (patch) {
+          useUIStore.getState().setAppearance(patch);
+          setInput('');
+          return;
+        }
+        window.dispatchEvent(new CustomEvent('infinite:open-personalization', { detail: 'appearance' }));
+        setInput('');
+        return;
+      }
+
+      const openWorkspaceTab = (prompt: string, preferred?: { kind: AiTabKind; title: string }) => {
+        const tabMeta = preferred || workspaceTabForPrompt(prompt);
+        if (!tabMeta) return;
+        const tab = createAiTab({ ...tabMeta, prompt });
+        onViewChange(tab.id);
+      };
 
       // Handle slash commands
       if (text.startsWith('/')) {
@@ -100,8 +386,11 @@ export function ChatView({
         const arg = args.join(' ');
 
         switch (cmd) {
+          case 'teach':
+            dispatch(text);
+            break;
           case 'build':
-            sendMessage(`Build me a ${arg || 'modern web application'} with best practices and clean architecture`);
+            dispatch(`Build me a ${arg || 'modern web application'} with best practices and clean architecture`);
             break;
           case 'deploy':
             (async () => {
@@ -112,17 +401,17 @@ export function ChatView({
                   cwd,
                   message: `deploy ${arg || new Date().toISOString().slice(0, 19)}`,
                 });
-                const pipeline = result as any;
+                const pipeline = result as DeploymentPipelineResult;
                 if (pipeline?.status === 'success') {
-                  sendMessage(
-                    `Deployment complete! All steps succeeded:\n${pipeline.steps?.map((s: any) => `  - ${s.name}: ${s.status}`).join('\n')}`,
+                  dispatch(
+                    `Deployment complete! All steps succeeded:\n${pipeline.steps?.map((s) => `  - ${s.name}: ${s.status}`).join('\n')}`,
                   );
                 } else {
-                  const failed = pipeline?.steps?.find((s: any) => s.status === 'failed');
-                  sendMessage(`Deployment failed at step "${failed?.name}": ${failed?.output || 'unknown error'}`);
+                  const failed = pipeline?.steps?.find((s) => s.status === 'failed');
+                  dispatch(`Deployment failed at step "${failed?.name}": ${failed?.output || 'unknown error'}`);
                 }
-              } catch (e: any) {
-                sendMessage(`Deployment error: ${e?.message || e}`);
+              } catch (e: unknown) {
+                dispatch(`Deployment error: ${e instanceof Error ? e.message : String(e)}`);
               }
             })();
             break;
@@ -134,7 +423,7 @@ export function ChatView({
             }
             break;
           case 'video':
-            sendMessage(`Generate a video about: ${arg || 'a compelling product demo'}`);
+            dispatch(`Generate a video about: ${arg || 'a compelling product demo'}`);
             break;
           case 'test':
             (async () => {
@@ -142,144 +431,200 @@ export function ChatView({
                 const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
                 const cwd = settings.cwd ?? '.';
                 const detected = await window.api.deployDetectProject({ projectPath: cwd });
-                const config = (await window.api.deployDefaultConfig({ type: detected || 'node' })) as any;
+                const config = (await window.api.deployDefaultConfig({ type: detected || 'node' })) as DeploymentConfigResult;
                 const target = await window.api.deployCreateTarget({ name: 'test-run', type: 'local', config: {} });
                 const pipeline = await window.api.deployCreatePipeline({
                   name: 'Run Tests',
                   projectId: 'default',
-                  targetId: (target as any).id,
+                  targetId: (target as DeploymentEntityResult).id,
                   commands: [config.commands?.test || 'npx vitest run'],
                 });
-                const result = (await window.api.deployRunPipeline({ pipelineId: (pipeline as any).id, cwd })) as any;
+                const result = (await window.api.deployRunPipeline({ pipelineId: (pipeline as DeploymentEntityResult).id, cwd })) as DeploymentPipelineResult;
                 if (result?.status === 'success') {
-                  sendMessage(`Tests passed!\n\n${result.steps?.map((s: any) => s.output).join('\n')}`);
+                  dispatch(`Tests passed!\n\n${result.steps?.map((s) => s.output).join('\n')}`);
                 } else {
-                  sendMessage(
+                  dispatch(
                     `Tests failed.\n\n${
                       result?.steps
-                        ?.filter((s: any) => s.status === 'failed')
-                        .map((s: any) => s.output)
+                        ?.filter((s) => s.status === 'failed')
+                        .map((s) => s.output)
                         .join('\n') || 'Unknown error'
                     }`,
                   );
                 }
-              } catch (e: any) {
-                sendMessage(`Test error: ${e?.message || e}`);
+              } catch (e: unknown) {
+                dispatch(`Test error: ${e instanceof Error ? e.message : String(e)}`);
               }
             })();
             break;
           case 'browser':
-            sendMessage(`Browse and analyze: ${arg || 'the current project documentation'}`);
+            dispatch(arg ? `Open Chrome and search the web for ${arg}` : 'Open Chrome and wait for my next instruction');
+            break;
+          case 'learn':
+            openWorkspaceTab(text, { kind: 'lesson', title: 'Learning Plan' });
+            dispatch(
+              `Teach me ${arg || 'this topic'} clearly. Make it useful for a student, entrepreneur, or business owner, with examples, a short study plan, and checks for understanding.`,
+            );
+            break;
+          case 'quiz':
+            openWorkspaceTab(text, { kind: 'quiz', title: 'Generated Quiz' });
+            dispatch(`Create a quiz from ${arg || 'the attached notes or PDF text'} with answers and explanations.`);
+            break;
+          case 'summarize':
+            openWorkspaceTab(text, { kind: 'summary', title: 'Smart Summary' });
+            dispatch(`Summarize ${arg || 'the attached document or notes'} into key ideas, actions, risks, and a study checklist.`);
+            break;
+          case 'pc':
+            dispatch(arg || 'Open Chrome and wait for my next instruction');
             break;
           case 'code':
-            sendMessage(`Show me the code for: ${arg || 'the main component'}`);
+            dispatch(`Show me the code for: ${arg || 'the main component'}`);
             break;
           case 'agent':
-            sendMessage(`Create a new AI agent specialized in: ${arg || 'general tasks'}`);
+            dispatch(`Create a new AI agent specialized in: ${arg || 'general tasks'}`);
             break;
+          case 'feature':
+            openWorkspaceTab(text, { kind: 'feature', title: 'Feature Build' });
+            dispatch(
+              `Implement this requested Infinite OS feature: ${arg || 'describe the feature with me first'}. Inspect the relevant files, make the smallest solid source-code changes, use BuildFeature or targeted edits where appropriate, run validation, and report changed files.`,
+            );
+            break;
+          case 'theme': {
+            const patch = appearanceFromPrompt(arg);
+            if (patch) useUIStore.getState().setAppearance(patch);
+            else window.dispatchEvent(new CustomEvent('infinite:open-personalization', { detail: 'appearance' }));
+            break;
+          }
           case 'research':
-            sendMessage(`Research deeply: ${arg || 'best practices for this project'}`);
+            dispatch(
+              `Perform deep research on: ${arg || 'best practices for this project'}. Use reliable current sources, compare important viewpoints, include direct source links, and clearly separate verified facts from conclusions.`,
+            );
+            break;
+          case 'canvas':
+            onViewChange('canvas');
+            break;
+          case 'automate':
+            dispatch(arg
+              ? `Run this automation in the chat interface: ${arg}. Use the Automation tool to execute the workflow, spawn agents as needed, and report progress here.`
+              : 'List all available automations and their status.');
+            break;
+          case 'schedule':
+            dispatch(arg
+              ? `Schedule this task: ${arg}. Use the Automation tool to create a scheduled workflow with the specified time and action.`
+              : 'What would you like to schedule? Tell me the time and action (e.g., "tomorrow at 9am send email to john@example.com").');
+            break;
+          case 'audit':
+            dispatch(
+              'Run a full Infinite OS self-improvement audit now. Inspect the codebase, use the SelfImprove tool if available, fix clear bugs, run validation, and report the changed files.',
+            );
             break;
           default:
-            sendMessage(text);
+            dispatch(text);
         }
       } else {
-        sendMessage(text);
+        openWorkspaceTab(text);
+        const inferredMode = inferExecutionMode(text);
+        selectChatMode(inferredMode);
+        dispatch(text, inferredMode, selectedAgentId === 'auto' ? undefined : selectedAgentId);
       }
       setInput('');
     },
-    [sendMessage, openInEditor],
+    [sendMessage, openInEditor, createAiTab, onViewChange, selectChatMode, selectedAgentId],
   );
-
-  const openPrompt = (value: string) => {
-    setInput(value);
-    requestAnimationFrame(() => inputRef.current?.focus());
-  };
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <ChatWorkspaceHeader onViewChange={onViewChange} openPrompt={openPrompt} />
       <div className="flex-1 min-h-0">
         {!currentSessionId ? (
-          <DemoChat input={input} setInput={setInput} inputRef={inputRef} onSend={handleSend} />
+          <DemoChat
+            header={<ChatWorkspaceHeader onViewChange={onViewChange} />}
+            input={input}
+            setInput={setInput}
+            inputRef={inputRef}
+            onSend={handleSend}
+            mode={chatMode}
+            onModeChange={selectChatMode}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={selectAgent}
+            workspaceOpen={workspaceOpen}
+            onWorkspaceOpenChange={setWorkspaceOpen}
+            onOpenWorkspace={() => onViewChange('workspace')}
+            onOpenDeploy={onOpenDeploy}
+          />
         ) : (
           <RealChat
+            header={<ChatWorkspaceHeader onViewChange={onViewChange} />}
             messages={messages}
             streaming={streaming}
             input={input}
             setInput={setInput}
             inputRef={inputRef}
             onSend={handleSend}
+            mode={chatMode}
+            onModeChange={selectChatMode}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={selectAgent}
+            workspaceOpen={workspaceOpen}
+            onWorkspaceOpenChange={setWorkspaceOpen}
+            onOpenWorkspace={() => onViewChange('workspace')}
+            onOpenDeploy={onOpenDeploy}
           />
         )}
-      </div>
-      <div className="flex-shrink-0 px-10 pb-6">
-        <ProjectCards onOpenWorkspace={() => onViewChange('workspace')} onOpenDeploy={onOpenDeploy} />
       </div>
     </div>
   );
 }
 
-function ChatWorkspaceHeader({
-  onViewChange,
-  openPrompt,
-}: {
-  onViewChange: (view: string) => void;
-  openPrompt: (value: string) => void;
-}) {
+function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) => void }) {
   const firstName = useAuthStore((state) => state.user?.name?.split(' ')[0] || 'there');
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
   const modes = [
     {
-      label: 'AI Chat',
-      action: () => openPrompt(''),
+      label: 'Chat',
+      view: 'chats',
       path: 'M7.5 8.25h9m-9 3H12m-8.25 7.5 3.6-3.6c.42-.42.99-.66 1.59-.66h8.31A2.25 2.25 0 0 0 19.5 15V6A2.25 2.25 0 0 0 17.25 3.75H6A2.25 2.25 0 0 0 3.75 6v12.75Z',
     },
     {
-      label: 'Infinite Canvas',
-      action: () => onViewChange('canvas'),
-      path: 'M3.75 3.75h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Zm-10 10h6.5v6.5h-6.5v-6.5Zm10 0h6.5v6.5h-6.5v-6.5Z',
-    },
-    {
       label: 'Code',
-      action: () => onViewChange('workspace'),
+      view: 'workspace',
       path: 'm8.25 6.75-5.25 5.25 5.25 5.25m7.5-10.5L21 12l-5.25 5.25M14.25 3.75l-4.5 16.5',
     },
-    { label: 'Analyze', action: () => openPrompt('Analyze '), path: 'M3.75 19.5h16.5M6 16.5v-6m6 6V4.5m6 12v-9' },
     {
-      label: 'Automate',
-      action: () => onViewChange('automations'),
-      path: 'M13 2.75 4.75 13h6.5L11 21.25 19.25 11h-6.5L13 2.75Z',
+      label: 'Agent',
+      view: 'agents',
+      path: 'M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z',
     },
     {
-      label: 'Research',
-      action: () => openPrompt('/research '),
-      path: 'm21 21-4.35-4.35m1.35-5.4a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z',
+      label: 'Build',
+      view: 'app-builder',
+      path: 'M12 3v18m9-9H3m3.75-6.75 10.5 13.5m0-13.5-10.5 13.5',
     },
     {
-      label: 'Design',
-      action: () => openPrompt('Design '),
-      path: 'M12 21s7.5-4.35 7.5-10.5A4.5 4.5 0 0 0 12 7.14a4.5 4.5 0 0 0-7.5 3.36C4.5 16.65 12 21 12 21Z',
+      label: 'Canvas',
+      view: 'canvas',
+      path: 'M4.5 4.5h6v6h-6v-6Zm9 0h6v6h-6v-6Zm-9 9h6v6h-6v-6Zm9 0h6v6h-6v-6Z',
     },
   ];
   return (
-    <div className="flex-shrink-0 px-10 pt-12 pb-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-[-0.02em] text-zinc-100 leading-tight">
-          {greeting}, {firstName}
+    <section className="px-6 pb-2 pt-5 lg:px-10" aria-label="Chat modes and greeting">
+      <div className="mx-auto max-w-[660px] text-center">
+        <h1 className="text-[20px] font-medium tracking-[-0.025em] text-zinc-100 leading-tight">
+          {greeting}, <span className="os-accent-text font-semibold">{firstName}</span>
         </h1>
-        <p className="text-sm text-textMuted mt-3">InfiniteAI is ready to build, analyze, and automate with you.</p>
-        <div className="mt-8 flex items-center gap-3 overflow-x-auto rounded-xl border border-white/[0.07] bg-[#0c0f17]/70 p-2 custom-scrollbar">
+        <p className="mt-2 text-[12px] text-zinc-500">
+          How can I help you build, create and automate today?
+        </p>
+        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/90 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)]">
           {modes.map((mode, index) => (
             <button
               key={mode.label}
-              onClick={mode.action}
-              aria-current={index === 0 ? 'page' : undefined}
-              className={`flex h-10 shrink-0 items-center gap-2.5 rounded-lg px-4 text-xs transition-all ${index === 0 ? 'border border-cyan-400/30 bg-cyan-400/[0.07] text-zinc-100 shadow-sm' : 'border border-transparent text-textMuted hover:bg-white/[0.035] hover:text-zinc-200'}`}
+              onClick={() => onViewChange(mode.view)}
+              className={`flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-full px-2 text-[10px] transition-all ${index === 0 ? 'os-active-mode border text-zinc-100' : 'border border-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200'}`}
             >
               <svg
-                className={`h-4 w-4 ${index === 0 ? 'text-cyan-400' : 'text-indigo-400'}`}
+                className={`h-3.5 w-3.5 ${index === 0 ? 'os-accent-text' : 'text-zinc-500'}`}
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.6"
@@ -292,7 +637,7 @@ function ChatWorkspaceHeader({
           ))}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -301,37 +646,188 @@ function InputBar({
   setInput,
   inputRef,
   onSend,
+  mode,
+  onModeChange,
+  selectedAgentId,
+  onAgentChange,
   placeholder,
   isOnline = false,
+  workspaceOpen,
+  onWorkspaceOpenChange,
+  onOpenWorkspace,
+  onOpenDeploy,
 }: {
   input: string;
   setInput: (v: string) => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
-  onSend: (text: string) => void;
+  onSend: (text: string, images?: ContentBlock[]) => void;
+  mode: ChatExecutionMode;
+  onModeChange: (mode: ChatExecutionMode) => void;
+  selectedAgentId: string;
+  onAgentChange: (agentId: string) => void;
   placeholder?: string;
   isOnline?: boolean;
+  workspaceOpen: boolean;
+  onWorkspaceOpenChange: (open: boolean) => void;
+  onOpenWorkspace: () => void;
+  onOpenDeploy: () => void;
 }) {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [uncensoredMode, setUncensoredMode] = useState(false);
+  const [uncensoredConfirmOpen, setUncensoredConfirmOpen] = useState(false);
+  const [images, setImages] = useState<ImagePreview[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isListening, transcript, startListening, stopListening, isSupported } = useVoiceAssistant();
+  const dictationPrefixRef = useRef('');
+
+  const processFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string | undefined;
+      const base64 = result?.split(',')[1];
+      if (!base64) return;
+      setImages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), data: base64, mediaType: file.type, name: file.name },
+      ]);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach(processFile);
+    e.target.value = '';
+  }, [processFile]);
+
+  const removeImage = useCallback((id: string) => {
+    setImages((prev) => prev.filter((img) => img.id !== id));
+  }, []);
+
+  const toImageBlocks = useCallback((): ContentBlock[] | undefined => {
+    if (images.length === 0) return undefined;
+    return images.map((img) => ({
+      type: 'image' as const,
+      source: { type: 'base64' as const, mediaType: img.mediaType, data: img.data },
+    }));
+  }, [images]);
+
+  const send = useCallback(() => {
+    if (!input.trim() && images.length === 0) return;
+    const blocks = toImageBlocks();
+    onSend(input, blocks);
+    setInput('');
+    setImages([]);
+    setShowSlashMenu(false);
+    if (inputRef.current) inputRef.current.style.height = '';
+  }, [input, images, onSend, setInput, toImageBlocks, inputRef]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          processFile(file);
+        }
+      }
+    }
+  }, [processFile]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (e.dataTransfer?.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      setDragActive(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    const files = e.dataTransfer?.files;
+    if (!files) return;
+    Array.from(files).forEach(processFile);
+  }, [processFile]);
+  const {
+    error: dictationError,
+    interimTranscript,
+    isListening,
+    isSupported,
+    startListening,
+    stopListening,
+    transcript,
+  } = useVoiceAssistant();
+  const agentTypes = useAgentsStore((state) => state.types);
+  const announceUncensoredMode = useChatStore((state) => state.announceUncensoredMode);
+  const activeMode = CHAT_MODE_OPTIONS.find((option) => option.id === mode) ?? CHAT_MODE_OPTIONS[1];
+  const selectedAgent = agentTypes.find((agent) => agent.id === selectedAgentId);
 
   useEffect(() => {
-    if (transcript) setInput(transcript);
+    if (!transcript) return;
+    const prefix = dictationPrefixRef.current;
+    setInput(`${prefix}${prefix && !/\s$/.test(prefix) ? ' ' : ''}${transcript}`);
   }, [transcript, setInput]);
 
-  const attachTextFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (file.size > 1_000_000) {
-      setInput(`Please analyze ${file.name}. The file is too large to attach inline; open it from the workspace.`);
-    } else {
-      const content = await file.text();
-      setInput(`${input}${input ? '\n\n' : ''}Attached file: ${file.name}\n\n${content}`);
+  useEffect(() => {
+    let active = true;
+    window.api.getSetting({ key: 'uncensoredMode' })
+      .then((value: unknown) => {
+        if (active) setUncensoredMode(value === true);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  const setUncensoredModePersisted = async (next: boolean) => {
+    setUncensoredMode(next);
+    const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as { cwd?: string };
+    try {
+      await window.api.setSetting({
+        scope: 'user',
+        key: 'uncensoredMode',
+        value: next,
+        cwd: current.cwd ?? '.',
+      });
+      if (next) await announceUncensoredMode();
+    } catch {
+      setUncensoredMode(!next);
     }
-    event.target.value = '';
+    setUncensoredConfirmOpen(false);
     inputRef.current?.focus();
+  };
+
+  const toggleUncensoredMode = () => {
+    if (uncensoredMode) {
+      void setUncensoredModePersisted(false);
+      return;
+    }
+    setUncensoredConfirmOpen(true);
+    setAgentMenuOpen(false);
+    setModeMenuOpen(false);
+  };
+
+  const toggleDictation = () => {
+    if (isListening) {
+      stopListening();
+      inputRef.current?.focus();
+      return;
+    }
+    dictationPrefixRef.current = input;
+    startListening();
   };
 
   const isSlashCommand = input.startsWith('/');
@@ -368,13 +864,14 @@ function InputBar({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSend(input);
+      send();
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
+    if (value.trim() && !value.startsWith('/')) onModeChange(inferExecutionMode(value));
     setShowSlashMenu(value.startsWith('/'));
     setSelectedSlashIndex(0);
   };
@@ -389,8 +886,35 @@ function InputBar({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    const closeWorkspace = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key === 'Escape') {
+        onWorkspaceOpenChange(false);
+      } else if (event instanceof MouseEvent && !composerRef.current?.contains(event.target as Node)) {
+        onWorkspaceOpenChange(false);
+      }
+    };
+    document.addEventListener('mousedown', closeWorkspace);
+    document.addEventListener('keydown', closeWorkspace);
+    return () => {
+      document.removeEventListener('mousedown', closeWorkspace);
+      document.removeEventListener('keydown', closeWorkspace);
+    };
+  }, [workspaceOpen, onWorkspaceOpenChange]);
+
   return (
-    <div className="w-full relative">
+    <div ref={composerRef} className="w-full relative">
+      {workspaceOpen && (
+        <div className="absolute bottom-full left-0 right-0 z-40 mb-3 animate-fade-in">
+          <ProjectCards
+            onOpenWorkspace={onOpenWorkspace}
+            onOpenDeploy={onOpenDeploy}
+            expanded
+            onExpandedChange={onWorkspaceOpenChange}
+          />
+        </div>
+      )}
       {/* Slash command menu */}
       {showSlashMenu && filteredCommands.length > 0 && (
         <div
@@ -432,126 +956,240 @@ function InputBar({
         </div>
       )}
 
-      {/* Brain mode indicator */}
-      {!isOnline && (
-        <div className="mb-2 px-3 py-2 bg-gradient-to-r from-purple-500/10 via-cyan-500/10 to-pink-500/10 border border-purple-500/20 rounded-xl flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-400 via-cyan-400 to-pink-400 animate-pulse" />
-          <span className="text-[11px] text-purple-300">Infinite AI Brain Active</span>
-          <span className="text-[10px] text-textMuted ml-auto">Offline mode — Learning from interactions</span>
-        </div>
-      )}
-
-      <div className="mb-3 flex items-center gap-3 overflow-x-auto custom-scrollbar">
-        {['Add dark mode', 'Add email notifications', 'Integrate Stripe', 'Add team settings'].map((suggestion) => (
-          <button
-            key={suggestion}
-            onClick={() => {
-              setInput(suggestion);
-              inputRef.current?.focus();
-            }}
-            className="h-7 shrink-0 rounded-full border border-white/[0.07] bg-white/[0.018] px-3 text-[9px] text-zinc-500 hover:border-indigo-500/25 hover:text-zinc-200 transition-colors"
-          >
-            {suggestion}
-          </button>
-        ))}
-      </div>
-
       {/* Input container with glow effect when online */}
       <div
-        className={`relative min-h-[124px] bg-[#0d111b] border rounded-2xl overflow-hidden transition-all duration-300 shadow-lg ${
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] border rounded-xl overflow-visible transition-all duration-300 shadow-[0_14px_40px_rgba(0,0,0,.22)] ${
           isOnline
             ? 'border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.15),0_0_40px_rgba(34,211,238,0.05)] focus-within:border-cyan-400/60 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.2),0_0_50px_rgba(34,211,238,0.1)]'
             : 'border-borderSubtle focus-within:border-indigo-500/40 shadow-black/10'
-        }`}
+        } ${dragActive ? 'border-indigo-400/70 ring-2 ring-indigo-400/30' : ''}`}
       >
+        {dragActive && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-indigo-400/60 bg-indigo-500/10">
+            <span className="rounded-lg bg-[#0b101a]/90 px-3 py-1.5 text-xs font-medium text-indigo-300">
+              Drop images to attach
+            </span>
+          </div>
+        )}
         <textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
           value={input}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder || (isOnline ? 'Ask Infinity anything...' : 'Ask the Infinite AI Brain anything...')}
+          onPaste={handlePaste}
+          onInput={(e) => {
+            const t = e.currentTarget;
+            if (!t.value) {
+              t.style.height = '';
+              return;
+            }
+            t.style.height = 'auto';
+            t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
+          }}
+          placeholder={placeholder || (isOnline ? 'Ask Infinite OS anything...' : 'Ask the Infinite AI Brain anything...')}
           rows={1}
-          aria-label="Message InfiniteAI"
-          className="w-full min-h-[68px] bg-transparent text-textMain text-sm px-5 pt-5 pb-2 pr-16 outline-none resize-none placeholder:text-textMuted/50"
+          aria-label="Message Infinite OS"
+          className="os-chat-textarea w-full min-h-[56px] max-h-40 overflow-y-auto bg-transparent text-textMain text-sm px-5 pt-4 pb-2 pr-4 outline-none resize-none placeholder:text-textMuted/50"
         />
-        <div className="absolute left-4 right-4 bottom-3 flex items-center gap-2">
+        {images.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pt-1">
+            {images.map((img) => (
+              <div key={img.id} className="group relative">
+                <img
+                  src={`data:${img.mediaType};base64,${img.data}`}
+                  alt={img.name}
+                  className="h-16 w-16 rounded-lg border border-white/10 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(img.id)}
+                  aria-label={`Remove ${img.name}`}
+                  title="Remove image"
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/15 bg-zinc-900 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-white"
+                >
+                  <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-auto flex flex-wrap items-center gap-2 px-4 pb-3 pt-2">
           <input
             ref={fileInputRef}
             type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
             className="hidden"
-            accept=".txt,.md,.json,.ts,.tsx,.js,.jsx,.css,.html,.py,.rs,.go,.java,.csv,.xml,.yaml,.yml"
-            onChange={attachTextFile}
           />
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
-            title="Attach a text or code file"
-            aria-label="Attach file"
+            aria-label="Attach an image"
+            title="Attach an image — paste or drag-drop also works"
+            className="flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-200"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
             </svg>
           </button>
-          <button
-            onClick={() => {
-              setInput('/browser ');
-              inputRef.current?.focus();
-            }}
-            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
-            title="Browse the web"
-            aria-label="Browse the web"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 21a9 9 0 1 0 0-18m0 18c2.1 0 3.75-4.03 3.75-9S14.1 3 12 3m0 18c-2.1 0-3.75-4.03-3.75-9S9.9 3 12 3M3.4 9h17.2M3.4 15h17.2"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={() => {
-              setInput('/code ');
-              inputRef.current?.focus();
-            }}
-            className="icon-button w-8 h-8 border border-white/[0.05] bg-white/[0.025]"
-            title="Open code workflow"
-            aria-label="Open code workflow"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="m8.25 6.75-5.25 5.25 5.25 5.25m7.5-10.5L21 12l-5.25 5.25"
-              />
-            </svg>
-          </button>
-          <button
-            disabled={!isSupported}
-            onClick={isListening ? stopListening : startListening}
-            className={`icon-button w-8 h-8 border ${isListening ? 'border-red-400/40 bg-red-500/10 text-red-400' : 'border-white/[0.05] bg-white/[0.025]'}`}
-            title={
-              isSupported ? (isListening ? 'Stop voice input' : 'Start voice input') : 'Voice input is unavailable'
-            }
-            aria-label="Voice input"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 15.75a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6.75a3 3 0 0 0 3 3Zm6-4.5v1.5a6 6 0 0 1-12 0v-1.5M12 18.75v3"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={() => {
-              setInput('/agent ');
-              inputRef.current?.focus();
-            }}
-            className="ml-1 flex items-center gap-2 h-8 px-2 rounded-lg text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.035] transition-colors"
-          >
+          <div className="relative">
+            {uncensoredConfirmOpen && (
+              <div className="os-uncensored-confirm absolute bottom-11 left-0 z-50 w-80 rounded-xl border bg-[#11151f] p-4 shadow-2xl">
+                <div className="os-accent-text text-xs font-semibold">Enable Uncensored mode?</div>
+                <p className="mt-2 text-[10px] leading-relaxed text-zinc-400">
+                  Infinite AI will use maximum authorized autonomy, respond more candidly, avoid unnecessary refusals, and actively try alternative tools when a method fails. Account authentication, tool permissions, privacy, user cancellation, and non-bypassable safety boundaries still apply.
+                </p>
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUncensoredConfirmOpen(false)}
+                    className="rounded-md border border-white/10 px-3 py-1.5 text-[10px] text-zinc-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void setUncensoredModePersisted(true)}
+                    className="os-uncensored-confirm-action rounded-md px-3 py-1.5 text-[10px] font-semibold"
+                  >
+                    Enable Uncensored
+                  </button>
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={toggleUncensoredMode}
+              aria-pressed={uncensoredMode}
+              aria-label={`Uncensored mode ${uncensoredMode ? 'on' : 'off'}`}
+              title="Use maximum authorized autonomy and more candid responses."
+              className={`os-uncensored-toggle flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] transition-colors ${uncensoredMode ? 'is-active' : ''}`}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c1.5 3-1 4.5 1 7 1.2 1.5 3 .8 3-1.2 2 2 3 4.1 3 6.2a7 7 0 1 1-14 0c0-2.5 1.3-5 4-7-.2 2.5.7 3.8 2 4.5-.5-3.5 2.5-5.5 1-9.5Z" />
+              </svg>
+              Uncensored {uncensoredMode ? 'On' : 'Off'}
+            </button>
+          </div>
+          <div className="relative ml-1">
+            {agentMenuOpen && (
+              <div className="absolute bottom-10 left-0 z-50 max-h-64 w-64 overflow-y-auto rounded-lg border border-white/[0.09] bg-[#101521] p-1 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAgentChange('auto');
+                    setAgentMenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    selectedAgentId === 'auto'
+                      ? 'os-mode-menu-active text-zinc-100'
+                      : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                  }`}
+                >
+                  <span className="flex h-6 w-6 flex-none items-center justify-center rounded-md bg-cyan-500/10 text-cyan-300">&infin;</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[10px] font-medium">Automatic agent</span>
+                    <span className="block truncate text-[9px] text-zinc-600">Choose the best execution path automatically</span>
+                  </span>
+                  {selectedAgentId === 'auto' && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-cyan-400" />}
+                </button>
+                {agentTypes.map((agent) => (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => {
+                      onAgentChange(agent.id);
+                      setAgentMenuOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                      selectedAgentId === agent.id
+                        ? 'os-mode-menu-active text-zinc-100'
+                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                    }`}
+                  >
+                    <span className="flex h-6 w-6 flex-none items-center justify-center overflow-hidden rounded-md bg-indigo-500/10 text-indigo-300">
+                      <ChatAgentIcon icon={agent.icon} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[10px] font-medium">{agent.name}</span>
+                      <span className="block truncate text-[9px] text-zinc-600">{agent.description}</span>
+                    </span>
+                    {selectedAgentId === agent.id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-cyan-400" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setAgentMenuOpen((open) => !open);
+                setModeMenuOpen(false);
+              }}
+              className="flex h-8 max-w-36 items-center gap-2 rounded-lg px-2 text-[10px] text-zinc-400 transition-colors hover:bg-white/[0.035] hover:text-zinc-200"
+              aria-expanded={agentMenuOpen}
+              aria-label={`Selected agent: ${selectedAgent?.name ?? 'Automatic'}`}
+              title="Select the agent that will execute this request"
+            >
+              <span className="flex h-4 w-5 flex-none items-center justify-center overflow-visible text-white">
+                {selectedAgent ? <ChatAgentIcon icon={selectedAgent.icon} /> : <InfiniteLogo className="h-3 w-5" variant="luminous" />}
+              </span>
+              <span className="truncate">{selectedAgent?.name ?? 'Auto agent'}</span>
+              <svg className={`h-3 w-3 flex-none text-zinc-700 transition-transform ${agentMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+          <div className="relative ml-1">
+            {modeMenuOpen && (
+              <div className="absolute bottom-10 left-0 z-50 w-52 overflow-hidden rounded-lg border border-white/[0.09] bg-[#101521] p-1 shadow-2xl">
+                {CHAT_MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      onModeChange(option.id);
+                      setModeMenuOpen(false);
+                      inputRef.current?.focus();
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                      option.id === mode
+                        ? 'os-mode-menu-active text-zinc-100'
+                        : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                    }`}
+                    aria-pressed={option.id === mode}
+                  >
+                    <svg className={`h-3.5 w-3.5 flex-none ${option.color}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d={option.path} />
+                    </svg>
+                    <span className="min-w-0">
+                      <span className="block text-[10px] font-medium">{option.label}</span>
+                      <span className="block truncate text-[9px] text-zinc-600">{option.description}</span>
+                    </span>
+                    {option.id === mode && <span className="ml-auto h-1.5 w-1.5 flex-none rounded-full bg-cyan-400 shadow-[0_0_7px_rgba(34,211,238,.8)]" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setModeMenuOpen((open) => !open);
+                setAgentMenuOpen(false);
+              }}
+              className="flex items-center gap-2 h-8 px-2 rounded-lg text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.035] transition-colors"
+              aria-expanded={modeMenuOpen}
+              aria-label={`Current mode: ${activeMode.label}`}
+            >
             <svg
-              className="w-3.5 h-3.5 text-cyan-400"
+              className="os-accent-text w-3.5 h-3.5"
               fill="none"
               stroke="currentColor"
               strokeWidth="1.7"
@@ -560,21 +1198,47 @@ function InputBar({
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z"
+                d={activeMode.path}
               />
             </svg>
-            Agent Mode <span className="text-zinc-700">⌄</span>
-          </button>
+              Auto · {activeMode.label}
+              <svg className={`h-3 w-3 text-zinc-700 transition-transform ${modeMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
           <div className="flex-1" />
+          <div className="relative flex items-center gap-1.5">
+            {(isListening || dictationError) && (
+              <div className="os-dictation-status absolute bottom-11 right-0 z-40 w-72 rounded-xl border p-3 shadow-2xl" role="status">
+                <div className="text-[10px] font-semibold text-zinc-200">
+                  {isListening ? 'Listening — speak naturally' : 'Dictation needs attention'}
+                </div>
+                <div className="mt-1 text-[9px] leading-relaxed text-zinc-400">
+                  {dictationError || interimTranscript || 'Your words will appear in the message box as you speak.'}
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={!isSupported}
+              onClick={toggleDictation}
+              aria-pressed={isListening}
+              aria-label={isListening ? 'Stop standalone dictation' : 'Start standalone dictation'}
+              title={isSupported ? 'Standalone speech-to-text — no chat model is used' : 'Speech-to-text is unavailable on this system'}
+              className={`os-dictation-button flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] transition-all ${isListening ? 'is-listening' : ''}`}
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15.75a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6.75a3 3 0 0 0 3 3Zm6-4.5v1.5a6 6 0 0 1-12 0v-1.5M12 18.75v3" />
+              </svg>
+              {isListening ? 'Stop' : 'Dictate'}
+            </button>
+          </div>
           <button
-            onClick={() => onSend(input)}
-            disabled={!input.trim()}
+            onClick={send}
+            disabled={!input.trim() && images.length === 0}
             aria-label="Send message"
-            className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 text-white shadow-md ${
-              isOnline
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 disabled:from-zinc-600 disabled:to-zinc-700'
-                : 'bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-400 hover:to-cyan-400 disabled:from-zinc-600 disabled:to-zinc-700'
-            } disabled:cursor-not-allowed`}
+            className="os-send-button w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-white disabled:cursor-not-allowed"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path
@@ -591,23 +1255,43 @@ function InputBar({
 }
 
 function RealChat({
+  header,
   messages,
   streaming,
   input,
   setInput,
   inputRef,
   onSend,
+  mode,
+  onModeChange,
+  selectedAgentId,
+  onAgentChange,
+  workspaceOpen,
+  onWorkspaceOpenChange,
+  onOpenWorkspace,
+  onOpenDeploy,
 }: {
+  header: ReactNode;
   messages: Message[];
   streaming: boolean;
   input: string;
   setInput: (v: string) => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onSend: (text: string) => void;
+  mode: ChatExecutionMode;
+  onModeChange: (mode: ChatExecutionMode) => void;
+  selectedAgentId: string;
+  onAgentChange: (agentId: string) => void;
+  workspaceOpen: boolean;
+  onWorkspaceOpenChange: (open: boolean) => void;
+  onOpenWorkspace: () => void;
+  onOpenDeploy: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const orchestratedTaskId = useChatStore((s) => s.orchestratedTaskId);
   const interject = useChatStore((s) => s.interject);
+  const activity = useChatStore((s) => s.activity);
+  const providerStatus = useChatStore((s) => s.providerStatus);
   const [isOnline, setIsOnline] = useState(false);
 
   // Check if AI model is online
@@ -628,12 +1312,18 @@ function RealChat({
   }, []);
 
   // Determine if we should show thinking bubble:
-  // Show it only when streaming is active AND the last assistant message has no text yet
+  // Show it only when streaming is active AND the last assistant message has
+  // no text yet AND no tool is currently executing (a running tool is already
+  // visible as a live ToolCallCard in the transcript).
   const lastMsg = messages[messages.length - 1];
   const isStreamingText =
     lastMsg?.role === 'assistant' &&
     lastMsg.content.some((b) => b.type === 'text' && 'text' in b && (b as { text: string }).text.trim());
-  const showThinking = streaming && !isStreamingText;
+  const runningToolIds = new Set(
+    activity.filter((a) => a.status === 'running').map((a) => a.toolUseId),
+  );
+  const hasRunningTool = runningToolIds.size > 0;
+  const showThinking = streaming && !isStreamingText && !hasRunningTool;
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -644,39 +1334,52 @@ function RealChat({
   // Handle sending during streaming (interjection)
   const handleSendDuringStream = (text: string) => {
     if (!text.trim()) return;
-    if (orchestratedTaskId) {
-      interject(text.trim());
-    }
+    interject(text.trim());
     setInput('');
   };
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="flex flex-col gap-8 w-full px-10 py-8">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scrollbar">
+        {header}
+        <BrainLearningPanel />
+        <LiveActivityFeed />
+        <div className="flex w-full flex-col gap-5 px-6 py-5 lg:px-10">
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
+            <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
           ))}
           {showThinking && <ThinkingBubble />}
-          {orchestratedTaskId && streaming && (
+          {streaming && !isStreamingText && (
             <div className="flex items-center gap-2 text-xs text-indigo-400 animate-pulse">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              Multiple agents working in parallel — type to send updates
+              {orchestratedTaskId
+                ? 'Multiple agents working in parallel'
+                : providerStatus?.label
+                  ? providerStatus.label
+                  : 'Infinite AI is thinking'}
             </div>
           )}
         </div>
       </div>
-      <div className="flex-shrink-0 px-10 py-6">
+      <div className="flex-shrink-0 px-6 py-4 lg:px-10">
         <div>
           <InputBar
             input={input}
             setInput={setInput}
             inputRef={inputRef}
             onSend={streaming ? handleSendDuringStream : onSend}
+            mode={mode}
+            onModeChange={onModeChange}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={onAgentChange}
             placeholder={streaming ? 'Send a suggestion or update...' : 'Continue the conversation...'}
             isOnline={isOnline}
+            workspaceOpen={workspaceOpen}
+            onWorkspaceOpenChange={onWorkspaceOpenChange}
+            onOpenWorkspace={onOpenWorkspace}
+            onOpenDeploy={onOpenDeploy}
           />
         </div>
       </div>
@@ -684,22 +1387,45 @@ function RealChat({
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, runningToolIds }: { message: Message; runningToolIds?: Set<string> }) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const isToolResult = message.role === 'tool';
-
-  if (isToolResult) return null;
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const updateMessage = useChatStore((state) => state.updateMessage);
+  const branchSession = useChatStore((state) => state.branchSession);
+  const [editing, setEditing] = useState(false);
 
   const textBlocks = message.content.filter((b) => b.type === 'text');
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
+  const imageBlocks = message.content.filter((b) => b.type === 'image');
+  const questionBlocks = message.content.filter((b) => b.type === 'question') as Array<{ type: 'question'; question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }>;
   const hasText = textBlocks.some((b) => b.type === 'text' && (b as { text: string }).text.trim());
+  const plainText = textBlocks
+    .map((block) => (block.type === 'text' ? block.text : ''))
+    .filter(Boolean)
+    .join('\n\n');
+  const [draft, setDraft] = useState(plainText);
+  const providerName = message.provider === 'opencode'
+    ? 'OpenCode Zen'
+    : message.provider
+        ?.split(/[-_]/)
+        .map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
+        .join(' ');
+  const modelName = message.model?.split('/').pop()?.replace(/:free$/, '') ?? message.model;
+  const provenance = isAssistant && providerName && modelName ? `${providerName} · ${modelName}` : '';
+  const usedFallback = Boolean(
+    message.requested_provider &&
+    message.requested_model &&
+    (message.provider !== message.requested_provider || message.model !== message.requested_model),
+  );
 
-  if (!hasText && toolUseBlocks.length === 0) return null;
+  if (isToolResult) return null;
+  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0) return null;
 
   return (
     <div
-      className={`flex gap-5 rounded-xl border px-5 py-4 shadow-[0_8px_24px_rgba(0,0,0,.1)] ${isUser ? 'border-blue-500/10 bg-blue-500/[0.025]' : 'border-white/[0.065] bg-[#0c1018]'}`}
+      className={`group/message flex gap-5 rounded-xl border px-5 py-4 shadow-[0_8px_24px_rgba(0,0,0,.1)] ${isUser ? 'border-blue-500/10 bg-blue-500/[0.025]' : 'border-white/[0.065] bg-[#0c1018]'}`}
     >
       {isAssistant ? (
         <div className="brand-avatar w-8 h-8 flex-shrink-0 mt-0.5">
@@ -718,46 +1444,138 @@ function MessageBubble({ message }: { message: Message }) {
       ) : null}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="font-semibold text-textMain text-sm">{isUser ? 'You' : 'InfiniteAI OS'}</span>
+          <span className="font-semibold text-textMain text-sm">{isUser ? 'You' : 'Infinite OS'}</span>
           <span className="text-[10px] text-textMuted">
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
+          {provenance && (
+            <span
+              className={`inline-flex min-w-0 max-w-[320px] items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-medium ${
+                usedFallback
+                  ? 'border-amber-400/15 bg-amber-400/[0.045] text-amber-200/65'
+                  : 'border-white/[0.08] bg-white/[0.035] text-zinc-500'
+              }`}
+              title={`${usedFallback ? 'Fallback used' : 'Answered by'}: ${message.provider} / ${message.model}`}
+              aria-label={`${usedFallback ? 'Fallback used' : 'Answered by'} ${message.provider}, model ${message.model}`}
+            >
+              <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${usedFallback ? 'bg-amber-400/80' : 'bg-emerald-400/80'}`} />
+              <span className="flex-shrink-0">{usedFallback ? 'Fallback' : 'Answered'}</span>
+              <span aria-hidden="true">·</span>
+              <span className="truncate">{provenance}</span>
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/message:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button
+              onClick={() => void navigator.clipboard.writeText(plainText)}
+              className="icon-button w-7 h-7"
+              title="Copy message"
+              aria-label="Copy message"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path d="M8 8h11v11H8zM5 16H4V5h11v1" />
+              </svg>
+            </button>
+            {isUser && (
+              <button
+                onClick={() => setEditing(true)}
+                className="icon-button w-7 h-7"
+                title="Edit message"
+                aria-label="Edit message"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                  <path d="m14 5 5 5M4 20l3.5-.8L19 7.7a1.8 1.8 0 0 0-2.6-2.6L5 16.5 4 20Z" />
+                </svg>
+              </button>
+            )}
+            {currentSessionId && (
+              <button
+                onClick={() => void branchSession(currentSessionId, message.id)}
+                className="icon-button w-7 h-7"
+                title="Branch conversation here"
+                aria-label="Branch conversation here"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                  <path d="M6 3v6a3 3 0 0 0 3 3h6m0 0-3-3m3 3-3 3M6 21v-3" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
-        {textBlocks.map((block, i) => {
-          if (block.type !== 'text') return null;
-          const text = (block as { text: string }).text;
-          if (!text.trim()) return null;
-          return (
-            <div key={i} className="text-sm text-zinc-300 leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+        {editing ? (
+          <div className="space-y-2">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              className="w-full min-h-24 rounded-lg border border-indigo-500/25 bg-black/20 p-3 text-sm text-zinc-200 outline-none focus:border-indigo-400/50 resize-y"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setDraft(plainText);
+                  setEditing(false);
+                }}
+                className="px-3 py-1.5 text-[10px] text-zinc-500 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  await updateMessage(message.id, draft);
+                  setEditing(false);
+                }}
+                className="rounded-md bg-indigo-500/15 border border-indigo-400/25 px-3 py-1.5 text-[10px] text-indigo-200 hover:bg-indigo-500/25"
+              >
+                Save edit
+              </button>
             </div>
-          );
-        })}
+          </div>
+        ) : (
+          textBlocks.map((block, i) => {
+            if (block.type !== 'text') return null;
+            const text = (block as { text: string }).text;
+            if (!text.trim()) return null;
+            return (
+              <div key={i} className="text-sm text-zinc-300 leading-relaxed">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+              </div>
+            );
+          })
+        )}
+        {questionBlocks.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {questionBlocks.map((block, i) => (
+              <InteractiveQuestion
+                key={i}
+                block={block}
+                onAnswer={(answer) => {
+                  const sendMessage = useChatStore.getState().sendMessage;
+                  sendMessage(`[Question Answer] ${block.questionId}: ${answer}`);
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {imageBlocks.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {imageBlocks.map((block, i) => (
+              <img
+                key={i}
+                src={`data:${block.source.mediaType};base64,${block.source.data}`}
+                alt="Attached image"
+                className="max-h-40 rounded-lg border border-white/10"
+              />
+            ))}
+          </div>
+        )}
         {toolUseBlocks.length > 0 && (
-          <div className="mt-2 space-y-1.5">
+          <div className="mt-2 space-y-2">
             {toolUseBlocks.map((block, i) => {
               if (block.type !== 'tool_use') return null;
               const tu = block as { id: string; name: string; input: unknown };
+              const isRunning = runningToolIds?.has(tu.id) ?? false;
               return (
-                <div
-                  key={i}
-                  className="bg-bgCard border border-borderSubtle rounded-xl px-3 py-2 text-xs flex items-center gap-2"
-                >
-                  <svg
-                    className="w-3.5 h-3.5 text-indigo-400"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M11.42 15.17l-5.1-5.1m0 0L11.42 4.97m-5.1 5.1H21"
-                    />
-                  </svg>
-                  <span className="font-medium text-textMain">{tu.name}</span>
-                </div>
+                <ToolCallCard key={i} name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} />
               );
             })}
           </div>
@@ -768,33 +1586,76 @@ function MessageBubble({ message }: { message: Message }) {
 }
 
 function ThinkingBubble() {
+  // Show real progress from the main process (Connecting to …, Streaming
+  // …, Switching providers …) instead of a frozen "Reasoning…" caption. If no
+  // status has arrived yet, fall back to the original generic copy.
+  const providerStatus = useChatStore((s) => s.providerStatus);
+  const [elapsed, setElapsed] = useState(0);
+  const startedAt = useRef<number>(Date.now());
+
+  useEffect(() => {
+    startedAt.current = Date.now();
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt.current) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const label = providerStatus?.label ?? 'Thinking';
+  const detail = providerStatus?.detail
+    ? `${providerStatus.detail} · ${elapsed}s`
+    : `Reasoning through your request… · ${elapsed}s`;
+
   return (
     <div
-      className="flex gap-3 items-center rounded-xl border border-white/[0.065] bg-[#0c1018] px-3 py-2.5"
+      className="flex gap-3 items-center rounded-xl border border-white/[0.065] bg-[#0c1018] px-4 py-3"
       role="status"
       aria-live="polite"
     >
-      <div className="brand-avatar w-12 h-10 flex-shrink-0">
-        <InfiniteLogo className="w-9 h-6" animated />
+      <div className="brand-avatar w-8 h-8 flex-shrink-0">
+        <InfiniteLogo className="w-5 h-3" />
       </div>
-      <div className="bg-bgCard/80 border border-borderSubtle rounded-xl px-4 py-2.5 shadow-sm">
-        <div className="text-xs font-medium text-zinc-300">Preparing response</div>
-        <div className="text-[10px] text-textMuted mt-0.5">Thinking through your request…</div>
+      <div className="flex-1 min-w-0 px-1">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-zinc-300">
+            {label}
+          </span>
+          <span className="h-3 w-3 animate-spin rounded-full border border-zinc-700 border-t-zinc-300" aria-hidden="true" />
+        </div>
+        <div className="text-[10px] text-textMuted mt-0.5">{detail}</div>
       </div>
     </div>
   );
 }
 
 function DemoChat({
+  header,
   input,
   setInput,
   inputRef,
   onSend,
+  mode,
+  onModeChange,
+  selectedAgentId,
+  onAgentChange,
+  workspaceOpen,
+  onWorkspaceOpenChange,
+  onOpenWorkspace,
+  onOpenDeploy,
 }: {
+  header: ReactNode;
   input: string;
   setInput: (v: string) => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   onSend: (text: string) => void;
+  mode: ChatExecutionMode;
+  onModeChange: (mode: ChatExecutionMode) => void;
+  selectedAgentId: string;
+  onAgentChange: (agentId: string) => void;
+  workspaceOpen: boolean;
+  onWorkspaceOpenChange: (open: boolean) => void;
+  onOpenWorkspace: () => void;
+  onOpenDeploy: () => void;
 }) {
   const [isOnline, setIsOnline] = useState(false);
 
@@ -816,26 +1677,28 @@ function DemoChat({
   }, []);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="px-8 py-24 flex flex-col items-center justify-center min-h-[60vh]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {header}
+      <div className="min-h-0 flex-1">
+        <div className="flex h-full flex-col items-center justify-center px-4 py-2 sm:px-8">
           {/* Canonical brand mark */}
-          <div className="w-36 h-24 mb-10 flex items-center justify-center relative">
-            <div className="absolute inset-5 bg-indigo-500/10 rounded-full blur-2xl" />
-            <InfiniteLogo className="relative w-32 h-20" animated labelled />
+          <div className="w-28 h-16 mb-3 flex items-center justify-center">
+            <InfiniteLogo className="w-24 h-14" animated labelled />
           </div>
 
-          <h2 className="text-lg font-semibold text-textMain mb-3">What are we working on?</h2>
-          <p className="text-sm text-textMuted mb-10">Start with a prompt or choose a workspace mode above.</p>
+          <h2 className="text-base font-semibold text-textMain mb-1.5">What should Infinite do?</h2>
+          <p className="text-xs text-textMuted mb-4">
+            Learn, quiz, summarize, build, browse, or control the computer from chat.
+          </p>
 
           {/* Minimal quick actions */}
-          <div className="flex gap-3 mb-8">
+          <div className="flex flex-wrap justify-center gap-2">
             <button
               onClick={() => {
-                setInput('/build ');
+                setInput('Create a quiz from this PDF: ');
                 inputRef.current?.focus();
               }}
-              className="px-4 py-2 rounded-xl bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-sm text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
+              className="px-3 py-1.5 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-xs text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
             >
               <svg
                 className="w-4 h-4 text-indigo-400"
@@ -850,14 +1713,14 @@ function DemoChat({
                   d="M11.42 15.17l-5.1-5.1m0 0L11.42 4.97m-5.1 5.1H21"
                 />
               </svg>
-              Build something
+              Create quiz
             </button>
             <button
               onClick={() => {
-                setInput('/research ');
+                setInput('Open Chrome and search Amazon for ');
                 inputRef.current?.focus();
               }}
-              className="px-4 py-2 rounded-xl bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-sm text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
+              className="px-3 py-1.5 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-xs text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
             >
               <svg
                 className="w-4 h-4 text-cyan-400"
@@ -872,16 +1735,52 @@ function DemoChat({
                   d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"
                 />
               </svg>
-              Research
+              Browse for me
+            </button>
+            <button
+              onClick={() => {
+                setInput('Teach me this in soccer terms: ');
+                inputRef.current?.focus();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-white/[0.03] border border-borderSubtle hover:border-indigo-500/30 hover:bg-white/[0.05] text-xs text-textMuted hover:text-textMain transition-all duration-200 flex items-center gap-2"
+            >
+              <svg
+                className="w-4 h-4 text-emerald-400"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4.5 6.75 12 3l7.5 3.75L12 10.5 4.5 6.75Zm0 4.5L12 15l7.5-3.75M6.75 13.5v3.75c0 1.24 2.35 2.25 5.25 2.25s5.25-1.01 5.25-2.25V13.5"
+                />
+              </svg>
+              Teach me
             </button>
           </div>
         </div>
       </div>
 
       {/* Input bar */}
-      <div className="flex-shrink-0 px-10 py-8">
+      <div className="flex-shrink-0 px-4 py-3 sm:px-8 lg:px-10">
         <div>
-          <InputBar input={input} setInput={setInput} inputRef={inputRef} onSend={onSend} isOnline={isOnline} />
+          <InputBar
+            input={input}
+            setInput={setInput}
+            inputRef={inputRef}
+            onSend={onSend}
+            mode={mode}
+            onModeChange={onModeChange}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={onAgentChange}
+            isOnline={isOnline}
+            workspaceOpen={workspaceOpen}
+            onWorkspaceOpenChange={onWorkspaceOpenChange}
+            onOpenWorkspace={onOpenWorkspace}
+            onOpenDeploy={onOpenDeploy}
+          />
         </div>
       </div>
     </div>

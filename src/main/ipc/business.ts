@@ -1,4 +1,4 @@
-// Business OS IPC handlers
+// Business Command Center IPC handlers
 
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';

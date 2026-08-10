@@ -34,12 +34,23 @@ export interface AgentRunState {
   preview?: string;
   /** Number of tool calls made so far. */
   toolCallCount: number;
+  activity?: AgentActivity[];
+}
+
+export interface AgentActivity {
+  id: string;
+  timestamp: number;
+  kind: 'status' | 'tool' | 'result' | 'error';
+  label: string;
+  detail?: string;
 }
 
 export type AgentEvent =
   | { type: 'start'; run: AgentRunState }
   | { type: 'text_delta'; runId: string; text: string }
   | { type: 'tool_call'; runId: string; toolName: string }
+  | { type: 'activity'; runId: string; activity: AgentActivity }
+  | { type: 'retrying'; runId: string; attempt: number; reason: string }
   | { type: 'complete'; runId: string; result: string }
   | { type: 'fail'; runId: string; error: string };
 

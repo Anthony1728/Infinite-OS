@@ -8,6 +8,7 @@
 import { EventEmitter } from 'node:events';
 import { spawn, ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { runInNewContext } from 'node:vm';
 
 export interface Breakpoint {
   id: string;
@@ -223,9 +224,12 @@ export class DebugAdapter extends EventEmitter {
     // Note: Full evaluation requires debugger protocol
     // This is a simplified version
     try {
-      // Try to evaluate in current context
-      // In a real implementation, this would use the debugger protocol
-      const result = eval(expression);
+      // Keep fallback evaluation isolated from the Electron main-process scope.
+      // A real attached debug session should replace this with its protocol API.
+      const result = runInNewContext(expression, Object.create(null), {
+        timeout: 1_000,
+        contextCodeGeneration: { strings: false, wasm: false },
+      });
       return {
         ok: true,
         result: JSON.stringify(result, null, 2),

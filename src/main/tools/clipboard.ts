@@ -129,11 +129,8 @@ export const clipboardWriteTool: Tool = {
         return { content: 'No content provided to write', is_error: true };
       }
 
-      let written = 0;
-
       if (text !== undefined && text !== null) {
         clipboard.writeText(text);
-        written += text.length;
       }
 
       if (html !== undefined && html !== null) {
@@ -154,7 +151,6 @@ export const clipboardWriteTool: Tool = {
         
         if (!image.isEmpty()) {
           clipboard.writeImage(image);
-          written += buffer.length;
         } else {
           return { content: 'Invalid image data', is_error: true };
         }

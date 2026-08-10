@@ -519,7 +519,15 @@ export class WorkspaceIndexer {
       };
 
       for (const file of data.files) {
-        this.index.set(file.id, file);
+        if (!existsSync(file.path)) continue;
+        try {
+          const content = readFileSync(file.path, 'utf-8');
+          const hydrated = { ...file, content };
+          this.index.set(file.id, hydrated);
+          this.embeddings.set(file.id, generateEmbedding(content));
+        } catch {
+          // Skip files that became unreadable since the previous index.
+        }
       }
       this.lastIndexed = data.lastIndexed;
     } catch (err) {
