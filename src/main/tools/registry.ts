@@ -82,6 +82,10 @@ import { enhancedComputerTool } from './enhanced-computer.js';
 import { workflowTemplatesTool } from './workflow-templates.js';
 import { gameEngineTool } from './game-engine.js';
 import { businessSuiteTool } from './business-suite.js';
+// Phase 5: Intelligence - Smart Scheduler, Knowledge Graph, Proactive Assistant
+import { smartSchedulerTool } from './smart-scheduler.js';
+import { knowledgeGraphTool } from './knowledge-graph.js';
+import { proactiveAssistantTool } from './proactive-assistant.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -173,6 +177,10 @@ export function registerBuiltinTools(): void {
     workflowTemplatesTool,
     gameEngineTool,
     businessSuiteTool,
+    // Phase 5: Intelligence
+    smartSchedulerTool,
+    knowledgeGraphTool,
+    proactiveAssistantTool,
   ]) {
     toolRegistry.register(t);
   }
