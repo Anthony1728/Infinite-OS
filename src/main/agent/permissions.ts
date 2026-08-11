@@ -119,10 +119,24 @@ async function checkWorkspacePermission(tu: ToolUse, opts: { sessionId: string; 
     if (isReadOnlyCommand(cmd) || isWorkspaceRoutineCommand(cmd)) return true;
     return await requestPermission(tu, opts);
   }
-  if (tu.name === 'WebSearch' || tu.name === 'WebFetch') return true;
+
+  // Network self-help: read-only diagnostics (list profiles, status, gateway, ping,
+  // DNS test, traceroute, port probe) run without prompting; password reveal
+  // (get_password) and system changes (dns_set/dns_flush) fall through to the
+  // permission === 'ask' prompt below so the user always consents to them.
+  if (tu.name === 'Network' && isReadOnlyNetworkAction(tu)) return true;
   const tool = toolRegistry.get(tu.name);
   if (tool?.permission === 'ask') return await requestPermission(tu, opts);
   return true;
+}
+
+
+const READONLY_NETWORK_ACTIONS = new Set([
+  'list_profiles', 'status', 'gateway', 'ping', 'dns_test', 'traceroute', 'ports',
+]);
+
+function isReadOnlyNetworkAction(tu: ToolUse): boolean {
+  return READONLY_NETWORK_ACTIONS.has((tu.input as { action?: string }).action ?? '');
 }
 
 function getToolPath(tu: ToolUse): string {

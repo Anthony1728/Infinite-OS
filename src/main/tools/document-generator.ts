@@ -28,8 +28,8 @@ function formatDate(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-async function createPDF(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult> {
-  const { PDFDocument, rgb, StandardFonts, PDFName, PDFNumber } = await import('pdf-lib');
+async function createPDF(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResult> {
+  const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
   const pdfDoc = await PDFDocument.create();
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -38,7 +38,7 @@ async function createPDF(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult
   const pageWidth = args.orientation === 'landscape' ? 842 : 595;
   const pageHeight = args.orientation === 'landscape' ? 595 : 842;
 
-  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
   const contentWidth = pageWidth - 2 * margin;
   let y = pageHeight - margin;
 
@@ -78,10 +78,9 @@ async function createPDF(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult
     const lines = args.content.split('\n');
     for (const line of lines) {
       if (y < margin + 20) {
-        const newPage = pdfDoc.addPage([pageWidth, pageHeight]);
+        // Continue onto a fresh page instead of silently dropping overflow.
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
         y = pageHeight - margin;
-        // We can't reassign page since it's const, so we draw on the last page
-        break;
       }
       page.drawText(line.substring(0, 80), {
         x: margin,
@@ -146,7 +145,7 @@ async function createPDF(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult
   return { content: `PDF created successfully: ${filePath} (${(pdfBytes.length / 1024).toFixed(1)} KB, ${args.data?.length || 0} rows)` };
 }
 
-async function createExcel(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult> {
+async function createExcel(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResult> {
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Infinite OS';
@@ -194,12 +193,13 @@ async function createExcel(args: DocGenArgs, ctx: ToolContext): Promise<ToolResu
   const filePath = join(outDir, filename);
 
   const buffer = await workbook.xlsx.writeBuffer();
-  await writeFile(filePath, Buffer.from(buffer));
+  const out = buffer instanceof Uint8Array ? Buffer.from(buffer) : Buffer.from(buffer as ArrayBuffer);
+  await writeFile(filePath, out);
 
   return { content: `Excel file created: ${filePath} (${args.data?.length || 0} rows, ${args.columns?.length || 0} columns)` };
 }
 
-async function createPowerPoint(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult> {
+async function createPowerPoint(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResult> {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.title = args.title || 'Presentation';
@@ -274,16 +274,17 @@ async function createPowerPoint(args: DocGenArgs, ctx: ToolContext): Promise<Too
   const filePath = join(outDir, filename);
 
   const buffer = await pptx.write({ outputType: 'nodebuffer' });
-  await writeFile(filePath, Buffer.from(buffer));
+  const out = buffer instanceof Uint8Array ? Buffer.from(buffer) : Buffer.from(buffer as ArrayBuffer);
+  await writeFile(filePath, out);
 
   return { content: `PowerPoint created: ${filePath} (${slides.length} slides)` };
 }
 
-async function createWord(args: DocGenArgs, ctx: ToolContext): Promise<ToolResult> {
+async function createWord(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResult> {
   const docx = await import('docx');
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } = docx;
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType } = docx;
 
-  const children: (Paragraph | Table)[] = [];
+  const children: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [];
 
   // Title
   if (args.title) {
@@ -323,8 +324,9 @@ async function createWord(args: DocGenArgs, ctx: ToolContext): Promise<ToolResul
 
   // Table from data
   if (args.data && args.columns && args.columns.length > 0) {
+    const columns = args.columns;
     const headerRow = new TableRow({
-      children: args.columns.map(
+      children: columns.map(
         (col) =>
           new TableCell({
             children: [new Paragraph({ children: [new TextRun({ text: col.header, bold: true, size: 22, color: 'FFFFFF' })] })],
@@ -336,7 +338,7 @@ async function createWord(args: DocGenArgs, ctx: ToolContext): Promise<ToolResul
     const dataRows = args.data.map(
       (row) =>
         new TableRow({
-          children: args.columns.map(
+          children: columns.map(
             (col) =>
               new TableCell({
                 children: [new Paragraph({ children: [new TextRun({ text: String(row[col.key] ?? ''), size: 22 })] })],

@@ -105,7 +105,7 @@ export const createTabTool: Tool = {
     required: ['title', 'kind', 'prompt'],
   },
 
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as CreateTabArgs;
 
     if (!a.title) return { content: 'Title is required', is_error: true };

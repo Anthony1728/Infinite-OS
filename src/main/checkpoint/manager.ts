@@ -84,6 +84,10 @@ export class CheckpointManager {
   private dataDir: string;
   private checkpoints = new Map<string, Checkpoint[]>();
   private store: CheckpointStore = { checkpoints: {}, metadata: { version: 1, lastUpdated: Date.now() } };
+  // Monotonic clock: guarantees strictly increasing timestamps even when two
+  // checkpoints are created within the same millisecond, so newest-first
+  // ordering is deterministic (see list/listAll).
+  private lastTimestamp = 0;
 
   constructor(dataDir?: string) {
     this.dataDir = dataDir ?? join(homedir(), '.infinite-ai', 'checkpoints');
@@ -94,12 +98,14 @@ export class CheckpointManager {
    * Create a new checkpoint
    */
   create(options: CheckpointCreateOptions): Checkpoint {
+    const now = Date.now();
+    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1;
     const checkpoint: Checkpoint = {
       id: randomUUID(),
       taskId: options.taskId,
       name: options.name,
       description: options.description,
-      timestamp: Date.now(),
+      timestamp: this.lastTimestamp,
       state: options.state,
       metadata: options.metadata ?? {},
       parentId: options.parentId,

@@ -1,7 +1,6 @@
 // CI/CD Tool — GitHub Actions, GitLab CI workflow generation and management
-import { writeFile, readFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import type { Tool, ToolContext, ToolResult } from './base.js';
 
 const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || '.', 'infinite-cicd');
@@ -222,7 +221,7 @@ export const cicdTool: Tool = {
     required: ['action'],
   },
 
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as CICDArgs;
 
     try {

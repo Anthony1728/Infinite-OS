@@ -33,7 +33,6 @@ const filesByChatTask = new Map<string, string[]>();
 interface TextDeltaBuffer { messageId: string; text: string }
 const textDeltaBuffer: TextDeltaBuffer[] = [];
 let textDeltaRafPending = false;
-let textDeltaMessageId: string | null = null;
 
 function flushTextDeltaBuffer() {
   textDeltaRafPending = false;
@@ -2003,7 +2002,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
     }
     case 'text_delta': {
       textDeltaBuffer.push({ messageId: ev.message_id, text: ev.text });
-      textDeltaMessageId = ev.message_id;
       scheduleTextDeltaFlush();
       break;
     }

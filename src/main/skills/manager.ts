@@ -394,7 +394,10 @@ export class SkillsManager {
   private seedBundledIfNeeded(): void {
     if (!this.isPersonal) return;
     const marker = join(this.personalDir, '.bundled-seeded');
-    if (existsSync(marker)) return;
+    // Additive: seed any bundled skill that is missing. The marker only
+    // suppresses the initial full seed; new bundled skills ship in app
+    // updates and are added to existing profiles on next launch.
+    let seeded = 0;
     for (const bundled of BUNDLED_SKILLS) {
       const slug = slugifySkillName(bundled.name);
       if (this.personalStore.read(slug)) continue;
@@ -412,7 +415,8 @@ export class SkillsManager {
         examples: bundled.examples,
         instructions: bundled.instructions,
       });
+      seeded++;
     }
-    writeFileSync(marker, JSON.stringify({ seededAt: Date.now(), count: BUNDLED_SKILLS.length }));
+    writeFileSync(marker, JSON.stringify({ seededAt: Date.now(), count: BUNDLED_SKILLS.length, lastSeeded: seeded }));
   }
 }

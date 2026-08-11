@@ -99,7 +99,7 @@ function ChartSection({ data, title }: { data: TabChartData; title: string }) {
   );
 }
 
-function generateChartSVG(data: TabChartData, title: string): string {
+function generateChartSVG(data: TabChartData, _title: string): string {
   const w = 700, h = 320;
   const pad = { t: 20, r: 20, b: 50, l: 50 };
   const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
@@ -235,9 +235,9 @@ function SectionBlock({ section }: { section: TabSection }) {
           ))}
         </div>
       ) : section.type === 'table' && section.data ? (
-        <TableSection data={section.data as TabTableData} />
+        <TableSection data={section.data as unknown as TabTableData} />
       ) : section.type === 'chart' && section.data ? (
-        <ChartSection data={section.data as TabChartData} title={section.title} />
+        <ChartSection data={section.data as unknown as TabChartData} title={section.title} />
       ) : section.type === 'image' ? (
         <div className="text-sm text-zinc-400 italic">Image: {section.content}</div>
       ) : section.type === 'embed' ? (

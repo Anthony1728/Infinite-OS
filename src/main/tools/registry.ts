@@ -86,6 +86,12 @@ import { businessSuiteTool } from './business-suite.js';
 import { smartSchedulerTool } from './smart-scheduler.js';
 import { knowledgeGraphTool } from './knowledge-graph.js';
 import { proactiveAssistantTool } from './proactive-assistant.js';
+// Phase 6: Meta - Dynamic Tool Registration
+import { dynamicToolTool } from './dynamic-tool.js';
+
+// Phase 6: Self-help - Network diagnostics and router management (user's own devices)
+import { networkTool } from './network.js';
+import { routerAdminTool } from './router-admin.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -181,6 +187,12 @@ export function registerBuiltinTools(): void {
     smartSchedulerTool,
     knowledgeGraphTool,
     proactiveAssistantTool,
+    // Phase 6: Meta - Dynamic Tool Registration
+    dynamicToolTool,
+
+    // Phase 7: Self-help (user's own PC and network)
+    networkTool,
+    routerAdminTool,
   ]) {
     toolRegistry.register(t);
   }

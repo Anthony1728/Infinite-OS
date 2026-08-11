@@ -38,13 +38,6 @@ const CHART_COLORS = [
   'rgba(52, 211, 153, 0.8)',   // Emerald
 ];
 
-function hexToRgba(hex: string, alpha = 1): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
 function generateBarChartSVG(args: ChartArgs): string {
   const w = args.width || 800;
   const h = args.height || 500;
@@ -263,13 +256,7 @@ function generateSVG(args: ChartArgs): string {
 }
 
 async function generatePNG(args: ChartArgs): Promise<Buffer> {
-  const { createCanvas } = await import('chartjs-node-canvas');
-  const width = args.width || 800;
-  const height = args.height || 500;
-  const canvas = createCanvas(width, height);
-  const ctx = canvas.getContext('2d');
-
-  // For PNG, render SVG to canvas
+  // Render the chart as SVG, then convert SVG to PNG with sharp.
   const svg = generateSVG(args);
 
   // Use sharp to convert SVG to PNG
@@ -327,7 +314,7 @@ export const chartGeneratorTool: Tool = {
     required: ['action', 'type', 'labels', 'datasets'],
   },
 
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as ChartArgs;
 
     try {

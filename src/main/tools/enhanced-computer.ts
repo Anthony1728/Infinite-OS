@@ -1,8 +1,6 @@
-import type { Tool, ToolContext, ToolResult } from './base.js';
+import type { Tool, ToolResult } from './base.js';
 import { getComputerAutomation } from '../automation/computer-automation.js';
 import { getOCR } from '../ocr/index.js';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 export const enhancedComputerTool: Tool = {
   name: 'EnhancedComputer',
@@ -269,7 +267,7 @@ export const enhancedComputerTool: Tool = {
             down: '{DOWN}',
           };
           const key = dirMap[input.direction || 'left'] || '{LEFT}';
-          execSync(`powershell.exe -NoProfile -Command "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::AppActivate('${targetWindow.title.Replace(/'/g, "''")}'); Start-Sleep -Milliseconds 100; $wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('^%${key === '{LEFT}' ? 'l' : key === '{RIGHT}' ? 'r' : key === '{UP}' ? 'u' : 'd'}')"`, { stdio: 'pipe' });
+          execSync(`powershell.exe -NoProfile -Command "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::AppActivate('${targetWindow.title.replace(/'/g, "''")}'); Start-Sleep -Milliseconds 100; $wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('^%${key === '{LEFT}' ? 'l' : key === '{RIGHT}' ? 'r' : key === '{UP}' ? 'u' : 'd'}')"`, { stdio: 'pipe' });
 
           return { content: `Snapped "${targetWindow.title}" to ${input.direction || 'left'}` };
         }

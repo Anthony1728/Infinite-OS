@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolResult } from './base.js';
+import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -24,12 +24,6 @@ interface KnowledgeEdge {
   weight: number;
   metadata: Record<string, unknown>;
   createdAt: number;
-}
-
-interface KnowledgeQuery {
-  nodes: KnowledgeNode[];
-  edges: KnowledgeEdge[];
-  paths: Array<{ nodes: string[]; edges: string[] }>;
 }
 
 const DATA_DIR = join(homedir(), '.infinite-ai', 'knowledge-graph');

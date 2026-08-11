@@ -797,7 +797,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       const voice = await getVoiceAsync();
       const buffer = await voice.textToSpeech(text);
       return { ok: true, audio: buffer.toString('base64') };
-    } catch (err) {
+    } catch {
       // Fallback: notify renderer to use browser SpeechSynthesis.
       const win = getMainWindow();
       win?.webContents.send(IPC.CHAT_STREAM_EVENT, { type: 'voice_speak', text });

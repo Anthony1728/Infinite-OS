@@ -244,6 +244,7 @@ button:disabled {
 .os-nav-item[data-nav="memory"] svg { --glow-color: rgba(192, 132, 252, 0.6); }
 .os-nav-item[data-nav="workspace"] svg { --glow-color: rgba(45, 212, 191, 0.6); }
 .os-nav-item[data-nav="settings"] svg { --glow-color: rgba(148, 163, 184, 0.6); }
+.os-nav-item[data-nav="capabilities"] svg { --glow-color: rgba(232, 121, 249, 0.6); }
 .os-nav-item[data-nav="plugin-store"] svg { --glow-color: rgba(139, 92, 246, 0.6); }
 .os-nav-item[data-nav="skills"] svg { --glow-color: rgba(59, 130, 246, 0.6); }
 .os-nav-item[data-nav="scheduled-tasks"] svg { --glow-color: rgba(251, 191, 36, 0.6); }

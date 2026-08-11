@@ -289,7 +289,7 @@ export class TaskOrchestrator {
     if (/\b(security|vulnerab|penetrat|渗透|hack|exploit|audit|compliance|secret.?scan)\b/i.test(lower)) return 'security';
 
     // DevOps / deployment
-    if (/\b(deploy|docker|ci[\/]?cd|pipeline|container|kubernetes|k8s|terraform|aws|gcp|azure|vercel|netlify)\b/i.test(lower)) return 'devops';
+    if (/\b(deploy|docker|ci[/]?cd|pipeline|container|kubernetes|k8s|terraform|aws|gcp|azure|vercel|netlify)\b/i.test(lower)) return 'devops';
 
     // Writing / documentation
     if (/\b(write|draft|document|blog|article|essay|book|grant|proposal|copy|content)\b.*\b(doc|docu|article|blog|book|essay|page|post)\b/i.test(lower)) return 'writer';

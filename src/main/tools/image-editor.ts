@@ -61,7 +61,7 @@ export const imageEditorTool: Tool = {
     required: ['action'],
   },
 
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as ImageArgs;
     const sharp = (await import('sharp')).default;
 
@@ -75,7 +75,7 @@ export const imageEditorTool: Tool = {
           const output = a.output || join(outDir, `resized-${randomUUID().slice(0, 8)}${extname(a.input)}`);
           const img = sharp(a.input);
           const meta = await img.metadata();
-          const resizeOpts: sharp.ResizeOptions = {};
+          const resizeOpts: { width?: number; height?: number } = {};
           if (a.width) resizeOpts.width = a.width;
           if (a.height) resizeOpts.height = a.height;
           if (!a.width && a.height) resizeOpts.width = Math.round((meta.width || 800) * (a.height / (meta.height || 600)));

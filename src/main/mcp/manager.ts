@@ -1,17 +1,28 @@
 // MCP client manager — spawns stdio MCP servers, exposes their tools and resources.
+// Supports stdio, SSE, and Streamable HTTP transports.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { toolRegistry } from '../tools/base.js';
 
+type TransportType = 'stdio' | 'sse' | 'streamable-http';
+
 interface McpServerConfig {
-  command: string;
+  transport?: TransportType;
+  // stdio
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // SSE / Streamable HTTP
+  url?: string;
+  headers?: Record<string, string>;
+  authToken?: string;
 }
 
 interface ConnectedServer {
@@ -66,13 +77,69 @@ export async function connectAll(cwd: string): Promise<void> {
   }
 }
 
+function createTransport(cfg: McpServerConfig) {
+  const transportType = cfg.transport ?? 'stdio';
+
+  if (transportType === 'stdio') {
+    if (!cfg.command) {
+      throw new Error('stdio transport requires "command"');
+    }
+    return new StdioClientTransport({
+      command: cfg.command,
+      args: cfg.args ?? [],
+      env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
+    });
+  }
+
+  if (transportType === 'sse') {
+    if (!cfg.url) {
+      throw new Error('SSE transport requires "url"');
+    }
+    const url = new URL(cfg.url);
+    const options: ConstructorParameters<typeof SSEClientTransport>[1] = {};
+    const headers = {
+      ...(cfg.headers ?? {}),
+      ...(cfg.authToken ? { Authorization: `Bearer ${cfg.authToken}` } : {}),
+    };
+    if (Object.keys(headers).length > 0) {
+      // The eventsource package's EventSourceInit has no `headers` field, so
+      // custom headers for the initial SSE stream are injected via its
+      // documented custom-fetch hook instead.
+      const baseFetch = globalThis.fetch.bind(globalThis);
+      options.eventSourceInit = {
+        fetch: async (input, init) => baseFetch(input, { ...init, headers: { ...init.headers, ...headers } }),
+      };
+    }
+    if (cfg.authToken) {
+      options.requestInit = { headers: { Authorization: `Bearer ${cfg.authToken}` } };
+    }
+    return new SSEClientTransport(url, options);
+  }
+
+  if (transportType === 'streamable-http') {
+    if (!cfg.url) {
+      throw new Error('Streamable HTTP transport requires "url"');
+    }
+    const url = new URL(cfg.url);
+    const options: ConstructorParameters<typeof StreamableHTTPClientTransport>[1] = {};
+    if (cfg.headers) {
+      options.requestInit = { headers: cfg.headers };
+    }
+    if (cfg.authToken) {
+      options.requestInit = {
+        ...options.requestInit,
+        headers: { ...options.requestInit?.headers, Authorization: `Bearer ${cfg.authToken}` },
+      };
+    }
+    return new StreamableHTTPClientTransport(url, options);
+  }
+
+  throw new Error(`Unknown transport type: ${transportType}`);
+}
+
 export async function connect(name: string, cfg: McpServerConfig): Promise<void> {
   if (servers.has(name)) return;
-  const transport = new StdioClientTransport({
-    command: cfg.command,
-    args: cfg.args ?? [],
-    env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
-  });
+  const transport = createTransport(cfg);
   const client = new Client({ name: 'infinite-ai', version: '0.1.0' }, { capabilities: {} });
   await client.connect(transport);
   const { tools } = await client.listTools();
@@ -112,4 +179,3 @@ export async function disconnect(name: string): Promise<void> {
 export function listServers(): { name: string; toolCount: number; connected: boolean }[] {
   return Array.from(servers.entries()).map(([name, s]) => ({ name, toolCount: s.tools.length, connected: true }));
 }
-

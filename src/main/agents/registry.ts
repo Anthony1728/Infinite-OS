@@ -58,7 +58,6 @@ export function listAgents(): AgentType[] {
 const ALL_TOOLS = ['*'];
 const READ_ONLY = ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skills'];
 const RESEARCH_TOOLS = [...READ_ONLY, 'Browser', 'Operator', 'SkillManage'];
-const WRITE_TOOLS = [...ALL_TOOLS];
 // Implementation agents need the complete registry. Permission profiles still
 // protect destructive actions; this list only prevents capability starvation.
 const CODE_TOOLS = ALL_TOOLS;

@@ -68,7 +68,7 @@ export const dockerTool: Tool = {
     required: ['action'],
   },
 
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as DockerArgs;
 
     try {

@@ -64,7 +64,7 @@ export const calendarTool: Tool = {
     },
     required: ["action"],
   },
-  async execute(args: unknown, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as { action: string; title?: string; description?: string; location?: string; start?: string; end?: string; allDay?: boolean; recurrence?: string; attendees?: string[]; filename?: string; outputDir?: string };
     try {
       const outDir = a.outputDir || OUTPUT_DIR;

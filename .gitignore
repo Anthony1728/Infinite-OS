@@ -17,4 +17,7 @@ playwright-report/
 test-results/
 .pnpm-store/
 
+# Local safety snapshots (scripts/backup.mjs)
+.backups/
+
 nul

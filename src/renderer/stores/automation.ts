@@ -18,6 +18,7 @@ export interface AutomationTemplate {
   description: string;
   trigger: { type: string; config: unknown };
   actions: { type: string; config: unknown }[];
+  tags?: string[];
 }
 
 export interface AutomationStats {

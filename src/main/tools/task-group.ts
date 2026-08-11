@@ -84,7 +84,7 @@ export const taskGroupTool: Tool = {
 
     const concurrency = Math.max(1, Math.min(10, max_concurrent));
 
-    ctx.onUpdate({ content: `[TaskGroup] Spawning ${tasks.length} agents (${execution_mode} mode, max ${concurrent} concurrent)...` });
+    ctx.onUpdate({ content: `[TaskGroup] Spawning ${tasks.length} agents (${execution_mode} mode, max ${concurrency} concurrent)...` });
 
     const results = await spawnBatch(
       tasks.map((t) => ({

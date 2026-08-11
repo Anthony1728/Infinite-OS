@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolResult } from './base.js';
+import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -49,7 +49,7 @@ const PROVIDERS: APIProvider[] = [
   {
     id: 'anthropic',
     name: 'Anthropic (Claude)',
-    keyPatterns: [/^sk-ant-[a-zA-Z0-9\-]{93,}$/],
+    keyPatterns: [/^sk-ant-[a-zA-Z0-9-]{93,}$/],
     keyPrefix: ['sk-ant-'],
     baseUrl: 'https://api.anthropic.com/v1',
     authHeader: 'x-api-key',

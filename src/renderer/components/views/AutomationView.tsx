@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAutomationStore } from '../../../renderer/stores/automation';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
-import { useChatStore } from '../../../renderer/stores/chat';
 
 const SCHEDULE_PRESETS = [
   { type: 'manual', label: 'Manual', desc: 'Run on demand', icon: 'M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m5.834.166l-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243l-1.59-1.59' },
@@ -35,7 +34,6 @@ const QUICK_ACTIONS = [
 export function AutomationView() {
   const { workflows, templates, stats, loading, activeRun, lastRun, initRunListener, clearRunResult, loadWorkflows, loadTemplates, loadStats, createWorkflow, runWorkflow, enableWorkflow, disableWorkflow, deleteWorkflow } = useAutomationStore();
   const addToast = useNotificationStore((s) => s.addToast);
-  const sendMessage = useChatStore((s) => s.sendMessage);
   const [showCreate, setShowCreate] = useState(false);
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [newWorkflow, setNewWorkflow] = useState({
@@ -105,11 +103,6 @@ export function AutomationView() {
     } catch (error) {
       addToast({ type: 'error', title: 'Workflow failed', message: error instanceof Error ? error.message : String(error) });
     }
-  };
-
-  const handleRunAgent = async (task: string) => {
-    addToast({ type: 'success', title: 'Sending task to agent...' });
-    await sendMessage(task);
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {

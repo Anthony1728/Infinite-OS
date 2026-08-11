@@ -1,4 +1,4 @@
-import type { Tool, ToolContext, ToolResult } from './base.js';
+import type { Tool, ToolResult } from './base.js';
 
 interface WorkflowTemplate {
   id: string;
