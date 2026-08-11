@@ -762,7 +762,6 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
           const app = action.appName && action.appName !== 'browser' ? action.appName : 'chrome';
           const opened = await window.api.computerOpenApp({ name: app });
           if ((opened as { ok?: boolean }).ok === false) return `Could not launch ${app}.`;
-          await new Promise((resolve) => setTimeout(resolve, 1400));
           await window.api.computerFocusWindow({
             title: app === 'edge' ? 'Edge' : app === 'firefox' ? 'Firefox' : 'Chrome',
           });
@@ -783,7 +782,6 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
         const app = action.appName && action.appName !== 'browser' ? action.appName : 'chrome';
         const opened = await window.api.computerOpenApp({ name: app });
         if ((opened as { ok?: boolean }).ok === false) return `Could not launch ${app}.`;
-        await new Promise((resolve) => setTimeout(resolve, 1400));
         await window.api.computerFocusWindow({
           title: app === 'edge' ? 'Edge' : app === 'firefox' ? 'Firefox' : 'Chrome',
         });

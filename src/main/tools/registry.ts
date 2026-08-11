@@ -73,6 +73,9 @@ import { cicdTool } from './cicd.js';
 import { calendarTool } from './calendar.js';
 // Dynamic tab tool
 import { createTabTool } from './create-tab.js';
+// Phase 3: Database and Voice tools
+import { databaseTool } from './database.js';
+import { voiceTool } from './voice.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -155,6 +158,9 @@ export function registerBuiltinTools(): void {
     calendarTool,
     // Dynamic tabs
     createTabTool,
+    // Phase 3: Database and Voice
+    databaseTool,
+    voiceTool,
   ]) {
     toolRegistry.register(t);
   }

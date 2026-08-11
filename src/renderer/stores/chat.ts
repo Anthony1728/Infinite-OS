@@ -25,6 +25,50 @@ const activeChatTaskBySession = new Map<string, string>();
 const chatTaskByOrchestrator = new Map<string, string>();
 const orchestratorBySession = new Map<string, string>();
 const filesByChatTask = new Map<string, string[]>();
+
+// ── rAF batched streaming ────────────────────────────────────────────
+// Accumulates rapid text_delta events and flushes once per animation
+// frame so React only re-renders at display refresh rate (~60 fps)
+// instead of per-provider chunk (~200+ fps on fast connections).
+interface TextDeltaBuffer { messageId: string; text: string }
+const textDeltaBuffer: TextDeltaBuffer[] = [];
+let textDeltaRafPending = false;
+let textDeltaMessageId: string | null = null;
+
+function flushTextDeltaBuffer() {
+  textDeltaRafPending = false;
+  if (textDeltaBuffer.length === 0) return;
+  const buffered = textDeltaBuffer.splice(0);
+  const targetId = buffered[0].messageId;
+  const combinedText = buffered.map((b) => b.text).join('');
+  useChatStore.setState((s) => ({
+    messages: s.messages.map((m) => {
+      if (m.id !== targetId) return m;
+      const last = m.content[m.content.length - 1];
+      if (last && last.type === 'text') {
+        return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + combinedText }] };
+      }
+      return { ...m, content: [...m.content, { type: 'text', text: combinedText }] };
+    }),
+  }));
+}
+
+function scheduleTextDeltaFlush() {
+  if (!textDeltaRafPending) {
+    textDeltaRafPending = true;
+    requestAnimationFrame(flushTextDeltaBuffer);
+  }
+}
+
+function forceFlushTextDeltaBuffer() {
+  if (textDeltaBuffer.length > 0) {
+    cancelAnimationFrame(textDeltaRafPending ? 1 : 0);
+    textDeltaRafPending = false;
+    flushTextDeltaBuffer();
+  }
+}
+// ─────────────────────────────────────────────────────────────────────
+
 const selectedAgentRuns = new Map<
   string,
   { sessionId: string; chatTaskId: string; activityId: string; agentName: string; preview: string }
@@ -1951,22 +1995,16 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'message_discard': {
+      forceFlushTextDeltaBuffer();
       // A provider/model failed before verification. Remove its partial output;
       // recovery continues in the background with another candidate.
       setState((s) => ({ messages: s.messages.filter((message) => message.id !== ev.message_id) }));
       break;
     }
     case 'text_delta': {
-      setState((s) => ({
-        messages: s.messages.map((m) => {
-          if (m.id !== ev.message_id) return m;
-          const last = m.content[m.content.length - 1];
-          if (last && last.type === 'text') {
-            return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + ev.text }] };
-          }
-          return { ...m, content: [...m.content, { type: 'text', text: ev.text }] };
-        }),
-      }));
+      textDeltaBuffer.push({ messageId: ev.message_id, text: ev.text });
+      textDeltaMessageId = ev.message_id;
+      scheduleTextDeltaFlush();
       break;
     }
     case 'tool_use_start': {
@@ -2206,6 +2244,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'message_end': {
+      forceFlushTextDeltaBuffer();
       // A provider turn ended, but tools or verification may still be running;
       // keep the session watchdog active until done/error.
       setState((s) => ({
@@ -2271,6 +2310,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'done':
+      forceFlushTextDeltaBuffer();
       // Clear safety timer immediately
       clearSafetyTimer(ev.sessionId);
       setState((s) => ({
@@ -2295,6 +2335,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     case 'fallback_required':
     case 'error': {
+      forceFlushTextDeltaBuffer();
       // Provider details stay in logs. If every configured model is exhausted,
       // return a useful local result instead of exposing transport failures.
       clearSafetyTimer(ev.sessionId);
