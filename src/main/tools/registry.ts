@@ -76,6 +76,12 @@ import { createTabTool } from './create-tab.js';
 // Phase 3: Database and Voice tools
 import { databaseTool } from './database.js';
 import { voiceTool } from './voice.js';
+// Phase 4: Superpowers - Universal API, Enhanced Computer, Workflows, Games, Business
+import { apiConnectorTool } from './api-connector.js';
+import { enhancedComputerTool } from './enhanced-computer.js';
+import { workflowTemplatesTool } from './workflow-templates.js';
+import { gameEngineTool } from './game-engine.js';
+import { businessSuiteTool } from './business-suite.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -161,6 +167,12 @@ export function registerBuiltinTools(): void {
     // Phase 3: Database and Voice
     databaseTool,
     voiceTool,
+    // Phase 4: Superpowers
+    apiConnectorTool,
+    enhancedComputerTool,
+    workflowTemplatesTool,
+    gameEngineTool,
+    businessSuiteTool,
   ]) {
     toolRegistry.register(t);
   }
