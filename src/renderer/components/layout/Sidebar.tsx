@@ -4,62 +4,18 @@ import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { AppIcon, type AppIconName } from '../brand/AppIcon';
 
-const NAV = [
-  {
-    id: 'chats',
-    label: 'Chats',
-    icon: 'M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501c1.153-.086 2.294-.213 3.423-.379 1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z',
-    color: 'text-indigo-400',
-  },
-  {
-    id: 'agents',
-    label: 'Agents',
-    icon: 'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z',
-    color: 'text-violet-400',
-  },
-  {
-    id: 'projects',
-    label: 'Projects',
-    icon: 'M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776',
-    color: 'text-emerald-400',
-  },
-  {
-    id: 'documents',
-    label: 'File Explorer',
-    icon: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
-    color: 'text-slate-400',
-  },
-  {
-    id: 'automations',
-    label: 'Automations',
-    icon: 'M3.75 13.5L14.25 2.25 12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
-    color: 'text-amber-400',
-  },
-  {
-    id: 'memory',
-    label: 'Memory',
-    icon: 'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z',
-    color: 'text-purple-400',
-  },
-  {
-    id: 'workspace',
-    label: 'Workspace',
-    icon: 'M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21',
-    color: 'text-teal-400',
-  },
-  {
-    id: 'capabilities',
-    label: 'Capabilities',
-    icon: 'M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18',
-    color: 'text-fuchsia-400',
-  },
-  {
-    id: 'settings',
-    label: 'Settings',
-    icon: 'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z',
-    color: 'text-slate-400',
-  },
+const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
+  { id: 'chats', label: 'Chats', icon: 'nav.chats', color: 'text-cyan-400' },
+  { id: 'agents', label: 'Agents', icon: 'nav.agents', color: 'text-violet-400' },
+  { id: 'projects', label: 'Projects', icon: 'nav.projects', color: 'text-emerald-400' },
+  { id: 'documents', label: 'File Explorer', icon: 'nav.files', color: 'text-sky-400' },
+  { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
+  { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
+  { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
+  { id: 'capabilities', label: 'Capabilities', icon: 'nav.capabilities', color: 'text-fuchsia-400' },
+  { id: 'settings', label: 'Settings', icon: 'nav.settings', color: 'text-slate-400' },
 ];
 
 interface SidebarProps {
@@ -172,17 +128,15 @@ export function Sidebar({
     }
   };
 
-  const tabIcon = (kind: AiTabKind): string => {
-    const emojis: Partial<Record<AiTabKind, string>> = {
-      quiz: '📝', summary: '📋', business: '💼', feature: '✨',
-      code: '💻', research: '🔍', lesson: '🎓', workspace: '📁',
-      chart: '📊', document: '📄', video: '🎬', invoice: '💰',
-      data: '📈', dashboard: '📊', financial: '💹', custom: '⚙️',
+  const tabIconName = (kind: AiTabKind): AppIconName => {
+    const icons: Partial<Record<AiTabKind, AppIconName>> = {
+      quiz: 'tab.quiz', summary: 'tab.summary', business: 'tab.business', feature: 'tab.feature',
+      code: 'tab.code', research: 'tab.research', lesson: 'tab.lesson', workspace: 'tab.workspace',
+      chart: 'tab.chart', document: 'tab.document', video: 'tab.video', invoice: 'tab.invoice',
+      data: 'tab.data', dashboard: 'tab.dashboard', financial: 'tab.financial', custom: 'tab.custom',
     };
-    return emojis[kind] || emojis.custom!;
+    return icons[kind] ?? 'tab.custom';
   };
-
-  // Tab icon rendering removed — now uses emojis
 
   return (
     <aside
@@ -252,15 +206,11 @@ export function Sidebar({
               {isActive && (
                 <span className="os-accent-indicator absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full" />
               )}
-              <svg
+              <AppIcon
+                name={n.icon}
                 className={`w-4 h-4 flex-shrink-0 transition-colors ${isActive ? n.color || 'text-indigo-400' : 'text-gray-500 group-hover:text-white'}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d={n.icon} />
-              </svg>
+                strokeWidth={1.7}
+              />
               {!collapsed && <span className="truncate">{n.label}</span>}
             </button>
           );
@@ -291,13 +241,11 @@ export function Sidebar({
                     {hasEmoji ? (
                       <span className="w-4 h-4 flex-shrink-0 text-center text-sm leading-4">{tab.icon}</span>
                     ) : (
-                      <span
-                        className={`w-4 h-4 flex-shrink-0 text-sm leading-none flex items-center justify-center ${isActive ? 'text-cyan-300' : 'text-gray-500 group-hover:text-cyan-300'}`}
-                        role="img"
-                        aria-label={tab.title}
-                      >
-                        {tabIcon(tab.kind)}
-                      </span>
+                      <AppIcon
+                        name={tabIconName(tab.kind)}
+                        className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-cyan-300' : 'text-gray-500 group-hover:text-cyan-300'}`}
+                        strokeWidth={1.7}
+                      />
                     )}
                     <span className="truncate flex-1 text-left">{tab.title}</span>
                   </button>
@@ -501,19 +449,7 @@ export function Sidebar({
             title={`${currentProvider} · ${currentModel}`}
           >
             <div className="w-7 h-7 rounded-lg bg-white/[0.035] border border-white/[0.08] flex items-center justify-center flex-shrink-0">
-              <svg
-                className="w-3.5 h-3.5 text-zinc-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"
-                />
-              </svg>
+              <AppIcon name="topbar.engine" className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.7} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-[9px] text-zinc-600 truncate">Selected · {currentProvider}</div>

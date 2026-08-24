@@ -45,7 +45,10 @@ export default defineConfig({
       minify: 'esbuild',
       cssCodeSplit: true,
       rollupOptions: {
-        input: resolve('src/renderer/index.html'),
+        input: {
+          index: resolve('src/renderer/index.html'),
+          mini: resolve('src/renderer/mini.html'),
+        },
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],

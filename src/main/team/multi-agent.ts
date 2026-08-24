@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import type { AgentId } from '../agents/types.js';
 
 export interface MultiAgentConfig {
   dataDir: string;
@@ -280,7 +281,7 @@ export class MultiAgentSystem {
     if (context?.sessionId && context?.cwd) {
       const { spawnBatch } = await import('../agent/runtime.js');
       const agentTasks = team.agents.map((agentId) => ({
-        agentId: agentId as any,
+        agentId: agentId as AgentId,
         task: `${taskType}: ${JSON.stringify(input)}`,
       }));
 
@@ -299,7 +300,7 @@ export class MultiAgentSystem {
       // Update task statuses
       const finalMap = results[0];
       for (const task of tasks) {
-        const result = finalMap.get(task.assignedTo as any);
+        const result = finalMap.get(task.assignedTo as AgentId);
         if (result?.error) {
           this.failTask(task.id, result.error);
         } else {

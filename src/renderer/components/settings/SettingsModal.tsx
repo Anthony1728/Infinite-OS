@@ -125,7 +125,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     const selectedProvider = providers.find((item) => item.id === activeProvider);
     if (selectedProvider && !selectedProvider.requiresApiKey) {
       setStatus('testing');
-      setStatusMessage('Checking local provider…');
+      setStatusMessage('Checking local provider...');
       window.api
         .testProvider({ provider: activeProvider, apiKey: '' })
         .then(async (result: { ok: boolean; error?: string }) => {
@@ -154,7 +154,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           saveCurrent({ provider: activeProvider, model: nextModel, hasApiKey: has });
           if (nextModel) setCurrentModel(nextModel);
           setStatus('ok');
-          setStatusMessage(nextModel ? `Connected · ${nextModel}` : 'Connected');
+          setStatusMessage(nextModel ? `Connected - ${nextModel}` : 'Connected');
           window.dispatchEvent(new Event('storage'));
         })
         .catch((error: unknown) => {
@@ -188,7 +188,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           setCurrentModel(nextModel);
         }
         setStatus('ok');
-        setStatusMessage(nextModel ? `API key saved · ${nextModel}` : 'API key saved');
+        setStatusMessage(nextModel ? `API key saved - ${nextModel}` : 'API key saved');
       })
       .catch(() => {
         if (!cancelled) {
@@ -203,7 +203,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const test = async () => {
     setStatus('testing');
-    setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models…' : 'Checking provider connection…');
+    setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models...' : 'Checking provider connection...');
     try {
       const res = await window.api.testProvider({ provider: activeProvider, apiKey });
       if (res.ok) {
@@ -227,9 +227,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         if (nextModel) setCurrentModel(nextModel);
         setStatusMessage(
           activeProvider === 'opencode'
-            ? `OpenCode connected · ${nextModels.length} model${nextModels.length === 1 ? '' : 's'} available`
+            ? `OpenCode connected - ${nextModels.length} model${nextModels.length === 1 ? '' : 's'} available`
             : nextModel
-              ? `Connected · ${nextModel}`
+              ? `Connected - ${nextModel}`
               : 'Connected',
         );
         window.dispatchEvent(new Event('storage'));
@@ -245,7 +245,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleUseInstalledOpenCode = async () => {
     setStatus('testing');
-    setStatusMessage('Switching to installed OpenCode credentials…');
+    setStatusMessage('Switching to installed OpenCode credentials...');
     try {
       await window.api.setProviderKey({ provider: 'opencode', key: '' });
       setApiKey('');
@@ -319,7 +319,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       return;
     }
     setEmailStatus('testing');
-    setEmailMessage('Verifying IMAP and SMTP…');
+    setEmailMessage('Verifying IMAP and SMTP...');
     try {
       const config = email;
       if (!email.password && emailSaved) {
@@ -341,6 +341,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setEmailSaved(true);
       setEmailStatus('ok');
       setEmailMessage('Mailbox verified and saved securely. Infinite AI can now send from this account.');
+    } catch (error) {
+      setEmailStatus('fail');
+      setEmailMessage(error instanceof Error ? error.message : 'Could not save mailbox settings.');
+    }
+  };
+
+  /** Save email config even when the connection test fails. */
+  const saveEmailAnyway = async () => {
+    if (!email.user.trim() || !email.password) {
+      setEmailStatus('fail');
+      setEmailMessage('Enter the mailbox email and password to save.');
+      return;
+    }
+    setEmailStatus('testing');
+    setEmailMessage('Saving without verification...');
+    try {
+      await window.api.emailConfigSave(email);
+      setEmail((current) => ({ ...current, password: '' }));
+      setEmailSaved(true);
+      setEmailStatus('ok');
+      setEmailMessage('Mailbox settings saved (unverified). Infinite AI will attempt to use this account.');
     } catch (error) {
       setEmailStatus('fail');
       setEmailMessage(error instanceof Error ? error.message : 'Could not save mailbox settings.');
@@ -544,10 +565,23 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-between gap-3 mt-3">
               <p className="text-[11px] leading-5 text-gray-600">Passwords are protected with Windows encryption. Gmail, Outlook, and Yahoo commonly require an app password when two-factor authentication is enabled.</p>
               <button onClick={() => void testAndSaveEmail()} disabled={emailStatus === 'testing'} className="shrink-0 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">
-                {emailStatus === 'testing' ? 'Testing…' : 'Test & Save'}
+                {emailStatus === 'testing' ? 'Testing...' : 'Test & Save'}
               </button>
             </div>
-            {emailMessage && <div className={`mt-2 text-xs ${emailStatus === 'fail' ? 'text-red-400' : emailStatus === 'ok' ? 'text-emerald-400' : 'text-gray-400'}`}>{emailMessage}</div>}
+            {emailStatus === 'fail' && emailMessage && (
+              <div className="mt-2">
+                <div className="text-xs text-red-400 whitespace-pre-wrap">{emailMessage}</div>
+                <button
+                  onClick={() => void saveEmailAnyway()}
+                  className="mt-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-1.5 text-xs text-yellow-300 hover:bg-yellow-500/20 transition-colors"
+                >
+                  Save anyway (without verification)
+                </button>
+              </div>
+            )}
+            {emailStatus !== 'fail' && emailMessage && (
+              <div className={`mt-2 text-xs ${emailStatus === 'ok' ? 'text-emerald-400' : 'text-gray-400'}`}>{emailMessage}</div>
+            )}
           </section>
 
           <section>

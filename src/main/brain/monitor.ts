@@ -187,7 +187,7 @@ export class SystemMonitor {
 
   private async checkNetwork(): Promise<boolean> {
     try {
-      await fetch('https://httpbin.org/get', { signal: AbortSignal.timeout(3000) });
+      await fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(3000) });
       return true;
     } catch {
       return false;
@@ -197,7 +197,7 @@ export class SystemMonitor {
   private async checkLatency(): Promise<number> {
     const start = Date.now();
     try {
-      await fetch('https://httpbin.org/get', { signal: AbortSignal.timeout(3000) });
+      await fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(3000) });
       return Date.now() - start;
     } catch {
       return -1;

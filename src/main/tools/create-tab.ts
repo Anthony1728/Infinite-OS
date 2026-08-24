@@ -118,7 +118,7 @@ export const createTabTool: Tool = {
 
     const tabPayload = {
       title: a.title,
-      kind: a.kind as any,
+      kind: a.kind,
       prompt: a.prompt,
       content: a.content,
       icon,

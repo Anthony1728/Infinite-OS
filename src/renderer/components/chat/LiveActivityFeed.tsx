@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useChatStore, type ActivityItem } from '../../stores/chat';
 import { ToolIcon } from '../tools/ToolCallCard';
 
@@ -22,52 +23,60 @@ function categoryColor(category: string): string {
   }
 }
 
-function ActivityRow({ item }: { item: ActivityItem }) {
+/** Ticking elapsed-time label for the step that is currently running. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <span className="ml-1.5 flex-shrink-0 tabular-nums text-[10px] text-indigo-300/60">
+      {s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`}
+    </span>
+  );
+}
+
+function StepRow({ item, connect }: { item: ActivityItem; connect: boolean }) {
   const running = item.status === 'running';
   const errored = item.status === 'error';
   return (
-    <div className={`flex items-start gap-2 rounded-lg px-2 py-1.5 ${running ? 'bg-indigo-500/[0.07]' : ''}`}>
-      <span
-        className={`relative mt-0.5 flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0 ${errored ? 'bg-red-500/15 text-red-300' : categoryColor(item.category)}`}
-      >
-        {running && <span className="absolute inset-0 rounded-md border border-indigo-400/50 animate-ping" />}
-        <ToolIcon name={item.name} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-zinc-200 truncate">{item.label}</span>
-          <span className="ml-auto flex-shrink-0">
-            {running ? (
-              <span className="w-3 h-3 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
-            ) : errored ? (
-              <svg
-                className="w-3.5 h-3.5 text-red-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                viewBox="0 0 24 24"
-              >
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            ) : (
-              <svg
-                className="w-3.5 h-3.5 text-emerald-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                viewBox="0 0 24 24"
-              >
-                <path d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-            )}
+    <div className="flex gap-3">
+      <div className="flex w-6 flex-col items-center">
+        <span
+          className={`relative flex h-6 w-6 flex-none items-center justify-center rounded-md ${
+            errored ? 'bg-red-500/15 text-red-300' : categoryColor(item.category)
+          }`}
+        >
+          {running && (
+            <span className="absolute inset-0 rounded-md border border-indigo-400/50 animate-ping" />
+          )}
+          {running ? (
+            <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current/40 border-t-current" />
+          ) : errored ? (
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          ) : item.status === 'done' ? (
+            <svg className="h-3.5 w-3.5 text-emerald-400/80" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <path d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          ) : (
+            <ToolIcon name={item.name} />
+          )}
+        </span>
+        {connect && <span className="w-px flex-1 bg-white/[0.07]" />}
+      </div>
+      <div className="min-w-0 flex-1 pb-3 pt-0.5">
+        <div className="flex items-baseline gap-2">
+          <span className={`truncate text-xs ${running ? 'font-medium text-zinc-100' : errored ? 'font-medium text-red-300/90' : 'text-zinc-400'}`}>
+            {item.label}
           </span>
+          {running && <Elapsed since={item.timestamp} />}
         </div>
         {item.detail && (
-          <div className="text-[10px] text-textMuted font-mono truncate mt-0.5" title={item.detail}>
+          <div className="mt-0.5 truncate font-mono text-[10px] text-textMuted" title={item.detail}>
             {item.detail}
           </div>
         )}
@@ -76,32 +85,39 @@ function ActivityRow({ item }: { item: ActivityItem }) {
   );
 }
 
+/**
+ * Inline live progress, rendered in the chat flow directly above the pending
+ * assistant reply. Visible only while work is actually streaming — once the
+ * run finishes the final assistant message carries the result, so nothing
+ * lingers as a faded strip at the top of the chat.
+ */
 export function LiveActivityFeed() {
   const activity = useChatStore((s) => s.activity);
   const streaming = useChatStore((s) => s.streaming);
-  if (activity.length === 0) return null;
 
+  if (!streaming) return null;
+
+  const visible = activity.slice(-6);
   const runningCount = activity.filter((a) => a.status === 'running').length;
+  const trailing =
+    runningCount > 0 || visible.length > 0 ? 'Working…' : 'Starting…';
 
   return (
-    <div className="sticky top-0 z-10 px-10 pt-3 pb-2 bg-gradient-to-b from-[#08080b] via-[#08080b] to-transparent pointer-events-none">
-      <div className="rounded-xl border border-white/[0.08] bg-[#0c1018]/90 backdrop-blur-sm overflow-hidden shadow-lg pointer-events-auto">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-          </span>
-          <span className="text-[11px] font-semibold tracking-wide text-zinc-300 uppercase">Live Activity</span>
-          {streaming && (
-            <span className="text-[10px] text-indigo-300/80 ml-auto">
-              {runningCount > 0 ? `${runningCount} running…` : 'working…'}
+    <div className="px-1" aria-live="polite" aria-label="Live progress">
+      <div className="flex flex-col">
+        {visible.map((item) => (
+          <StepRow key={item.id} item={item} connect />
+        ))}
+        <div className="flex gap-3">
+          <div className="flex w-6 flex-col items-center">
+            <span className="relative flex h-6 w-6 items-center justify-center">
+              <span className="absolute inline-flex h-2 w-2 rounded-full bg-indigo-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-400" />
             </span>
-          )}
-        </div>
-        <div className="max-h-44 overflow-y-auto custom-scrollbar px-2 py-2 space-y-1">
-          {activity.map((a) => (
-            <ActivityRow key={a.id} item={a} />
-          ))}
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <span className="text-xs font-medium text-indigo-300/90">{trailing}</span>
+          </div>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { app, BrowserWindow, shell, Menu, nativeImage, session } from 'electron'
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc/index.js';
+import { registerMiniMode } from './ipc/mini-mode.js';
 import { registerBuiltinTools } from './tools/registry.js';
 import { settings } from './settings/store.js';
 import { connectAll as mcpConnectAll } from './mcp/manager.js';
@@ -198,6 +199,7 @@ app.whenReady().then(async () => {
 
   registerBuiltinTools();
   registerIpc(() => mainWindow);
+  registerMiniMode(() => mainWindow);
   const cwd = process.cwd();
 
   // Settings and external services initialize in the background. Slow disk,

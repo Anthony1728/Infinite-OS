@@ -535,6 +535,13 @@ export const IPC = {
   WINDOW_IS_MAXIMIZED: 'window:is-maximized',
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed', // main → renderer push
 
+  // Mini Mode (desktop floating chat bar)
+  MINI_TOGGLE: 'mini:toggle',
+  MINI_SEND: 'mini:send',
+  MINI_STATE: 'mini:state',           // main → mini push
+  MINI_STREAM_EVENT: 'mini:stream',   // main → mini push
+  MINI_RESTORE: 'mini:restore',       // mini → main: restore main window
+
   // Browser Bridge (Infinite OS Bridge browser extension)
   BRIDGE_STATUS: 'bridge:status',
   BRIDGE_EXEC: 'bridge:exec',

@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
 import { ToolCallCard } from '../tools/ToolCallCard';
 import { LiveActivityFeed } from './LiveActivityFeed';
@@ -351,16 +352,32 @@ export function ChatView({
     (text: string, imageBlocks?: ContentBlock[]) => {
       if (!text.trim() && !imageBlocks?.length) return;
 
-      const dispatch = (msg: string, mode?: ChatExecutionMode, agent?: string) =>
-        sendMessage(msg, imageBlocks, mode, agent);
+      const dispatch = (msg: string, mode?: ChatExecutionMode, agent?: string) => {
+        sendMessage(msg, imageBlocks, mode, agent).catch((err) => {
+          console.error('[chat] sendMessage failed:', err);
+          useChatStore.setState({ streaming: false });
+        });
+      };
 
-      if (/\b(configure|setup|set up|connect|add)\b.*\b(email|mailbox|smtp|imap)\b/i.test(text)) {
+      // Convenience shortcuts (open email settings, tweak the UI) should only
+      // fire for short, direct commands. A pasted prompt or longer task that
+      // merely mentions these words must still be sent to the AI, otherwise
+      // the message is silently swallowed and "nothing happens" (no streaming,
+      // no tool calls, no response).
+      const isShortCommand = text.trim().length <= 160;
+
+      if (
+        isShortCommand &&
+        /\b(configure|setup|set up|connect|add)\b.*\b(email|mailbox|smtp|imap)\b/i.test(text)
+      ) {
         window.dispatchEvent(new Event('infinite:open-settings'));
         setInput('');
         return;
       }
 
-      const isAppearanceRequest = /\b(change|make|switch|customi[sz]e|set|use)\b.*\b(ui|interface|theme|sidebar|bar|color|glow|glass|layout|corners|spacing)\b/i.test(text);
+      const isAppearanceRequest =
+        isShortCommand &&
+        /\b(change|make|switch|customi[sz]e|set|use)\b.*\b(ui|interface|theme|sidebar|bar|color|glow|glass|layout|corners|spacing)\b/i.test(text);
       if (isAppearanceRequest) {
         const patch = appearanceFromPrompt(text);
         if (patch) {
@@ -580,32 +597,12 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const modes = [
-    {
-      label: 'Chat',
-      view: 'chats',
-      path: 'M7.5 8.25h9m-9 3H12m-8.25 7.5 3.6-3.6c.42-.42.99-.66 1.59-.66h8.31A2.25 2.25 0 0 0 19.5 15V6A2.25 2.25 0 0 0 17.25 3.75H6A2.25 2.25 0 0 0 3.75 6v12.75Z',
-    },
-    {
-      label: 'Code',
-      view: 'workspace',
-      path: 'm8.25 6.75-5.25 5.25 5.25 5.25m7.5-10.5L21 12l-5.25 5.25M14.25 3.75l-4.5 16.5',
-    },
-    {
-      label: 'Agent',
-      view: 'agents',
-      path: 'M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z',
-    },
-    {
-      label: 'Build',
-      view: 'app-builder',
-      path: 'M12 3v18m9-9H3m3.75-6.75 10.5 13.5m0-13.5-10.5 13.5',
-    },
-    {
-      label: 'Canvas',
-      view: 'canvas',
-      path: 'M4.5 4.5h6v6h-6v-6Zm9 0h6v6h-6v-6Zm-9 9h6v6h-6v-6Zm9 0h6v6h-6v-6Z',
-    },
+  const modes: { label: string; view: string; icon: AppIconName }[] = [
+    { label: 'Chat', view: 'chats', icon: 'home.chat' },
+    { label: 'Code', view: 'workspace', icon: 'home.code' },
+    { label: 'Agent', view: 'agents', icon: 'home.agents' },
+    { label: 'Build', view: 'app-builder', icon: 'action.build' },
+    { label: 'Canvas', view: 'canvas', icon: 'home.canvas' },
   ];
   return (
     <section className="px-6 pb-2 pt-5 lg:px-10" aria-label="Chat modes and greeting">
@@ -616,22 +613,18 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
         <p className="mt-2 text-[12px] text-zinc-500">
           How can I help you build, create and automate today?
         </p>
-        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/90 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)]">
+        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full bg-[#0b0f18]/90 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)]">
           {modes.map((mode, index) => (
             <button
               key={mode.label}
               onClick={() => onViewChange(mode.view)}
-              className={`flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-full px-2 text-[10px] transition-all ${index === 0 ? 'os-active-mode border text-zinc-100' : 'border border-transparent text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200'}`}
+              className={`flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-full px-2 text-[10px] transition-all ${index === 0 ? 'os-active-mode text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200'}`}
             >
-              <svg
-                className={`h-3.5 w-3.5 ${index === 0 ? 'os-accent-text' : 'text-zinc-500'}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d={mode.path} />
-              </svg>
+              <AppIcon
+                name={mode.icon}
+                className={`h-3.5 w-3.5 flex-none ${index === 0 ? 'os-accent-text' : 'text-zinc-500'}`}
+                strokeWidth={1.75}
+              />
               {mode.label}
             </button>
           ))}
@@ -919,7 +912,7 @@ function InputBar({
       {showSlashMenu && filteredCommands.length > 0 && (
         <div
           ref={slashMenuRef}
-          className="absolute bottom-full left-0 right-0 mb-2 bg-[#0d0d11] border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden z-50"
+          className="absolute bottom-full left-0 right-0 mb-2 bg-[#0d0d11] rounded-xl shadow-2xl overflow-hidden z-50"
         >
           <div className="px-3 py-2 text-[10px] text-textMuted uppercase tracking-wider border-b border-white/5">
             Commands
@@ -961,14 +954,14 @@ function InputBar({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] border rounded-xl overflow-visible transition-all duration-300 shadow-[0_14px_40px_rgba(0,0,0,.22)] ${
+        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] rounded-xl overflow-visible transition-all duration-300 ${
           isOnline
-            ? 'border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.15),0_0_40px_rgba(34,211,238,0.05)] focus-within:border-cyan-400/60 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.2),0_0_50px_rgba(34,211,238,0.1)]'
-            : 'border-borderSubtle focus-within:border-indigo-500/40 shadow-black/10'
-        } ${dragActive ? 'border-indigo-400/70 ring-2 ring-indigo-400/30' : ''}`}
+            ? 'shadow-[0_0_0.5px_rgba(34,211,238,0.45),0_0_14px_rgba(34,211,238,0.14)]'
+            : ''
+        } ${dragActive ? 'ring-2 ring-indigo-400/30' : ''}`}
       >
         {dragActive && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-indigo-400/60 bg-indigo-500/10">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-indigo-500/10">
             <span className="rounded-lg bg-[#0b101a]/90 px-3 py-1.5 text-xs font-medium text-indigo-300">
               Drop images to attach
             </span>
@@ -1040,7 +1033,7 @@ function InputBar({
           </button>
           <div className="relative">
             {uncensoredConfirmOpen && (
-              <div className="os-uncensored-confirm absolute bottom-11 left-0 z-50 w-80 rounded-xl border bg-[#11151f] p-4 shadow-2xl">
+              <div className="os-uncensored-confirm absolute bottom-11 left-0 z-50 w-80 rounded-xl bg-[#11151f] p-4 shadow-2xl">
                 <div className="os-accent-text text-xs font-semibold">Enable Uncensored mode?</div>
                 <p className="mt-2 text-[10px] leading-relaxed text-zinc-400">
                   Infinite AI will use maximum authorized autonomy, respond more candidly, avoid unnecessary refusals, and actively try alternative tools when a method fails. Account authentication, tool permissions, privacy, user cancellation, and non-bypassable safety boundaries still apply.
@@ -1079,7 +1072,7 @@ function InputBar({
           </div>
           <div className="relative ml-1">
             {agentMenuOpen && (
-              <div className="absolute bottom-10 left-0 z-50 max-h-64 w-64 overflow-y-auto rounded-lg border border-white/[0.09] bg-[#101521] p-1 shadow-2xl">
+              <div className="absolute bottom-10 left-0 z-50 max-h-64 w-64 overflow-y-auto rounded-lg bg-[#101521] p-1 shadow-2xl">
                 <button
                   type="button"
                   onClick={() => {
@@ -1149,7 +1142,7 @@ function InputBar({
           </div>
           <div className="relative ml-1">
             {modeMenuOpen && (
-              <div className="absolute bottom-10 left-0 z-50 w-52 overflow-hidden rounded-lg border border-white/[0.09] bg-[#101521] p-1 shadow-2xl">
+              <div className="absolute bottom-10 left-0 z-50 w-52 overflow-hidden rounded-lg bg-[#101521] p-1 shadow-2xl">
                 {CHAT_MODE_OPTIONS.map((option) => (
                   <button
                     key={option.id}
@@ -1248,6 +1241,16 @@ function InputBar({
               />
             </svg>
           </button>
+          <button
+            onClick={async () => { await window.api.miniToggle(); }}
+            aria-label="Toggle mini mode"
+            title="Mini mode — float a chat bar on your desktop"
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-zinc-500 hover:text-indigo-400 hover:bg-white/[0.04]"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
@@ -1323,13 +1326,15 @@ function RealChat({
     activity.filter((a) => a.status === 'running').map((a) => a.toolUseId),
   );
   const hasRunningTool = runningToolIds.size > 0;
-  const showThinking = streaming && !isStreamingText && !hasRunningTool;
+  // When the inline live-activity feed is showing steps, it carries the
+  // "working" signal — don't also render the generic thinking bubble.
+  const showThinking = streaming && !isStreamingText && !hasRunningTool && activity.length === 0;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streaming]);
+  }, [messages, streaming, activity]);
 
   // Handle sending during streaming (interjection)
   const handleSendDuringStream = (text: string) => {
@@ -1343,22 +1348,23 @@ function RealChat({
       <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scrollbar">
         {header}
         <BrainLearningPanel />
-        <LiveActivityFeed />
         <div className="flex w-full flex-col gap-5 px-6 py-5 lg:px-10">
           {messages.map((m) => (
             <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
           ))}
           {showThinking && <ThinkingBubble />}
-          {streaming && !isStreamingText && (
-            <div className="flex items-center gap-2 text-xs text-indigo-400 animate-pulse">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+          <LiveActivityFeed />
+          {streaming && !isStreamingText && activity.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-indigo-400/80 py-1">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+              </span>
               {orchestratedTaskId
-                ? 'Multiple agents working in parallel'
+                ? 'Multiple agents working in parallel…'
                 : providerStatus?.label
-                  ? providerStatus.label
-                  : 'Infinite AI is thinking'}
+                  ? `${providerStatus.label}${providerStatus.detail ? ` — ${providerStatus.detail}` : ''}`
+                  : 'Infinite AI is thinking…'}
             </div>
           )}
         </div>
@@ -1425,7 +1431,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
 
   return (
     <div
-      className={`group/message flex gap-5 rounded-xl border px-5 py-4 shadow-[0_8px_24px_rgba(0,0,0,.1)] ${isUser ? 'border-blue-500/10 bg-blue-500/[0.025]' : 'border-white/[0.065] bg-[#0c1018]'}`}
+      className={`group/message flex gap-5 rounded-xl px-5 py-4 ${isUser ? 'bg-blue-500/[0.04]' : 'bg-white/[0.02]'}`}
     >
       {isAssistant ? (
         <div className="brand-avatar w-8 h-8 flex-shrink-0 mt-0.5">
@@ -1608,7 +1614,7 @@ function ThinkingBubble() {
 
   return (
     <div
-      className="flex gap-3 items-center rounded-xl border border-white/[0.065] bg-[#0c1018] px-4 py-3"
+      className="flex gap-3 items-center rounded-xl px-4 py-3 bg-white/[0.02]"
       role="status"
       aria-live="polite"
     >

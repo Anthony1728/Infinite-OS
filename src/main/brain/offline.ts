@@ -72,7 +72,7 @@ export class OfflineManager {
 
     try {
       // Try to reach a reliable endpoint
-      const response = await fetch('https://httpbin.org/get', {
+      const response = await fetch('https://www.google.com/generate_204', {
         method: 'HEAD',
         signal: AbortSignal.timeout(5000),
       });

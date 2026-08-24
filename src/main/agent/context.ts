@@ -1,6 +1,5 @@
 // Build the system prompt and assemble message context.
 
-import { readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { arch, homedir, hostname, platform, release, userInfo } from 'node:os';
 import type { Message } from '../../shared/types.js';
@@ -555,10 +554,9 @@ async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
   const projectHidden = join(cwd, '.infinite', 'INFINITE.md');
   const localPath = join(cwd, 'INFINITE.local.md');
 
-  const { access } = await import('node:fs/promises');
+  const { readFile } = await import('node:fs/promises');
   for (const p of [userPath, projectPath, projectHidden, localPath]) {
     try {
-      await access(p);
       out.push({ path: p, content: await readFile(p, 'utf8') });
     } catch { /* skip */ }
   }
@@ -568,9 +566,11 @@ async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
 async function loadAutoMemory(cwd: string): Promise<string | null> {
   const hash = await hashPath(cwd);
   const dir = join(homedir(), '.infinite-ai', 'memory', hash);
-  const { access, readdir, readFile } = await import('node:fs/promises');
-  try { await access(dir); } catch { return null; }
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort();
+  const { readdir, readFile } = await import('node:fs/promises');
+  let files: string[];
+  try {
+    files = (await readdir(dir)).filter((f) => f.endsWith('.md')).sort();
+  } catch { return null; }
   const out: string[] = [];
   for (const f of files) {
     out.push(`## ${f}`);

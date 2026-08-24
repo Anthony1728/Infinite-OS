@@ -1,28 +1,28 @@
-// Infinite OS Bridge v3.0 — Content script.
-  // Injected into every page for fast DOM operations without script injection overhead.
-  // Communicates with background.js via chrome.runtime messages.
+// Infinite AI Bridge v4.0 — Content script.
+// Injected into every page for fast DOM operations without script injection overhead.
+// Communicates with background.js via chrome.runtime messages.
 
-  (() => {
-    'use strict';
+(() => {
+  'use strict';
 
-    const BRIDGE_NS = '__infinite_bridge__';
-    if (window[BRIDGE_NS]) return;
-    window[BRIDGE_NS] = true;
+  const BRIDGE_NS = '__infinite_bridge__';
+  if (window[BRIDGE_NS]) return;
+  window[BRIDGE_NS] = true;
 
-    const INTERACTIVE = 'a, button, input, textarea, select, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="tab"], [role="option"], [onclick], label[for], details summary';
-    const TEXT_ATTRS = ['aria-label', 'title', 'placeholder', 'alt', 'name', 'value'];
+  const INTERACTIVE = 'a, button, input, textarea, select, summary, [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="tab"], [role="option"], [onclick], label[for], details summary';
+  const TEXT_ATTRS = ['aria-label', 'title', 'placeholder', 'alt', 'name', 'value'];
 
-    // Incremental DOM snapshot cache
-    const snapshotCache = {
-      elements: new Map(),
-      lastSnapshot: null,
-      lastSnapshotTime: 0,
-      selectorIndex: new Map(),
-    };
+  // Incremental DOM snapshot cache
+  const snapshotCache = {
+    elements: new Map(),
+    lastSnapshot: null,
+    lastSnapshotTime: 0,
+    selectorIndex: new Map(),
+  };
 
-    function norm(s) {
-      return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    }
+  function norm(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
 
   function cssPath(el) {
     if (!el || el.nodeType !== 1) return '';
@@ -489,6 +489,270 @@
         }
       }
       return { results };
+    },
+
+    // ── NEW OPERATIONS (v4.0) ──────────────────────────────────────────────────
+
+    getFormData() {
+      const forms = Array.from(document.forms).map(f => {
+        const data = {};
+        const elements = Array.from(f.elements);
+        for (const el of elements) {
+          if (el.name || el.id) {
+            const key = el.name || el.id;
+            if (el.type === 'checkbox' || el.type === 'radio') {
+              data[key] = el.checked;
+            } else if (el.tagName === 'SELECT') {
+              data[key] = el.value;
+            } else {
+              data[key] = el.value;
+            }
+          }
+        }
+        return {
+          action: f.action,
+          method: f.method,
+          id: f.id,
+          name: f.name,
+          data,
+          fields: elements.filter(e => ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName)).map(describe),
+        };
+      });
+      return { forms };
+    },
+
+    submitForm(params) {
+      const el = findCandidate(params.selector);
+      if (!el) return { error: 'submitForm: element not found' };
+      const form = el instanceof HTMLFormElement ? el : el.closest('form');
+      if (!form) return { error: 'submitForm: no form found' };
+      form.submit();
+      return { submitted: true };
+    },
+
+    getTableData(params) {
+      const tables = Array.from(document.querySelectorAll(params.selector || 'table'));
+      const data = tables.map(table => {
+        const rows = Array.from(table.querySelectorAll('tr'));
+        const headers = Array.from(rows[0]?.querySelectorAll('th') || []).map(th => th.textContent?.trim() || '');
+        const body = rows.slice(1).map(row => {
+          const cells = Array.from(row.querySelectorAll('td'));
+          if (headers.length) {
+            const obj = {};
+            cells.forEach((cell, i) => { obj[headers[i] || 'col' + i] = cell.textContent?.trim() || ''; });
+            return obj;
+          }
+          return cells.map(cell => cell.textContent?.trim() || '');
+        });
+        return { headers, rows: body, rowCount: rows.length - 1 };
+      });
+      return { tables: data };
+    },
+
+    getPageMeta() {
+      const meta = {};
+      document.querySelectorAll('meta').forEach(m => {
+        const name = m.getAttribute('name') || m.getAttribute('property') || m.getAttribute('http-equiv');
+        const content = m.getAttribute('content');
+        if (name && content) meta[name] = content;
+      });
+      return {
+        title: document.title,
+        meta,
+        canonical: document.querySelector('link[rel="canonical"]')?.href || '',
+        description: meta.description || meta['og:description'] || '',
+        keywords: meta.keywords || '',
+        author: meta.author || '',
+        ogTitle: meta['og:title'] || '',
+        ogImage: meta['og:image'] || '',
+        ogUrl: meta['og:url'] || '',
+        twitterCard: meta['twitter:card'] || '',
+        viewport: meta.viewport || '',
+      };
+    },
+
+    getStructuredContent() {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(h => ({
+        level: parseInt(h.tagName[1]),
+        text: h.textContent?.trim() || '',
+        id: h.id || '',
+      }));
+      const images = Array.from(document.querySelectorAll('img')).slice(0, 50).map(img => ({
+        src: img.src,
+        alt: img.alt || '',
+        title: img.title || '',
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      }));
+      const videos = Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"]')).slice(0, 20).map(v => ({
+        tag: v.tagName.toLowerCase(),
+        src: v.src || '',
+        title: v.title || '',
+      }));
+      const lists = Array.from(document.querySelectorAll('ul, ol')).slice(0, 20).map(list => ({
+        type: list.tagName.toLowerCase(),
+        items: Array.from(list.querySelectorAll(':scope > li')).slice(0, 50).map(li => li.textContent?.trim() || ''),
+      }));
+      return { headings, images, videos, lists };
+    },
+
+    getAccessibilityTree() {
+      function traverse(el, depth = 0) {
+        if (!el || depth > 10) return null;
+        const role = el.getAttribute('role');
+        const name = el.getAttribute('aria-label') || el.getAttribute('title') || '';
+        const state = {
+          disabled: el.hasAttribute('disabled'),
+          focused: document.activeElement === el,
+          selected: el.getAttribute('aria-selected') === 'true',
+          checked: el.getAttribute('aria-checked') === 'true',
+          expanded: el.getAttribute('aria-expanded') === 'true',
+        };
+        const node = {
+          role: role || el.tagName.toLowerCase(),
+          name,
+          description: el.getAttribute('aria-describedby') || '',
+          states: state,
+          children: [],
+        };
+        for (const child of el.children) {
+          const childNode = traverse(child, depth + 1);
+          if (childNode) node.children.push(childNode);
+        }
+        return node;
+      }
+      return { tree: traverse(document.body) };
+    },
+
+    getElementAtPoint(params) {
+      const x = params.x || 0;
+      const y = params.y || 0;
+      const el = document.elementFromPoint(x, y);
+      if (!el) return { error: 'No element at point' };
+      return describe(el);
+    },
+
+    getVisibleElements() {
+      const elements = Array.from(document.querySelectorAll(INTERACTIVE));
+      const visible = elements.filter(el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 &&
+               r.x >= 0 && r.y >= 0 &&
+               r.x < window.innerWidth && r.y < window.innerHeight;
+      }).slice(0, 100);
+      return { elements: visible.map(describe) };
+    },
+
+    getElementByText(params) {
+      if (!params.text) return { error: 'getTextElement requires text' };
+      const q = norm(params.text);
+      const all = Array.from(document.querySelectorAll('*'));
+      const matches = [];
+      for (const el of all) {
+        if (!visible(el)) continue;
+        const text = norm(el.textContent || '');
+        if (text.includes(q)) {
+          matches.push(describe(el));
+          if (matches.length >= 10) break;
+        }
+      }
+      return { elements: matches };
+    },
+
+    getPageStructure() {
+      const structure = {
+        title: document.title,
+        url: location.href,
+        domain: location.hostname,
+        protocol: location.protocol,
+        charset: document.characterSet,
+        doctype: document.doctype ? document.doctype.name : null,
+        language: document.documentElement.lang || '',
+        meta: {},
+        headings: [],
+        links: { internal: 0, external: 0, total: 0 },
+        images: { total: 0, withAlt: 0, withoutAlt: 0 },
+        forms: document.forms.length,
+        scripts: document.scripts.length,
+        stylesheets: document.styleSheets.length,
+        iframes: document.querySelectorAll('iframe').length,
+      };
+
+      // Meta tags
+      document.querySelectorAll('meta').forEach(m => {
+        const name = m.getAttribute('name') || m.getAttribute('property') || m.getAttribute('http-equiv');
+        if (name) structure.meta[name] = m.getAttribute('content') || '';
+      });
+
+      // Headings
+      document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(h => {
+        structure.headings.push({ level: parseInt(h.tagName[1]), text: h.textContent?.trim() || '' });
+      });
+
+      // Links
+      document.querySelectorAll('a[href]').forEach(a => {
+        structure.links.total++;
+        try {
+          const url = new URL(a.href, location.href);
+          if (url.hostname === location.hostname) structure.links.internal++;
+          else structure.links.external++;
+        } catch { structure.links.external++; }
+      });
+
+      // Images
+      document.querySelectorAll('img').forEach(img => {
+        structure.images.total++;
+        if (img.alt) structure.images.withAlt++;
+        else structure.images.withoutAlt++;
+      });
+
+      return structure;
+    },
+
+    searchPage(params) {
+      if (!params.query) return { error: 'searchPage requires query' };
+      const q = params.query.toLowerCase();
+      const results = [];
+
+      // Search in text content
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || '';
+        if (text.toLowerCase().includes(q)) {
+          const parent = node.parentElement;
+          if (parent && visible(parent)) {
+            results.push({
+              type: 'text',
+              text: text.slice(0, 200),
+              selector: cssPath(parent),
+              context: text.slice(Math.max(0, text.toLowerCase().indexOf(q) - 50), text.toLowerCase().indexOf(q) + q.length + 50),
+            });
+            if (results.length >= 20) break;
+          }
+        }
+      }
+
+      // Search in attributes
+      const attrElements = document.querySelectorAll('[aria-label], [title], [placeholder], [alt]');
+      for (const el of attrElements) {
+        if (!visible(el)) continue;
+        for (const attr of ['aria-label', 'title', 'placeholder', 'alt']) {
+          const val = el.getAttribute(attr) || '';
+          if (val.toLowerCase().includes(q)) {
+            results.push({
+              type: 'attribute',
+              attribute: attr,
+              value: val,
+              selector: cssPath(el),
+            });
+            if (results.length >= 20) break;
+          }
+        }
+        if (results.length >= 20) break;
+      }
+
+      return { results, totalFound: results.length };
     },
   };
 

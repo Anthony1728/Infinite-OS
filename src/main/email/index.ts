@@ -141,6 +141,58 @@ function formatAddr(addr: EmailAddress[] | EmailAddress | undefined): string {
   }).join(', ');
 }
 
+/**
+ * Map raw IMAP/SMTP error messages to actionable, user-friendly guidance.
+ * Preserves the original detail while adding provider-specific hints.
+ */
+function humanizeEmailError(raw: string, config: EmailConfig): string {
+  const lower = raw.toLowerCase();
+  const host = (config.smtpHost || config.imapHost || '').toLowerCase();
+
+  // Authentication failures — most common for Gmail/Outlook/Yahoo with 2FA
+  if (
+    lower.includes('auth') ||
+    lower.includes('invalid credentials') ||
+    lower.includes('login') ||
+    lower.includes('password') ||
+    lower.includes('command failed')
+  ) {
+    if (host.includes('gmail') || host.includes('google')) {
+      return `${raw}\n\nGmail requires an App Password when two-factor authentication is enabled. Generate one at https://myaccount.google.com/apppasswords and use the app password (not your regular Gmail password).`;
+    }
+    if (host.includes('outlook') || host.includes('office365') || host.includes('microsoft')) {
+      return `${raw}\n\nOutlook/Microsoft 365 may require an App Password if two-factor authentication is enabled. Check your Microsoft account security settings.`;
+    }
+    if (host.includes('yahoo')) {
+      return `${raw}\n\nYahoo requires an App Password for third-party apps. Generate one at https://login.yahoo.com/myaccount/security then App passwords.`;
+    }
+    return `${raw}\n\nThe username or password was rejected. If two-factor authentication is enabled, use an app-specific password instead of your regular password.`;
+  }
+
+  // Connection / network failures
+  if (
+    lower.includes('econnrefused') ||
+    lower.includes('econnreset') ||
+    lower.includes('timeout') ||
+    lower.includes('enotfound') ||
+    lower.includes('getaddrinfo')
+  ) {
+    return `${raw}\n\nCould not reach the mail server. Check your internet connection and verify the IMAP/SMTP host and port are correct.`;
+  }
+
+  // TLS / certificate issues
+  if (
+    lower.includes('certificate') ||
+    lower.includes('ssl') ||
+    lower.includes('tls') ||
+    lower.includes('handshake')
+  ) {
+    return `${raw}\n\nTLS/SSL handshake failed. Verify the port and security settings match your provider (port 993/465 = SSL, port 587 = STARTTLS).`;
+  }
+
+  return raw;
+}
+
 export async function testConnection(config: EmailConfig): Promise<{ ok: boolean; error?: string }> {
   try {
     const client = await getClient(config);
@@ -155,13 +207,14 @@ export async function testConnection(config: EmailConfig): Promise<{ ok: boolean
     return { ok: true };
   } catch (e: unknown) {
     const error = e instanceof Error ? e : new Error(String(e));
-    return { ok: false, error: error.message || 'Connection failed' };
+    const raw = error.message || 'Connection failed';
+    return { ok: false, error: humanizeEmailError(raw, config) };
   }
 }
 
 export async function listEmails(folder = 'INBOX', limit = 20): Promise<EmailMessage[]> {
   const config = await getConfig();
-  if (!config) throw new Error('Email not configured. Go to Settings → Email to set up.');
+  if (!config) throw new Error('Email not configured. Go to Settings -> Email to set up.');
 
   const client = await getClient(config);
   const emails: EmailMessage[] = [];
@@ -299,4 +352,3 @@ export async function getEmailConfig(): Promise<EmailConfig | null> {
 export async function hasEmailConfig(): Promise<boolean> {
   return (await getConfig()) !== null;
 }
-

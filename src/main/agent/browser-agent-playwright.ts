@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 
 export interface BrowserConfig {
   headless: boolean;

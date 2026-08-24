@@ -859,6 +859,22 @@ const api = {
   screenshotCleanup: () => ipcRenderer.invoke('screenshot:cleanup'),
   screenshotRestore: () => ipcRenderer.invoke('screenshot:restore'),
   screenshotStats: () => ipcRenderer.invoke('screenshot:stats'),
+
+  // Mini Mode
+  miniToggle: () => ipcRenderer.invoke(IPC.MINI_TOGGLE),
+  miniRestore: () => ipcRenderer.invoke(IPC.MINI_RESTORE),
+  miniSend: (args: { sessionId: string; message: string; provider: string; model: string; cwd: string }) =>
+    ipcRenderer.invoke(IPC.MINI_SEND, args),
+  onMiniStreamEvent: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.MINI_STREAM_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.MINI_STREAM_EVENT, handler);
+  },
+  onMiniState: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.MINI_STATE, handler);
+    return () => ipcRenderer.removeListener(IPC.MINI_STATE, handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

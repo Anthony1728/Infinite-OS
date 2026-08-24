@@ -86,7 +86,6 @@ export async function runAgent(
   userMessage: Message,
   opts: AgentRunOptions,
 ): Promise<Message[]> {
-  console.log(`[agent] runAgent called: provider=${opts.provider} model=${opts.model} cwd=${opts.cwd}`);
   const messages = [...history, userMessage];
   const failoverPlan = await buildProviderFailoverPlan({ provider: opts.provider, model: opts.model });
   if (failoverPlan.length === 0) {
@@ -118,7 +117,7 @@ export async function runAgent(
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
   const problemTracker = new ProblemTracker();
-  console.log(`[agent] Recovery plan contains ${failoverPlan.length} credential-aware model candidate(s)`);
+
 
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
@@ -149,7 +148,6 @@ export async function runAgent(
   };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    console.log(`[agent] Turn ${turn}/${MAX_TURNS}`);
     problemTracker.setTurn(turn);
     if (opts.signal.aborted) break;
 
@@ -179,8 +177,6 @@ export async function runAgent(
       });
       runSystemPrompts.set(systemKey, activeSystem);
     }
-    console.log(`[agent] Using ${activeCandidate.label}; tools=${activeTools.length}`);
-
     for (const update of drainInterjections(opts.sessionId)) {
       messages.push({
         id: crypto.randomUUID(),
@@ -225,7 +221,6 @@ export async function runAgent(
       opts.onEvent({ type: 'message_end', message_id: assistant.id, stop_reason: 'tool_use' });
     } else {
 
-    console.log(`[agent] Calling provider.streamChat...`);
     // Rebuild the checkpoint on every continuation turn so it includes tool
     // results produced after the original provider switch.
     const recoveryHandoff = recoveryContext
@@ -277,7 +272,6 @@ export async function runAgent(
       for await (const chunk of stream) {
         streamLastEvent = Date.now();
         if (opts.signal.aborted) break;
-        console.log(`[agent] chunk type=${chunk.type}`);
         switch (chunk.type) {
           case 'text_delta':
             appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
@@ -366,7 +360,6 @@ export async function runAgent(
       return messages;
     }
 
-    console.log(`[agent] Turn ${turn} complete, checking tool calls...`);
     if (opts.signal.aborted) break;
 
     // If no tool calls → done
@@ -445,7 +438,6 @@ export async function runAgent(
         opts.onEvent({ type: 'fallback_required' });
         return messages;
       }
-      console.log(`[agent] No tool calls, done after ${turn + 1} turns`);
       decisionRouter.recordTask(activeCandidate.model, true);
       recordProviderSuccess(activeCandidate);
       learnFromCompletedResponse({

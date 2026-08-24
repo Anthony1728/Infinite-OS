@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background gradient: deep space -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="60%" stop-color="#060e1a"/>
+      <stop offset="100%" stop-color="#020810"/>
+    </radialGradient>
+
+    <!-- Nebula glow -->
+    <radialGradient id="nebula1" cx="35%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#1a3a6a" stop-opacity="0.5"/>
+      <stop offset="50%" stop-color="#0d2240" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nebula2" cx="65%" cy="60%" r="45%">
+      <stop offset="0%" stop-color="#0c2d5e" stop-opacity="0.4"/>
+      <stop offset="60%" stop-color="#081e3d" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="transparent" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Infinity glow (outer) -->
+    <filter id="glow-outer" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="15.36" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.1  0 0 0 0 0.5  0 0 0 0 1  0 0 0 0.7 0" result="colorBlur"/>
+      <feMerge>
+        <feMergeNode in="colorBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Infinity glow (inner bright) -->
+    <filter id="glow-inner" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="6.144" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="0 0 0 0 0.2  0 0 0 0 0.7  0 0 0 0 1  0 0 0 1 0" result="bright"/>
+      <feMerge>
+        <feMergeNode in="bright"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Star glow -->
+    <filter id="star-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4.096"/>
+    </filter>
+
+    <!-- Infinity stroke gradient — brand spectrum, violet core to cyan lobes -->
+    <linearGradient id="inf-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="30%" stop-color="#818cf8"/>
+      <stop offset="55%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+
+    <!-- Clip for rounded square -->
+    <clipPath id="roundedRect">
+      <rect x="0" y="0" width="512" height="512" rx="92.16" ry="92.16"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#roundedRect)">
+    <!-- Background -->
+    <rect width="512" height="512" fill="url(#bg)"/>
+
+    <!-- Nebula layers -->
+    <rect width="512" height="512" fill="url(#nebula1)"/>
+    <rect width="512" height="512" fill="url(#nebula2)"/>
+
+    <!-- Subtle cosmic dust band -->
+    <ellipse cx="230.4" cy="281.6" rx="230.4" ry="61.44"
+      fill="none" stroke="#1e40af" stroke-width="2.56" opacity="0.15"
+      transform="rotate(-20 230.4 281.6)"/>
+
+    <!-- Stars (background) -->
+    <g filter="url(#star-glow)">
+      <circle cx="0.2" cy="268.6" r="2.02" fill="#e0f2fe" opacity="0.48"/>
+      <circle cx="192.6" cy="100.5" r="2.51" fill="#e0f2fe" opacity="0.66"/>
+      <circle cx="271.6" cy="131.6" r="0.73" fill="#e0f2fe" opacity="0.87"/>
+      <circle cx="461.1" cy="231.4" r="1.01" fill="#e0f2fe" opacity="0.47"/>
+      <circle cx="96.4" cy="165.5" r="0.72" fill="#e0f2fe" opacity="0.87"/>
+      <circle cx="273.6" cy="432.4" r="2.02" fill="#e0f2fe" opacity="0.35"/>
+      <circle cx="276.0" cy="67.1" r="2.28" fill="#e0f2fe" opacity="0.63"/>
+      <circle cx="241.7" cy="230.4" r="0.99" fill="#e0f2fe" opacity="0.31"/>
+      <circle cx="11.8" cy="508.7" r="2.39" fill="#e0f2fe" opacity="0.85"/>
+      <circle cx="292.3" cy="393.9" r="1.79" fill="#e0f2fe" opacity="0.54"/>
+      <circle cx="192.3" cy="136.8" r="1.23" fill="#e0f2fe" opacity="0.75"/>
+      <circle cx="186.3" cy="27.0" r="1.59" fill="#e0f2fe" opacity="0.41"/>
+      <circle cx="232.4" cy="168.6" r="0.91" fill="#e0f2fe" opacity="0.35"/>
+      <circle cx="505.1" cy="279.6" r="0.69" fill="#e0f2fe" opacity="1.00"/>
+      <circle cx="222.1" cy="359.2" r="0.89" fill="#e0f2fe" opacity="0.68"/>
+      <circle cx="509.7" cy="97.3" r="1.91" fill="#e0f2fe" opacity="0.58"/>
+      <circle cx="224.8" cy="382.5" r="0.88" fill="#e0f2fe" opacity="0.87"/>
+      <circle cx="412.7" cy="49.9" r="0.57" fill="#e0f2fe" opacity="0.39"/>
+      <circle cx="326.4" cy="194.7" r="1.02" fill="#e0f2fe" opacity="0.65"/>
+      <circle cx="266.8" cy="53.0" r="2.53" fill="#e0f2fe" opacity="0.54"/>
+      <circle cx="393.4" cy="135.9" r="1.88" fill="#e0f2fe" opacity="0.94"/>
+      <circle cx="238.8" cy="225.7" r="2.40" fill="#e0f2fe" opacity="0.63"/>
+      <circle cx="500.3" cy="163.9" r="2.14" fill="#e0f2fe" opacity="0.91"/>
+      <circle cx="380.2" cy="285.4" r="2.21" fill="#e0f2fe" opacity="0.67"/>
+      <circle cx="157.4" cy="175.8" r="1.15" fill="#e0f2fe" opacity="0.61"/>
+      <circle cx="290.2" cy="334.1" r="0.64" fill="#e0f2fe" opacity="0.64"/>
+      <circle cx="233.6" cy="4.9" r="1.95" fill="#e0f2fe" opacity="0.57"/>
+      <circle cx="228.8" cy="479.3" r="0.77" fill="#e0f2fe" opacity="0.60"/>
+      <circle cx="149.8" cy="210.4" r="1.01" fill="#e0f2fe" opacity="0.56"/>
+      <circle cx="363.6" cy="479.0" r="0.55" fill="#e0f2fe" opacity="0.63"/>
+      <circle cx="420.7" cy="272.7" r="0.77" fill="#e0f2fe" opacity="0.58"/>
+      <circle cx="65.9" cy="416.0" r="1.31" fill="#e0f2fe" opacity="0.35"/>
+      <circle cx="306.0" cy="172.4" r="1.03" fill="#e0f2fe" opacity="0.57"/>
+      <circle cx="160.8" cy="315.7" r="0.93" fill="#e0f2fe" opacity="0.50"/>
+      <circle cx="506.4" cy="100.5" r="1.87" fill="#e0f2fe" opacity="0.66"/>
+    </g>
+
+    <!-- Infinity symbol - outer glow layer -->
+    <g filter="url(#glow-outer)" opacity="0.6">
+      <path d="M 256 256 C 135.37279999999998 154.8288 61.44 185.18016 61.44 256 C 61.44 326.81984 135.37279999999998 357.1712 256 256 C 376.6272 154.8288 450.56 185.18016 450.56 256 C 450.56 326.81984 376.6272 357.1712 256 256 Z" stroke="url(#inf-grad)" fill="none" stroke-width="28.16"/>
+    </g>
+
+    <!-- Infinity symbol - main stroke -->
+    <g filter="url(#glow-inner)">
+      <path d="M 256 256 C 135.37279999999998 154.8288 61.44 185.18016 61.44 256 C 61.44 326.81984 135.37279999999998 357.1712 256 256 C 376.6272 154.8288 450.56 185.18016 450.56 256 C 450.56 326.81984 376.6272 357.1712 256 256 Z" stroke="url(#inf-grad)" fill="none" stroke-width="17.92"/>
+    </g>
+
+    <!-- Infinity symbol - bright core -->
+    <path d="M 256 256 C 135.37279999999998 154.8288 61.44 185.18016 61.44 256 C 61.44 326.81984 135.37279999999998 357.1712 256 256 C 376.6272 154.8288 450.56 185.18016 450.56 256 C 450.56 326.81984 376.6272 357.1712 256 256 Z" stroke="#e0f2fe" fill="none" stroke-width="6.144" opacity="0.85"/>
+
+    <!-- Bright center highlight on the crossing -->
+    <circle cx="256" cy="256" r="10.24" fill="#93c5fd" opacity="0.4"/>
+
+    <!-- Tiny accent stars near the infinity -->
+    <circle cx="119.80800000000002" cy="158.72" r="3.072" fill="#e0f2fe" opacity="0.9"/>
+    <circle cx="411.648" cy="333.824" r="2.56" fill="#bae6fd" opacity="0.7"/>
+    <circle cx="294.91200000000003" cy="80.89599999999999" r="2.048" fill="#e0f2fe" opacity="0.6"/>
+
+    <!-- Border glow -->
+    <rect x="0.5" y="0.5" width="511" height="511" rx="92.16" ry="92.16"
+      fill="none" stroke="#1e40af" stroke-width="4.096" opacity="0.3"/>
+    <rect x="1.5" y="1.5" width="509" height="509" rx="89.6" ry="89.6"
+      fill="none" stroke="#38bdf8" stroke-width="1.536" opacity="0.15"/>
+  </g>
+</svg>

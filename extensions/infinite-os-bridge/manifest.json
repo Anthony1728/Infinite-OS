@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Infinite OS Bridge",
-  "version": "3.0.0",
-  "description": "High-performance browser control for Infinite OS: navigate, click, type, fill forms, extract content, take screenshots, automate any web task with sub-10ms latency.",
+  "name": "Infinite AI Bridge",
+  "version": "4.0.0",
+  "description": "Infinite AI Browser Extension — Full browser automation, AI-powered control, and seamless Infinite OS integration. Navigate, click, type, fill forms, extract content, take screenshots, manage tabs, intercept network requests, manipulate storage, and automate any web task with zero limits.",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",
@@ -14,7 +14,21 @@
     "clipboardRead",
     "clipboardWrite",
     "debugger",
-    "webNavigation"
+    "webNavigation",
+    "webRequest",
+    "webRequestBlocking",
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "management",
+    "browsingData",
+    "downloads",
+    "history",
+    "topSites",
+    "sessions",
+    "contextMenus",
+    "identity",
+    "notifications",
+    "idle"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -25,12 +39,12 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Infinite OS Bridge",
+    "default_title": "Infinite AI Bridge",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -43,7 +57,7 @@
       "suggested_key": {
         "default": "Ctrl+Shift+I"
       },
-      "description": "Open Infinite OS Bridge popup"
+      "description": "Open Infinite AI Bridge popup"
     }
   },
   "icons": {

@@ -1,126 +1,124 @@
-import { useEffect, useState } from 'react';
-import {
-  MessageSquare,
-  Library,
-  LayoutGrid,
-  Code,
-  Zap,
-  Sparkles,
-  Settings,
-  Briefcase,
-  Clock,
-  Shield,
-  Lightbulb,
-  Puzzle,
-  Cloud,
-} from 'lucide-react';
+import { useEffect, useState, type CSSProperties } from 'react';
+import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { useAgentsStore } from '../../stores/agents';
 import { useChatStore } from '../../stores/chat';
 
-const MODULES = [
+const MODULES: { id: string; title: string; status: string; metric: string; a: string; b: string; icon: AppIconName }[] = [
   {
     id: 'chats',
     title: 'AI Chat',
     status: 'Live',
     metric: 'Multi-model workspace',
-    accent: 'from-indigo-500 to-cyan-500',
-    Icon: MessageSquare,
+    a: '#818cf8',
+    b: '#22d3ee',
+    icon: 'home.chat',
   },
   {
     id: 'learning',
     title: 'Learn',
     status: 'Live',
     metric: 'Knowledge and study hub',
-    accent: 'from-emerald-500 to-teal-500',
-    Icon: Library,
+    a: '#34d399',
+    b: '#2dd4bf',
+    icon: 'home.learn',
   },
   {
     id: 'canvas',
     title: 'Infinite Canvas',
     status: 'Live',
     metric: 'Visual workflows',
-    accent: 'from-fuchsia-500 to-violet-600',
-    Icon: LayoutGrid,
+    a: '#e879f9',
+    b: '#8b5cf6',
+    icon: 'home.canvas',
   },
   {
     id: 'workspace',
     title: 'Code Workspace',
     status: 'Live',
     metric: 'Files, editor, and terminal',
-    accent: 'from-cyan-500 to-blue-600',
-    Icon: Code,
+    a: '#22d3ee',
+    b: '#3b82f6',
+    icon: 'home.code',
   },
   {
     id: 'automations',
     title: 'Automation Studio',
     status: 'Live',
     metric: 'Workflow engine',
-    accent: 'from-amber-500 to-orange-500',
-    Icon: Zap,
+    a: '#fbbf24',
+    b: '#fb923c',
+    icon: 'home.automation',
   },
   {
     id: 'agents',
     title: 'Agent Fleet',
     status: 'Live',
     metric: 'Specialized AI workers',
-    accent: 'from-violet-500 to-indigo-600',
-    Icon: Sparkles,
+    a: '#a78bfa',
+    b: '#6366f1',
+    icon: 'home.agents',
   },
   {
     id: 'multi-agent',
     title: 'Orchestrator',
     status: 'Live',
     metric: 'Parallel agent missions',
-    accent: 'from-rose-500 to-pink-600',
-    Icon: Settings,
+    a: '#fb7185',
+    b: '#ec4899',
+    icon: 'home.orchestrator',
   },
   {
     id: 'business',
     title: 'Business Command Center',
     status: 'Live',
     metric: 'CRM and analytics',
-    accent: 'from-orange-500 to-rose-500',
-    Icon: Briefcase,
+    a: '#fb923c',
+    b: '#fb7185',
+    icon: 'home.business',
   },
   {
     id: 'scheduled-tasks',
     title: 'Routines',
     status: 'Live',
     metric: 'Scheduled automations',
-    accent: 'from-amber-500 to-yellow-500',
-    Icon: Clock,
+    a: '#fbbf24',
+    b: '#facc15',
+    icon: 'home.routines',
   },
   {
     id: 'standing-orders',
     title: 'Standing Orders',
     status: 'Live',
     metric: 'Persistent instructions',
-    accent: 'from-purple-500 to-pink-500',
-    Icon: Shield,
+    a: '#c084fc',
+    b: '#f472b6',
+    icon: 'home.standing-orders',
   },
   {
     id: 'active-memory',
     title: 'Active Memory',
     status: 'Live',
     metric: 'Auto context retrieval',
-    accent: 'from-cyan-500 to-teal-500',
-    Icon: Lightbulb,
+    a: '#22d3ee',
+    b: '#2dd4bf',
+    icon: 'home.memory',
   },
   {
     id: 'plugins',
     title: 'Plugin Store',
     status: 'Live',
     metric: 'Extensions',
-    accent: 'from-lime-500 to-emerald-500',
-    Icon: Puzzle,
+    a: '#a3e635',
+    b: '#34d399',
+    icon: 'home.plugins',
   },
 ];
 
-const QUICK_ACTIONS = [
-  { label: 'AI Chat', view: 'chats', Icon: MessageSquare, color: 'text-indigo-400 bg-indigo-400/10' },
-  { label: 'Learn', view: 'learning', Icon: Library, color: 'text-emerald-400 bg-emerald-400/10' },
-  { label: 'Automate', view: 'automations', Icon: Zap, color: 'text-amber-400 bg-amber-400/10' },
-  { label: 'Cloud Sync', view: 'cloud', Icon: Cloud, color: 'text-cyan-400 bg-cyan-400/10' },
+const QUICK_ACTIONS: { label: string; view: string; icon: AppIconName; a: string; b: string }[] = [
+  { label: 'AI Chat', view: 'chats', icon: 'home.chat', a: '#818cf8', b: '#22d3ee' },
+  { label: 'Learn', view: 'learning', icon: 'home.learn', a: '#34d399', b: '#2dd4bf' },
+  { label: 'Automate', view: 'automations', icon: 'home.automation', a: '#fbbf24', b: '#fb923c' },
+  { label: 'Cloud Sync', view: 'cloud', icon: 'home.cloud', a: '#22d3ee', b: '#38bdf8' },
 ];
 
 interface SystemMetrics {
@@ -340,12 +338,17 @@ export function OSHomeView({ onOpenView }: OSHomeViewProps) {
               <button
                 key={module.id}
                 onClick={() => onOpenView(module.id)}
-                className="group text-left bg-bgCard border border-borderSubtle hover:border-indigo-500/30 rounded-xl p-3 transition-all hover:bg-bgCard/80 animate-slide-up"
-                style={{ animationDelay: `${i * 30}ms` }}
+                className="os-module-tile group text-left bg-bgCard border border-borderSubtle rounded-xl p-3 transition-all hover:bg-bgCard/80 animate-slide-up"
+                style={{ animationDelay: `${i * 30}ms`, '--tile-a': module.a, '--tile-b': module.b } as CSSProperties}
               >
                 <div className="flex items-start justify-between gap-2 mb-2.5">
-                  <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${module.accent} flex items-center justify-center shadow-lg shadow-${module.accent.split(' ')[0].replace('from-', '')}/25 flex-shrink-0 group-hover:shadow-xl group-hover:scale-105 transition-all`}>
-                    <module.Icon className="w-4 h-4 text-white" strokeWidth={2} aria-label={module.title} />
+                  <div className="os-module-chip w-10 h-10 rounded-[13px] flex items-center justify-center flex-shrink-0">
+                    <AppIcon
+                      name={module.icon}
+                      className="os-module-glyph w-[19px] h-[19px]"
+                      strokeWidth={1.75}
+                      gradient={[module.a, module.b]}
+                    />
                   </div>
                   <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide ${
                     module.status === 'Live' ? 'bg-emerald-500/15 text-emerald-400' :
@@ -419,11 +422,16 @@ export function OSHomeView({ onOpenView }: OSHomeViewProps) {
                 <button
                   key={action.label}
                   onClick={() => onOpenView(action.view)}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-bgCard border border-borderSubtle text-xs font-medium text-textMain hover:border-indigo-500/30 hover:bg-white/[0.03] transition-all animate-slide-up text-left"
-                  style={{ animationDelay: `${i * 30}ms` }}
+                  className="os-module-tile flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bgCard border border-borderSubtle text-xs font-medium text-textMain transition-all animate-slide-up text-left"
+                  style={{ animationDelay: `${i * 30}ms`, '--tile-a': action.a, '--tile-b': action.b } as CSSProperties}
                 >
-                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${action.color}`}>
-                    <action.Icon className="w-3.5 h-3.5" strokeWidth={2} aria-label={action.label} />
+                  <div className="os-module-chip w-7 h-7 rounded-[9px] flex items-center justify-center flex-shrink-0">
+                    <AppIcon
+                      name={action.icon}
+                      className="os-module-glyph w-3.5 h-3.5"
+                      strokeWidth={1.8}
+                      gradient={[action.a, action.b]}
+                    />
                   </div>
                   {action.label}
                 </button>

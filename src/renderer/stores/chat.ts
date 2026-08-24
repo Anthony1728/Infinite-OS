@@ -32,10 +32,10 @@ const filesByChatTask = new Map<string, string[]>();
 // instead of per-provider chunk (~200+ fps on fast connections).
 interface TextDeltaBuffer { messageId: string; text: string }
 const textDeltaBuffer: TextDeltaBuffer[] = [];
-let textDeltaRafPending = false;
+let textDeltaRafId = 0;
 
 function flushTextDeltaBuffer() {
-  textDeltaRafPending = false;
+  textDeltaRafId = 0;
   if (textDeltaBuffer.length === 0) return;
   const buffered = textDeltaBuffer.splice(0);
   const targetId = buffered[0].messageId;
@@ -53,16 +53,15 @@ function flushTextDeltaBuffer() {
 }
 
 function scheduleTextDeltaFlush() {
-  if (!textDeltaRafPending) {
-    textDeltaRafPending = true;
-    requestAnimationFrame(flushTextDeltaBuffer);
+  if (textDeltaRafId === 0) {
+    textDeltaRafId = requestAnimationFrame(flushTextDeltaBuffer);
   }
 }
 
 function forceFlushTextDeltaBuffer() {
   if (textDeltaBuffer.length > 0) {
-    cancelAnimationFrame(textDeltaRafPending ? 1 : 0);
-    textDeltaRafPending = false;
+    if (textDeltaRafId !== 0) cancelAnimationFrame(textDeltaRafId);
+    textDeltaRafId = 0;
     flushTextDeltaBuffer();
   }
 }
@@ -72,6 +71,7 @@ const selectedAgentRuns = new Map<
   string,
   { sessionId: string; chatTaskId: string; activityId: string; agentName: string; preview: string }
 >();
+const subagentMessageIds = new Map<string, string>(); // subTaskId → assistant message ID
 let activeTeachingChatSessionId: string | null = null;
 
 function clearSafetyTimer(sessionId: string): void {
@@ -560,6 +560,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!data.subTaskId || !data.agentType || !data.description) return;
         agentStore.addSubTask(ev.taskId, data.subTaskId, data.agentType, data.description);
         if (isCurrentSession) {
+          const subAgentMsgId = crypto.randomUUID();
+          subagentMessageIds.set(data.subTaskId, subAgentMsgId);
           set((state) => ({
             activity: [
               ...state.activity.filter((item) => item.id !== `subtask-${data.subTaskId}`),
@@ -574,16 +576,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 timestamp: Date.now(),
               },
             ],
+            messages: [
+              ...state.messages,
+              {
+                id: subAgentMsgId,
+                role: 'assistant',
+                content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
+                timestamp: Date.now(),
+              },
+            ],
           }));
         }
-        // Show progress message
-        const progressMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
-          timestamp: Date.now(),
-        };
-        if (isCurrentSession) set((s) => ({ messages: [...s.messages, progressMsg] }));
       } else if (ev.type === 'task_updated') {
         if (!isCurrentSession) return;
         const data = ev.data as { interjection?: string; affectedPendingTasks?: number };
@@ -624,6 +627,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const event = data.event;
           const detail = event.activity?.detail || event.text || event.reason || (event.toolName ? `Using ${event.toolName}` : 'Working…');
           const label = event.activity?.label || event.toolName || `${data.agentType} is working`;
+
+          // Update activity panel
           set((state) => ({
             activity: state.activity.map((item) =>
               item.id === `subtask-${data.subTaskId}`
@@ -631,9 +636,52 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : item,
             ),
           }));
+
+          // Stream subagent tool calls and text into the chat transcript
+          const subMsgId = subagentMessageIds.get(data.subTaskId);
+          if (subMsgId) {
+            if (event.type === 'tool_call' && event.toolName) {
+              set((state) => ({
+                messages: state.messages.map((m) => {
+                  if (m.id !== subMsgId) return m;
+                  return {
+                    ...m,
+                    content: [...m.content, { type: 'tool_use', id: `sub-${data.subTaskId}-${Date.now()}`, name: event.toolName!, input: {} }],
+                  };
+                }),
+              }));
+            } else if (event.type === 'text_delta' && event.text) {
+              set((state) => ({
+                messages: state.messages.map((m) => {
+                  if (m.id !== subMsgId) return m;
+                  const last = m.content[m.content.length - 1];
+                  if (last && last.type === 'text') {
+                    return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + event.text }] };
+                  }
+                  return { ...m, content: [...m.content, { type: 'text', text: event.text! }] };
+                }),
+              }));
+            } else if (event.type === 'activity' && event.activity) {
+              const actLabel = event.activity.label || 'Working';
+              const actDetail = event.activity.detail || '';
+              set((state) => ({
+                messages: state.messages.map((m) => {
+                  if (m.id !== subMsgId) return m;
+                  const actText = `\n> ${actLabel}${actDetail ? `: ${actDetail}` : ''}`;
+                  const last = m.content[m.content.length - 1];
+                  if (last && last.type === 'text') {
+                    return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + actText }] };
+                  }
+                  return { ...m, content: [...m.content, { type: 'text', text: actText }] };
+                }),
+              }));
+            }
+          }
         }
       } else if (ev.type === 'task_completed') {
         if (isCurrentSession) set({ streaming: false, orchestratedTaskId: null });
+        // Clean up subagent message tracking
+        subagentMessageIds.clear();
         const data = ev.data as {
           totalSubTasks: number;
           completed: number;
@@ -671,6 +719,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (isCurrentSession) set((s) => ({ messages: [...s.messages, doneMsg] }));
       } else if (ev.type === 'task_failed') {
         if (isCurrentSession) set({ streaming: false, orchestratedTaskId: null });
+        // Clean up subagent message tracking
+        subagentMessageIds.clear();
         const data = ev.data as {
           report?: { summary?: string; failed?: Array<{ description: string; error: string; attempts: number }>; retries?: Array<{ description: string; attempt: number; reason: string }> };
         };
@@ -875,8 +925,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (visibleText, images, mode = 'chat', agentId) => {
     const text = promptForExecutionMode(visibleText, mode);
-    const { currentSessionId } = get();
-    const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+    const { currentSessionId, streaming: wasStreaming } = get();
+
+    // If streaming is stuck from a previous failed/crashed run, reset it so the
+    // new message can actually be sent through the normal path instead of the
+    // interject path (which silently drops the message when there is no active run).
+    if (wasStreaming) {
+      console.warn('[chat] Resetting stuck streaming state before new send');
+      set({ streaming: false });
+    }
+
+    let settings: Record<string, string>;
+    try {
+      settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+    } catch {
+      console.warn('[chat] Malformed settings in localStorage, using defaults');
+      settings = {};
+    }
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
     let model = settings.model ?? '';
     let modelLabel = '';
@@ -1285,7 +1350,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Check if Brain Mode is enabled — use Brain immediately without IPC delay
     // Default to true: Brain is the default when no preference is set
-    const brainMode = settings.brainMode !== false;
+    const brainMode = settings.brainMode !== 'false';
 
     // Check if user has an API key configured — check directly via IPC
     let providerRequiresApiKey = true;
@@ -1598,6 +1663,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
       } catch (e) {
         console.error('[chat] Failed to create session:', e);
+        // Still show the user message and an error so the user gets feedback
+        // instead of a silent "nothing happens" experience.
+        const userMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: withImages(visibleText, images),
+          timestamp: Date.now(),
+        };
+        const errorMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `**Could not start a session.** ${e instanceof Error ? e.message : String(e)}\n\nPlease check that the app backend is running and try again.` }],
+          timestamp: Date.now(),
+        };
+        set((s) => ({ messages: [...s.messages, userMessage, errorMsg], streaming: false }));
         return;
       }
     }
@@ -1610,7 +1690,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: withImages(visibleText, images),
       timestamp: Date.now(),
     };
-    set({ messages: [...get().messages, userMessage], streaming: true, activity: [] });
+    const thinkingActivityId = `thinking-${crypto.randomUUID()}`;
+    set({ messages: [...get().messages, userMessage], streaming: true,
+      activity: [{
+        id: thinkingActivityId,
+        toolUseId: thinkingActivityId,
+        name: 'thinking',
+        label: 'Thinking',
+        detail: 'Preparing request…',
+        category: 'status',
+        status: 'running',
+        timestamp: Date.now(),
+      }],
+    });
 
     // Create a chat task for the right panel
     const taskTitle = visibleText.length > 60 ? visibleText.slice(0, 60) + '...' : visibleText;

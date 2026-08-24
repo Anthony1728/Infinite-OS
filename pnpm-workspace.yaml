@@ -1,7 +1,8 @@
 allowBuilds:
   better-sqlite3: true
-  canvas: set this to true or false
+  canvas: true
   electron: true
+  electron-winstaller: false
   esbuild: true
 overrides:
   dompurify: 3.4.11

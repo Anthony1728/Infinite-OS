@@ -19,7 +19,6 @@ import {
   getCustomAgent,
   updateCustomAgent,
   deleteCustomAgent,
-  customAgentToAgentType,
 } from '../agents/custom-store.js';
 import * as memoryStore from '../memory/store.js';
 import { abortSubagent, listRunStates, spawnSubagent, clearCompletedRuns } from '../agent/runtime.js';
@@ -354,9 +353,10 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   // Agents (multi-agent system)
   ipcMain.handle(IPC.AGENT_LIST, async () => {
-    const builtin = listAgents();
-    const custom = listCustomAgents().map(customAgentToAgentType);
-    return [...builtin, ...custom].map((a) => ({
+    // listAgents() already merges built-ins with custom agents from the
+    // database — appending listCustomAgents() here duplicated every custom
+    // agent in the fleet grid (React duplicate-key warnings, doubled cards).
+    return listAgents().map((a) => ({
       id: a.id,
       name: a.name,
       description: a.description,

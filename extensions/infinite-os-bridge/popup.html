@@ -2,31 +2,37 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Infinite OS Bridge</title>
+    <title>Infinite AI Bridge</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <header>
       <div class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" fill="url(#grad1)"/>
-          <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z" fill="url(#grad2)"/>
-          <circle cx="12" cy="12" r="2" fill="white"/>
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="14" stroke="url(#grad1)" stroke-width="2"/>
+          <circle cx="16" cy="16" r="8" fill="url(#grad2)" opacity="0.3"/>
+          <circle cx="16" cy="16" r="4" fill="url(#grad3)"/>
+          <path d="M16 2L16 6M16 26L16 30M2 16L6 16M26 16L30 16M4.93 4.93L7.76 7.76M24.24 24.24L27.07 27.07M4.93 27.07L7.76 24.24M24.24 7.76L27.07 4.93" stroke="url(#grad1)" stroke-width="1.5" stroke-linecap="round"/>
           <defs>
-            <linearGradient id="grad1" x1="2" y1="2" x2="22" y2="22">
+            <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32">
+              <stop offset="0%" stop-color="#6366f1"/>
+              <stop offset="50%" stop-color="#8b5cf6"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+            <linearGradient id="grad2" x1="8" y1="8" x2="24" y2="24">
               <stop offset="0%" stop-color="#6366f1"/>
               <stop offset="100%" stop-color="#8b5cf6"/>
             </linearGradient>
-            <linearGradient id="grad2" x1="6" y1="6" x2="18" y2="18">
-              <stop offset="0%" stop-color="#6366f1"/>
-              <stop offset="100%" stop-color="#8b5cf6"/>
-            </linearGradient>
+            <radialGradient id="grad3" cx="50%" cy="50%">
+              <stop offset="0%" stop-color="#a78bfa"/>
+              <stop offset="100%" stop-color="#6366f1"/>
+            </radialGradient>
           </defs>
         </svg>
       </div>
       <div class="header-text">
-        <h1>Infinite OS Bridge</h1>
-        <p class="subtitle">Browser Control Extension v3.0</p>
+        <h1>Infinite AI</h1>
+        <p class="subtitle">Browser Extension v4.0</p>
       </div>
       <div class="header-right">
         <div id="latencyBadge" class="latency hidden" title="Connection latency">
@@ -66,6 +72,10 @@
         <div class="status-item">
           <span class="status-label">Cache Hits</span>
           <strong id="cacheText" class="status-value">0</strong>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Uptime</span>
+          <strong id="uptimeText" class="status-value">0s</strong>
         </div>
       </div>
       <div id="errBox" class="error hidden"></div>
@@ -161,6 +171,36 @@
           </svg>
           <span>Perf</span>
         </button>
+        <button data-act="cookies" class="action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>
+            <path d="M8.5 8.5v.01M16 15.5v.01M12 12v.01M11 17v.01M7 14v.01"/>
+          </svg>
+          <span>Cookies</span>
+        </button>
+        <button data-act="storage" class="action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          <span>Storage</span>
+        </button>
+        <button data-act="history" class="action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>History</span>
+        </button>
+        <button data-act="downloads" class="action-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Downloads</span>
+        </button>
       </div>
     </section>
 
@@ -176,6 +216,16 @@
       </div>
       <div id="tabList" class="tab-list">
         <div class="tab-loading">Loading tabs...</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title">Command</span>
+      </div>
+      <div class="command-input">
+        <input type="text" id="commandInput" placeholder="Enter command (e.g., navigate https://google.com)" />
+        <button id="runCommand" class="run-btn">Run</button>
       </div>
     </section>
 
@@ -195,7 +245,7 @@
       <div class="footer-info">
         <span>Bridge: <code id="portCode">127.0.0.1:8765</code></span>
         <span class="footer-sep">|</span>
-        <span>Auto-reconnects when Infinite OS starts</span>
+        <span>Auto-connects to Infinite OS</span>
       </div>
     </footer>
 

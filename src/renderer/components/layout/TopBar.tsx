@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
 import { useBrainStore } from '../../stores/brain';
+import { AppIcon } from '../brand/AppIcon';
 
 interface TopBarProps {
   onOpenCommand: () => void;
@@ -68,9 +69,7 @@ export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, rig
     <header className="os-topbar flex h-14 flex-shrink-0 items-center gap-3 overflow-visible border-b border-white/[0.025] bg-[#090c13]/95 px-4 backdrop-blur-xl">
       <div className="flex flex-shrink-0 items-center">
         <button onClick={onToggleSidebar} className="icon-button w-8 h-8 xl:hidden" aria-label="Toggle sidebar">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
-            <path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" />
-          </svg>
+          <AppIcon name="topbar.menu" className="w-4 h-4" strokeWidth={1.6} />
         </button>
       </div>
 
@@ -81,13 +80,7 @@ export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, rig
           aria-label="Search anything"
         >
           <span className="os-search-icon" aria-hidden="true">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="m21 21-4.35-4.35m1.35-5.4a6.75 6.75 0 1 1-13.5 0 6.75 6.75 0 0 1 13.5 0Z"
-            />
-          </svg>
+            <AppIcon name="topbar.search" className="w-3.5 h-3.5" strokeWidth={1.8} />
           </span>
           <span className="os-search-placeholder min-w-0 flex-1 text-left"><span>Search anything…</span><i aria-hidden="true" /></span>
           <span className="os-search-shortcut font-mono text-[8px]">⌘ K</span>
@@ -132,9 +125,7 @@ export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, rig
           aria-label={`${rightPanelOpen ? 'Close' : 'Open'} notifications and activity`}
           aria-expanded={rightPanelOpen}
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14.86 17.08a24 24 0 0 0 5.45-1.31A8.97 8.97 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.97 8.97 0 0 1-2.31 6.02c1.79.57 3.61 1.01 5.45 1.31m5.72 0a24.3 24.3 0 0 1-5.72 0m5.72 0a3 3 0 1 1-5.72 0" />
-          </svg>
+          <AppIcon name="topbar.notifications" className="h-4 w-4" strokeWidth={1.6} />
           {activeTasks > 0 && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-pink-400 ring-2 ring-[#090c13]" />}
         </button>
 

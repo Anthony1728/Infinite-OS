@@ -1,184 +1,184 @@
-// Infinite OS Bridge v3.0 — High-performance background service worker.
-  // Features: WebSocket bridge with connection pooling, request batching,
-  // LRU response cache, compression-ready protocol (MessagePack), and fast content script delegation.
+// Infinite AI Bridge v4.0 — High-performance background service worker.
+// Features: WebSocket bridge with connection pooling, request batching,
+// LRU response cache, compression-ready protocol (MessagePack), and fast content script delegation.
 
-  const DEFAULT_PORT = 8765;
-  const CACHE_TTL_MS = 3000;
-  const KEEPALIVE_INTERVAL_MS = 15000;
-  const MAX_CACHE_SIZE = 500;
-  const BATCH_WINDOW_MS = 16;
-  const RECONNECT_BASE_MS = 400;
-  const RECONNECT_MAX_MS = 8000;
+const DEFAULT_PORT = 8765;
+const CACHE_TTL_MS = 3000;
+const KEEPALIVE_INTERVAL_MS = 15000;
+const MAX_CACHE_SIZE = 500;
+const BATCH_WINDOW_MS = 16;
+const RECONNECT_BASE_MS = 400;
+const RECONNECT_MAX_MS = 8000;
 
-  let BRIDGE_PORT = DEFAULT_PORT;
-  let BRIDGE_TOKEN = '';
-  try {
-    importScripts('config.js');
-    if (typeof BRIDGE_CONFIG !== 'undefined') {
-      BRIDGE_PORT = BRIDGE_CONFIG.port || DEFAULT_PORT;
-      BRIDGE_TOKEN = BRIDGE_CONFIG.token || '';
+let BRIDGE_PORT = DEFAULT_PORT;
+let BRIDGE_TOKEN = '';
+try {
+  importScripts('config.js');
+  if (typeof BRIDGE_CONFIG !== 'undefined') {
+    BRIDGE_PORT = BRIDGE_CONFIG.port || DEFAULT_PORT;
+    BRIDGE_TOKEN = BRIDGE_CONFIG.token || '';
+  }
+} catch (_e) {}
+
+// ── MessagePack encoder/decoder (lightweight subset for our protocol) ───────────
+const MSGPACK = {
+  encode(obj) {
+    const bytes = [];
+    function write(val) {
+      if (val === null) { bytes.push(0xc0); return; }
+      if (val === undefined) { bytes.push(0xc0); return; }
+      if (typeof val === 'boolean') { bytes.push(val ? 0xc3 : 0xc2); return; }
+      if (typeof val === 'number') {
+        if (Number.isInteger(val)) {
+          if (val >= 0 && val <= 127) { bytes.push(val); return; }
+          if (val >= -32 && val <= -1) { bytes.push(0xe0 | (val & 0x1f)); return; }
+          if (val >= -32768 && val <= 32767) { bytes.push(0xd2, (val >> 8) & 0xff, val & 0xff); return; }
+          if (val >= -2147483648 && val <= 2147483647) { bytes.push(0xd3, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff); return; }
+          bytes.push(0xcf); writeFloat64(val); return;
+        }
+        bytes.push(0xcb); writeFloat64(val); return;
+      }
+      if (typeof val === 'string') {
+        const utf8 = new TextEncoder().encode(val);
+        const len = utf8.length;
+        if (len <= 31) { bytes.push(0xa0 | len); }
+        else if (len <= 255) { bytes.push(0xd9, len); }
+        else if (len <= 65535) { bytes.push(0xda, (len >> 8) & 0xff, len & 0xff); }
+        else { bytes.push(0xdb, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        bytes.push(...utf8);
+        return;
+      }
+      if (Array.isArray(val)) {
+        const len = val.length;
+        if (len <= 15) { bytes.push(0x90 | len); }
+        else if (len <= 65535) { bytes.push(0xdc, (len >> 8) & 0xff, len & 0xff); }
+        else { bytes.push(0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        for (const item of val) write(item);
+        return;
+      }
+      if (typeof val === 'object') {
+        const keys = Object.keys(val);
+        const len = keys.length;
+        if (len <= 15) { bytes.push(0x80 | len); }
+        else if (len <= 65535) { bytes.push(0xde, (len >> 8) & 0xff, len & 0xff); }
+        else { bytes.push(0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        for (const key of keys) { write(key); write(val[key]); }
+        return;
+      }
+      // Fallback to JSON
+      const json = JSON.stringify(val);
+      const utf8 = new TextEncoder().encode(json);
+      bytes.push(0xdb, 0, 0, 0, 0, ...utf8); // placeholder, not exact
     }
-  } catch (_e) {}
+    function writeFloat64(val) {
+      const buf = new ArrayBuffer(8);
+      new DataView(buf).setFloat64(0, val, false);
+      bytes.push(...new Uint8Array(buf));
+    }
+    write(obj);
+    return new Uint8Array(bytes);
+  },
 
-  // ── MessagePack encoder/decoder (lightweight subset for our protocol) ───────────
-  const MSGPACK = {
-    encode(obj) {
-      const bytes = [];
-      function write(val) {
-        if (val === null) { bytes.push(0xc0); return; }
-        if (val === undefined) { bytes.push(0xc0); return; }
-        if (typeof val === 'boolean') { bytes.push(val ? 0xc3 : 0xc2); return; }
-        if (typeof val === 'number') {
-          if (Number.isInteger(val)) {
-            if (val >= 0 && val <= 127) { bytes.push(val); return; }
-            if (val >= -32 && val <= -1) { bytes.push(0xe0 | (val & 0x1f)); return; }
-            if (val >= -32768 && val <= 32767) { bytes.push(0xd2, (val >> 8) & 0xff, val & 0xff); return; }
-            if (val >= -2147483648 && val <= 2147483647) { bytes.push(0xd3, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff); return; }
-            bytes.push(0xcf); writeFloat64(val); return;
-          }
-          bytes.push(0xcb); writeFloat64(val); return;
-        }
-        if (typeof val === 'string') {
-          const utf8 = new TextEncoder().encode(val);
-          const len = utf8.length;
-          if (len <= 31) { bytes.push(0xa0 | len); }
-          else if (len <= 255) { bytes.push(0xd9, len); }
-          else if (len <= 65535) { bytes.push(0xda, (len >> 8) & 0xff, len & 0xff); }
-          else { bytes.push(0xdb, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-          bytes.push(...utf8);
-          return;
-        }
-        if (Array.isArray(val)) {
-          const len = val.length;
-          if (len <= 15) { bytes.push(0x90 | len); }
-          else if (len <= 65535) { bytes.push(0xdc, (len >> 8) & 0xff, len & 0xff); }
-          else { bytes.push(0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-          for (const item of val) write(item);
-          return;
-        }
-        if (typeof val === 'object') {
-          const keys = Object.keys(val);
-          const len = keys.length;
-          if (len <= 15) { bytes.push(0x80 | len); }
-          else if (len <= 65535) { bytes.push(0xde, (len >> 8) & 0xff, len & 0xff); }
-          else { bytes.push(0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-          for (const key of keys) { write(key); write(val[key]); }
-          return;
-        }
-        // Fallback to JSON
-        const json = JSON.stringify(val);
-        const utf8 = new TextEncoder().encode(json);
-        bytes.push(0xdb, 0, 0, 0, 0, ...utf8); // placeholder, not exact
+  decode(bytes) {
+    let offset = 0;
+    function read() {
+      if (offset >= bytes.length) return undefined;
+      const b = bytes[offset++];
+      // nil
+      if (b === 0xc0) return null;
+      // boolean
+      if (b === 0xc2) return false;
+      if (b === 0xc3) return true;
+      // positive fixint
+      if ((b & 0x80) === 0x00) return b;
+      // negative fixint
+      if ((b & 0xe0) === 0xe0) return b - 0x100;
+      // fixstr
+      if ((b & 0xe0) === 0xa0) {
+        const len = b & 0x1f;
+        const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
+        offset += len;
+        return str;
       }
-      function writeFloat64(val) {
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setFloat64(0, val, false);
-        bytes.push(...new Uint8Array(buf));
+      // fixarray
+      if ((b & 0xf0) === 0x90) {
+        const len = b & 0x0f;
+        const arr = [];
+        for (let i = 0; i < len; i++) arr.push(read());
+        return arr;
       }
-      write(obj);
-      return new Uint8Array(bytes);
-    },
-
-    decode(bytes) {
-      let offset = 0;
-      function read() {
-        if (offset >= bytes.length) return undefined;
-        const b = bytes[offset++];
-        // nil
-        if (b === 0xc0) return null;
-        // boolean
-        if (b === 0xc2) return false;
-        if (b === 0xc3) return true;
-        // positive fixint
-        if ((b & 0x80) === 0x00) return b;
-        // negative fixint
-        if ((b & 0xe0) === 0xe0) return b - 0x100;
-        // fixstr
-        if ((b & 0xe0) === 0xa0) {
-          const len = b & 0x1f;
-          const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
-          offset += len;
-          return str;
-        }
-        // fixarray
-        if ((b & 0xf0) === 0x90) {
-          const len = b & 0x0f;
-          const arr = [];
-          for (let i = 0; i < len; i++) arr.push(read());
-          return arr;
-        }
-        // fixmap
-        if ((b & 0xf0) === 0x80) {
-          const len = b & 0x0f;
-          const obj = {};
-          for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
-          return obj;
-        }
-        // str 8/16/32
-        if (b === 0xd9 || b === 0xda || b === 0xdb) {
-          let len = 0;
-          if (b === 0xd9) len = bytes[offset++];
-          else if (b === 0xda) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-          else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
-          const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
-          offset += len;
-          return str;
-        }
-        // array 16/32
-        if (b === 0xdc || b === 0xdd) {
-          let len = 0;
-          if (b === 0xdc) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-          else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
-          const arr = [];
-          for (let i = 0; i < len; i++) arr.push(read());
-          return arr;
-        }
-        // map 16/32
-        if (b === 0xde || b === 0xdf) {
-          let len = 0;
-          if (b === 0xde) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-          else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
-          const obj = {};
-          for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
-          return obj;
-        }
-        // int 8/16/32/64
-        if (b === 0xd0) return bytes[offset++]; // int8
-        if (b === 0xd1) { const v = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; return v > 32767 ? v - 65536 : v; }
-        if (b === 0xd2) { const v = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 1] << 8) | bytes[offset + 3]; offset += 4; return v; }
-        // float 32/64
-        if (b === 0xca) { const buf = bytes.slice(offset, offset + 4); offset += 4; return new DataView(buf.buffer).getFloat32(0, false); }
-        if (b === 0xcb) { const buf = bytes.slice(offset, offset + 8); offset += 8; return new DataView(buf.buffer).getFloat64(0, false); }
-        // Fallback: try JSON
-        try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return null; }
+      // fixmap
+      if ((b & 0xf0) === 0x80) {
+        const len = b & 0x0f;
+        const obj = {};
+        for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
+        return obj;
       }
-      return read();
-    },
-  };
+      // str 8/16/32
+      if (b === 0xd9 || b === 0xda || b === 0xdb) {
+        let len = 0;
+        if (b === 0xd9) len = bytes[offset++];
+        else if (b === 0xda) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
+        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
+        const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
+        offset += len;
+        return str;
+      }
+      // array 16/32
+      if (b === 0xdc || b === 0xdd) {
+        let len = 0;
+        if (b === 0xdc) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
+        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
+        const arr = [];
+        for (let i = 0; i < len; i++) arr.push(read());
+        return arr;
+      }
+      // map 16/32
+      if (b === 0xde || b === 0xdf) {
+        let len = 0;
+        if (b === 0xde) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
+        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
+        const obj = {};
+        for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
+        return obj;
+      }
+      // int 8/16/32
+      if (b === 0xd0) return bytes[offset++]; // int8
+      if (b === 0xd1) { const v = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; return v > 32767 ? v - 65536 : v; }
+      if (b === 0xd2) { const v = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; return v; }
+      // float 32/64
+      if (b === 0xca) { const buf = bytes.slice(offset, offset + 4); offset += 4; return new DataView(buf.buffer).getFloat32(0, false); }
+      if (b === 0xcb) { const buf = bytes.slice(offset, offset + 8); offset += 8; return new DataView(buf.buffer).getFloat64(0, false); }
+      // Fallback: try JSON
+      try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return null; }
+    }
+    return read();
+  },
+};
 
-  // ── Connection state ──────────────────────────────────────────────────────────
-  let ws = null;
-  let reconnectDelay = RECONNECT_BASE_MS;
-  let manualClose = false;
-  let lastPong = 0;
-  let latencyMs = 0;
-  let pingPending = false;
-  let connectionAttempts = 0;
-  let useBinaryProtocol = false;
+// ── Connection state ──────────────────────────────────────────────────────────
+let ws = null;
+let reconnectDelay = RECONNECT_BASE_MS;
+let manualClose = false;
+let lastPong = 0;
+let latencyMs = 0;
+let pingPending = false;
+let connectionAttempts = 0;
+let useBinaryProtocol = false;
 
-  const status = {
-    connected: false,
-    version: chrome.runtime.getManifest().version,
-    browser: navigator.userAgent,
-    extensionId: chrome.runtime.id,
-    port: BRIDGE_PORT,
-    hasToken: Boolean(BRIDGE_TOKEN),
-    lastError: '',
-    latencyMs: 0,
-    commandsServed: 0,
-    cacheHits: 0,
-    contentScriptsReady: 0,
-  };
+const status = {
+  connected: false,
+  version: chrome.runtime.getManifest().version,
+  browser: navigator.userAgent,
+  extensionId: chrome.runtime.id,
+  port: BRIDGE_PORT,
+  hasToken: Boolean(BRIDGE_TOKEN),
+  lastError: '',
+  latencyMs: 0,
+  commandsServed: 0,
+  cacheHits: 0,
+  contentScriptsReady: 0,
+};
 
 // ── LRU Response cache ────────────────────────────────────────────────────────
 const cache = new Map();
@@ -205,6 +205,7 @@ const CACHEABLE = new Set([
   'list_tabs', 'get_active_tab', 'status', 'ping',
   'get_page_text', 'get_page_links', 'get_form_fields',
   'get_page_html', 'get_element', 'get_elements',
+  'get_history', 'get_downloads', 'get_windows',
 ]);
 
 // ── Pending requests ──────────────────────────────────────────────────────────
@@ -275,7 +276,7 @@ function connect() {
         version: status.version,
         browser: status.browser,
         extensionId: status.extensionId,
-        name: 'Infinite OS Bridge',
+        name: 'Infinite AI Bridge',
         binary: true, // Signal binary protocol support
       });
       startKeepalive();
@@ -772,6 +773,514 @@ async function handleCommand(command, params) {
       break;
     }
 
+    // ── NEW COMMANDS (v4.0) ────────────────────────────────────────────────────
+
+    case 'get_history': {
+      const items = await chrome.history.search({
+        text: params.query || '',
+        maxResults: params.maxResults || 100,
+        startTime: params.startTime || 0,
+      });
+      result = {
+        history: items.map(item => ({
+          id: item.id,
+          url: item.url,
+          title: item.title,
+          lastVisitTime: item.lastVisitTime,
+          visitCount: item.visitCount,
+          typedCount: item.typedCount,
+        })),
+      };
+      break;
+    }
+
+    case 'clear_history': {
+      await chrome.history.deleteAll();
+      result = { cleared: true };
+      break;
+    }
+
+    case 'get_downloads': {
+      const items = await chrome.downloads.search({
+        query: params.query || [],
+        limit: params.limit || 100,
+        orderBy: params.orderBy || ['-startTime'],
+      });
+      result = {
+        downloads: items.map(item => ({
+          id: item.id,
+          url: item.url,
+          filename: item.filename,
+          state: item.state,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          fileSize: item.fileSize,
+          totalBytes: item.totalBytes,
+          bytesReceived: item.bytesReceived,
+          error: item.error,
+          estimatedCompletionTime: item.estimatedCompletionTime,
+        })),
+      };
+      break;
+    }
+
+    case 'download': {
+      if (!params.url) throw new Error('download requires url');
+      const download = await chrome.downloads.download({
+        url: params.url,
+        filename: params.filename,
+        conflictAction: params.conflictAction || 'uniquify',
+        saveAs: params.saveAs || false,
+      });
+      result = { downloadId: download.id, url: params.url };
+      break;
+    }
+
+    case 'get_windows': {
+      const windows = await chrome.windows.getAll({ populate: true });
+      result = {
+        windows: windows.map(w => ({
+          id: w.id,
+          focused: w.focused,
+          type: w.type,
+          state: w.state,
+          tabs: w.tabs?.map(t => ({
+            id: t.id,
+            url: t.url,
+            title: t.title,
+            active: t.active,
+          })) || [],
+        })),
+      };
+      break;
+    }
+
+    case 'focus_window': {
+      if (params.windowId == null) throw new Error('focus_window requires windowId');
+      await chrome.windows.update(params.windowId, { focused: true });
+      result = { focused: params.windowId };
+      break;
+    }
+
+    case 'minimize_window': {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (active) {
+        await chrome.windows.update(active.windowId, { state: 'minimized' });
+      }
+      result = { minimized: true };
+      break;
+    }
+
+    case 'maximize_window': {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (active) {
+        const win = await chrome.windows.get(active.windowId);
+        const newState = win.state === 'maximized' ? 'normal' : 'maximized';
+        await chrome.windows.update(active.windowId, { state: newState });
+        result = { state: newState };
+      }
+      break;
+    }
+
+    case 'create_window': {
+      const win = await chrome.windows.create({
+        url: params.url || 'about:blank',
+        type: params.type || 'normal',
+        focused: params.focused !== false,
+        state: params.state || 'normal',
+        width: params.width,
+        height: params.height,
+        left: params.left,
+        top: params.top,
+      });
+      result = { windowId: win.id, url: params.url };
+      break;
+    }
+
+    case 'get_extensions': {
+      const extensions = await chrome.management.getAll();
+      result = {
+        extensions: extensions.map(ext => ({
+          id: ext.id,
+          name: ext.name,
+          version: ext.version,
+          enabled: ext.enabled,
+          type: ext.type,
+          description: ext.description,
+        })),
+      };
+      break;
+    }
+
+    case 'toggle_extension': {
+      if (!params.extensionId) throw new Error('toggle_extension requires extensionId');
+      const ext = await chrome.management.get(params.extensionId);
+      if (ext) {
+        await chrome.management.setEnabled(ext.id, !ext.enabled);
+        result = { toggled: true, enabled: !ext.enabled };
+      } else {
+        throw new Error('Extension not found');
+      }
+      break;
+    }
+
+    case 'get_permissions': {
+      result = {
+        permissions: chrome.runtime.getManifest().permissions || [],
+        host_permissions: chrome.runtime.getManifest().host_permissions || [],
+      };
+      break;
+    }
+
+    case 'get_tab_info': {
+      if (params.tabId == null) throw new Error('get_tab_info requires tabId');
+      const tab = await chrome.tabs.get(params.tabId);
+      result = {
+        id: tab.id,
+        url: tab.url,
+        title: tab.title,
+        active: tab.active,
+        windowId: tab.windowId,
+        pinned: tab.pinned,
+        favIconUrl: tab.favIconUrl,
+        index: tab.index,
+        status: tab.status,
+        width: tab.width,
+        height: tab.height,
+      };
+      break;
+    }
+
+    case 'move_tab': {
+      if (params.tabId == null || params.index == null) throw new Error('move_tab requires tabId and index');
+      const tab = await chrome.tabs.move(params.tabId, { index: params.index });
+      result = { moved: true, index: tab.index };
+      break;
+    }
+
+    case 'pin_tab': {
+      if (params.tabId == null) throw new Error('pin_tab requires tabId');
+      await chrome.tabs.update(params.tabId, { pinned: params.pinned !== false });
+      result = { pinned: true };
+      break;
+    }
+
+    case 'duplicate_tab': {
+      if (params.tabId == null) throw new Error('duplicate_tab requires tabId');
+      const tab = await chrome.tabs.duplicate(params.tabId);
+      result = { id: tab.id, url: tab.url, title: tab.title };
+      break;
+    }
+
+    case 'zoom': {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!active) throw new Error('No active tab');
+      if (params.factor) {
+        await chrome.tabs.setZoom(active.id, params.factor);
+      } else if (params.action === 'in') {
+        const currentZoom = await chrome.tabs.getZoom(active.id);
+        await chrome.tabs.setZoom(active.id, Math.min(currentZoom + 0.1, 5));
+      } else if (params.action === 'out') {
+        const currentZoom = await chrome.tabs.getZoom(active.id);
+        await chrome.tabs.setZoom(active.id, Math.max(currentZoom - 0.1, 0.25));
+      } else if (params.action === 'reset') {
+        await chrome.tabs.setZoom(active.id, 1);
+      }
+      const newZoom = await chrome.tabs.getZoom(active.id);
+      result = { zoom: newZoom };
+      break;
+    }
+
+    case 'find_in_page': {
+      if (!params.text) throw new Error('find_in_page requires text');
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!active) throw new Error('No active tab');
+      await chrome.tabs.highlightText(active.id, { text: params.text });
+      result = { found: true, text: params.text };
+      break;
+    }
+
+    case 'get_browser_info': {
+      result = {
+        name: navigator.userAgent,
+        version: status.version,
+        platform: navigator.platform,
+        language: navigator.language,
+        cookieEnabled: navigator.cookieEnabled,
+        onLine: navigator.onLine,
+      };
+      break;
+    }
+
+    case 'get_network_info': {
+      const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      result = {
+        onLine: navigator.onLine,
+        type: connection?.type || 'unknown',
+        effectiveType: connection?.effectiveType || 'unknown',
+        downlink: connection?.downlink || 0,
+        rtt: connection?.rtt || 0,
+        saveData: connection?.saveData || false,
+      };
+      break;
+    }
+
+    case 'get_battery': {
+      try {
+        const battery = await navigator.getBattery();
+        result = {
+          charging: battery.charging,
+          chargingTime: battery.chargingTime,
+          dischargingTime: battery.dischargingTime,
+          level: battery.level,
+        };
+      } catch {
+        result = { error: 'Battery API not available' };
+      }
+      break;
+    }
+
+    case 'get_media_devices': {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        result = {
+          devices: devices.map(d => ({
+            deviceId: d.deviceId,
+            kind: d.kind,
+            label: d.label,
+            groupId: d.groupId,
+          })),
+        };
+      } catch {
+        result = { error: 'Media devices not available' };
+      }
+      break;
+    }
+
+    case 'get_geolocation': {
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0,
+          });
+        });
+        result = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          altitude: position.coords.altitude,
+          heading: position.coords.heading,
+          speed: position.coords.speed,
+          timestamp: position.timestamp,
+        };
+      } catch (e) {
+        result = { error: 'Geolocation not available: ' + (e?.message || e) };
+      }
+      break;
+    }
+
+    case 'get_webgl_info': {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+          result = { error: 'WebGL not available' };
+          break;
+        }
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        result = {
+          vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+          renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+          version: gl.getParameter(gl.VERSION),
+          shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+          maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+          maxViewportDims: gl.getParameter(gl.MAX_VIEWPORT_DIMS),
+        };
+      } catch {
+        result = { error: 'WebGL info not available' };
+      }
+      break;
+    }
+
+    case 'get_cpu_info': {
+      const cores = navigator.hardwareConcurrency || 0;
+      const memory = navigator.deviceMemory || 0;
+      result = {
+        cores,
+        memory: memory + ' GB',
+        platform: navigator.platform,
+        userAgent: navigator.userAgent,
+      };
+      break;
+    }
+
+    case 'get_storage_info': {
+      try {
+        if (navigator.storage && navigator.storage.estimate) {
+          const estimate = await navigator.storage.estimate();
+          result = {
+            usage: estimate.usage,
+            quota: estimate.quota,
+            usageInMB: (estimate.usage / 1024 / 1024).toFixed(2),
+            quotaInMB: (estimate.quota / 1024 / 1024).toFixed(2),
+            percentUsed: ((estimate.usage / estimate.quota) * 100).toFixed(2),
+          };
+        } else {
+          result = { error: 'Storage API not available' };
+        }
+      } catch {
+        result = { error: 'Storage API not available' };
+      }
+      break;
+    }
+
+    case 'get_performance_metrics': {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab?.id) throw new Error('No active tab');
+      const metrics = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const perf = performance;
+          const entries = perf.getEntriesByType('resource');
+          const paint = perf.getEntriesByType('paint');
+          const navigation = perf.getEntriesByType('navigation')[0];
+          return {
+            timing: {
+              navigationStart: perf.timing.navigationStart,
+              domContentLoaded: perf.timing.domContentLoadedEventEnd - perf.timing.navigationStart,
+              loadComplete: perf.timing.loadEventEnd - perf.timing.navigationStart,
+              ttfb: perf.timing.responseStart - perf.timing.navigationStart,
+              dnsLookup: perf.timing.domainLookupEnd - perf.timing.domainLookupStart,
+              tcpConnect: perf.timing.connectEnd - perf.timing.connectStart,
+              serverResponse: perf.timing.responseStart - perf.timing.requestStart,
+              domInteractive: perf.timing.domInteractive - perf.timing.navigationStart,
+              domComplete: perf.timing.domComplete - perf.timing.navigationStart,
+            },
+            paint: paint.map(p => ({ name: p.name, startTime: p.startTime })),
+            resources: entries.length,
+            totalTransferSize: entries.reduce((sum, e) => sum + (e.transferSize || 0), 0),
+            resourceTypes: entries.reduce((acc, e) => {
+              const type = e.initiatorType || 'other';
+              acc[type] = (acc[type] || 0) + 1;
+              return acc;
+            }, {}),
+            memory: perf.memory ? {
+              usedJSHeapSize: perf.memory.usedJSHeapSize,
+              totalJSHeapSize: perf.memory.totalJSHeapSize,
+              jsHeapSizeLimit: perf.memory.jsHeapSizeLimit,
+            } : null,
+          };
+        },
+      });
+      result = metrics?.[0]?.result || {};
+      break;
+    }
+
+    case 'get_cookies': {
+      const cookies = await chrome.cookies.getAll({});
+      result = {
+        cookies: cookies.map(c => ({
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path,
+          expires: c.expirationDate,
+          httpOnly: c.httpOnly,
+          secure: c.secure,
+          sameSite: c.sameSite,
+        })),
+        count: cookies.length,
+      };
+      break;
+    }
+
+    case 'clear_cookies': {
+      await chrome.browsingData.remove({}, { cookies: true });
+      result = { cleared: true };
+      break;
+    }
+
+    case 'get_form_data': {
+      const res = await contentScriptOp('getFormData', {});
+      result = res || { forms: [] };
+      break;
+    }
+
+    case 'submit_form': {
+      if (!params.selector) throw new Error('submit_form requires selector');
+      result = await contentScriptOp('submitForm', { selector: params.selector });
+      break;
+    }
+
+    case 'get_table_data': {
+      const res = await contentScriptOp('getTableData', { selector: params.selector });
+      result = res || { tables: [] };
+      break;
+    }
+
+    case 'get_page_meta': {
+      const res = await contentScriptOp('getPageMeta', {});
+      result = res || {};
+      break;
+    }
+
+    case 'get_page_structured': {
+      const res = await contentScriptOp('getStructuredContent', {});
+      result = res || {};
+      break;
+    }
+
+    case 'take_screenshot_area': {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab) throw new Error('No active tab');
+      const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 80 });
+      result = { base64: screenshot.replace(/^data:image\/jpeg;base64,/, ''), format: 'jpeg' };
+      break;
+    }
+
+    case 'create_notification': {
+      chrome.notifications.create(params.id || 'infinite-ai-' + Date.now(), {
+        type: params.type || 'basic',
+        title: params.title || 'Infinite AI',
+        message: params.message || '',
+        iconUrl: params.iconUrl || 'icons/icon128.png',
+        priority: params.priority || 0,
+      });
+      result = { created: true };
+      break;
+    }
+
+    case 'get_idle_state': {
+      const state = await chrome.idle.queryState(params.interval || 60);
+      result = { state };
+      break;
+    }
+
+    case 'get_tab_tree': {
+      const tabs = await chrome.tabs.query({});
+      const windows = await chrome.windows.getAll({ populate: false });
+      result = {
+        windows: windows.map(w => ({
+          id: w.id,
+          focused: w.focused,
+          type: w.type,
+          state: w.state,
+          tabs: tabs.filter(t => t.windowId === w.id).map(t => ({
+            id: t.id,
+            url: t.url,
+            title: t.title,
+            active: t.active,
+            pinned: t.pinned,
+            favIconUrl: t.favIconUrl,
+          })),
+        })),
+        totalTabs: tabs.length,
+      };
+      break;
+    }
+
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -1124,6 +1633,104 @@ const PAGE_EXEC = function (op, params) {
       }
       return out({ results });
     }
+    case 'getFormData': {
+      const forms = Array.from(document.forms).map(f => {
+        const data = {};
+        const elements = Array.from(f.elements);
+        for (const el of elements) {
+          if (el.name || el.id) {
+            const key = el.name || el.id;
+            if (el.type === 'checkbox' || el.type === 'radio') {
+              data[key] = el.checked;
+            } else if (el.tagName === 'SELECT') {
+              data[key] = el.value;
+            } else {
+              data[key] = el.value;
+            }
+          }
+        }
+        return {
+          action: f.action,
+          method: f.method,
+          id: f.id,
+          name: f.name,
+          data,
+          fields: elements.filter(e => ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName)).map(describe),
+        };
+      });
+      return out({ forms });
+    }
+    case 'submitForm': {
+      const el = findCandidate(params.selector);
+      if (!el) return fail('submitForm: element not found');
+      const form = el instanceof HTMLFormElement ? el : el.closest('form');
+      if (!form) return fail('submitForm: no form found');
+      form.submit();
+      return out({ submitted: true });
+    }
+    case 'getTableData': {
+      const tables = Array.from(document.querySelectorAll(params.selector || 'table'));
+      const data = tables.map(table => {
+        const rows = Array.from(table.querySelectorAll('tr'));
+        const headers = Array.from(rows[0]?.querySelectorAll('th') || []).map(th => th.textContent?.trim() || '');
+        const body = rows.slice(1).map(row => {
+          const cells = Array.from(row.querySelectorAll('td'));
+          if (headers.length) {
+            const obj = {};
+            cells.forEach((cell, i) => { obj[headers[i] || 'col' + i] = cell.textContent?.trim() || ''; });
+            return obj;
+          }
+          return cells.map(cell => cell.textContent?.trim() || '');
+        });
+        return { headers, rows: body, rowCount: rows.length - 1 };
+      });
+      return out({ tables: data });
+    }
+    case 'getPageMeta': {
+      const meta = {};
+      document.querySelectorAll('meta').forEach(m => {
+        const name = m.getAttribute('name') || m.getAttribute('property') || m.getAttribute('http-equiv');
+        const content = m.getAttribute('content');
+        if (name && content) meta[name] = content;
+      });
+      return out({
+        title: document.title,
+        meta,
+        canonical: document.querySelector('link[rel="canonical"]')?.href || '',
+        description: meta.description || meta['og:description'] || '',
+        keywords: meta.keywords || '',
+        author: meta.author || '',
+        ogTitle: meta['og:title'] || '',
+        ogImage: meta['og:image'] || '',
+        ogUrl: meta['og:url'] || '',
+        twitterCard: meta['twitter:card'] || '',
+        viewport: meta.viewport || '',
+      });
+    }
+    case 'getStructuredContent': {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(h => ({
+        level: parseInt(h.tagName[1]),
+        text: h.textContent?.trim() || '',
+        id: h.id || '',
+      }));
+      const images = Array.from(document.querySelectorAll('img')).slice(0, 50).map(img => ({
+        src: img.src,
+        alt: img.alt || '',
+        title: img.title || '',
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      }));
+      const videos = Array.from(document.querySelectorAll('video, iframe[src*="youtube"], iframe[src*="vimeo"]')).slice(0, 20).map(v => ({
+        tag: v.tagName.toLowerCase(),
+        src: v.src || '',
+        title: v.title || '',
+      }));
+      const lists = Array.from(document.querySelectorAll('ul, ol')).slice(0, 20).map(list => ({
+        type: list.tagName.toLowerCase(),
+        items: Array.from(list.querySelectorAll(':scope > li')).slice(0, 50).map(li => li.textContent?.trim() || ''),
+      }));
+      return out({ headings, images, videos, lists });
+    }
     default: return fail('Unknown page op: ' + op);
   }
 };
@@ -1153,6 +1760,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'get-status') { sendResponse(status); return false; }
   if (msg?.type === 'content-script-ready') {
     status.contentScriptsReady++;
+    return false;
+  }
+  if (msg?.type === 'reconnect') {
+    connect();
+    sendResponse({ ok: true });
     return false;
   }
   if (msg?.type === 'exec') {

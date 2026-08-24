@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import {
   DollarSign, Users, Handshake, ListTodo, TrendingUp, TrendingDown,
   Plus, Search, X, Send, Mail, Phone, Building2, Tag,
@@ -80,21 +80,21 @@ const now = () => Date.now();
 
 // Backend API calls
 const api = {
-  listContacts: () => (window as any).api.businessListContacts(),
-  createContact: (data: any) => (window as any).api.businessCreateContact(data),
-  updateContact: (id: string, updates: any) => (window as any).api.businessUpdateContact({ id, updates }),
-  deleteContact: (id: string) => (window as any).api.businessDeleteContact({ id }),
-  listLeads: () => (window as any).api.businessListLeads(),
-  createLead: (data: any) => (window as any).api.businessCreateLead(data),
-  updateLeadStatus: (id: string, status: string) => (window as any).api.businessUpdateLeadStatus({ id, status }),
-  listInvoices: () => (window as any).api.businessListInvoices(),
-  createInvoice: (data: any) => (window as any).api.businessCreateInvoice(data),
-  updateInvoiceStatus: (id: string, status: string) => (window as any).api.businessUpdateInvoiceStatus({ id, status }),
-  listDeals: () => (window as any).api.businessListDeals(),
-  createDeal: (data: any) => (window as any).api.businessCreateDeal(data),
-  updateDealStage: (id: string, stage: string) => (window as any).api.businessUpdateDealStage({ id, stage }),
-  getAnalytics: () => (window as any).api.businessAnalytics(),
-  getStats: () => (window as any).api.businessStats(),
+  listContacts: () => window.api.businessListContacts(),
+  createContact: (data: Record<string, unknown>) => window.api.businessCreateContact(data),
+  updateContact: (id: string, updates: Record<string, unknown>) => window.api.businessUpdateContact({ id, updates }),
+  deleteContact: (id: string) => window.api.businessDeleteContact({ id }),
+  listLeads: () => window.api.businessListLeads(),
+  createLead: (data: Record<string, unknown>) => window.api.businessCreateLead(data),
+  updateLeadStatus: (id: string, status: string) => window.api.businessUpdateLeadStatus({ id, status }),
+  listInvoices: () => window.api.businessListInvoices(),
+  createInvoice: (data: Record<string, unknown>) => window.api.businessCreateInvoice(data),
+  updateInvoiceStatus: (id: string, status: string) => window.api.businessUpdateInvoiceStatus({ id, status }),
+  listDeals: () => window.api.businessListDeals(),
+  createDeal: (data: Record<string, unknown>) => window.api.businessCreateDeal(data),
+  updateDealStage: (id: string, stage: string) => window.api.businessUpdateDealStage({ id, stage }),
+  getAnalytics: () => window.api.businessAnalytics(),
+  getStats: () => window.api.businessStats(),
 };
 
 export function BusinessOSView() {
@@ -488,10 +488,10 @@ export function BusinessOSView() {
                     </button>
                   </div>
                   <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div className="flex items-center gap-2 text-xs"><Mail size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.email || '—'}</span></div>
-                    <div className="flex items-center gap-2 text-xs"><Phone size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.phone || '—'}</span></div>
-                    <div className="flex items-center gap-2 text-xs"><Building2 size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.company || '—'}</span></div>
-                    <div className="flex items-center gap-2 text-xs"><Tag size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.tags.join(', ') || '—'}</span></div>
+                    <div className="flex items-center gap-2 text-xs"><Mail size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.email || 'â€”'}</span></div>
+                    <div className="flex items-center gap-2 text-xs"><Phone size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.phone || 'â€”'}</span></div>
+                    <div className="flex items-center gap-2 text-xs"><Building2 size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.company || 'â€”'}</span></div>
+                    <div className="flex items-center gap-2 text-xs"><Tag size={12} className="text-white/30" /><span className="text-white/60">{selectedContact.tags.join(', ') || 'â€”'}</span></div>
                   </div>
                   <div className="border-t border-white/5 pt-3">
                     <div className="flex items-center gap-1.5 mb-1"><StickyNote size={12} className="text-white/30" /><span className="text-xs text-white/40">Notes</span></div>
@@ -587,7 +587,7 @@ export function BusinessOSView() {
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <div className="text-sm font-semibold text-white">{selectedEmail.subject}</div>
-                      <div className="text-[10px] text-white/30 mt-0.5">From: {selectedEmail.from} · To: {selectedEmail.to}</div>
+                      <div className="text-[10px] text-white/30 mt-0.5">From: {selectedEmail.from} Â· To: {selectedEmail.to}</div>
                     </div>
                     <button onClick={() => setSelectedEmail(null)} className="text-white/30 hover:text-white/60"><X size={14} /></button>
                   </div>
@@ -719,7 +719,7 @@ export function BusinessOSView() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium text-white">{inv.client}</div>
-                    <div className="text-[10px] text-white/30">{inv.items.length} item{inv.items.length !== 1 ? 's' : ''} · {new Date(inv.createdAt).toLocaleDateString()}</div>
+                    <div className="text-[10px] text-white/30">{inv.items.length} item{inv.items.length !== 1 ? 's' : ''} Â· {new Date(inv.createdAt).toLocaleDateString()}</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-bold text-white">${inv.total.toLocaleString()}</div>
@@ -832,4 +832,5 @@ export function BusinessOSView() {
     </div>
   );
 }
+
 

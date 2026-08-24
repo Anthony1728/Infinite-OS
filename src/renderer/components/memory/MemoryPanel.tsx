@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AppIcon, type AppIconName } from '../brand/AppIcon';
 
 interface MemoryEntry {
   id: string;
@@ -16,12 +17,12 @@ interface MemoryStats {
   byType: Record<string, number>;
 }
 
-const TYPE_ICONS: Record<string, string> = {
-  preference: 'M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75',
-  project: 'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
-  document: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
-  chat: 'M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z',
-  note: 'M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z',
+const TYPE_ICONS: Record<string, AppIconName> = {
+  preference: 'memory.preference',
+  project: 'memory.project',
+  document: 'memory.document',
+  chat: 'memory.chat',
+  note: 'memory.note',
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -117,9 +118,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
           {Object.entries(TYPE_COLORS).map(([type, gradient]) => (
             <div key={type} className="bg-bgCard border border-borderSubtle rounded-xl p-3 text-center">
               <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${gradient} flex items-center justify-center mx-auto mb-2 shadow-lg`}>
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d={TYPE_ICONS[type]} />
-                </svg>
+                <AppIcon name={TYPE_ICONS[type]} className="w-4 h-4 text-white" strokeWidth={1.9} />
               </div>
               <div className="text-lg font-bold text-textMain">{stats.byType[type] || 0}</div>
               <div className="text-[10px] text-textMuted capitalize">{type}s</div>
@@ -229,9 +228,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
       ) : memories.length === 0 ? (
         <div className="text-center py-12 text-textMuted">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brandPurple/20 to-brandPink/20 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-brandPurple" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
+            <AppIcon name="nav.memory" className="w-8 h-8 text-brandPurple" strokeWidth={1.5} />
           </div>
           <p className="text-lg font-medium mb-1 text-textMain">No memories yet</p>
           <p className="text-sm text-textMuted">Create your first memory to get started.</p>
@@ -242,9 +239,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
             <div key={memory.id} className="bg-bgCard border border-borderSubtle rounded-xl p-4 hover:border-indigo-500/30 transition-colors group">
               <div className="flex items-start gap-3">
                 <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${TYPE_COLORS[memory.type]} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d={TYPE_ICONS[memory.type]} />
-                  </svg>
+                  <AppIcon name={TYPE_ICONS[memory.type]} className="w-5 h-5 text-white" strokeWidth={1.8} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-textMain text-sm truncate">{memory.title}</div>

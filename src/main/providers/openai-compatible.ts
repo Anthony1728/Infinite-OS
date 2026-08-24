@@ -71,7 +71,6 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         if (attempt > 0) {
           const delay = Math.min(500 * attempt, 1500);
-          console.log(`[provider:${opts.id}] Retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
           await new Promise(r => setTimeout(r, delay));
         }
 
@@ -83,8 +82,6 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
           stream: true,
           tools: !disableToolsForRetry && req.tools?.length ? req.tools.map(toOpenAITool) : undefined,
         };
-
-        console.log(`[provider:${opts.id}] POST ${url} model=${activeModel} messages=${body.messages.length} tools=${body.tools?.length ?? 0}`);
 
         // Tell the UI we're about to hit the network so the user gets feedback
         // immediately, before any DNS / TCP / TLS handshakes have even started.
@@ -111,17 +108,12 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
           const error = e instanceof Error ? e : new Error(String(e));
           if (error.name === 'AbortError') {
             if (!req.signal?.aborted && attempt < TIMEOUT_RETRY_ATTEMPTS) {
-              console.warn(
-                `[provider:${opts.id}] Connection timed out; retrying (attempt ${attempt + 2}/${maxRetries + 1})...`,
-              );
               await new Promise((r) => setTimeout(r, 500));
               continue;
             }
             const errorMsg = req.signal?.aborted ? 'Request cancelled' : 'The provider connection was aborted.';
-            console.error(`[provider:${opts.id}] ${errorMsg}`);
             yield { type: 'error', error: errorMsg };
           } else {
-            console.error(`[provider:${opts.id}] Fetch error: ${error.message}`);
             yield { type: 'error', error: `Network error: ${error.message}` };
           }
           return;
@@ -138,21 +130,17 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
 
         if (!res.ok || !res.body) {
           const errText = await res.text().catch(() => 'no body');
-          console.error(`[provider:${opts.id}] HTTP ${res.status}: ${errText}`);
           if (body.tools?.length && isDegradedFunctionError(errText) && attempt < maxRetries) {
-            console.warn(`[provider:${opts.id}] Tool/function calling is degraded; retrying without tools.`);
             disableToolsForRetry = true;
             continue;
           }
           if (res.status >= 500 && attempt < maxRetries) {
-            console.warn(`[provider:${opts.id}] HTTP ${res.status} server error, retrying shortly...`);
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
           if (opts.id === 'openrouter' && res.status === 402 && isInsufficientCreditsError(errText) && attempt < maxRetries) {
             const freeModel = opts.freeModels.find((model) => model.free)?.id;
             if (freeModel && freeModel !== activeModel) {
-              console.warn(`[provider:${opts.id}] Insufficient credits for ${activeModel}; retrying with free model ${freeModel}.`);
               activeModel = freeModel;
               continue;
             }
@@ -164,8 +152,6 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
         // Emit a status chunk immediately so the UI can replace the static
         // "Thinking…" copy with something specific to this provider/model.
         yield { type: 'provider_status', status: 'streaming', model: activeModel, provider: opts.id };
-
-        console.log(`[provider:${opts.id}] Response OK, reading stream...`);
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();

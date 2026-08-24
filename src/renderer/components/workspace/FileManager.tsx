@@ -1,4 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  Folder,
+  FolderOpen,
+  FileCode2,
+  FileJson2,
+  FileText,
+  FileImage,
+  FileArchive,
+  File,
+  Braces,
+  Palette,
+  Globe,
+  TerminalSquare,
+  Settings2,
+  BookOpen,
+} from 'lucide-react';
 import { joinSystemPath, normalizeSystemPath, parentSystemPath, type SystemRoots } from '../../lib/systemPaths';
 
 interface DirEntry {
@@ -23,18 +39,54 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
-const EXT_ICONS: Record<string, string> = {
-  ts: '📘', tsx: '⚛', js: '📒', jsx: '⚛', json: '📋', md: '📝', css: '🎨', html: '🌐',
-  py: '🐍', rs: '🦀', go: '🔷', java: '☕', rb: '💎', php: '🐘', c: '🔧', cpp: '⚙',
-  sh: '🖥', bat: '🖥', yml: '⚙', yaml: '⚙', toml: '⚙', xml: '📋', txt: '📄',
-  png: '🖼', jpg: '🖼', jpeg: '🖼', gif: '🖼', svg: '🖼', webp: '🖼', ico: '🖼',
-  pdf: '📕', doc: '📘', docx: '📘', zip: '📦', tar: '📦', gz: '📦',
+const EXT_ICONS: Record<string, { Icon: typeof File; color: string }> = {
+  ts: { Icon: FileCode2, color: 'text-sky-400' },
+  tsx: { Icon: FileCode2, color: 'text-cyan-400' },
+  js: { Icon: FileCode2, color: 'text-yellow-400' },
+  jsx: { Icon: FileCode2, color: 'text-cyan-400' },
+  json: { Icon: FileJson2, color: 'text-amber-400' },
+  md: { Icon: BookOpen, color: 'text-slate-300' },
+  css: { Icon: Palette, color: 'text-fuchsia-400' },
+  html: { Icon: Globe, color: 'text-orange-400' },
+  py: { Icon: FileCode2, color: 'text-emerald-400' },
+  rs: { Icon: FileCode2, color: 'text-orange-400' },
+  go: { Icon: FileCode2, color: 'text-cyan-400' },
+  java: { Icon: FileCode2, color: 'text-red-400' },
+  rb: { Icon: FileCode2, color: 'text-rose-400' },
+  php: { Icon: FileCode2, color: 'text-indigo-400' },
+  c: { Icon: FileCode2, color: 'text-sky-400' },
+  cpp: { Icon: FileCode2, color: 'text-sky-400' },
+  sh: { Icon: TerminalSquare, color: 'text-lime-400' },
+  bat: { Icon: TerminalSquare, color: 'text-lime-400' },
+  yml: { Icon: Settings2, color: 'text-zinc-400' },
+  yaml: { Icon: Settings2, color: 'text-zinc-400' },
+  toml: { Icon: Settings2, color: 'text-zinc-400' },
+  xml: { Icon: Braces, color: 'text-zinc-400' },
+  txt: { Icon: FileText, color: 'text-zinc-400' },
+  png: { Icon: FileImage, color: 'text-violet-400' },
+  jpg: { Icon: FileImage, color: 'text-violet-400' },
+  jpeg: { Icon: FileImage, color: 'text-violet-400' },
+  gif: { Icon: FileImage, color: 'text-violet-400' },
+  svg: { Icon: FileImage, color: 'text-violet-400' },
+  webp: { Icon: FileImage, color: 'text-violet-400' },
+  ico: { Icon: FileImage, color: 'text-violet-400' },
+  pdf: { Icon: FileText, color: 'text-red-400' },
+  doc: { Icon: FileText, color: 'text-sky-400' },
+  docx: { Icon: FileText, color: 'text-sky-400' },
+  zip: { Icon: FileArchive, color: 'text-amber-400' },
+  tar: { Icon: FileArchive, color: 'text-amber-400' },
+  gz: { Icon: FileArchive, color: 'text-amber-400' },
 };
 
-function getFileIcon(name: string, isDir: boolean): string {
-  if (isDir) return '📁';
+function getFileIconMeta(name: string, isDir: boolean, open = false): { Icon: typeof File; color: string } {
+  if (isDir) return { Icon: open ? FolderOpen : Folder, color: 'text-amber-300/80' };
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
-  return EXT_ICONS[ext] ?? '📄';
+  return EXT_ICONS[ext] ?? { Icon: File, color: 'text-zinc-500' };
+}
+
+function FileIcon({ name, isDir, open = false, className = 'w-4 h-4' }: { name: string; isDir: boolean; open?: boolean; className?: string }) {
+  const { Icon, color } = getFileIconMeta(name, isDir, open);
+  return <Icon className={`${className} ${color} flex-shrink-0`} strokeWidth={1.7} />;
 }
 
 function isEditable(name: string): boolean {
@@ -371,7 +423,7 @@ export function FileManager() {
                     : 'text-textMuted hover:text-textMain hover:bg-white/[0.03]'
                 }`}
               >
-                <span className="text-sm flex-shrink-0">{getFileIcon(entry.name, entry.isDirectory)}</span>
+                <FileIcon name={entry.name} isDir={entry.isDirectory} open={isSelected} className="w-3.5 h-3.5" />
                 <span className="flex-1 truncate text-left">{entry.name}</span>
               </button>
             );
@@ -383,7 +435,7 @@ export function FileManager() {
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-borderSubtle bg-bgPanel/30">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-sm">{getFileIcon(selectedFile.split('/').pop() ?? '', false)}</span>
+                <FileIcon name={selectedFile.split('/').pop() ?? ''} isDir={false} className="w-3.5 h-3.5" />
                 <span className="text-xs text-textMain truncate font-medium">{relativePath}</span>
                 {dirty && <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
               </div>
@@ -405,7 +457,7 @@ export function FileManager() {
             ) : (
               <div className="flex-1 flex items-center justify-center text-textMuted text-xs">
                 <div className="text-center">
-                  <div className="text-4xl mb-3">{getFileIcon(relativePath.split('/').pop() ?? '', false)}</div>
+                  <div className="mb-3 flex justify-center"><FileIcon name={relativePath.split('/').pop() ?? ''} isDir={false} className="w-10 h-10" /></div>
                   <div className="font-medium text-textMain mb-1">{relativePath.split('/').pop()}</div>
                   <div>Binary or non-editable file ({formatSize(fileContent.length)} chars)</div>
                 </div>

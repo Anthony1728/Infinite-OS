@@ -1,9 +1,10 @@
-// Infinite OS Bridge v3.0 — Fast popup UI with real-time updates.
+// Infinite AI Bridge v4.0 — Popup UI with real-time updates and auto-connect.
 
 const $ = (id) => document.getElementById(id);
 
 let statusPollTimer = null;
 let currentTabs = [];
+let startTime = Date.now();
 
 // ── Status rendering ──────────────────────────────────────────────────────────
 function renderStatus(s) {
@@ -23,6 +24,19 @@ function renderStatus(s) {
   $('cacheText').textContent = String(s.cacheHits ?? 0);
   $('portCode').textContent = '127.0.0.1:' + (s.port ?? 8765);
 
+  // Uptime
+  const uptime = Math.floor((Date.now() - startTime) / 1000);
+  const hours = Math.floor(uptime / 3600);
+  const minutes = Math.floor((uptime % 3600) / 60);
+  const seconds = uptime % 60;
+  if (hours > 0) {
+    $('uptimeText').textContent = `${hours}h ${minutes}m`;
+  } else if (minutes > 0) {
+    $('uptimeText').textContent = `${minutes}m ${seconds}s`;
+  } else {
+    $('uptimeText').textContent = `${seconds}s`;
+  }
+
   // Latency badge
   const latencyBadge = $('latencyBadge');
   const latencyText = $('latencyText');
@@ -38,11 +52,11 @@ function renderStatus(s) {
   const err = $('errBox');
   if (!s.connected && s.lastError) {
     err.textContent = s.hasToken === false
-      ? 'Missing token in config.js -- re-run the installer.'
+      ? 'Missing token in config.js — re-run the installer.'
       : 'Not connected. Start Infinite OS or run the bridge server.';
     err.classList.remove('hidden');
   } else if (s.hasToken === false) {
-    err.textContent = 'Missing token in config.js -- re-run the installer.';
+    err.textContent = 'Missing token in config.js — re-run the installer.';
     err.classList.remove('hidden');
   } else {
     err.classList.add('hidden');
@@ -192,7 +206,105 @@ const actionHandlers = {
   performance: async () => {
     return await sendToBackground({ type: 'exec', command: 'get_page_performance', params: {} });
   },
+  cookies: async () => {
+    return await sendToBackground({ type: 'exec', command: 'cookie_get', params: {} });
+  },
+  storage: async () => {
+    return await sendToBackground({ type: 'exec', command: 'storage_get', params: { keys: [] } });
+  },
+  history: async () => {
+    return await sendToBackground({ type: 'exec', command: 'get_history', params: {} });
+  },
+  downloads: async () => {
+    return await sendToBackground({ type: 'exec', command: 'get_downloads', params: {} });
+  },
 };
+
+// ── Command execution ─────────────────────────────────────────────────────────
+async function executeCommand(commandStr) {
+  const parts = commandStr.trim().split(/\s+/);
+  const command = parts[0];
+  const args = parts.slice(1);
+
+  // Parse common commands
+  switch (command) {
+    case 'navigate':
+    case 'nav':
+      return await sendToBackground({ type: 'exec', command: 'navigate', params: { url: args[0] || 'about:blank' } });
+    case 'click':
+      return await sendToBackground({ type: 'exec', command: 'click', params: { text: args.join(' ') } });
+    case 'type':
+      return await sendToBackground({ type: 'exec', command: 'type', params: { selector: 'input:focus, textarea:focus', text: args.join(' ') } });
+    case 'fill':
+      return await sendToBackground({ type: 'exec', command: 'fill', params: { fields: { 'input:focus': args.join(' ') } } });
+    case 'scroll':
+      return await sendToBackground({ type: 'exec', command: 'scroll', params: { direction: args[0] || 'down' } });
+    case 'select':
+      return await sendToBackground({ type: 'exec', command: 'select', params: { selector: args[0], value: args[1] } });
+    case 'hover':
+      return await sendToBackground({ type: 'exec', command: 'hover', params: { text: args.join(' ') } });
+    case 'focus':
+      return await sendToBackground({ type: 'exec', command: 'focus', params: { selector: args[0] } });
+    case 'clear':
+      return await sendToBackground({ type: 'exec', command: 'clear', params: { selector: args[0] } });
+    case 'press':
+    case 'press_key':
+      return await sendToBackground({ type: 'exec', command: 'press_key', params: { key: args[0] || 'Enter' } });
+    case 'newtab':
+    case 'new':
+      return await sendToBackground({ type: 'exec', command: 'new_tab', params: { url: args[0] || 'about:blank' } });
+    case 'close':
+      return await sendToBackground({ type: 'exec', command: 'close_tab', params: { tabId: parseInt(args[0]) || undefined } });
+    case 'activate':
+    case 'switch':
+      return await sendToBackground({ type: 'exec', command: 'activate_tab', params: { url: args[0] } });
+    case 'reload':
+      return await sendToBackground({ type: 'exec', command: 'reload', params: {} });
+    case 'back':
+      return await sendToBackground({ type: 'exec', command: 'back', params: {} });
+    case 'forward':
+      return await sendToBackground({ type: 'exec', command: 'forward', params: {} });
+    case 'execute':
+    case 'exec':
+    case 'js':
+      return await sendToBackground({ type: 'exec', command: 'execute_js', params: { script: args.join(' ') } });
+    case 'screenshot':
+    case 'ss':
+      return await sendToBackground({ type: 'exec', command: 'screenshot', params: {} });
+    case 'extract':
+    case 'text':
+      return await sendToBackground({ type: 'exec', command: 'get_page_text', params: {} });
+    case 'html':
+      return await sendToBackground({ type: 'exec', command: 'get_page_html', params: {} });
+    case 'links':
+      return await sendToBackground({ type: 'exec', command: 'get_page_links', params: {} });
+    case 'forms':
+      return await sendToBackground({ type: 'exec', command: 'get_form_fields', params: {} });
+    case 'cookie':
+      return await sendToBackground({ type: 'exec', command: 'cookie_get', params: { url: args[0] } });
+    case 'storage':
+      return await sendToBackground({ type: 'exec', command: 'storage_get', params: { keys: args } });
+    case 'ping':
+      return await sendToBackground({ type: 'exec', command: 'ping', params: {} });
+    case 'status':
+      return await sendToBackground({ type: 'get-status' });
+    default:
+      // Try as generic command
+      try {
+        const params = {};
+        if (args.length > 0) {
+          try {
+            params.value = JSON.parse(args.join(' '));
+          } catch {
+            params.value = args.join(' ');
+          }
+        }
+        return await sendToBackground({ type: 'exec', command, params });
+      } catch (e) {
+        return { ok: false, error: 'Unknown command: ' + command };
+      }
+  }
+}
 
 // ── Initialization ────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -231,6 +343,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           showResult(data?.text || 'Clipboard empty', false);
         } else if (act === 'tabs') {
           // Tabs already loaded in the tab list
+        } else if (act === 'cookies') {
+          const data = res?.data || res;
+          showResult(JSON.stringify(data?.cookies || data, null, 2), !res?.ok);
+        } else if (act === 'storage') {
+          const data = res?.data || res;
+          showResult(JSON.stringify(data?.data || data, null, 2), !res?.ok);
+        } else if (act === 'history') {
+          const data = res?.data || res;
+          showResult(JSON.stringify(data?.history || data, null, 2), !res?.ok);
+        } else if (act === 'downloads') {
+          const data = res?.data || res;
+          showResult(JSON.stringify(data?.downloads || data, null, 2), !res?.ok);
         } else {
           showResult(JSON.stringify(res, null, 2), !res?.ok);
         }
@@ -257,6 +381,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Close result
   $('closeResult').addEventListener('click', () => $('resultCard').classList.add('hidden'));
 
+  // Command input
+  const commandInput = $('commandInput');
+  const runCommandBtn = $('runCommand');
+
+  runCommandBtn.addEventListener('click', async () => {
+    const cmd = commandInput.value.trim();
+    if (!cmd) return;
+
+    runCommandBtn.disabled = true;
+    runCommandBtn.textContent = 'Running...';
+
+    try {
+      const res = await executeCommand(cmd);
+      showResult(JSON.stringify(res?.data || res, null, 2), !res?.ok);
+      commandInput.value = '';
+    } catch (e) {
+      showResult('Error: ' + (e?.message || String(e)), true);
+    } finally {
+      runCommandBtn.disabled = false;
+      runCommandBtn.textContent = 'Run';
+    }
+  });
+
+  commandInput.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runCommandBtn.click();
+    }
+  });
+
   // Auto-refresh status every 3 seconds
   statusPollTimer = setInterval(async () => {
     try {
@@ -264,6 +418,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderStatus(res);
     } catch {}
   }, 3000);
+
+  // Auto-connect: Immediately try to connect if not connected
+  setTimeout(async () => {
+    try {
+      const res = await sendToBackground({ type: 'get-status' });
+      if (!res?.connected) {
+        // Request background to reconnect
+        await sendToBackground({ type: 'reconnect' });
+      }
+    } catch {}
+  }, 1000);
 });
 
 // Listen for status updates

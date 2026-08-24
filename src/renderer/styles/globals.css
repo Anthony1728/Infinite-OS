@@ -211,10 +211,11 @@ button:disabled {
   background: color-mix(in srgb, var(--os-accent) 11%, transparent);
 }
 .os-active-mode {
-  border-color: color-mix(in srgb, var(--os-accent) 52%, transparent);
-  background: color-mix(in srgb, var(--os-accent) 13%, transparent);
-  box-shadow: 0 0 13px color-mix(in srgb, var(--os-accent) 27%, transparent), inset 0 1px 0 rgba(255,255,255,.05);
+  border-color: color-mix(in srgb, var(--os-accent) 58%, transparent);
+  background: color-mix(in srgb, var(--os-accent) 14%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--os-accent) 22%, transparent), inset 0 1px 0 rgba(255,255,255,.06);
 }
+.os-active-mode svg { filter: drop-shadow(0 0 2.5px currentColor); }
 .os-accent-control-active {
   color: color-mix(in srgb, var(--os-accent) 72%, white) !important;
   border-color: color-mix(in srgb, var(--os-accent) 38%, transparent) !important;
@@ -223,36 +224,36 @@ button:disabled {
 .os-mode-menu-active { background: color-mix(in srgb, var(--os-accent) 12%, transparent) !important; }
 .os-nav-item.is-active svg { color: color-mix(in srgb, var(--os-accent) 74%, white) !important; }
 
-/* Glowing sidebar icon effects */
+/* Crisp neon treatment for sidebar icons: one tight contact glow plus a
+   single restrained halo — wide double-blur smears read as "blurry". */
 .os-nav-item svg {
   transition: filter 0.3s ease, transform 0.2s ease;
 }
+.os-nav-item:hover svg {
+  filter: drop-shadow(0 0 3px currentColor);
+  transform: scale(1.03);
+}
 .os-nav-item.is-active svg {
-  filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor);
-  transform: scale(1.05);
+  filter:
+    drop-shadow(0 0 2.5px var(--glow-color, currentColor))
+    drop-shadow(0 0 9px color-mix(in srgb, var(--glow-color, currentColor) 55%, transparent));
+  transform: scale(1.06);
 }
-.os-nav-item:hover svg:not(.os-nav-item.is-active svg) {
-  filter: drop-shadow(0 0 4px currentColor);
-  transform: scale(1.02);
-}
-/* Specific glow colors per nav item */
-.os-nav-item[data-nav="chats"] svg { --glow-color: rgba(129, 140, 248, 0.6); }
-.os-nav-item[data-nav="agents"] svg { --glow-color: rgba(167, 139, 250, 0.6); }
-.os-nav-item[data-nav="projects"] svg { --glow-color: rgba(52, 211, 153, 0.6); }
-.os-nav-item[data-nav="documents"] svg { --glow-color: rgba(148, 163, 184, 0.6); }
-.os-nav-item[data-nav="automations"] svg { --glow-color: rgba(251, 191, 36, 0.6); }
-.os-nav-item[data-nav="memory"] svg { --glow-color: rgba(192, 132, 252, 0.6); }
-.os-nav-item[data-nav="workspace"] svg { --glow-color: rgba(45, 212, 191, 0.6); }
-.os-nav-item[data-nav="settings"] svg { --glow-color: rgba(148, 163, 184, 0.6); }
-.os-nav-item[data-nav="capabilities"] svg { --glow-color: rgba(232, 121, 249, 0.6); }
-.os-nav-item[data-nav="plugin-store"] svg { --glow-color: rgba(139, 92, 246, 0.6); }
-.os-nav-item[data-nav="skills"] svg { --glow-color: rgba(59, 130, 246, 0.6); }
-.os-nav-item[data-nav="scheduled-tasks"] svg { --glow-color: rgba(251, 191, 36, 0.6); }
-.os-nav-item[data-nav="standing-orders"] svg { --glow-color: rgba(168, 85, 247, 0.6); }
-.os-nav-item[data-nav="active-memory"] svg { --glow-color: rgba(6, 182, 212, 0.6); }
-.os-nav-item.is-active svg {
-  filter: drop-shadow(0 0 8px var(--glow-color, currentColor)) drop-shadow(0 0 16px var(--glow-color, currentColor));
-}
+/* Specific glow colors per nav item — high alpha keeps the tight glow color-true */
+.os-nav-item[data-nav="chats"] svg { --glow-color: rgba(129, 140, 248, 0.85); }
+.os-nav-item[data-nav="agents"] svg { --glow-color: rgba(167, 139, 250, 0.85); }
+.os-nav-item[data-nav="projects"] svg { --glow-color: rgba(52, 211, 153, 0.85); }
+.os-nav-item[data-nav="documents"] svg { --glow-color: rgba(148, 163, 184, 0.85); }
+.os-nav-item[data-nav="automations"] svg { --glow-color: rgba(251, 191, 36, 0.85); }
+.os-nav-item[data-nav="memory"] svg { --glow-color: rgba(192, 132, 252, 0.85); }
+.os-nav-item[data-nav="workspace"] svg { --glow-color: rgba(45, 212, 191, 0.85); }
+.os-nav-item[data-nav="settings"] svg { --glow-color: rgba(148, 163, 184, 0.85); }
+.os-nav-item[data-nav="capabilities"] svg { --glow-color: rgba(232, 121, 249, 0.85); }
+.os-nav-item[data-nav="plugin-store"] svg { --glow-color: rgba(139, 92, 246, 0.85); }
+.os-nav-item[data-nav="skills"] svg { --glow-color: rgba(59, 130, 246, 0.85); }
+.os-nav-item[data-nav="scheduled-tasks"] svg { --glow-color: rgba(251, 191, 36, 0.85); }
+.os-nav-item[data-nav="standing-orders"] svg { --glow-color: rgba(168, 85, 247, 0.85); }
+.os-nav-item[data-nav="active-memory"] svg { --glow-color: rgba(6, 182, 212, 0.85); }
 
 .os-profile-ring { background: linear-gradient(135deg, color-mix(in srgb, var(--os-accent) 88%, white 8%), color-mix(in srgb, var(--os-accent) 54%, #22d3ee)); }
 
@@ -428,7 +429,7 @@ button:disabled {
 /* The selected Infinite mark stays crisp; active marks trace the full loop. */
 
 .os-chat-composer { border-radius: var(--os-radius) !important; border-color: color-mix(in srgb, var(--os-accent) 34%, var(--os-line)) !important; background: color-mix(in srgb, var(--os-surface-2) 92%, transparent) !important; }
-.os-chat-composer:focus-within { outline: none !important; box-shadow: 0 0 calc(12px + 20px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 24%, transparent), inset 0 1px 0 rgba(255,255,255,.05) !important; border-color: color-mix(in srgb, var(--os-accent) 72%, white) !important; }
+.os-chat-composer:focus-within { outline: none !important; box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-accent) 55%, transparent), 0 0 calc(7px + 10px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 30%, transparent), inset 0 1px 0 rgba(255,255,255,.05) !important; border-color: color-mix(in srgb, var(--os-accent) 72%, white) !important; }
 .os-chat-textarea:focus, .os-chat-textarea:focus-visible { outline: none !important; box-shadow: none !important; }
 .os-uncensored-toggle,
 .os-dictation-button,
@@ -482,6 +483,29 @@ button:disabled {
 .os-send-button:not(:disabled):hover { filter: brightness(1.14) saturate(1.08); transform: translateY(-1px); box-shadow: 0 0 calc(15px + 18px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 52%, transparent), inset 0 1px 0 rgba(255,255,255,.4); }
 .os-send-button:not(:disabled):active { transform: translateY(0) scale(.96); }
 .os-send-button:disabled { border-color: rgba(255,255,255,.07); background: linear-gradient(135deg, #3f3f46, #27272a); box-shadow: none; color: #a1a1aa; opacity: .58; }
+
+/* Workspace module tiles: glass chip carrying a neon gradient glyph.
+   Accent colors flow through --tile-a/--tile-b set inline per module. */
+.os-module-tile { transition: border-color .2s ease, box-shadow .2s ease; }
+.os-module-tile:hover {
+  border-color: color-mix(in srgb, var(--tile-a, #8b5cf6) 38%, transparent) !important;
+  box-shadow: 0 10px 28px -12px color-mix(in srgb, var(--tile-a, #8b5cf6) 45%, transparent);
+}
+.os-module-chip {
+  border: 1px solid color-mix(in srgb, var(--tile-a, #8b5cf6) 32%, rgba(255,255,255,.09));
+  background:
+    radial-gradient(130% 130% at 20% 10%, color-mix(in srgb, var(--tile-a, #8b5cf6) 17%, transparent), transparent 60%),
+    linear-gradient(150deg, color-mix(in srgb, var(--tile-a, #8b5cf6) 13%, transparent), color-mix(in srgb, var(--tile-b, #22d3ee) 8%, transparent) 80%),
+    rgba(255,255,255,.028);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 5px 16px -6px color-mix(in srgb, var(--tile-a, #8b5cf6) 45%, transparent);
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.os-module-tile:hover .os-module-chip {
+  transform: scale(1.07);
+  border-color: color-mix(in srgb, var(--tile-a, #8b5cf6) 55%, rgba(255,255,255,.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 7px 20px -6px color-mix(in srgb, var(--tile-a, #8b5cf6) 60%, transparent);
+}
+.os-module-glyph { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tile-a, #8b5cf6) 75%, transparent)); }
 
 .os-right-panel {
   border-color: color-mix(in srgb, var(--os-accent) 10%, var(--os-line)) !important;

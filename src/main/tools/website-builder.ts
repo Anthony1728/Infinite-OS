@@ -1,5 +1,6 @@
 import type { Tool, ToolResult } from './base.js';
 import { WebsiteBuilder } from '../builders/website.js';
+import type { Website, WebsiteComponent, WebsiteTemplate } from '../builders/website.js';
 
 let _websiteBuilder: InstanceType<typeof WebsiteBuilder> | null = null;
 function getWebsiteBuilder() {
@@ -64,9 +65,11 @@ export const websiteBuilderTool: Tool = {
             try { content = JSON.parse(input.component_content as string); } catch { return bad('component_content must be valid JSON'); }
           }
           const comp = getWebsiteBuilder().addComponent(input.website_id as string, input.page_id as string, {
-            type: input.component_type as string,
-            content,
-          } as any);
+            type: input.component_type as WebsiteComponent['type'],
+            name: input.component_type as string,
+            props: content,
+            order: 0,
+          });
           return comp ? json({ success: true, component: { id: comp.id, type: comp.type } }) : bad('Failed to add component');
         }
         case 'generate_code': {
@@ -93,7 +96,7 @@ export const websiteBuilderTool: Tool = {
           return json({ success: getWebsiteBuilder().deleteWebsite(input.website_id as string) });
         }
         case 'templates':
-          return json(getWebsiteBuilder().getTemplates().map((t: any) => ({ id: t.id, name: t.name, description: t.description })));
+          return json(getWebsiteBuilder().getTemplates().map((t: WebsiteTemplate) => ({ id: t.id, name: t.name, description: t.description })));
         case 'stats':
           return json(getWebsiteBuilder().getStats());
         default:
@@ -105,7 +108,7 @@ export const websiteBuilderTool: Tool = {
   },
 };
 
-function summarizeSite(s: any) {
+function summarizeSite(s: Website) {
   return {
     id: s.id,
     name: s.name,

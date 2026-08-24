@@ -2,26 +2,43 @@ import { useEffect, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
 import { useNotificationStore } from '../../stores/notifications';
 import { CreateAgentModal } from '../agents/CreateAgentModal';
+import { AppIcon, type AppIconName } from '../brand/AppIcon';
 
 type FilterStatus = 'all' | 'running' | 'completed' | 'failed';
 
-// Icon paths for different agent categories (clean Heroicons — not AI-generated looking)
-const CATEGORY_ICONS: Record<string, string> = {
-  coder:   'M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5',
-  researcher: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607z',
-  browser: 'M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3',
-  writer:  'M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931zm0 0L19.5 7.125',
-  analyst: 'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75zm7.5-9.75C10.5 2.754 11.004 2.25 11.625 2.25h2.25c.621 0 1.125.504 1.125 1.125v16.5c0 .621-.504 1.125-1.125 1.125h-2.25A1.125 1.125 0 0 1 10.5 19.875V3.375zm7.5 6.75c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-2.25A1.125 1.125 0 0 1 18 19.875v-9.75z',
-  default: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09z',
+// Agent category icons — custom Infinite OS glyph set via the central registry
+const CATEGORY_ICONS: Record<string, AppIconName> = {
+  coder: 'agent.coder',
+  developer: 'agent.coder',
+  code: 'agent.coder',
+  researcher: 'agent.researcher',
+  research: 'agent.researcher',
+  browser: 'agent.browser',
+  web: 'agent.browser',
+  writer: 'agent.writer',
+  analyst: 'agent.analyst',
+  data: 'agent.analyst',
+  finance: 'agent.finance',
+  ops: 'agent.ops',
+  operator: 'agent.ops',
+  devops: 'agent.ops',
+  design: 'agent.design',
+  designer: 'agent.design',
+  seo: 'agent.seo',
+  security: 'agent.security',
+  default: 'agent.default',
 };
 
-function getAgentIcon(agent: { id: string; icon?: string }): string {
-  if (agent.icon) return agent.icon;
+function getAgentIconName(agent: { id: string; icon?: string }): AppIconName {
   const id = agent.id.toLowerCase();
-  for (const [key, path] of Object.entries(CATEGORY_ICONS)) {
-    if (id.includes(key)) return path;
+  for (const [key, name] of Object.entries(CATEGORY_ICONS)) {
+    if (key !== 'default' && id.includes(key)) return name;
   }
   return CATEGORY_ICONS.default;
+}
+
+function AgentGlyph({ agent, className }: { agent: { id: string; icon?: string }; className: string }) {
+  return <AppIcon name={getAgentIconName(agent)} className={className} strokeWidth={1.7} />;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -88,9 +105,7 @@ export function AgentsView() {
         <div>
           <h1 className="text-2xl font-bold text-textMain flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d={CATEGORY_ICONS.default} />
-              </svg>
+              <AppIcon name="agent.default" className="w-5 h-5 text-white" strokeWidth={1.8} />
             </div>
             Agent Fleet
             {activeCount > 0 && (
@@ -133,9 +148,7 @@ export function AgentsView() {
               <div>
                 <div className="flex items-start gap-3 mb-3">
                   <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${agent.color || 'from-indigo-500 to-violet-600'} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d={getAgentIcon(agent)} />
-                    </svg>
+                    <AgentGlyph agent={agent} className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-textMain truncate">{agent.name}</div>
@@ -253,9 +266,7 @@ export function AgentsView() {
                     onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
                   >
                     <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${agentInfo?.color || 'from-indigo-500 to-violet-600'} flex items-center justify-center shadow-md flex-shrink-0`}>
-                      <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d={getAgentIcon(agentInfo ?? { id: run.agentId })} />
-                      </svg>
+                      <AgentGlyph agent={agentInfo ?? { id: run.agentId }} className="w-4 h-4 text-white" />
                     </div>
 
                     <div className="flex-1 min-w-0">

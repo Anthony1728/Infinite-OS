@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
 import { CodeEditor } from '../workspace/CodeEditor';
+import { AppIcon } from '../brand/AppIcon';
 
 type PanelId = 'agents' | 'workspace' | 'tasks';
 type AgentTab = 'ACTIVE' | 'IDLE' | 'ALL';
@@ -267,20 +268,11 @@ export function RightPanel({ onViewChange }: { onViewChange: (view: string) => v
 }
 
 function PanelIcon({ kind, active }: { kind: PanelId; active: boolean }) {
-  const paths = {
-    agents:
-      'M9.8 15.9 9 18.75l-.8-2.85a4.5 4.5 0 0 0-3.1-3.1L2.25 12l2.85-.8a4.5 4.5 0 0 0 3.1-3.1L9 5.25l.8 2.85a4.5 4.5 0 0 0 3.1 3.1l2.85.8-2.85.8a4.5 4.5 0 0 0-3.1 3.1Z',
-    workspace: 'M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z',
-    tasks:
-      'M6 4.5h12A1.5 1.5 0 0 1 19.5 6v12A1.5 1.5 0 0 1 18 19.5H6A1.5 1.5 0 0 1 4.5 18V6A1.5 1.5 0 0 1 6 4.5Zm2.25 5.25 1.5 1.5 3-3m-4.5 6 1.5 1.5 3-3',
-  };
   return (
     <span
       className={`w-8 h-8 rounded-lg border flex items-center justify-center ${active ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300' : 'border-white/[0.06] bg-white/[0.025] text-zinc-500'}`}
     >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d={paths[kind]} />
-      </svg>
+      <AppIcon name={`panel.${kind}`} className="w-4 h-4" strokeWidth={1.7} />
     </span>
   );
 }

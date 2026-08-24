@@ -1,5 +1,6 @@
 import type { Tool, ToolResult } from './base.js';
 import { AppBuilder } from '../builders/app.js';
+import type { AppProject, AppFile, AppTemplate } from '../builders/app.js';
 
 let _appBuilder: InstanceType<typeof AppBuilder> | null = null;
 function getAppBuilder() {
@@ -46,8 +47,8 @@ export const appBuilderTool: Tool = {
           const project = getAppBuilder().createProject({
             name: input.name as string,
             description: (input.description as string) ?? '',
-            framework: (input.framework ?? 'react') as any,
-            language: (input.language ?? 'typescript') as any,
+            framework: (input.framework ?? 'react') as AppProject['framework'],
+            language: (input.language ?? 'typescript') as AppProject['language'],
           });
           return json({ success: true, project: summarizeProject(project) });
         }
@@ -63,7 +64,7 @@ export const appBuilderTool: Tool = {
           const ok = getAppBuilder().addFile(input.project_id as string, {
             path: input.file_path as string,
             content: input.file_content as string,
-            type: (input.file_type as string ?? 'component') as any,
+            type: (input.file_type as string ?? 'component') as AppFile['type'],
           });
           return ok ? json({ success: true }) : bad('Failed to add file — project not found');
         }
@@ -107,7 +108,7 @@ export const appBuilderTool: Tool = {
           return json({ success: getAppBuilder().deleteProject(input.project_id as string) });
         }
         case 'templates':
-          return json(getAppBuilder().getTemplates().map((t: any) => ({ id: t.id, name: t.name, framework: t.framework, language: t.language, description: t.description })));
+          return json(getAppBuilder().getTemplates().map((t: AppTemplate) => ({ id: t.id, name: t.name, framework: t.framework, language: t.language, description: t.description })));
         case 'stats':
           return json(getAppBuilder().getStats());
         default:
@@ -119,7 +120,7 @@ export const appBuilderTool: Tool = {
   },
 };
 
-function summarizeProject(p: any) {
+function summarizeProject(p: AppProject) {
   return {
     id: p.id,
     name: p.name,
