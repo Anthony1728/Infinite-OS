@@ -20,6 +20,7 @@ export const IPC = {
   SESSION_SEARCH: 'session:search',
   SESSION_PIN: 'session:pin',
   SESSION_EXPORT: 'session:export',
+  SESSION_SHARE: 'session:share',
   SESSION_BRANCH: 'session:branch',
   SESSION_UPDATE_MESSAGE: 'session:update-message',
   SESSION_APPEND: 'session:append',

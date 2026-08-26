@@ -35,6 +35,7 @@ const api = {
     ipcRenderer.invoke(IPC.SESSION_UPDATE_MESSAGE, args),
   exportSession: (args: { sessionId: string; format?: 'markdown' | 'json' }) =>
     ipcRenderer.invoke(IPC.SESSION_EXPORT, args),
+  shareSession: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.SESSION_SHARE, args),
   appendSessionMessage: (args: { sessionId: string; message: unknown }) => ipcRenderer.invoke(IPC.SESSION_APPEND, args),
 
   getSetting: (args: { key: string }) => ipcRenderer.invoke(IPC.SETTINGS_GET, args),
@@ -99,6 +100,9 @@ const api = {
   connectMcp: (args: { name: string; config: { command: string; args?: string[]; env?: Record<string, string> } }) =>
     ipcRenderer.invoke(IPC.MCP_CONNECT, args),
   disconnectMcp: (args: { name: string }) => ipcRenderer.invoke(IPC.MCP_DISCONNECT, args),
+  mcpStatus: () => ipcRenderer.invoke(IPC.MCP_STATUS),
+  mcpListTools: (args?: { name?: string }) => ipcRenderer.invoke(IPC.MCP_LIST_TOOLS, args),
+  openExternal: (url: string) => ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL, url),
 
   respondPermission: (args: { id: string; allowed: boolean }) => ipcRenderer.invoke(IPC.PERMISSION_RESPONSE, args),
   onPermissionRequest: (cb: (e: { id: string; tool: string; input: unknown }) => void) => {

@@ -252,6 +252,10 @@ const CHAT_MODE_OPTIONS: Array<{
     id: 'build', label: 'Creative Mode', description: 'Create a complete working outcome', color: 'text-fuchsia-400',
     path: 'M12 3v18m9-9H3m13.5-7.5 3 3m-15 9 3 3',
   },
+  {
+    id: 'plan', label: 'Plan Mode', description: 'Read-only analysis then a step-by-step plan', color: 'text-emerald-400',
+    path: 'M12 2.75 4.25 5.6v5.05c0 4.35 2.8 8.4 6.55 10.2.35.15.75.15 1.15 0 3.75-1.8 6.55-5.85 6.55-10.2V5.6Z M8.6 12.3l2.2 2.2 4.5-4.85',
+  },
 ];
 
 function initialChatMode(): ChatExecutionMode {

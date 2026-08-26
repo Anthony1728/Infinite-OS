@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
+import { useNotificationStore } from '../../stores/notifications';
 import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 
 // Flat, monochrome nav — icons inherit their color from the row state so the
@@ -51,6 +52,8 @@ export function Sidebar({
   const searchSessions = useChatStore((state) => state.searchSessions);
   const branchSession = useChatStore((state) => state.branchSession);
   const exportSession = useChatStore((state) => state.exportSession);
+  const shareSession = useChatStore((state) => state.shareSession);
+  const addToast = useNotificationStore((state) => state.addToast);
   const runs = useAgentsStore((state) => state.runs);
   const { user } = useAuthStore();
   const aiTabs = useAiTabsStore((state) => state.tabs);
@@ -495,6 +498,13 @@ export function Sidebar({
                           },
                         },
                         { label: 'Branch', action: () => branchSession(s.id) },
+                        {
+                          label: 'Copy share',
+                          action: async () => {
+                            const r = await shareSession(s.id) as { ok: boolean; length?: number };
+                            addToast({ title: r.ok ? 'Conversation copied to clipboard' : 'Share failed', type: r.ok ? 'success' : 'error' });
+                          },
+                        },
                         { label: 'Export', action: () => exportSession(s.id) },
                         { label: 'Delete', action: () => deleteSession(s.id), danger: true },
                       ].map((item) => (

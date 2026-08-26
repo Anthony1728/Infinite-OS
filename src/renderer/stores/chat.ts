@@ -161,7 +161,7 @@ export interface BrainTeachingLiveState extends BrainTeachingStatus {
   chatSessionId: string | null;
 }
 
-export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build';
+export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build' | 'plan';
 
 export function isModelIdentityQuestion(text: string): boolean {
   const request = text.trim().toLowerCase().replace(/[?!.,]+$/g, '');
@@ -251,6 +251,8 @@ function promptForExecutionMode(text: string, mode: ChatExecutionMode): string {
       return `Code mode is active. Treat this as a software task. Inspect the relevant workspace files, implement or explain the smallest solid solution, preserve unrelated work, run proportionate validation, and report the files and checks involved.\n\nCoding request:\n${request}`;
     case 'build':
       return `Build mode is active. Produce a complete working outcome, not only suggestions. Use the app-building and workspace tools where useful, connect the required functionality, test the result, and keep iterating through recoverable failures until it works.\n\nBuild request:\n${request}`;
+    case 'plan':
+      return `Plan mode is active. You are READ-ONLY. Do not modify any files, run state-changing commands, or reach approvals. Inspect the relevant workspace, files, and context thoroughly, then respond with a concise step-by-step implementation plan broken into phases: (1) what exists and the gap, (2) the exact steps/commands/tools that would be needed, (3) files or systems each step touches, (4) how the result will be verified. End with a one-line "Ready to execute" summary. Never make changes in plan mode.\n\nPlan request:\n${request}`;
     default:
       return request;
   }
@@ -332,6 +334,7 @@ interface ChatState {
   searchSessions: (query: string) => Promise<void>;
   branchSession: (id: string, messageId?: string) => Promise<void>;
   exportSession: (id: string, format?: 'markdown' | 'json') => Promise<void>;
+  shareSession: (id: string) => Promise<{ ok: boolean; length?: number }>;
   updateMessage: (messageId: string, text: string) => Promise<void>;
   announceUncensoredMode: () => Promise<void>;
   sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string) => Promise<void>;
@@ -877,6 +880,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   exportSession: async (id, format = 'markdown') => {
     await window.api.exportSession({ sessionId: id, format });
+  },
+
+  shareSession: async (id) => {
+    const result = await window.api.shareSession({ sessionId: id }) as { ok: boolean; length?: number };
+    return result;
   },
 
   updateMessage: async (messageId, text) => {

@@ -179,3 +179,24 @@ export async function disconnect(name: string): Promise<void> {
 export function listServers(): { name: string; toolCount: number; connected: boolean }[] {
   return Array.from(servers.entries()).map(([name, s]) => ({ name, toolCount: s.tools.length, connected: true }));
 }
+
+export function getStatus(): { active: boolean; servers: { name: string; toolCount: number; connected: boolean }[]; totalTools: number } {
+  const list = listServers();
+  return {
+    active: list.length > 0,
+    servers: list,
+    totalTools: list.reduce((sum, s) => sum + s.toolCount, 0),
+  };
+}
+
+export function listTools(name?: string): { server: string; tools: { name: string; description: string }[] }[] {
+  if (name) {
+    const server = servers.get(name);
+    if (!server) return [];
+    return [{ server: name, tools: server.tools.map((t) => ({ name: t.name, description: t.description })) }];
+  }
+  return Array.from(servers.entries()).map(([key, s]) => ({
+    server: key,
+    tools: s.tools.map((t) => ({ name: t.name, description: t.description })),
+  }));
+}

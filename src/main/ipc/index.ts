@@ -1,6 +1,6 @@
 // IPC handler registration — wires every channel declared in shared/ipc.ts to a main-process function.
 
-import { ipcMain, BrowserWindow, dialog, shell } from 'electron';
+import { ipcMain, BrowserWindow, dialog, shell, clipboard } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { IPC } from '../../shared/ipc.js';
@@ -8,7 +8,7 @@ import { settings } from '../settings/store.js';
 import { deleteApiKey, setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
 import { listProviders, getProvider } from '../providers/registry.js';
 import { toolRegistry } from '../tools/base.js';
-import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect } from '../mcp/manager.js';
+import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect, getStatus as mcpGetStatus, listTools as mcpListTools } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
 import { interjectAgent, runAgent } from '../agent/loop.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
@@ -303,6 +303,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     await writeFile(result.filePath, await sessionStore.exportSession(sessionId, format), 'utf8');
     return { ok: true, path: result.filePath };
   });
+  // Share a conversation: produce compact markdown and copy it to the clipboard
+  // so the user can paste it anywhere (chat, email, notes) — like a share link.
+  ipcMain.handle(IPC.SESSION_SHARE, async (_e, { sessionId }) => {
+    const session = await sessionStore.loadSessionMeta(sessionId);
+    if (!session) throw new Error('Conversation not found');
+    const markdown = await sessionStore.exportSession(sessionId, 'markdown');
+    await clipboard.writeText(markdown);
+    return { ok: true, length: markdown.length };
+  });
 
   // Settings
   ipcMain.handle(IPC.SETTINGS_GET, async (_e, { key }) => settings.get(key));
@@ -418,6 +427,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     await mcpDisconnect(name);
     return { ok: true };
   });
+  ipcMain.handle(IPC.MCP_STATUS, async () => mcpGetStatus());
+  ipcMain.handle(IPC.MCP_LIST_TOOLS, async (_e, { name } = {}) => mcpListTools(name));
 
   // Permissions
   ipcMain.handle(IPC.PERMISSION_RESPONSE, async (_e, { id, allowed }) => {
@@ -557,6 +568,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   // App
   ipcMain.handle(IPC.APP_VERSION, async () => '0.1.0');
+  ipcMain.handle(IPC.APP_OPEN_EXTERNAL, async (_e, url: string) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { ok: false, error: 'Invalid URL' };
+    await shell.openExternal(url);
+    return { ok: true };
+  });
 
   // System Metrics
   ipcMain.handle(IPC.METRICS_GET, async () => collectSystemMetrics());
