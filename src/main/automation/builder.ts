@@ -26,7 +26,16 @@ export interface AutomationConfig {
 }
 
 export interface Trigger {
-  type: 'manual' | 'schedule' | 'event' | 'webhook' | 'file_change';
+  type:
+    | 'manual'
+    | 'schedule'
+    | 'cron'
+    | 'interval'
+    | 'once'
+    | 'event'
+    | 'webhook'
+    | 'file_change'
+    | 'idle';
   config: Record<string, unknown>;
 }
 
@@ -262,6 +271,43 @@ export class AutomationBuilder {
           { id: 'report', type: 'notify', config: { message: 'Documentation generation complete.' } },
         ],
         tags: ['documentation', 'automation', 'weekly'],
+      },
+      {
+        id: 'standup_git_summary',
+        name: 'Standup Git Summary',
+        description: 'Morning digest of commits, branches, and open changes for standup',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '30 8 * * 1-5' } },
+        actions: [
+          { id: 'collect', type: 'tool_call', config: { tool: 'git', input: { action: 'status' } } },
+          { id: 'summarize', type: 'agent_run', config: { agent: 'general', task: 'Summarize the last 24 hours of git activity for a standup: commits made, branches created/merged, uncommitted changes, and anything blocked. Keep it to five bullet points.' } },
+          { id: 'report', type: 'notify', config: { message: 'Standup summary ready.' } },
+        ],
+        tags: ['git', 'standup', 'daily'],
+      },
+      {
+        id: 'ci_failures_report',
+        name: 'CI Failures & Flaky Test Report',
+        description: 'Collect recent CI failures and flag flaky tests',
+        category: 'development',
+        trigger: { type: 'schedule', config: { cron: '0 * * * *' } },
+        actions: [
+          { id: 'scan_ci', type: 'agent_run', config: { agent: 'general', task: 'Look at recent CI runs (gh run list or local test logs). List failures with their likely cause. Identify tests that failed intermittently across runs — those are flaky. Suggest next actions.' } },
+          { id: 'report', type: 'notify', config: { message: 'CI failure report updated.' } },
+        ],
+        tags: ['ci', 'testing', 'monitoring'],
+      },
+      {
+        id: 'documentation_sync_check',
+        name: 'Documentation Sync Check',
+        description: 'Verify README and docs match the current code',
+        category: 'maintenance',
+        trigger: { type: 'schedule', config: { cron: '0 10 * * 4' } },
+        actions: [
+          { id: 'diff_docs', type: 'agent_run', config: { agent: 'general', task: 'Compare README.md and docs/ against the current source: commands that changed, renamed APIs, removed features, new setup steps. Report every place the documentation is out of date, most important first.' } },
+          { id: 'report', type: 'notify', config: { message: 'Documentation sync check complete.' } },
+        ],
+        tags: ['documentation', 'sync', 'weekly'],
       },
     ];
   }

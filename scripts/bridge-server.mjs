@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 const PORT = 8765;
-const WS_GUID = '258EAFA5-E914-74DA-95CA-C5AB0DC85B11';
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const TOKEN_PATH = join(homedir(), '.infinite-ai', 'bridge-token');
 const CONFIG_DIRS = [
   join(process.cwd(), 'extensions', 'infinite-os-bridge'),

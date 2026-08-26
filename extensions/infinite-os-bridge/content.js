@@ -754,6 +754,59 @@
 
       return { results, totalFound: results.length };
     },
+
+    findInPage(params) {
+      const query = String(params?.text || '');
+      if (!query) return { error: 'findInPage requires text' };
+      const requested = Number(params?.index ?? 0);
+      // Collect visible text nodes and their offsets in a '\n'-joined haystack.
+      const nodes = [];
+      let total = 0;
+      const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      let current;
+      while ((current = walker.nextNode())) {
+        const value = current.nodeValue || '';
+        const parent = current.parentElement;
+        if (!value.trim() || !parent || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA)$/.test(parent.tagName)) continue;
+        const cs = getComputedStyle(parent);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        nodes.push({ node: current, start: total });
+        total += value.length + 1; // +1 accounts for the '\n' join below
+      }
+      if (!nodes.length) return { count: 0, index: -1 };
+      const haystack = nodes.map(n => n.node.nodeValue).join('\n');
+      const lower = haystack.toLowerCase();
+      const needle = query.toLowerCase();
+      const positions = [];
+      let pos = lower.indexOf(needle);
+      while (pos !== -1 && positions.length < 5000) {
+        positions.push(pos);
+        pos = lower.indexOf(needle, pos + Math.max(needle.length, 1));
+      }
+      const count = positions.length;
+      if (!count) return { count: 0, index: -1 };
+      const index = ((requested % count) + count) % count; // wrap like Ctrl+G
+      const at = positions[index];
+      const entry = nodes.find(n => at >= n.start && at < n.start + n.node.nodeValue.length + 1);
+      if (!entry) return { count, index };
+      try {
+        const localStart = at - entry.start;
+        const range = document.createRange();
+        range.setStart(entry.node, localStart);
+        range.setEnd(entry.node, Math.min(localStart + query.length, entry.node.nodeValue.length));
+        const rect = range.getBoundingClientRect();
+        window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 3), left: 0, behavior: 'instant' });
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const r2 = range.getBoundingClientRect();
+        const marker = document.createElement('div');
+        marker.style.cssText = 'position:absolute;left:' + (r2.left + window.scrollX - 2) + 'px;top:' + (r2.top + window.scrollY - 2) + 'px;width:' + (r2.width + 4) + 'px;height:' + (r2.height + 4) + 'px;pointer-events:none;z-index:2147483647;background:rgba(255,220,0,0.35);outline:2px solid rgba(255,160,0,0.9);border-radius:2px;';
+        (document.body || document.documentElement).appendChild(marker);
+        setTimeout(() => { try { marker.remove(); sel.removeAllRanges(); } catch {} }, 1500);
+      } catch {}
+      return { count, index };
+    },
   };
 
   // ── Message listener ─────────────────────────────────────────────────────────

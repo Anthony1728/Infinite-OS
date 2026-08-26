@@ -5,17 +5,21 @@ import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
+import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 
-const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
-  { id: 'chats', label: 'Chats', icon: 'nav.chats', color: 'text-cyan-400' },
-  { id: 'agents', label: 'Agents', icon: 'nav.agents', color: 'text-violet-400' },
-  { id: 'projects', label: 'Projects', icon: 'nav.projects', color: 'text-emerald-400' },
-  { id: 'documents', label: 'File Explorer', icon: 'nav.files', color: 'text-sky-400' },
-  { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
-  { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
-  { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
-  { id: 'capabilities', label: 'Capabilities', icon: 'nav.capabilities', color: 'text-fuchsia-400' },
-  { id: 'settings', label: 'Settings', icon: 'nav.settings', color: 'text-slate-400' },
+// Flat, monochrome nav — icons inherit their color from the row state so the
+// whole rail reads as one system instead of a set of colored widgets.
+const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
+  { id: 'chats', label: 'Chats', icon: 'nav.chats' },
+  { id: 'agents', label: 'Agents', icon: 'nav.agents' },
+  { id: 'projects', label: 'Projects', icon: 'nav.projects' },
+  { id: 'documents', label: 'File Explorer', icon: 'nav.files' },
+];
+
+const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
+  { id: 'memory', label: 'Memory', icon: 'nav.memory' },
+  { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
+  { id: 'capabilities', label: 'Capabilities', icon: 'nav.capabilities' },
 ];
 
 interface SidebarProps {
@@ -48,7 +52,7 @@ export function Sidebar({
   const branchSession = useChatStore((state) => state.branchSession);
   const exportSession = useChatStore((state) => state.exportSession);
   const runs = useAgentsStore((state) => state.runs);
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const aiTabs = useAiTabsStore((state) => state.tabs);
   const closeAiTab = useAiTabsStore((state) => state.closeTab);
   const [currentModel, setCurrentModel] = useState('No model selected');
@@ -60,6 +64,7 @@ export function Sidebar({
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryError, setClearHistoryError] = useState('');
+  const [phoneOpen, setPhoneOpen] = useState(false);
 
   const activeAgents = runs.filter((r) => r.status === 'running').length;
 
@@ -107,6 +112,14 @@ export function Sidebar({
     onNavChange('chats');
   };
 
+  // ZCode-style top action: reveal the conversation filter and focus it.
+  const handleSearch = () => {
+    if (collapsed) onToggleCollapse();
+    requestAnimationFrame(() => {
+      document.getElementById('sidebar-chat-search')?.focus();
+    });
+  };
+
   const handleSelectSession = (id: string) => {
     selectSession(id);
     onNavChange('chats');
@@ -137,6 +150,61 @@ export function Sidebar({
     };
     return icons[kind] ?? 'tab.custom';
   };
+
+  const renderNavItem = (n: { id: string; label: string; icon: AppIconName }) => {
+    const isActive = activeView === n.id;
+    return (
+      <button
+        key={n.id}
+        onClick={() => onNavChange(n.id)}
+        title={collapsed ? n.label : undefined}
+        data-nav={n.id}
+        className={`os-nav-item group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-colors duration-150 text-xs ${
+          isActive
+            ? 'is-active bg-white/[0.07] text-zinc-100 font-medium'
+            : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.04]'
+        }`}
+      >
+        <AppIcon name={n.icon} className="w-4 h-4 flex-shrink-0" strokeWidth={1.7} />
+        {!collapsed && <span className="truncate">{n.label}</span>}
+      </button>
+    );
+  };
+
+  const renderActionRow = (
+    key: string,
+    label: string,
+    keycap: string | null,
+    onClick: () => void,
+    icon: React.ReactNode,
+    opts?: { badge?: number },
+  ) => (
+    <button
+      key={key}
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={`group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2 rounded-lg transition-colors duration-150 text-xs ${
+        activeView === key
+          ? 'is-active bg-white/[0.07] text-zinc-100 font-medium'
+          : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.04]'
+      }`}
+    >
+      {icon}
+      {!collapsed && (
+        <>
+          <span className="truncate flex-1 text-left">{label}</span>
+          {typeof opts?.badge === 'number' && opts.badge > 0 && (
+            <span className="text-[9px] font-medium text-zinc-500 bg-white/[0.06] border border-white/[0.08] rounded-full px-1.5 py-px">
+              {opts.badge}
+            </span>
+          )}
+          {keycap && (
+            <span className="os-accent-keycap text-[9px] border px-1.5 py-0.5 rounded font-mono opacity-70">{keycap}</span>
+          )}
+        </>
+      )}
+    </button>
+  );
 
   return (
     <aside
@@ -169,56 +237,69 @@ export function Sidebar({
         </button>
       </div>
 
-      {/* New Chat Button */}
-      {!collapsed && (
-        <div className="px-3 py-3">
-          <button
-            onClick={handleNewChat}
-            className="os-new-chat group w-full h-10 px-3 rounded-lg border text-zinc-100 flex items-center justify-between transition-all duration-150 text-xs"
-          >
-            <span className="flex items-center gap-2">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              New Chat
-            </span>
-            <span className="os-accent-keycap text-[9px] border px-1.5 py-0.5 rounded font-mono">Ctrl+N</span>
-          </button>
-        </div>
-      )}
+      {/* Primary actions: New task / Search */}
+      <div className={`pt-3 space-y-0.5 ${collapsed ? 'px-2' : 'px-3'}`}>
+        {renderActionRow(
+          'chats:new',
+          'New task',
+          'Ctrl+N',
+          () => void handleNewChat(),
+          <svg className="w-4 h-4 flex-shrink-0 text-gray-500 group-hover:text-zinc-200 transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>,
+        )}
+        {renderActionRow(
+          'search',
+          'Search',
+          'Ctrl+K',
+          handleSearch,
+          <svg className="w-4 h-4 flex-shrink-0 text-gray-500 group-hover:text-zinc-200 transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+            <path strokeLinecap="round" d="m20 20-4-4m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
+          </svg>,
+        )}
+      </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 space-y-1 custom-scrollbar">
-        {NAV.map((n) => {
-          const isActive = activeView === n.id;
-          return (
-            <button
-              key={n.id}
-              onClick={() => onNavChange(n.id)}
-              title={collapsed ? n.label : undefined}
-              data-nav={n.id}
-              className={`os-nav-item group relative w-full flex items-center ${collapsed ? 'justify-center' : 'gap-2.5'} px-2.5 py-2.5 rounded-lg transition-all duration-150 text-xs ${
-                isActive
-                  ? 'is-active bg-white/[0.06] text-white font-medium'
-                  : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
-              }`}
-            >
-              {isActive && (
-                <span className="os-accent-indicator absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full" />
-              )}
-              <AppIcon
-                name={n.icon}
-                className={`w-4 h-4 flex-shrink-0 transition-colors ${isActive ? n.color || 'text-indigo-400' : 'text-gray-500 group-hover:text-white'}`}
-                strokeWidth={1.7}
-              />
-              {!collapsed && <span className="truncate">{n.label}</span>}
-            </button>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto px-2 pt-1 pb-2 custom-scrollbar">
+        <div className="space-y-0.5">
+          {NAV_PRIMARY.map(renderNavItem)}
+        </div>
+
+        {/* Automate & extend */}
+        {!collapsed && (
+          <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
+            Automate
+          </div>
+        )}
+        <div className="space-y-0.5">
+          {renderActionRow(
+            'automations',
+            'Automations',
+            null,
+            () => onNavChange('automations'),
+            <AppIcon name="nav.automations" className="w-4 h-4 flex-shrink-0 text-gray-500" strokeWidth={1.7} />,
+          )}
+          {renderActionRow(
+            'plugins',
+            'Plugin Marketplace',
+            null,
+            () => onNavChange('plugins'),
+            <AppIcon name="nav.capabilities" className="w-4 h-4 flex-shrink-0 text-gray-500" strokeWidth={1.7} />,
+          )}
+        </div>
+
+        {!collapsed && (
+          <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
+            System
+          </div>
+        )}
+        <div className="space-y-0.5">
+          {NAV_SECONDARY.map(renderNavItem)}
+        </div>
 
         {!collapsed && aiTabs.length > 0 && (
           <>
-            <div className="pt-6 pb-2 px-2.5 flex items-center justify-between text-[9px] font-semibold text-cyan-400/70 uppercase tracking-widest">
+            <div className="pt-6 pb-1.5 px-2.5 flex items-center justify-between text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
               <span>AI Workspaces</span>
               <span>{aiTabs.length}</span>
             </div>
@@ -229,21 +310,18 @@ export function Sidebar({
                 <div key={tab.id} className="relative group/tab">
                   <button
                     onClick={() => onNavChange(tab.id)}
-                    className={`group relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
+                    className={`group relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-colors duration-150 text-xs ${
                       isActive
-                        ? 'bg-cyan-400/[0.08] text-white font-medium'
-                        : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
+                        ? 'bg-white/[0.07] text-zinc-100 font-medium'
+                        : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.04]'
                     }`}
                   >
-                    {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full bg-cyan-400" />
-                    )}
                     {hasEmoji ? (
                       <span className="w-4 h-4 flex-shrink-0 text-center text-sm leading-4">{tab.icon}</span>
                     ) : (
                       <AppIcon
                         name={tabIconName(tab.kind)}
-                        className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-cyan-300' : 'text-gray-500 group-hover:text-cyan-300'}`}
+                        className="w-4 h-4 flex-shrink-0"
                         strokeWidth={1.7}
                       />
                     )}
@@ -272,7 +350,7 @@ export function Sidebar({
         {/* Starred section - only show when there are active starred items */}
         {!collapsed && starredItems.length > 0 && (
           <>
-            <div className="pt-7 pb-2.5 px-2.5 text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
+            <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
               Starred
             </div>
             {starredItems.map((item) => (
@@ -280,7 +358,7 @@ export function Sidebar({
                 key={item.name}
                 className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-gray-500"
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${item.color.replace('text-', 'bg-')}`} />
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
                 <span className="truncate">{item.name}</span>
               </div>
             ))}
@@ -290,7 +368,7 @@ export function Sidebar({
         {/* Recent Sessions */}
         {!collapsed && (
           <>
-            <div className="pt-7 pb-2 px-2.5 flex items-center justify-between text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
+            <div className="pt-6 pb-1.5 px-2.5 flex items-center justify-between text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
               <span>Conversations</span>
               <span className="flex items-center gap-2">
                 <span>{sessions.length}</span>
@@ -342,7 +420,7 @@ export function Sidebar({
               </div>
             )}
             <div className="px-1.5 pb-2">
-              <label className="h-7 rounded-lg border border-white/[0.055] bg-white/[0.018] flex items-center gap-2 px-2 focus-within:border-indigo-500/30">
+              <label className="h-7 rounded-lg border border-white/[0.06] bg-white/[0.02] flex items-center gap-2 px-2 focus-within:border-white/[0.18] transition-colors">
                 <svg
                   className="w-3 h-3 text-zinc-600"
                   fill="none"
@@ -353,6 +431,7 @@ export function Sidebar({
                   <path strokeLinecap="round" d="m20 20-4-4m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
                 </svg>
                 <input
+                  id="sidebar-chat-search"
                   value={chatSearch}
                   onChange={(event) => setChatSearch(event.target.value)}
                   placeholder="Search chats"
@@ -369,14 +448,14 @@ export function Sidebar({
                 <div key={s.id} className="relative">
                   <button
                     onClick={() => handleSelectSession(s.id)}
-                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all duration-150 text-xs ${
+                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-150 text-xs ${
                       currentSessionId === s.id
                         ? 'bg-white/[0.06] text-white'
-                        : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
+                        : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.03]'
                     }`}
                   >
                     <svg
-                      className={`w-3 h-3 flex-shrink-0 ${s.pinned ? 'text-indigo-400' : 'opacity-40'}`}
+                      className={`w-3 h-3 flex-shrink-0 ${s.pinned ? 'text-zinc-400' : 'opacity-40'}`}
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
@@ -405,7 +484,7 @@ export function Sidebar({
                     ···
                   </button>
                   {sessionMenu === s.id && (
-                    <div className="absolute z-50 right-1 top-7 w-36 rounded-lg border border-white/[0.08] bg-[#11131b] p-1 shadow-2xl animate-scale-in">
+                    <div className="absolute z-50 right-1 top-7 w-36 rounded-lg border border-white/[0.08] bg-[#111113] p-1 shadow-2xl animate-scale-in">
                       {[
                         { label: s.pinned ? 'Unpin' : 'Pin', action: () => pinSession(s.id, !s.pinned) },
                         {
@@ -445,7 +524,7 @@ export function Sidebar({
           {/* Model pill */}
           <button
             onClick={onOpenSettings}
-            className="w-full flex items-center gap-2.5 rounded-xl border border-white/[0.055] bg-white/[0.018] px-2.5 py-2.5 hover:border-white/[0.1] hover:bg-white/[0.035] transition-all duration-150 text-left group"
+            className="w-full flex items-center gap-2.5 rounded-xl border border-white/[0.055] bg-white/[0.018] px-2.5 py-2.5 hover:border-white/[0.1] hover:bg-white/[0.035] transition-colors duration-150 text-left group"
             title={`${currentProvider} · ${currentModel}`}
           >
             <div className="w-7 h-7 rounded-lg bg-white/[0.035] border border-white/[0.08] flex items-center justify-center flex-shrink-0">
@@ -468,9 +547,9 @@ export function Sidebar({
 
           {/* Active agents indicator */}
           {activeAgents > 0 && (
-            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse flex-shrink-0" />
-              <span className="text-[10px] text-indigo-300 font-medium">
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.07]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span className="text-[10px] text-zinc-400 font-medium">
                 {activeAgents} agent{activeAgents !== 1 ? 's' : ''} running
               </span>
             </div>
@@ -485,7 +564,7 @@ export function Sidebar({
               </div>
               <div className="flex items-center gap-2 text-zinc-500">
                 <span
-                  className={`w-1.5 h-1.5 rounded-full border ${providerConnected ? 'border-emerald-400 bg-emerald-400/20' : 'border-amber-400 bg-amber-400/10'}`}
+                  className={`w-1.5 h-1.5 rounded-full border ${providerConnected ? 'border-emerald-400 bg-emerald-400/20' : 'border-zinc-600'}`}
                 />
                 AI provider
               </div>
@@ -498,34 +577,43 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* User */}
-          <div onClick={() => window.dispatchEvent(new Event('infinite:open-personalization'))} className="flex items-center gap-2.5 pt-1 border-t border-white/[0.06] cursor-pointer hover:bg-white/[0.03] rounded-lg px-1.5 py-2 transition-all duration-150 group" role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') window.dispatchEvent(new Event('infinite:open-personalization')); }}>
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-teal-500 to-pink-500 flex items-center justify-center text-white shadow-md flex-shrink-0">
-              {user?.avatar ? <img src={user.avatar} alt="" className="h-full w-full rounded-full object-cover" /> : <span className="text-xs font-semibold">{user?.name?.charAt(0)?.toUpperCase() ?? 'U'}</span>}
+          {/* User row with phone connect + settings */}
+          <div className="flex items-center gap-2.5 pt-2 border-t border-white/[0.06] px-1.5 py-1.5">
+            <div
+              onClick={() => window.dispatchEvent(new Event('infinite:open-personalization'))}
+              className="os-profile-ring w-7 h-7 rounded-full flex items-center justify-center cursor-pointer flex-shrink-0 overflow-hidden"
+              role="button"
+              tabIndex={0}
+              title="Personalize profile"
+              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') window.dispatchEvent(new Event('infinite:open-personalization')); }}
+            >
+              {user?.avatar ? <img src={user.avatar} alt="" className="h-full w-full object-cover" /> : <span className="text-xs font-semibold text-zinc-200">{user?.name?.charAt(0)?.toUpperCase() ?? 'U'}</span>}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-white truncate">{user?.name ?? 'User'}</div>
-              <div className="text-[9px] text-gray-600">{user?.email ?? ''}</div>
+              <div className="text-[9px] text-gray-600 truncate">{user?.email ?? ''}</div>
             </div>
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                logout();
-              }}
-              className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-all"
-              title="Sign out"
+              onClick={() => setPhoneOpen(true)}
+              className="icon-button w-7 h-7 flex-shrink-0"
+              title="Connect phone (QR)"
+              aria-label="Connect your phone"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"
-                />
-              </svg>
+              <AppIcon name="action.phone" className="w-3.5 h-3.5" strokeWidth={1.7} />
+            </button>
+            <button
+              onClick={onOpenSettings}
+              className="icon-button w-7 h-7 flex-shrink-0"
+              title="Settings"
+              aria-label="Open settings"
+            >
+              <AppIcon name="nav.settings" className="w-3.5 h-3.5" strokeWidth={1.7} />
             </button>
           </div>
         </div>
       )}
+
+      <PhoneConnectModal open={phoneOpen} onClose={() => setPhoneOpen(false)} />
     </aside>
   );
 }

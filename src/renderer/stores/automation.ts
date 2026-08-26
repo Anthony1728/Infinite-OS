@@ -69,6 +69,14 @@ export interface ActiveAutomationRun {
   error?: string;
 }
 
+export interface SchedulerStatus {
+  running: boolean;
+  tickMs: number;
+  scheduledWorkflows: number;
+  idleWorkflows: number;
+  keepAwake: boolean;
+}
+
 interface AutomationWorkflowPayload extends Omit<AutomationWorkflow, 'runs'> {
   runCount?: number;
   runs?: number;
@@ -81,10 +89,14 @@ interface AutomationState {
   activeRun: ActiveAutomationRun | null;
   lastRun: ActiveAutomationRun | null;
   loading: boolean;
+  schedulerStatus: SchedulerStatus | null;
+  nextRuns: Record<string, string>;
   initRunListener: () => void;
   loadWorkflows: () => Promise<void>;
   loadTemplates: () => Promise<void>;
   loadStats: () => Promise<void>;
+  loadScheduler: () => Promise<void>;
+  setKeepAwake: (enabled: boolean) => Promise<void>;
   createWorkflow: (workflow: { name: string; description: string; trigger: unknown; actions: unknown[] }) => Promise<void>;
   runWorkflow: (id: string) => Promise<AutomationRunResult>;
   clearRunResult: () => void;
@@ -100,6 +112,8 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   activeRun: null,
   lastRun: null,
   loading: false,
+  schedulerStatus: null,
+  nextRuns: {},
 
   initRunListener: () => {
     const marker = window as Window & { __automationRunListenerAttached?: boolean };
@@ -163,10 +177,26 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     } catch { /* silent */ }
   },
 
+  loadScheduler: async () => {
+    try {
+      const [schedulerStatus, nextRuns] = await Promise.all([
+        window.api.automationSchedulerStatus() as SchedulerStatus,
+        window.api.automationNextRuns() as Record<string, string>,
+      ]);
+      set({ schedulerStatus, nextRuns });
+    } catch { /* silent */ }
+  },
+
+  setKeepAwake: async (enabled) => {
+    const schedulerStatus = await window.api.automationSetKeepAwake(enabled) as SchedulerStatus;
+    set({ schedulerStatus });
+  },
+
   createWorkflow: async (workflow) => {
     await window.api.automationCreateWorkflow(workflow);
     await get().loadWorkflows();
     await get().loadStats();
+    await get().loadScheduler();
   },
 
   runWorkflow: async (id) => {
@@ -204,12 +234,14 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     const enabled = await window.api.automationEnableWorkflow({ workflowId: id });
     if (!enabled) throw new Error('Workflow could not be enabled.');
     await get().loadWorkflows();
+    await get().loadScheduler();
   },
 
   disableWorkflow: async (id) => {
     const disabled = await window.api.automationDisableWorkflow({ workflowId: id });
     if (!disabled) throw new Error('Workflow could not be disabled.');
     await get().loadWorkflows();
+    await get().loadScheduler();
   },
 
   deleteWorkflow: async (id) => {
@@ -217,6 +249,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     if (!deleted) throw new Error('Workflow could not be deleted.');
     await get().loadWorkflows();
     await get().loadStats();
+    await get().loadScheduler();
   },
 }));
 

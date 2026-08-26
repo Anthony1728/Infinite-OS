@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { InfiniteLogo } from '../brand/InfiniteLogo';
 
 declare global {
   interface Window {
@@ -15,10 +16,17 @@ declare global {
   }
 }
 
+/**
+ * MiniBar — the "mini mode" companion window.
+ *
+ * Mirrors the main chat composer's design language: a quiet rounded surface,
+ * hairline border, hairline focus ring, and the standard Infinite mark.
+ * No colored glow washes, no gradient logo box — the surface is what carries it.
+ */
 export function MiniBar() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [response, setResponse] = useState('');
+  const [noteError, setNoteError] = useState('');
   const [visible, setVisible] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -28,11 +36,15 @@ export function MiniBar() {
   const sessionIdRef = useRef<string>('');
 
   useEffect(() => {
+    document.body.dataset.mini = 'true';
     const t = setTimeout(() => {
       setVisible(true);
       inputRef.current?.focus();
     }, 50);
-    return () => clearTimeout(t);
+    return () => {
+      delete document.body.dataset.mini;
+      clearTimeout(t);
+    };
   }, []);
 
   useEffect(() => {
@@ -42,13 +54,13 @@ export function MiniBar() {
       const e = evt as { type?: string; text?: string; delta?: string; content?: string; error?: string };
       const t = (e.type ?? '').replace(/-/g, '_');
       if (t === 'text_delta' || t === 'content_delta') {
-        setResponse((prev) => prev + (e.delta ?? e.text ?? e.content ?? ''));
         setSending(true);
+        setNoteError('');
       } else if (t === 'message_end') {
         setSending(false);
       } else if (t === 'error') {
         setSending(false);
-        if (e.error) setResponse(`Error: ${e.error}`);
+        if (e.error) setNoteError(e.error);
       }
     });
     return unsub;
@@ -66,8 +78,8 @@ export function MiniBar() {
     const text = input.trim();
     if (!text || sending) return;
     setInput('');
-    setResponse('');
     setSending(true);
+    setNoteError('');
 
     try {
       const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
@@ -82,11 +94,11 @@ export function MiniBar() {
       })) as { ok?: boolean; sessionId?: string; error?: string };
       if (result?.sessionId) sessionIdRef.current = result.sessionId;
       if (result && result.ok === false) {
-        setResponse(`Error: ${result.error ?? 'Send failed'}`);
+        setNoteError(result.error ?? 'Send failed');
         setSending(false);
       }
     } catch (err) {
-      setResponse(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setNoteError(err instanceof Error ? err.message : String(err));
       setSending(false);
     }
   }, [input, sending]);
@@ -97,7 +109,7 @@ export function MiniBar() {
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('input, button')) return;
+    if ((e.target as HTMLElement).closest('button')) return;
     setDragging(true);
     dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
   }, [pos]);
@@ -121,28 +133,29 @@ export function MiniBar() {
     >
       <style>{`
         @keyframes mini-slide-in {
-          0% { opacity: 0; transform: translateY(20px) scale(0.95); filter: blur(4px); }
-          100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+          0% { opacity: 0; transform: translateY(20px) scale(0.95); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         @keyframes mini-slide-out {
-          0% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-          100% { opacity: 0; transform: translateY(20px) scale(0.95); filter: blur(4px); }
+          0% { opacity: 1; transform: translateY(0) scale(1); }
+          100% { opacity: 0; transform: translateY(20px) scale(0.95); }
         }
-        @keyframes mini-glow-pulse {
-          0%, 100% { opacity: 0.5; }
+        @keyframes mini-dot-pulse {
+          0%, 100% { opacity: 0.35; }
           50% { opacity: 1; }
-        }
-        @keyframes mini-send-pulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.15); }
-          100% { transform: scale(1); }
         }
       `}</style>
 
-      {/* Main input row — fully transparent, no background block */}
+      {/* Chat bar — a floating, draggable bar. The surface is a soft rounded
+          box (matching the main composer) sitting on a fully transparent
+          window, so the box itself is the interface and the desktop shows
+          through everywhere else. */}
       <div
-        className="flex items-center gap-0 h-[48px] mx-2"
+        className="relative flex items-center gap-0 h-[48px] mx-2 overflow-hidden rounded-xl"
         style={{
+          background: 'rgba(8,11,20,0.85)',
+          border: `1px solid ${focused ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.08)'}`,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.35)',
           animation: visible
             ? 'mini-slide-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards'
             : 'mini-slide-out 0.25s cubic-bezier(0.7, 0, 0.84, 0) forwards',
@@ -150,41 +163,17 @@ export function MiniBar() {
         }}
         onMouseDown={handleMouseDown}
       >
-        {/* Glow layer behind the input — visible when focused or typing */}
-        <div
-          className="absolute inset-0 rounded-full pointer-events-none"
-          style={{
-            margin: '0 8px',
-            background: focused || input
-              ? 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(34,211,238,0.08) 100%)'
-              : 'transparent',
-            boxShadow: focused || input
-              ? '0 0 24px rgba(99,102,241,0.18), 0 0 48px rgba(34,211,238,0.08), inset 0 0 12px rgba(99,102,241,0.06)'
-              : '0 0 16px rgba(99,102,241,0.06)',
-            border: `1px solid ${focused || input ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)'}`,
-            borderRadius: '9999px',
-            transition: 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-          }}
-        />
-
-        {/* Infinite logo */}
+        {/* Infinite mark */}
         <button
           onClick={handleRestore}
-          className="relative z-10 flex-shrink-0 w-8 h-8 ml-1 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110"
-          style={{
-            background: 'rgba(99,102,241,0.08)',
-          }}
+          className="flex-shrink-0 w-8 h-8 ml-1.5 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-white/[0.04]"
           title="Open Infinite OS"
+          aria-label="Open Infinite OS"
         >
-          <svg width="16" height="16" viewBox="0 0 64 64" fill="none">
-            <path d="M17.2 20.8C17.2 28.7 23.6 35 32 35C40.4 35 46.8 28.7 46.8 20.8" stroke="#6366f1" strokeWidth="5" strokeLinecap="round" />
-            <path d="M46.8 43.2C46.8 35.3 40.4 29 32 29C23.6 29 17.2 35.3 17.2 43.2" stroke="#22d3ee" strokeWidth="5" strokeLinecap="round" />
-            <circle cx="17.2" cy="20.8" r="3.2" fill="#6366f1" />
-            <circle cx="46.8" cy="43.2" r="3.2" fill="#22d3ee" />
-          </svg>
+          <InfiniteLogo className="h-3.5 w-6" variant="luminous" />
         </button>
 
-        {/* Input — transparent, no bg */}
+        {/* Input */}
         <input
           ref={inputRef}
           value={input}
@@ -199,54 +188,47 @@ export function MiniBar() {
           onBlur={() => setFocused(false)}
           placeholder={sending ? 'Thinking...' : 'Ask Infinite OS anything...'}
           disabled={sending}
-          className="relative z-10 flex-1 bg-transparent text-[13px] text-zinc-100 outline-none placeholder:text-zinc-500/60 disabled:opacity-40 min-w-0 px-2 py-2"
-          style={{ caretColor: '#6366f1' }}
+          className="relative flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-zinc-500 disabled:opacity-40 min-w-0 px-2 py-2"
+          style={{ caretColor: 'rgba(255,255,255,0.85)' }}
         />
 
-        {/* Send / Stop — pill shaped, glow on active */}
+        {sending && (
+          <span className="flex-shrink-0 pr-1 flex items-center gap-1.5">
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+              style={{ animation: 'mini-dot-pulse 1.2s ease-in-out infinite' }}
+            />
+            <span className="text-[10px] text-zinc-400">Notepad…</span>
+          </span>
+        )}
+        {noteError && !sending && (
+          <span className="flex-shrink-0 pr-1 flex items-center gap-1.5 max-w-[160px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+            <span className="text-[10px] text-red-300 truncate">{noteError}</span>
+          </span>
+        )}
+
+        {/* Send */}
         <button
           onClick={sending ? () => { setSending(false); } : handleSend}
           disabled={!input.trim() && !sending}
-          className="relative z-10 flex-shrink-0 w-8 h-8 mr-1 rounded-full flex items-center justify-center transition-all duration-300 disabled:opacity-20"
+          className="flex-shrink-0 w-7 h-7 mr-1.5 rounded-lg flex items-center justify-center transition-all duration-200 disabled:opacity-20 hover:bg-white/[0.06]"
           style={{
-            background: sending
-              ? 'rgba(239,68,68,0.12)'
-              : input.trim()
-                ? 'linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(34,211,238,0.15) 100%)'
-                : 'rgba(255,255,255,0.03)',
-            boxShadow: input.trim() && !sending
-              ? '0 0 12px rgba(99,102,241,0.15)'
-              : 'none',
-            animation: sending ? 'mini-send-pulse 1.5s ease-in-out infinite' : 'none',
+            background: input.trim() ? 'rgba(255,255,255,0.08)' : 'transparent',
           }}
+          aria-label={sending ? 'Stop' : 'Send'}
         >
           {sending ? (
-            <svg className="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <svg className="w-3 h-3 text-zinc-400" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           ) : (
-            <svg className="w-3.5 h-3.5" style={{ color: input.trim() ? '#818cf8' : 'rgba(255,255,255,0.2)' }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+            <svg className="w-3 h-3" style={{ color: input.trim() ? '#e4e4e7' : 'rgba(255,255,255,0.25)' }} fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
             </svg>
           )}
         </button>
       </div>
-
-      {/* Response preview — floats below, also transparent */}
-      {response && (
-        <div
-          className="mx-4 mt-1 px-3 py-2 rounded-xl text-xs text-zinc-300 max-h-16 overflow-y-auto leading-relaxed"
-          style={{
-            background: 'rgba(10,10,16,0.85)',
-            border: '1px solid rgba(99,102,241,0.1)',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            animation: 'mini-slide-in 0.2s ease-out',
-            backdropFilter: 'blur(12px)',
-          }}
-        >
-          {response.length > 200 ? response.slice(-200) + '...' : response}
-        </div>
-      )}
     </div>
   );
 }

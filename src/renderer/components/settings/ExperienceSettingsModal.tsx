@@ -14,8 +14,11 @@ export type ExperienceSettingsSection = 'profile' | 'appearance' | 'designer';
 const TEMPLATES: Array<{ id: UITemplate; name: string; description: string; colors: string[] }> = [
   { id: 'infinite', name: 'Infinite', description: 'Balanced cosmic workspace', colors: ['#080b14', '#8b5cf6', '#22d3ee'] },
   { id: 'aurora', name: 'Aurora', description: 'Luminous glass and color', colors: ['#06131b', '#22d3ee', '#ec4899'] },
-  { id: 'onyx', name: 'Onyx', description: 'Focused, compact, precise', colors: ['#070908', '#a3e635', '#252a25'] },
+  { id: 'onyx', name: 'Onyx Green', description: 'Focused grid with lime phosphor', colors: ['#070908', '#a3e635', '#252a25'] },
   { id: 'cloud', name: 'Cloud', description: 'Bright and calm daylight', colors: ['#eef2ff', '#4f46e5', '#ffffff'] },
+  { id: 'chatgpt', name: 'ChatGPT', description: 'Warm graphite with mint pulse', colors: ['#1a1a1c', '#10a37f', '#212124'] },
+  { id: 'zcode', name: 'ZCode', description: 'Cobalt terminal with electric blue', colors: ['#0a1020', '#38bdf8', '#0e1630'] },
+  { id: 'matrix', name: 'Matrix', description: 'Phosphor green on near-black', colors: ['#050808', '#00e676', '#0a100e'] },
 ];
 
 const LOGO_STYLES: Array<{ id: LogoStyle; name: string; description: string }> = [

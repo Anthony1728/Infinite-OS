@@ -77,6 +77,7 @@ const CUSTOM: Record<string, InfinityIconName> = {
   // ── Common actions ──────────────────────────────────────────────
   'action.build': 'inf.build',
   'action.ai': 'inf.sparkle',
+  'action.phone': 'inf.phone',
 
   // ── Agent categories ────────────────────────────────────────────
   'agent.coder': 'inf.code',

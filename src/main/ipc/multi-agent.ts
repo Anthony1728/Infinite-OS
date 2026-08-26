@@ -1,5 +1,7 @@
 // Multi-Agent System IPC handlers
 
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 import { multiAgentSystem } from '../index.js';
@@ -49,8 +51,15 @@ export function registerMultiAgentIpc(): void {
     return multiAgentSystem.getMessages(agentId, count);
   });
 
-  ipcMain.handle(IPC.MULTI_AGENT_EXECUTE_TEAM_TASK, async (_e, { teamId, taskType, input }) => {
-    return multiAgentSystem.executeTeamTask(teamId, taskType, input);
+  ipcMain.handle(IPC.MULTI_AGENT_EXECUTE_TEAM_TASK, async (_e, { teamId, taskType, input, context }) => {
+    // Without a sessionId/cwd the orchestrator only records task rows and
+    // never spawns agents — synthesize defaults so teams always execute.
+    const resolved = {
+      ...(context ?? {}),
+      sessionId: context?.sessionId ?? `team-${randomUUID()}`,
+      cwd: context?.cwd ?? homedir(),
+    };
+    return multiAgentSystem.executeTeamTask(teamId, taskType, input, resolved);
   });
 
   ipcMain.handle(IPC.MULTI_AGENT_STATS, async () => {

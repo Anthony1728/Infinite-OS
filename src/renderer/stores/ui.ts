@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 export type UITheme = 'dark' | 'light' | 'system';
-export type UITemplate = 'infinite' | 'aurora' | 'onyx' | 'cloud';
+export type UITemplate = 'infinite' | 'aurora' | 'onyx' | 'cloud' | 'chatgpt' | 'zcode' | 'matrix';
 export type LogoStyle = 'spectrum' | 'luminous' | 'ice';
 
 export interface AppearancePreferences {
@@ -38,6 +38,9 @@ export const TEMPLATE_PRESETS: Record<UITemplate, Partial<AppearancePreferences>
   aurora: { template: 'aurora', accent: '#22d3ee', radius: 20, glass: 84, glow: 95, density: 'spacious', shinyBars: true },
   onyx: { template: 'onyx', accent: '#a3e635', radius: 7, glass: 42, glow: 28, density: 'compact', shinyBars: false },
   cloud: { template: 'cloud', accent: '#4f46e5', radius: 16, glass: 68, glow: 35, density: 'comfortable', shinyBars: true },
+  chatgpt: { template: 'chatgpt', accent: '#10a37f', radius: 16, glass: 58, glow: 22, density: 'spacious', shinyBars: false },
+  zcode: { template: 'zcode', accent: '#38bdf8', radius: 10, glass: 48, glow: 30, density: 'compact', shinyBars: false },
+  matrix: { template: 'matrix', accent: '#00e676', radius: 8, glass: 40, glow: 34, density: 'comfortable', shinyBars: false },
 };
 
 export function applyAppearance(prefs: AppearancePreferences, theme: UITheme = 'dark') {
@@ -62,9 +65,12 @@ export function appearanceFromPrompt(prompt: string): Partial<AppearancePreferen
   const text = prompt.toLowerCase();
   const patch: Partial<AppearancePreferences> = {};
   if (/\b(aurora|neon|cyber|colorful)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.aurora);
-  if (/\b(onyx|minimal|industrial|flat)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.onyx);
+  if (/\b(onyx|minimal|industrial|flat|green theme|green grid)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.onyx);
   if (/\b(cloud|light|bright|day)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.cloud);
   if (/\b(infinite|cosmic|default)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.infinite);
+  if (/\b(chatgpt|mint|warm graphite)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.chatgpt);
+  if (/\b(zcode|z code|cobalt|terminal blue)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.zcode);
+  if (/\b(matrix|phosphor|scanline)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.matrix);
   if (/\b(shiny|glossy|glassier|glassmorphism)\b/.test(text)) { patch.shinyBars = true; patch.glass = 90; patch.glow = 90; }
   if (/\b(matte|less glow|no glow)\b/.test(text)) { patch.shinyBars = false; patch.glow = 15; }
   if (/\b(compact|dense|smaller)\b/.test(text)) patch.density = 'compact';

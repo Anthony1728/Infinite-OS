@@ -3,8 +3,18 @@
 import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 import { automationBuilder } from '../automation/builder.js';
+import { automationScheduler } from '../automation/scheduler.js';
 
-export function registerAutomationIpc(): void {
+export function registerAutomationIpc(getMainWindow?: () => Electron.BrowserWindow | null): void {
+  // Scheduler-initiated runs broadcast progress to the main window the same
+  // way manual runs do, so the UI shows live activity for both.
+  if (getMainWindow) {
+    automationScheduler.start((progress) => {
+      const win = getMainWindow();
+      if (win && !win.isDestroyed()) win.webContents.send(IPC.AUTOMATION_RUN_EVENT, progress);
+    });
+  }
+
   ipcMain.handle(IPC.AUTOMATION_CREATE_WORKFLOW, async (_e, { name, description, trigger, actions }) => {
     return automationBuilder.createWorkflow({ name, description, trigger, actions });
   });
@@ -49,6 +59,23 @@ export function registerAutomationIpc(): void {
 
   ipcMain.handle(IPC.AUTOMATION_STATS, async () => {
     return automationBuilder.getStats();
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_SCHEDULER_STATUS, async () => {
+    return automationScheduler.getStatus();
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_SET_KEEP_AWAKE, async (_e, { enabled }) => {
+    return automationScheduler.setKeepAwake(enabled === true);
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_NEXT_RUNS, async () => {
+    const out: Record<string, string> = {};
+    for (const wf of automationBuilder.listWorkflows()) {
+      const next = automationScheduler.nextRunFor(wf);
+      if (next) out[wf.id] = next;
+    }
+    return out;
   });
 }
 

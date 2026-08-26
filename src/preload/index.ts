@@ -214,6 +214,12 @@ const api = {
   automationGetTemplates: () => ipcRenderer.invoke(IPC.AUTOMATION_GET_TEMPLATES),
   automationGetRuns: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_GET_RUNS, args),
   automationStats: () => ipcRenderer.invoke(IPC.AUTOMATION_STATS),
+  automationSchedulerStatus: () => ipcRenderer.invoke(IPC.AUTOMATION_SCHEDULER_STATUS),
+  automationSetKeepAwake: (enabled: boolean) => ipcRenderer.invoke(IPC.AUTOMATION_SET_KEEP_AWAKE, { enabled }),
+  automationNextRuns: () => ipcRenderer.invoke(IPC.AUTOMATION_NEXT_RUNS),
+
+  // Phone remote
+  remotePhoneInfo: () => ipcRenderer.invoke(IPC.REMOTE_PHONE_INFO),
 
   // Website Builder
   websiteCreate: (args: unknown) => ipcRenderer.invoke(IPC.WEBSITE_CREATE, args),

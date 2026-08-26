@@ -4,7 +4,6 @@ const $ = (id) => document.getElementById(id);
 
 let statusPollTimer = null;
 let currentTabs = [];
-let startTime = Date.now();
 
 // ── Status rendering ──────────────────────────────────────────────────────────
 function renderStatus(s) {
@@ -24,12 +23,15 @@ function renderStatus(s) {
   $('cacheText').textContent = String(s.cacheHits ?? 0);
   $('portCode').textContent = '127.0.0.1:' + (s.port ?? 8765);
 
-  // Uptime
-  const uptime = Math.floor((Date.now() - startTime) / 1000);
+  // Uptime — time since the service worker recorded the connection
+  const startedAt = Number(s.connectedAt) || 0;
+  const uptime = s.connected && startedAt > 0 ? Math.floor(Math.max(0, Date.now() - startedAt) / 1000) : -1;
   const hours = Math.floor(uptime / 3600);
   const minutes = Math.floor((uptime % 3600) / 60);
   const seconds = uptime % 60;
-  if (hours > 0) {
+  if (uptime < 0) {
+    $('uptimeText').textContent = '--';
+  } else if (hours > 0) {
     $('uptimeText').textContent = `${hours}h ${minutes}m`;
   } else if (minutes > 0) {
     $('uptimeText').textContent = `${minutes}m ${seconds}s`;

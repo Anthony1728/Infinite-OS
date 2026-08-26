@@ -1,5 +1,8 @@
 import { BrowserWindow, ipcMain, screen, nativeImage } from 'electron';
-import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { v4 as uuid } from 'uuid';
 import { IPC } from '../../shared/ipc.js';
@@ -16,6 +19,75 @@ let mainWinGetter: () => BrowserWindow | null = () => null;
 // One AbortController per running mini-mode request so a new send supersedes
 // an in-flight one instead of interleaving two agent runs in one session.
 const activeMiniRuns = new Map<string, AbortController>();
+
+// ── Notepad streaming ──────────────────────────────────────────────────
+// Mini-mode answers stream into a live Notepad window instead of a floating
+// preview. The text accumulates in a temp .txt file; Notepad (Windows 10+)
+// reloads it as it changes on disk.
+interface NotepadSession {
+  file: string;
+  notepad: ReturnType<typeof spawn> | null;
+  buffer: string;
+  flushTimer: NodeJS.Timeout | null;
+}
+
+const notepadSessions = new Map<string, NotepadSession>();
+
+function openNotepadFor(sessionId: string): NotepadSession {
+  let session = notepadSessions.get(sessionId);
+  if (session) return session;
+  const dir = mkdtempSync(join(tmpdir(), 'infinite-mini-'));
+  const file = resolve(dir, 'response.txt');
+  writeFileSync(file, '');
+  const notepad = spawn('notepad.exe', [file], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  notepad.unref();
+  session = { file, notepad, buffer: '', flushTimer: null };
+  notepadSessions.set(sessionId, session);
+  return session;
+}
+
+function noteDelta(sessionId: string, delta: string): void {
+  if (!delta) return;
+  const session = openNotepadFor(sessionId);
+  session.buffer += delta;
+  if (session.flushTimer) return;
+  // Debounce disk writes so a fast stream does not thrash the file watcher.
+  session.flushTimer = setTimeout(() => {
+    session.flushTimer = null;
+    try {
+      // Notepad (Win10 1903+/11) live-reloads files that change on disk.
+      writeFileSync(session.file, session.buffer, 'utf8');
+    } catch (err) {
+      logger.error(`MINI_SEND: notepad write failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, 150);
+}
+
+function noteFinish(sessionId: string): void {
+  const session = notepadSessions.get(sessionId);
+  if (!session) return;
+  if (session.flushTimer) {
+    clearTimeout(session.flushTimer);
+    session.flushTimer = null;
+  }
+  try {
+    writeFileSync(session.file, session.buffer, 'utf8');
+  } catch (err) {
+    logger.error(`MINI_SEND: notepad final write failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  // Leave the window open for the user to read; release our bookkeeping.
+  setTimeout(() => {
+    try {
+      rmSync(resolve(session.file, '..'), { recursive: true, force: true });
+    } catch {
+      /* temp cleanup is best-effort; notepad may still hold the file open */
+    }
+  }, 60_000);
+  notepadSessions.delete(sessionId);
+}
 
 export function registerMiniMode(getMainWindow: () => BrowserWindow | null): void {
   mainWinGetter = getMainWindow;
@@ -88,8 +160,15 @@ export function registerMiniMode(getMainWindow: () => BrowserWindow | null): voi
         model,
         signal: controller.signal,
         onEvent: (ev) => {
-          // Forward only what the mini bar renders: streamed text, terminal
-          // markers, and errors. Tool noise stays out of the tiny preview.
+          // Mini-mode answers stream straight into Notepad: text deltas are
+          // appended to the temp file (debounced), and completion flushes it.
+          if (ev.type === 'text_delta' && typeof ev.delta === 'string') {
+            noteDelta(sessionId, ev.delta);
+          } else if (ev.type === 'done') {
+            noteFinish(sessionId);
+          }
+          // Keep the renderer's status signals alive — the dot only reflects
+          // whether a run is active, the text itself lives in Notepad.
           if (ev.type === 'text_delta' || ev.type === 'message_end' || ev.type === 'error') {
             sendMiniStreamEvent(ev);
           } else if (ev.type === 'done') {
@@ -109,6 +188,7 @@ export function registerMiniMode(getMainWindow: () => BrowserWindow | null): voi
         .catch((err: unknown) => {
           const errorMessage = err instanceof Error ? err.message : String(err);
           logger.error(`MINI_SEND: agent run failed: ${errorMessage}`);
+          noteFinish(sessionId);
           sendMiniStreamEvent({ type: 'error', error: errorMessage });
           sendMiniState({ active: false, sessionId });
         })
@@ -142,10 +222,10 @@ function openMini(): void {
   const main = mainWinGetter();
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
 
-  const miniW = 420;
+  const miniW = 440;
   const miniH = 64;
   const x = Math.round((screenW - miniW) / 2);
-  const y = screenH - miniH - 16;
+  const y = screenH - miniH - 24;
 
   miniWindow = new BrowserWindow({
     width: miniW,
@@ -154,6 +234,7 @@ function openMini(): void {
     y,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,

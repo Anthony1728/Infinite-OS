@@ -1,7 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
-import './styles/globals.css';
+import { useUiTheme } from './theme/uiTheme';
+import { initThemeStyles } from './theme/styles';
+
+// Mount the active UI theme's stylesheet (classic or modern) before render.
+initThemeStyles(useUiTheme.getState().theme);
 
 window.addEventListener('error', (e) => {
   console.error('[renderer] Uncaught error:', e.error);

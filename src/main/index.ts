@@ -20,6 +20,8 @@ import { ToolMarketplace } from './brain/marketplace.js';
 import { DeveloperSDK } from './brain/sdk.js';
 import { BrowserAgent } from './agent/browser.js';
 import { bridgeServer } from './bridge/server.js';
+import { automationScheduler } from './automation/scheduler.js';
+import { phoneRemoteServer } from './remote/server.js';
 import { getEngine } from './engine/intelligence.js';
 import { browserOperator } from './operator/browser-operator.js';
 import { windowsDictation } from './voice/windows-dictation.js';
@@ -194,6 +196,10 @@ app.whenReady().then(async () => {
   // browser with their logged-in sessions. Never blocks startup.
   void bridgeServer.start().catch((e) => logger.warn({ err: e }, 'Bridge server failed to start'));
 
+  // Phone companion server (LAN, token-authed) so a phone can chat with and
+  // watch the agent over SSE. Never blocks startup.
+  phoneRemoteServer.start();
+
   // Pre-warm model connections in background (non-blocking)
   warmUpModels().catch((e) => logger.warn({ err: e }, 'Model warm-up failed'));
 
@@ -267,6 +273,8 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   windowsDictation.stop();
   bridgeServer.stop();
+  phoneRemoteServer.stop();
+  automationScheduler.stop();
   void browserOperator.shutdown().finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });

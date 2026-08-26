@@ -2,6 +2,7 @@ import { useEffect, lazy, Suspense } from 'react';
 import { ChatView } from '../chat/ChatView';
 import { useSessionStore } from '../../stores/session';
 import { useAiTabsStore } from '../../stores/aiTabs';
+import { useUiTheme } from '../../theme/uiTheme';
 import { DynamicTabView } from './DynamicTabView';
 
 // Lazy-load heavy views that aren't needed on initial load
@@ -26,6 +27,10 @@ const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ d
 const MultiAgentView = lazy(() => import('../views/MultiAgentView').then(m => ({ default: m.MultiAgentView })));
 const OSHomeView = lazy(() => import('../views/OSHomeView').then(m => ({ default: m.OSHomeView })));
 const PluginStoreView = lazy(() => import('../views/PluginStoreView').then(m => ({ default: m.PluginStoreView })));
+// Classic (original-look) variants shown when the Classic UI theme is active.
+const AutomationViewClassic = lazy(() => import('../views/AutomationViewClassic').then(m => ({ default: m.AutomationView })));
+const OSHomeViewClassic = lazy(() => import('../views/OSHomeViewClassic').then(m => ({ default: m.OSHomeView })));
+const PluginStoreViewClassic = lazy(() => import('../views/PluginStoreViewClassic').then(m => ({ default: m.PluginStoreView })));
 const TaskReplayView = lazy(() => import('../views/TaskReplayView').then(m => ({ default: m.TaskReplayView })));
 const TestView = lazy(() => import('../views/TestView').then(m => ({ default: m.TestView })));
 const VideoView = lazy(() => import('../views/VideoView').then(m => ({ default: m.VideoView })));
@@ -45,6 +50,8 @@ interface MainViewProps {
 export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewProps) {
   const { restoreSession, setCurrentView } = useSessionStore();
   const aiTabs = useAiTabsStore((state) => state.tabs);
+  const uiTheme = useUiTheme((s) => s.theme);
+  const classic = uiTheme === 'classic';
   const activeAiTab = aiTabs.find((tab) => tab.id === activeView);
 
   useEffect(() => {
@@ -60,7 +67,7 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
 
     switch (activeView) {
       case 'home':
-        return <OSHomeView onOpenView={onViewChange} />;
+        return classic ? <OSHomeViewClassic onOpenView={onViewChange} /> : <OSHomeView onOpenView={onViewChange} />;
       case 'chats':
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'agents':
@@ -80,7 +87,7 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
           </div>
         );
       case 'automations':
-        return <AutomationView />;
+        return classic ? <AutomationViewClassic /> : <AutomationView />;
       case 'memory':
         return <MemoryPanel onClose={() => onViewChange('chats')} />;
       case 'workspace':
@@ -109,7 +116,7 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
       case 'callcenter':
         return <CallCenterView />;
       case 'plugins':
-        return <PluginStoreView />;
+        return classic ? <PluginStoreViewClassic /> : <PluginStoreView />;
       case 'app-builder':
         return <AppBuilderView />;
       case 'website-builder':

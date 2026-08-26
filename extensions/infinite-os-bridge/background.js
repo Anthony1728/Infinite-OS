@@ -173,6 +173,7 @@ const status = {
   extensionId: chrome.runtime.id,
   port: BRIDGE_PORT,
   hasToken: Boolean(BRIDGE_TOKEN),
+  connectedAt: 0,
   lastError: '',
   latencyMs: 0,
   commandsServed: 0,
@@ -237,11 +238,15 @@ function setConnected(connected, errorText) {
   const changed = status.connected !== connected;
   status.connected = connected;
   if (connected) {
+    status.connectedAt = Date.now();
     status.lastError = '';
     reconnectDelay = RECONNECT_BASE_MS;
     connectionAttempts = 0;
-  } else if (errorText) {
-    status.lastError = errorText;
+  } else {
+    status.connectedAt = 0;
+    if (errorText) {
+      status.lastError = errorText;
+    }
   }
   if (changed) {
     chrome.storage.local.set({ bridgeStatus: status });
@@ -993,10 +998,7 @@ async function handleCommand(command, params) {
 
     case 'find_in_page': {
       if (!params.text) throw new Error('find_in_page requires text');
-      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (!active) throw new Error('No active tab');
-      await chrome.tabs.highlightText(active.id, { text: params.text });
-      result = { found: true, text: params.text };
+      result = await contentScriptOp('findInPage', { text: String(params.text), index: params.index });
       break;
     }
 
@@ -1360,8 +1362,8 @@ async function screenshotActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab) throw new Error('No active tab');
   if (!/^(https?|file):/.test(String(tab.url || ''))) throw new Error(`Cannot capture: ${tab.url}`);
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 80 });
-  return { base64: dataUrl.replace(/^data:image\/jpeg;base64,/, ''), format: 'jpeg' };
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  return { base64: dataUrl.replace(/^data:image\/png;base64,/, ''), format: 'png' };
 }
 
 async function runInPage(code) {
@@ -1584,6 +1586,58 @@ const PAGE_EXEC = function (op, params) {
       el.style.outline = '3px solid #22c55e'; el.style.backgroundColor = 'rgba(34,197,94,0.25)';
       setTimeout(() => { el.style.outline = oldOutline; el.style.backgroundColor = oldBg; }, 2200);
       return out({ highlighted: cssPath(el) });
+    }
+    case 'findInPage': {
+      const query = String(params.text || '');
+      if (!query) return fail('findInPage: no search text provided');
+      const requested = Number(params.index ?? 0);
+      // Collect visible text nodes and their offsets in a '\n'-joined haystack.
+      const nodes = [];
+      let total = 0;
+      const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+      let current;
+      while ((current = walker.nextNode())) {
+        const value = current.nodeValue || '';
+        const parent = current.parentElement;
+        if (!value.trim() || !parent || /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA)$/.test(parent.tagName)) continue;
+        const cs = getComputedStyle(parent);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        nodes.push({ node: current, start: total });
+        total += value.length + 1; // +1 accounts for the '\n' join below
+      }
+      if (!nodes.length) return out({ count: 0, index: -1 });
+      const haystack = nodes.map(n => n.node.nodeValue).join('\n');
+      const lower = haystack.toLowerCase();
+      const needle = query.toLowerCase();
+      const positions = [];
+      let pos = lower.indexOf(needle);
+      while (pos !== -1 && positions.length < 5000) {
+        positions.push(pos);
+        pos = lower.indexOf(needle, pos + Math.max(needle.length, 1));
+      }
+      const count = positions.length;
+      if (!count) return out({ count: 0, index: -1 });
+      const index = ((requested % count) + count) % count; // wrap like Ctrl+G
+      const at = positions[index];
+      const entry = nodes.find(n => at >= n.start && at < n.start + n.node.nodeValue.length + 1);
+      if (!entry) return out({ count, index });
+      try {
+        const localStart = at - entry.start;
+        const range = document.createRange();
+        range.setStart(entry.node, localStart);
+        range.setEnd(entry.node, Math.min(localStart + query.length, entry.node.nodeValue.length));
+        const rect = range.getBoundingClientRect();
+        window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - window.innerHeight / 3), left: 0, behavior: 'instant' });
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const r2 = range.getBoundingClientRect();
+        const marker = document.createElement('div');
+        marker.style.cssText = 'position:absolute;left:' + (r2.left + window.scrollX - 2) + 'px;top:' + (r2.top + window.scrollY - 2) + 'px;width:' + (r2.width + 4) + 'px;height:' + (r2.height + 4) + 'px;pointer-events:none;z-index:2147483647;background:rgba(255,220,0,0.35);outline:2px solid rgba(255,160,0,0.9);border-radius:2px;';
+        (document.body || document.documentElement).appendChild(marker);
+        setTimeout(() => { try { marker.remove(); sel.removeAllRanges(); } catch {} }, 1500);
+      } catch {}
+      return out({ count, index });
     }
     case 'hover': {
       const el = findCandidate(params.selector, params.text);

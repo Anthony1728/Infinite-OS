@@ -11,11 +11,14 @@ import { OnboardingFlow } from './components/auth/OnboardingFlow';
 import { TopBar } from './components/layout/TopBar';
 import { TitleBar } from './components/layout/TitleBar';
 import { Sidebar } from './components/layout/Sidebar';
+import { SidebarClassic } from './components/layout/SidebarClassic';
 import { RightPanel } from './components/layout/RightPanel';
 import { MainView } from './components/layout/MainView';
 import { CommandPalette } from './components/command/CommandPalette';
 import { DeployModal } from './components/deploy/DeployModal';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { SettingsModalClassic } from './components/settings/SettingsModalClassic';
+import { useUiTheme } from './theme/uiTheme';
 import { ExperienceSettingsModal, type ExperienceSettingsSection } from './components/settings/ExperienceSettingsModal';
 import { PermissionDialog } from './components/permissions/PermissionDialog';
 import { ToastContainer } from './components/notifications/ToastContainer';
@@ -73,6 +76,7 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
 
 export function App() {
   const { isAuthenticated, isNewUser } = useAuthStore();
+  const uiTheme = useUiTheme((s) => s.theme);
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
   const [activeView, setActiveView] = useState('home');
@@ -188,14 +192,25 @@ export function App() {
     <div className="app-shell h-screen w-full flex flex-col overflow-hidden text-[12px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-      <Sidebar
-        activeView={activeView}
-        onNavChange={setActiveView}
-        onOpenSettings={() => setSettingsOpen(true)}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-        starredItems={[]}
-      />
+      {uiTheme === 'classic' ? (
+        <SidebarClassic
+          activeView={activeView}
+          onNavChange={setActiveView}
+          onOpenSettings={() => setSettingsOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+          starredItems={[]}
+        />
+      ) : (
+        <Sidebar
+          activeView={activeView}
+          onNavChange={setActiveView}
+          onOpenSettings={() => setSettingsOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
+          starredItems={[]}
+        />
+      )}
       <div className="flex-1 flex flex-col min-w-0">
         <TopBar
           onOpenCommand={() => setCommandOpen(true)}
@@ -233,7 +248,9 @@ export function App() {
         }}
       />
       {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (uiTheme === 'classic'
+        ? <SettingsModalClassic onClose={() => setSettingsOpen(false)} />
+        : <SettingsModal onClose={() => setSettingsOpen(false)} />)}
       {experienceSettingsOpen && <ExperienceSettingsModal key={experienceSettingsSection} initialSection={experienceSettingsSection} onClose={() => setExperienceSettingsOpen(false)} />}
       <PermissionDialog />
       <ToastContainer />

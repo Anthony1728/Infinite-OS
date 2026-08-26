@@ -37,6 +37,7 @@ import { registerBusinessIpc } from './business.js';
 import { registerPluginIpc } from './plugin.js';
 import { registerCloudIpc } from './cloud.js';
 import { registerMultiAgentIpc } from './multi-agent.js';
+import { registerRemoteIpc } from './remote.js';
 import { registerWorkspaceIpc } from './workspace.js';
 import { registerAuthIpc } from './auth.js';
 import { registerTerminalIpc } from '../terminal/handler.js';
@@ -567,7 +568,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerBrowserIpc();
   registerBridgeIpc();
   registerComputerIpc();
-  registerAutomationIpc();
+  registerAutomationIpc(getMainWindow);
 
   // Phase 3 IPC
   registerWebsiteIpc();
@@ -579,6 +580,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerCloudIpc();
   registerMultiAgentIpc();
   registerWorkspaceIpc();
+  registerRemoteIpc();
 
   // Self-Improvement Agent IPC
   ipcMain.handle('self-improvement:audit', async (_e, { cwd }: { cwd: string }) => {

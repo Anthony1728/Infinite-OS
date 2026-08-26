@@ -613,7 +613,7 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
         <p className="mt-2 text-[12px] text-zinc-500">
           How can I help you build, create and automate today?
         </p>
-        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full bg-[#0b0f18]/90 p-1.5 shadow-[0_10px_30px_rgba(0,0,0,.22)]">
+        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/95 p-1.5 shadow-[0_2px_8px_rgba(0,0,0,.35),0_0_0_0.5px_rgba(255,255,255,0.03)]">
           {modes.map((mode, index) => (
             <button
               key={mode.label}
@@ -954,11 +954,7 @@ function InputBar({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] rounded-xl overflow-visible transition-all duration-300 ${
-          isOnline
-            ? 'shadow-[0_0_0.5px_rgba(34,211,238,0.45),0_0_14px_rgba(34,211,238,0.14)]'
-            : ''
-        } ${dragActive ? 'ring-2 ring-indigo-400/30' : ''}`}
+        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] rounded-xl overflow-visible transition-all duration-300 ${dragActive ? 'ring-2 ring-indigo-400/30' : ''}`}
       >
         {dragActive && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-indigo-500/10">
@@ -1245,10 +1241,10 @@ function InputBar({
             onClick={async () => { await window.api.miniToggle(); }}
             aria-label="Toggle mini mode"
             title="Mini mode — float a chat bar on your desktop"
-            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-zinc-500 hover:text-indigo-400 hover:bg-white/[0.04]"
+            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
             </svg>
           </button>
         </div>

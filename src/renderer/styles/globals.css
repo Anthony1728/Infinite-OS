@@ -25,6 +25,15 @@
   }
 }
 
+/* The mini-mode companion window is frameless + transparent: its body must
+   stay see-through so the bar's chrome floats directly over the desktop. */
+body[data-mini='true'] {
+  background-color: transparent !important;
+}
+body[data-mini='true'] [data-mini-chrome] {
+  background: none;
+}
+
 button,
 a,
 input,
@@ -181,87 +190,63 @@ button:disabled {
   }
 }
 
-/* Infinite OS personalization layer */
+/* Infinite OS personalization layer — neutral zinc surfaces, single accent */
 :root {
   --os-accent: #8b5cf6;
-  --os-radius: 14px;
-  --os-glow: .7;
-  --os-surface: #0b0f18;
-  --os-surface-2: #101522;
-  --os-line: rgba(255,255,255,.075);
+  --os-radius: 12px;
+  --os-glow: .3;
+  --os-surface: #0d0d0f;
+  --os-surface-2: #151518;
+  --os-line: rgba(255,255,255,.07);
   --os-text: #f4f4f5;
 }
 
-/* Semantic OS accent layer: every primary interaction follows the color
-   selected in Settings instead of retaining a hardcoded purple treatment. */
-.os-accent-text { color: color-mix(in srgb, var(--os-accent) 76%, white) !important; }
-.os-accent-indicator { background: color-mix(in srgb, var(--os-accent) 82%, white); box-shadow: 0 0 9px color-mix(in srgb, var(--os-accent) 62%, transparent); }
+/* Semantic accent layer — restrained: the accent appears only in a few
+   deliberate places; everything else stays neutral zinc. */
+.os-accent-text { color: color-mix(in srgb, var(--os-accent) 68%, white) !important; }
+.os-accent-indicator { background: #e4e4e7; }
 .os-new-chat {
-  border-color: color-mix(in srgb, var(--os-accent) 44%, transparent);
-  background: linear-gradient(100deg, color-mix(in srgb, var(--os-accent) 17%, transparent), color-mix(in srgb, var(--os-accent) 8%, transparent));
-  box-shadow: 0 0 18px color-mix(in srgb, var(--os-accent) 10%, transparent), inset 0 1px 0 rgba(255,255,255,.04);
+  border-color: rgba(255,255,255,.09);
+  background: rgba(255,255,255,.04);
+  box-shadow: none;
 }
 .os-new-chat:hover {
-  border-color: color-mix(in srgb, var(--os-accent) 66%, white 8%);
-  background: linear-gradient(100deg, color-mix(in srgb, var(--os-accent) 25%, transparent), color-mix(in srgb, var(--os-accent) 13%, transparent));
+  border-color: rgba(255,255,255,.16);
+  background: rgba(255,255,255,.06);
 }
 .os-accent-keycap {
-  color: color-mix(in srgb, var(--os-accent) 68%, white);
-  border-color: color-mix(in srgb, var(--os-accent) 22%, transparent);
-  background: color-mix(in srgb, var(--os-accent) 11%, transparent);
+  color: #71717a;
+  border-color: rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
 }
 .os-active-mode {
-  border-color: color-mix(in srgb, var(--os-accent) 58%, transparent);
-  background: color-mix(in srgb, var(--os-accent) 14%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--os-accent) 22%, transparent), inset 0 1px 0 rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.14);
+  background: rgba(255,255,255,.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    0 1px 1.5px rgba(0,0,0,.4);
 }
-.os-active-mode svg { filter: drop-shadow(0 0 2.5px currentColor); }
 .os-accent-control-active {
-  color: color-mix(in srgb, var(--os-accent) 72%, white) !important;
-  border-color: color-mix(in srgb, var(--os-accent) 38%, transparent) !important;
-  background: color-mix(in srgb, var(--os-accent) 12%, transparent) !important;
+  color: #fafafa !important;
+  border-color: rgba(255,255,255,.14) !important;
+  background: rgba(255,255,255,.07) !important;
 }
-.os-mode-menu-active { background: color-mix(in srgb, var(--os-accent) 12%, transparent) !important; }
-.os-nav-item.is-active svg { color: color-mix(in srgb, var(--os-accent) 74%, white) !important; }
+.os-mode-menu-active { background: rgba(255,255,255,.07) !important; }
+.os-nav-item.is-active svg { color: #fafafa !important; }
 
-/* Crisp neon treatment for sidebar icons: one tight contact glow plus a
-   single restrained halo — wide double-blur smears read as "blurry". */
-.os-nav-item svg {
-  transition: filter 0.3s ease, transform 0.2s ease;
-}
-.os-nav-item:hover svg {
-  filter: drop-shadow(0 0 3px currentColor);
-  transform: scale(1.03);
-}
-.os-nav-item.is-active svg {
-  filter:
-    drop-shadow(0 0 2.5px var(--glow-color, currentColor))
-    drop-shadow(0 0 9px color-mix(in srgb, var(--glow-color, currentColor) 55%, transparent));
-  transform: scale(1.06);
-}
-/* Specific glow colors per nav item — high alpha keeps the tight glow color-true */
-.os-nav-item[data-nav="chats"] svg { --glow-color: rgba(129, 140, 248, 0.85); }
-.os-nav-item[data-nav="agents"] svg { --glow-color: rgba(167, 139, 250, 0.85); }
-.os-nav-item[data-nav="projects"] svg { --glow-color: rgba(52, 211, 153, 0.85); }
-.os-nav-item[data-nav="documents"] svg { --glow-color: rgba(148, 163, 184, 0.85); }
-.os-nav-item[data-nav="automations"] svg { --glow-color: rgba(251, 191, 36, 0.85); }
-.os-nav-item[data-nav="memory"] svg { --glow-color: rgba(192, 132, 252, 0.85); }
-.os-nav-item[data-nav="workspace"] svg { --glow-color: rgba(45, 212, 191, 0.85); }
-.os-nav-item[data-nav="settings"] svg { --glow-color: rgba(148, 163, 184, 0.85); }
-.os-nav-item[data-nav="capabilities"] svg { --glow-color: rgba(232, 121, 249, 0.85); }
-.os-nav-item[data-nav="plugin-store"] svg { --glow-color: rgba(139, 92, 246, 0.85); }
-.os-nav-item[data-nav="skills"] svg { --glow-color: rgba(59, 130, 246, 0.85); }
-.os-nav-item[data-nav="scheduled-tasks"] svg { --glow-color: rgba(251, 191, 36, 0.85); }
-.os-nav-item[data-nav="standing-orders"] svg { --glow-color: rgba(168, 85, 247, 0.85); }
-.os-nav-item[data-nav="active-memory"] svg { --glow-color: rgba(6, 182, 212, 0.85); }
+/* Sidebar icon treatment: quiet and consistent — no per-item colors,
+   no glow. Active reads through the pill, not through the icon. */
+.os-nav-item svg { transition: color .15s ease; }
+.os-nav-item:hover svg { color: #e4e4e7; }
+.os-nav-item.is-active svg { color: #fafafa; }
 
-.os-profile-ring { background: linear-gradient(135deg, color-mix(in srgb, var(--os-accent) 88%, white 8%), color-mix(in srgb, var(--os-accent) 54%, #22d3ee)); }
+.os-profile-ring { background: #27272a; }
 
 .app-shell { position: relative; isolation: isolate; background: var(--os-surface) !important; }
 .app-shell::before {
   content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background: radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--os-accent) 16%, transparent), transparent 38%);
-  opacity: var(--os-glow); transition: opacity .35s ease, background .35s ease;
+  background: radial-gradient(circle at 50% -10%, rgba(255,255,255,.035), transparent 38%);
+  opacity: 1;
 }
 .os-window-titlebar {
   position: relative;
@@ -283,20 +268,11 @@ button:disabled {
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: calc(100% - 28px);
+  width: 100%;
   height: 1px;
   pointer-events: none;
   transform: translateX(-50%);
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in srgb, var(--os-accent) 52%, transparent) 12%,
-    rgba(34,211,238,.48) 50%,
-    color-mix(in srgb, var(--os-accent) 48%, rgba(236,72,153,.3)) 88%,
-    transparent 100%
-  );
-  box-shadow: 0 0 5px color-mix(in srgb, var(--os-accent) 38%, transparent);
-  opacity: .72;
+  background: var(--os-line);
 }
 .os-window-title { display: flex; align-items: center; justify-content: center; gap: 7px; color: #71717a; font-size: 9px; font-weight: 550; letter-spacing: .025em; }
 .os-window-title .infinite-logo { opacity: .9; }
@@ -339,44 +315,30 @@ button:disabled {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  border-color: color-mix(in srgb, var(--os-accent) 10%, rgba(255,255,255,.07));
-  background: color-mix(in srgb, var(--os-accent) 2.5%, rgba(255,255,255,.018));
-  color: #52525b;
-  transition: color 240ms ease, border-color 300ms ease, background 300ms ease, box-shadow 300ms ease !important;
-}
-.os-search-command::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  background: linear-gradient(100deg, transparent 0%, color-mix(in srgb, var(--os-accent) 12%, transparent) 42%, rgba(125,211,252,.16) 50%, transparent 60%);
-  transform: translateX(-115%);
-  opacity: 0;
+  border-color: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.03);
+  color: #71717a;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease !important;
 }
 .os-search-command:hover {
   color: #d4d4d8;
-  border-color: color-mix(in srgb, var(--os-accent) 42%, #7dd3fc 20%);
-  background: color-mix(in srgb, var(--os-accent) 7%, rgba(255,255,255,.025));
-  box-shadow: 0 0 18px color-mix(in srgb, var(--os-accent) 13%, transparent), inset 0 1px rgba(255,255,255,.035);
+  border-color: rgba(255,255,255,.11);
+  background: rgba(255,255,255,.045);
 }
-.os-search-command:hover::before { animation: osSearchLightSweep 1.35s cubic-bezier(.16,1,.3,1) both !important; }
 .os-search-icon {
   display: grid;
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
   place-items: center;
-  color: color-mix(in srgb, var(--os-accent) 58%, #7dd3fc);
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--os-accent) 72%, #38bdf8)) drop-shadow(0 0 7px color-mix(in srgb, var(--os-accent) 35%, transparent));
+  color: #71717a;
 }
-.os-search-command:hover .os-search-icon { animation: osSearchIconGlow 1.15s ease-in-out infinite !important; color: #bae6fd; }
+.os-search-command:hover .os-search-icon { color: #d4d4d8; }
 .os-search-placeholder { position: relative; display: block; overflow: hidden; white-space: nowrap; }
 .os-search-placeholder > span { display: block; width: max-content; max-width: 100%; overflow: hidden; white-space: nowrap; }
-.os-search-placeholder > i { position: absolute; left: 0; top: 50%; width: 1px; height: 12px; opacity: 0; background: #bae6fd; box-shadow: 0 0 7px #38bdf8; transform: translateY(-50%); }
-.os-search-command:hover .os-search-placeholder > span { animation: osSearchTyping 1.15s steps(16, end) both !important; }
-.os-search-command:hover .os-search-placeholder > i { animation: osSearchCaret 1.15s steps(16, end) both, osSearchCaretBlink .55s step-end 1.15s infinite !important; }
-.os-search-shortcut { color: #52525b; transition: color 240ms ease !important; }
-.os-search-command:hover .os-search-shortcut { color: color-mix(in srgb, var(--os-accent) 62%, #bae6fd); }
+.os-search-placeholder > i { display: none; }
+.os-search-shortcut { color: #52525b; transition: color 150ms ease !important; }
+.os-search-command:hover .os-search-shortcut { color: #a1a1aa; }
 @keyframes osSearchTyping { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes osSearchCaret { 0% { left: 0; opacity: 1; } 100% { left: min(92%, 88px); opacity: 1; } }
 @keyframes osSearchCaretBlink { 0%, 48% { opacity: 1; } 49%, 100% { opacity: 0; } }
@@ -399,6 +361,28 @@ button:disabled {
 [data-ui-template="cloud"] .os-sidebar, [data-ui-template="cloud"] .os-topbar { background: rgba(255,255,255,.86) !important; border-color: rgba(79,70,229,.12) !important; }
 [data-ui-template="cloud"] .os-sidebar .text-white, [data-ui-template="cloud"] .os-topbar .text-white, [data-ui-template="cloud"] .os-sidebar .text-zinc-300, [data-ui-template="cloud"] .os-topbar .text-zinc-300 { color: #1f2937 !important; }
 [data-ui-template="cloud"] .os-sidebar .text-gray-500, [data-ui-template="cloud"] .os-topbar .text-zinc-600 { color: #64748b !important; }
+
+/* ChatGPT-inspired — deep warm graphite, soft user bubbles, mint accent */
+[data-ui-template="chatgpt"] { --os-surface: #1a1a1c; --os-surface-2: #212124; --os-line: rgba(255,255,255,.08); }
+[data-ui-template="chatgpt"] .app-shell::before { background: radial-gradient(circle at 50% -12%, rgba(16,163,127,.14), transparent 40%); }
+[data-ui-template="chatgpt"] .os-sidebar, [data-ui-template="chatgpt"] .os-topbar { background: rgba(24,24,26,.97) !important; border-color: rgba(16,163,127,.1) !important; }
+[data-ui-template="chatgpt"] .os-active-mode, [data-ui-template="chatgpt"] .os-mode-menu-active { border-color: rgba(16,163,127,.3) !important; background: color-mix(in srgb, var(--os-accent) 13%, transparent) !important; }
+
+/* ZCode-inspired — cobalt terminal haze, electric blue signatures */
+[data-ui-template="zcode"] { --os-surface: #0a1020; --os-surface-2: #0e1630; --os-line: rgba(56,189,248,.12); }
+[data-ui-template="zcode"] .app-shell::before { background:
+  radial-gradient(circle at 10% 8%, rgba(56,189,248,.13), transparent 30%),
+  radial-gradient(circle at 92% 14%, rgba(99,102,241,.11), transparent 32%); }
+[data-ui-template="zcode"] .os-sidebar, [data-ui-template="zcode"] .os-topbar { background: rgba(10,16,32,.97) !important; border-color: rgba(56,189,248,.12) !important; }
+[data-ui-template="zcode"] .os-active-mode, [data-ui-template="zcode"] .os-mode-menu-active { border-color: rgba(56,189,248,.32) !important; background: color-mix(in srgb, var(--os-accent) 14%, transparent) !important; }
+
+/* Matrix-inspired — phosphor green on near-black, scanline grid */
+[data-ui-template="matrix"] { --os-surface: #050808; --os-surface-2: #0a100e; --os-accent: #00e676; --os-line: rgba(0,230,118,.1); }
+[data-ui-template="matrix"] .app-shell::before { background:
+  repeating-linear-gradient(0deg, rgba(0,230,118,.02) 0 1px, transparent 1px 4px),
+  radial-gradient(circle at 50% 0, rgba(0,230,118,.13), transparent 42%); }
+[data-ui-template="matrix"] .os-sidebar, [data-ui-template="matrix"] .os-topbar { background: rgba(5,8,8,.97) !important; border-color: rgba(0,230,118,.1) !important; }
+[data-ui-template="matrix"] .os-active-mode, [data-ui-template="matrix"] .os-mode-menu-active { border-color: rgba(0,230,118,.3) !important; background: color-mix(in srgb, var(--os-accent) 12%, transparent) !important; }
 [data-ui-density="compact"] .os-topbar { height: 44px !important; }
 [data-ui-density="compact"] .os-sidebar > div:first-child { height: 44px !important; }
 [data-ui-density="spacious"] .os-topbar { height: 64px !important; }
@@ -428,8 +412,8 @@ button:disabled {
 
 /* The selected Infinite mark stays crisp; active marks trace the full loop. */
 
-.os-chat-composer { border-radius: var(--os-radius) !important; border-color: color-mix(in srgb, var(--os-accent) 34%, var(--os-line)) !important; background: color-mix(in srgb, var(--os-surface-2) 92%, transparent) !important; }
-.os-chat-composer:focus-within { outline: none !important; box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-accent) 55%, transparent), 0 0 calc(7px + 10px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 30%, transparent), inset 0 1px 0 rgba(255,255,255,.05) !important; border-color: color-mix(in srgb, var(--os-accent) 72%, white) !important; }
+.os-chat-composer { border-radius: var(--os-radius) !important; border-color: rgba(255,255,255,.09) !important; background: color-mix(in srgb, var(--os-surface-2) 92%, transparent) !important; }
+.os-chat-composer:focus-within { outline: none !important; box-shadow: 0 0 0 1px rgba(255,255,255,.13) !important; border-color: rgba(255,255,255,.15) !important; }
 .os-chat-textarea:focus, .os-chat-textarea:focus-visible { outline: none !important; box-shadow: none !important; }
 .os-uncensored-toggle,
 .os-dictation-button,
@@ -476,36 +460,33 @@ button:disabled {
 [data-ui-template="cloud"] .os-dictation-button:hover:not(:disabled) { color: #1f2937; }
 [data-ui-template="cloud"] .os-dictation-language { color-scheme: light; }
 .os-send-button {
-  border: 1px solid color-mix(in srgb, var(--os-accent) 68%, white 12%);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--os-accent) 88%, white 12%), color-mix(in srgb, var(--os-accent) 72%, #22d3ee 28%));
-  box-shadow: 0 0 calc(10px + 14px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 38%, transparent), inset 0 1px 0 rgba(255,255,255,.32);
+  border: 1px solid rgba(255,255,255,.1);
+  background: #ececec;
+  box-shadow: none;
 }
-.os-send-button:not(:disabled):hover { filter: brightness(1.14) saturate(1.08); transform: translateY(-1px); box-shadow: 0 0 calc(15px + 18px * var(--os-glow)) color-mix(in srgb, var(--os-accent) 52%, transparent), inset 0 1px 0 rgba(255,255,255,.4); }
+.os-send-button:not(:disabled) { color: #18181b !important; }
+.os-send-button:not(:disabled):hover { background: #ffffff; transform: translateY(-1px); }
 .os-send-button:not(:disabled):active { transform: translateY(0) scale(.96); }
-.os-send-button:disabled { border-color: rgba(255,255,255,.07); background: linear-gradient(135deg, #3f3f46, #27272a); box-shadow: none; color: #a1a1aa; opacity: .58; }
+.os-send-button:disabled { border-color: rgba(255,255,255,.07); background: #232327; box-shadow: none; color: #71717a; opacity: .6; }
 
-/* Workspace module tiles: glass chip carrying a neon gradient glyph.
-   Accent colors flow through --tile-a/--tile-b set inline per module. */
-.os-module-tile { transition: border-color .2s ease, box-shadow .2s ease; }
+/* Workspace module tiles: flat neutral cards — quiet, consistent, ZCode-like. */
+.os-module-tile { transition: border-color .18s ease, background .18s ease; }
 .os-module-tile:hover {
-  border-color: color-mix(in srgb, var(--tile-a, #8b5cf6) 38%, transparent) !important;
-  box-shadow: 0 10px 28px -12px color-mix(in srgb, var(--tile-a, #8b5cf6) 45%, transparent);
+  border-color: rgba(255,255,255,.14) !important;
+  background: rgba(255,255,255,.028) !important;
 }
 .os-module-chip {
-  border: 1px solid color-mix(in srgb, var(--tile-a, #8b5cf6) 32%, rgba(255,255,255,.09));
-  background:
-    radial-gradient(130% 130% at 20% 10%, color-mix(in srgb, var(--tile-a, #8b5cf6) 17%, transparent), transparent 60%),
-    linear-gradient(150deg, color-mix(in srgb, var(--tile-a, #8b5cf6) 13%, transparent), color-mix(in srgb, var(--tile-b, #22d3ee) 8%, transparent) 80%),
-    rgba(255,255,255,.028);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.07), 0 5px 16px -6px color-mix(in srgb, var(--tile-a, #8b5cf6) 45%, transparent);
-  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.045);
+  color: #d4d4d8;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
 }
 .os-module-tile:hover .os-module-chip {
-  transform: scale(1.07);
-  border-color: color-mix(in srgb, var(--tile-a, #8b5cf6) 55%, rgba(255,255,255,.12));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 7px 20px -6px color-mix(in srgb, var(--tile-a, #8b5cf6) 60%, transparent);
+  transform: scale(1.05);
+  border-color: rgba(255,255,255,.15);
+  background: rgba(255,255,255,.07);
 }
-.os-module-glyph { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tile-a, #8b5cf6) 75%, transparent)); }
+.os-module-glyph { filter: none; }
 
 .os-right-panel {
   border-color: color-mix(in srgb, var(--os-accent) 10%, var(--os-line)) !important;
@@ -550,15 +531,15 @@ button:disabled {
 [data-ui-template="cloud"] .os-right-panel .text-zinc-600 { color: #94a3b8 !important; }
 
 .os-modal-backdrop { background: rgba(2,4,9,.72); backdrop-filter: blur(16px); }
-.os-settings-window { display: grid; grid-template-columns: 225px 1fr; min-height: 610px; max-height: min(760px, 92vh); border-radius: calc(var(--os-radius) + 6px); border: 1px solid color-mix(in srgb, var(--os-accent) 18%, rgba(255,255,255,.08)); background: rgba(8,12,20,.96); box-shadow: 0 28px 90px rgba(0,0,0,.55), 0 0 54px color-mix(in srgb, var(--os-accent) 10%, transparent), inset 0 1px 0 rgba(255,255,255,.06); }
+.os-settings-window { display: grid; grid-template-columns: 225px 1fr; min-height: 610px; max-height: min(760px, 92vh); border-radius: calc(var(--os-radius) + 6px); border: 1px solid rgba(255,255,255,.09); background: #101013; box-shadow: 0 28px 90px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05); }
 .os-settings-nav { display: flex; flex-direction: column; padding: 20px 14px 14px; border-right: 1px solid var(--os-line); background: linear-gradient(160deg, rgba(255,255,255,.035), transparent 50%); }
-.os-logo-orb { display: grid; place-items: center; width: 42px; height: 36px; border: 1px solid color-mix(in srgb, var(--os-accent) 26%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--os-accent) 9%, transparent); }
+.os-logo-orb { display: grid; place-items: center; width: 42px; height: 36px; border: 1px solid rgba(255,255,255,.09); border-radius: 12px; background: rgba(255,255,255,.04); }
 .os-settings-nav-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 11px; margin-bottom: 4px; border: 1px solid transparent; border-radius: 11px; color: #a1a1aa; text-align: left; transition: .18s ease; }
 .os-settings-nav-item span { font-size: 11px; font-weight: 600; }.os-settings-nav-item small { font-size: 9px; color: #52525b; }
-.os-settings-nav-item:hover { background: rgba(255,255,255,.035); color: white; }.os-settings-nav-item.is-active { background: color-mix(in srgb, var(--os-accent) 13%, transparent); border-color: color-mix(in srgb, var(--os-accent) 24%, transparent); color: #fff; box-shadow: inset 2px 0 var(--os-accent); }
+.os-settings-nav-item:hover { background: rgba(255,255,255,.035); color: white; }.os-settings-nav-item.is-active { background: rgba(255,255,255,.07); border-color: transparent; color: #fff; box-shadow: none; }
 .os-settings-content { overflow-y: auto; padding: 28px 32px 32px; }.os-close-button { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--os-line); color: #71717a; font-size: 20px; line-height: 1; }.os-close-button:hover { color: #fff; background: rgba(255,255,255,.05); }
 .os-profile-card { display: flex; align-items: center; gap: 17px; padding: 18px; border: 1px solid var(--os-line); border-radius: var(--os-radius); background: rgba(255,255,255,.025); }
-.os-avatar-large { position: relative; display: grid; flex: 0 0 auto; width: 74px; height: 74px; place-items: center; overflow: hidden; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--os-accent) 70%, #fff); background: linear-gradient(135deg, var(--os-accent), #22d3ee); color: #fff; font-size: 24px; font-weight: 700; box-shadow: 0 0 28px color-mix(in srgb, var(--os-accent) 28%, transparent); }.os-avatar-large img { width: 100%; height: 100%; object-fit: cover; }.os-avatar-large i { position: absolute; inset: auto 0 0; padding: 5px; background: rgba(0,0,0,.7); font-size: 8px; font-style: normal; opacity: 0; transition: opacity .2s; }
+.os-avatar-large { position: relative; display: grid; flex: 0 0 auto; width: 74px; height: 74px; place-items: center; overflow: hidden; border-radius: 50%; border: 1px solid rgba(255,255,255,.12); background: #27272a; color: #fff; font-size: 24px; font-weight: 700; box-shadow: none; }.os-avatar-large img { width: 100%; height: 100%; object-fit: cover; }.os-avatar-large i { position: absolute; inset: auto 0 0; padding: 5px; background: rgba(0,0,0,.7); font-size: 8px; font-style: normal; opacity: 0; transition: opacity .2s; }
 .os-status-pill { display: flex; align-items: center; gap: 6px; align-self: flex-start; padding: 6px 9px; border: 1px solid rgba(52,211,153,.16); border-radius: 999px; background: rgba(52,211,153,.06); color: #6ee7b7; font-size: 9px; }.os-status-pill i { width: 6px; height: 6px; border-radius: 50%; background: #34d399; box-shadow: 0 0 8px #34d399; }
 .os-field { display: flex; flex-direction: column; gap: 7px; color: #a1a1aa; font-size: 10px; }.os-field input { height: 42px; border: 1px solid var(--os-line); border-radius: 11px; background: rgba(0,0,0,.2); padding: 0 13px; color: #e4e4e7; outline: none; }.os-field input:focus { border-color: color-mix(in srgb, var(--os-accent) 55%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-accent) 10%, transparent); }.os-field input:disabled { opacity: .55; }
 .os-primary-button, .os-designer-box button { padding: 10px 15px; border-radius: 10px; background: linear-gradient(135deg, var(--os-accent), color-mix(in srgb, var(--os-accent) 65%, #22d3ee)); color: #fff; font-size: 10px; font-weight: 650; box-shadow: 0 8px 24px color-mix(in srgb, var(--os-accent) 26%, transparent); }.os-secondary-button { padding: 7px 10px; border: 1px solid var(--os-line); border-radius: 8px; color: #d4d4d8; font-size: 9px; }.os-text-button { padding: 7px; color: #71717a; font-size: 9px; }
@@ -683,12 +664,10 @@ button:disabled {
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, #818cf8, #ec4899, #22d3ee);
-    background-size: 200% 200%;
+    background: linear-gradient(135deg, #e4e4e7, #a1a1aa);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    animation: gradientShift 3s ease infinite;
   }
 
   .gradient-border {
@@ -739,19 +718,18 @@ button:disabled {
 
   .btn-premium {
     @apply px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200;
-    background: linear-gradient(135deg, #4f46e5, #7c3aed);
-    color: white;
-    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+    background: #ececec;
+    color: #18181b;
+    box-shadow: none;
   }
 
   .btn-premium:hover {
-    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5);
-    transform: translateY(-1px);
+    background: #ffffff;
   }
 
   .btn-premium:active {
     transform: translateY(0);
-    box-shadow: 0 2px 10px rgba(79, 70, 229, 0.3);
+    background: #d4d4d8;
   }
 
   .btn-danger {
@@ -771,10 +749,8 @@ button:disabled {
   }
 
   .card-premium:hover {
-    border-color: rgba(99, 102, 241, 0.3);
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.2),
-      0 0 0 1px rgba(99, 102, 241, 0.1);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   }
 
   .input-premium {
@@ -782,8 +758,9 @@ button:disabled {
   }
 
   .input-premium:focus {
-    @apply outline-none border-indigo-500/50;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    @apply outline-none;
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
   }
 
   .status-dot {
