@@ -266,6 +266,91 @@ function withImages(text: string, images?: ContentBlock[]): ContentBlock[] {
     : [{ type: 'text', text }];
 }
 
+// ── Local quiz generator ───────────────────────────────────────────────
+interface QuizQuestion {
+  id: string;
+  question: string;
+  options: Array<{ label: string; text: string; isCorrect: boolean }>;
+  explanation?: string;
+}
+interface QuizPayload {
+  quizId: string;
+  title: string;
+  description?: string;
+  questions: QuizQuestion[];
+}
+
+const QUIZ_BANK: Record<string, Array<{ q: string; opts: string[]; correct: number; explain: string }>> = {
+  javascript: [
+    { q: 'What does `typeof null` return in JavaScript?', opts: ['"null"', '"object"', '"undefined"', '"boolean"'], correct: 1, explain: 'A long-standing bug in JS: typeof null === "object".' },
+    { q: 'Which method adds an element to the end of an array?', opts: ['unshift()', 'push()', 'pop()', 'concat()'], correct: 1, explain: 'push() appends to the end; unshift() prepends.' },
+    { q: 'What is the output of `console.log(0.1 + 0.2 === 0.3)`?', opts: ['true', 'false', 'undefined', 'TypeError'], correct: 1, explain: 'Floating-point precision: 0.1 + 0.2 is 0.30000000000000004.' },
+    { q: 'Which keyword creates a constant in JavaScript?', opts: ['var', 'let', 'const', 'define'], correct: 2, explain: 'const declares a block-scoped, read-only binding.' },
+    { q: 'What does the `===` operator check?', opts: ['Value only', 'Value and type', 'Reference only', 'Value or type'], correct: 1, explain: 'Strict equality checks both value and type without coercion.' },
+    { q: 'Which array method returns a new array with elements that pass a test?', opts: ['forEach()', 'map()', 'filter()', 'reduce()'], correct: 2, explain: 'filter() tests each element and returns matching ones in a new array.' },
+    { q: 'What is a closure in JavaScript?', opts: ['A loop construct', 'A function with access to its outer scope', 'A closing bracket', 'An error handler'], correct: 1, explain: 'A closure retains access to variables from its enclosing function.' },
+    { q: 'Which symbol is used for template literals?', opts: ['Single quotes', 'Double quotes', 'Backticks', 'Parentheses'], correct: 2, explain: 'Template literals use backticks and support ${expression} interpolation.' },
+    { q: 'What does `Array.isArray([])` return?', opts: ['false', 'true', 'undefined', 'TypeError'], correct: 1, explain: 'Array.isArray correctly identifies arrays, unlike typeof.' },
+    { q: 'Which method removes the last element from an array?', opts: ['shift()', 'pop()', 'splice()', 'slice()'], correct: 1, explain: 'pop() removes and returns the last element.' },
+  ],
+  science: [
+    { q: 'What is the chemical symbol for gold?', opts: ['Go', 'Gd', 'Au', 'Ag'], correct: 2, explain: 'Au comes from the Latin "aurum".' },
+    { q: 'How many planets are in our solar system?', opts: ['7', '8', '9', '10'], correct: 1, explain: 'Eight planets since Pluto was reclassified in 2006.' },
+    { q: 'What gas do plants absorb from the atmosphere?', opts: ['Oxygen', 'Nitrogen', 'Carbon dioxide', 'Hydrogen'], correct: 2, explain: 'Plants use CO₂ in photosynthesis to produce glucose and oxygen.' },
+    { q: 'What is the speed of light approximately?', opts: ['300,000 km/s', '150,000 km/s', '500,000 km/s', '100,000 km/s'], correct: 0, explain: 'Light travels at roughly 299,792 km/s in a vacuum.' },
+    { q: 'Which planet has the most moons?', opts: ['Jupiter', 'Saturn', 'Neptune', 'Uranus'], correct: 1, explain: 'Saturn has over 140 known moons, surpassing Jupiter.' },
+    { q: 'What is the powerhouse of the cell?', opts: ['Nucleus', 'Ribosome', 'Mitochondria', 'Golgi apparatus'], correct: 2, explain: 'Mitochondria generate most of the cell\'s ATP supply.' },
+    { q: 'What element has the atomic number 1?', opts: ['Helium', 'Oxygen', 'Carbon', 'Hydrogen'], correct: 3, explain: 'Hydrogen has one proton, making it the lightest element.' },
+    { q: 'What force keeps planets in orbit?', opts: ['Magnetism', 'Gravity', 'Friction', 'Electricity'], correct: 1, explain: 'Gravitational attraction between the Sun and planets.' },
+  ],
+  mathematics: [
+    { q: 'What is the value of Pi to two decimal places?', opts: ['3.12', '3.14', '3.16', '3.18'], correct: 1, explain: 'Pi ≈ 3.14159…, commonly rounded to 3.14.' },
+    { q: 'What is the square root of 144?', opts: ['11', '12', '13', '14'], correct: 1, explain: '12 × 12 = 144.' },
+    { q: 'Solve: 15% of 200 = ?', opts: ['25', '30', '35', '40'], correct: 1, explain: '15/100 × 200 = 30.' },
+    { q: 'What is a triangle with all sides equal called?', opts: ['Isosceles', 'Scalene', 'Equilateral', 'Right'], correct: 2, explain: 'An equilateral triangle has three equal sides and angles.' },
+    { q: 'What is 7 factorial (7!)?', opts: ['720', '2520', '5040', '40320'], correct: 2, explain: '7! = 7 × 6 × 5 × 4 × 3 × 2 × 1 = 5040.' },
+    { q: 'What is the derivative of x²?', opts: ['x', '2x', 'x²', '2x²'], correct: 1, explain: 'Using the power rule: d/dx(x²) = 2x.' },
+    { q: 'In a right-angled triangle, the hypotenuse is:', opts: ['The shortest side', 'The longest side', 'Always 5', 'Adjacent to the right angle'], correct: 1, explain: 'The hypotenuse is always opposite the right angle and is the longest side.' },
+    { q: 'What is the sum of interior angles of a quadrilateral?', opts: ['180°', '270°', '360°', '540°'], correct: 2, explain: 'Any quadrilateral has interior angles summing to 360°.' },
+  ],
+  general: [
+    { q: 'Which country has the largest population?', opts: ['United States', 'India', 'China', 'Indonesia'], correct: 1, explain: 'India surpassed China as the most populous country in 2023.' },
+    { q: 'What year did the Berlin Wall fall?', opts: ['1987', '1989', '1991', '1993'], correct: 1, explain: 'The Berlin Wall fell on November 9, 1989.' },
+    { q: 'What is the largest ocean on Earth?', opts: ['Atlantic', 'Indian', 'Arctic', 'Pacific'], correct: 3, explain: 'The Pacific Ocean covers about 165 million km².' },
+    { q: 'Who painted the Mona Lisa?', opts: ['Michelangelo', 'Raphael', 'Leonardo da Vinci', 'Donatello'], correct: 2, explain: 'Leonardo da Vinci painted it between 1503 and 1519.' },
+    { q: 'What is the main language spoken in Brazil?', opts: ['Spanish', 'Portuguese', 'French', 'English'], correct: 1, explain: 'Brazil was colonized by Portugal; Portuguese is official.' },
+    { q: 'How many continents are there?', opts: ['5', '6', '7', '8'], correct: 2, explain: 'The seven continents are Asia, Africa, N. America, S. America, Antarctica, Europe, and Australia.' },
+    { q: 'What is the currency of Japan?', opts: ['Yuan', 'Won', 'Yen', 'Ringgit'], correct: 2, explain: 'The Japanese Yen (¥) has been the currency since 1871.' },
+    { q: 'Which element is essential for human breathing?', opts: ['Nitrogen', 'Carbon dioxide', 'Oxygen', 'Helium'], correct: 2, explain: 'Oxygen is required for cellular respiration in humans.' },
+  ],
+};
+
+function pickQuizQuestions(topic: string, count = 8): QuizQuestion[] {
+  const key = topic.toLowerCase().replace(/[^a-z]/g, '');
+  const bank = QUIZ_BANK[key] ?? QUIZ_BANK['general'];
+  const shuffled = [...bank].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count).map((item, i) => ({
+    id: `q${i + 1}`,
+    question: item.q,
+    options: item.opts.map((text, j) => ({
+      label: String.fromCharCode(65 + j), // A, B, C, D
+      text,
+      isCorrect: j === item.correct,
+    })),
+    explanation: item.explain,
+  }));
+}
+
+function generateQuiz(topic: string): QuizPayload {
+  const title = topic.charAt(0).toUpperCase() + topic.slice(1);
+  return {
+    quizId: crypto.randomUUID(),
+    title: `${title} Quiz`,
+    description: `Test your knowledge of ${title.toLowerCase()}. Select the best answer for each question.`,
+    questions: pickQuizQuestions(topic),
+  };
+}
+
 // Turn a tool name + input into a short, human-readable description of the
 // action the AI is performing (command, computer action, browser nav, etc.).
 function summarizeTool(name: string, input: unknown): { label: string; detail: string; category: string } {
@@ -1126,6 +1211,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
         requested_provider: provider,
         requested_model: model,
       };
+      set((state) => ({ messages: [...state.messages, userMessage, assistantMessage], streaming: false }));
+      await persistLocalExchange(userMessage, assistantMessage);
+      return;
+    }
+
+    // ── /quiz command: generate an interactive quiz locally ───────────
+    if (textLower.startsWith('/quiz')) {
+      const topic = visibleText.replace(/^\/quiz\s*/i, '').trim() || 'General Knowledge';
+      const now = Date.now();
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: withImages(visibleText.trim(), images),
+        timestamp: now,
+      };
+
+      const quizData = generateQuiz(topic);
+      const assistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: [
+          { type: 'text', text: `Here's your **${quizData.title}** quiz. Good luck!` },
+          { type: 'quiz', ...quizData } as ContentBlock,
+        ],
+        timestamp: now + 1,
+        provider,
+        model,
+        requested_provider: provider,
+        requested_model: model,
+      };
+
       set((state) => ({ messages: [...state.messages, userMessage, assistantMessage], streaming: false }));
       await persistLocalExchange(userMessage, assistantMessage);
       return;

@@ -20,6 +20,18 @@ export type ContentBlock =
       options: Array<{ label: string; description?: string }>;
       allowCustom?: boolean;
       questionId: string;
+    }
+  | {
+      type: 'quiz';
+      quizId: string;
+      title: string;
+      description?: string;
+      questions: Array<{
+        id: string;
+        question: string;
+        options: Array<{ label: string; text: string; isCorrect: boolean }>;
+        explanation?: string;
+      }>;
     };
 
 export interface Message {

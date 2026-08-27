@@ -12,6 +12,7 @@ import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
 import { ToolCallCard } from '../tools/ToolCallCard';
 import { LiveActivityFeed } from './LiveActivityFeed';
+import { QuizRenderer } from './QuizRenderer';
 import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
@@ -1406,6 +1407,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
   const imageBlocks = message.content.filter((b) => b.type === 'image');
   const questionBlocks = message.content.filter((b) => b.type === 'question') as Array<{ type: 'question'; question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }>;
+  const quizBlocks = message.content.filter((b) => b.type === 'quiz') as Array<{ type: 'quiz'; quizId: string; title: string; description?: string; questions: Array<{ id: string; question: string; options: Array<{ label: string; text: string; isCorrect: boolean }>; explanation?: string }> }>;
   const hasText = textBlocks.some((b) => b.type === 'text' && (b as { text: string }).text.trim());
   const plainText = textBlocks
     .map((block) => (block.type === 'text' ? block.text : ''))
@@ -1427,7 +1429,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   );
 
   if (isToolResult) return null;
-  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0) return null;
+  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0 && quizBlocks.length === 0) return null;
 
   return (
     <div
@@ -1557,6 +1559,27 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
                 onAnswer={(answer) => {
                   const sendMessage = useChatStore.getState().sendMessage;
                   sendMessage(`[Question Answer] ${block.questionId}: ${answer}`);
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {quizBlocks.length > 0 && (
+          <div className="mt-3 space-y-3">
+            {quizBlocks.map((block, i) => (
+              <QuizRenderer
+                key={i}
+                quiz={{
+                  quizId: block.quizId,
+                  title: block.title,
+                  description: block.description,
+                  questions: block.questions,
+                }}
+                onComplete={(results) => {
+                  const sendMessage = useChatStore.getState().sendMessage;
+                  sendMessage(
+                    `[Quiz Complete] ${results.title}: ${results.correctAnswers}/${results.totalQuestions} correct (${Math.round((results.correctAnswers / results.totalQuestions) * 100)}%)`,
+                  );
                 }}
               />
             ))}
