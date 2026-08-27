@@ -150,6 +150,10 @@ const REGISTRY = {
 
 export type AppIconName = keyof typeof REGISTRY | keyof typeof CUSTOM;
 
+/** The brand spectrum used by the Infinite mark — violet → cyan.
+    Applied to navigation glyphs so the rail reads as the OS identity. */
+export const BRAND_GRADIENT: [string, string] = ['#8b5cf6', '#22d3ee'];
+
 interface AppIconProps {
   name: AppIconName;
   className?: string;

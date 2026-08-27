@@ -4,7 +4,7 @@ import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
-import { AppIcon, type AppIconName } from '../brand/AppIcon';
+import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { useNotificationStore } from '../../stores/notifications';
 import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 
@@ -168,7 +168,12 @@ export function Sidebar({
             : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.04]'
         }`}
       >
-        <AppIcon name={n.icon} className="w-4 h-4 flex-shrink-0" strokeWidth={1.7} />
+        <AppIcon
+          name={n.icon}
+          className={`w-4 h-4 flex-shrink-0 ${isActive ? '' : 'opacity-70'}`}
+          strokeWidth={1.7}
+          gradient={BRAND_GRADIENT}
+        />
         {!collapsed && <span className="truncate">{n.label}</span>}
       </button>
     );
@@ -280,14 +285,14 @@ export function Sidebar({
             'Automations',
             null,
             () => onNavChange('automations'),
-            <AppIcon name="nav.automations" className="w-4 h-4 flex-shrink-0 text-gray-500" strokeWidth={1.7} />,
+            <AppIcon name="nav.automations" className="w-4 h-4 flex-shrink-0 opacity-70" strokeWidth={1.7} gradient={BRAND_GRADIENT} />,
           )}
           {renderActionRow(
             'plugins',
             'Plugin Marketplace',
             null,
             () => onNavChange('plugins'),
-            <AppIcon name="nav.capabilities" className="w-4 h-4 flex-shrink-0 text-gray-500" strokeWidth={1.7} />,
+            <AppIcon name="nav.capabilities" className="w-4 h-4 flex-shrink-0 opacity-70" strokeWidth={1.7} gradient={BRAND_GRADIENT} />,
           )}
         </div>
 
@@ -617,7 +622,7 @@ export function Sidebar({
               title="Settings"
               aria-label="Open settings"
             >
-              <AppIcon name="nav.settings" className="w-3.5 h-3.5" strokeWidth={1.7} />
+              <AppIcon name="nav.settings" className="w-3.5 h-3.5 opacity-80" strokeWidth={1.7} gradient={BRAND_GRADIENT} />
             </button>
           </div>
         </div>
