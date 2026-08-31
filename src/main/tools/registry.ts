@@ -11,6 +11,7 @@ import { webfetch } from './webfetch.js';
 import { websearch } from './websearch.js';
 import { todowrite } from './todowrite.js';
 import { agent as agentTool } from './agent.js';
+import { crewTool } from './crew.js';
 import { createCustomAgentTool } from './custom-agent.js';
 import { computerTool } from './computer.js';
 import { browserTool } from './browser.js';
@@ -92,6 +93,8 @@ import { dynamicToolTool } from './dynamic-tool.js';
 // Phase 6: Self-help - Network diagnostics and router management (user's own devices)
 import { networkTool } from './network.js';
 import { routerAdminTool } from './router-admin.js';
+import { tabBrowserTool } from './tab-browser.js';
+import { askQuestionTool } from './ask-question.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -106,6 +109,7 @@ export function registerBuiltinTools(): void {
     websearch,
     todowrite,
     agentTool,
+    crewTool,
     createCustomAgentTool,
     computerTool,
     browserTool,
@@ -193,6 +197,8 @@ export function registerBuiltinTools(): void {
     // Phase 7: Self-help (user's own PC and network)
     networkTool,
     routerAdminTool,
+    tabBrowserTool,
+    askQuestionTool,
   ]) {
     toolRegistry.register(t);
   }

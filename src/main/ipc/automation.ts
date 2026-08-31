@@ -77,5 +77,15 @@ export function registerAutomationIpc(getMainWindow?: () => Electron.BrowserWind
     }
     return out;
   });
+
+  ipcMain.handle(IPC.AUTOMATION_CANCEL_RUN, async (_e, { runId }) => {
+    return { ok: automationBuilder.cancelRun(runId) };
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_CREATE_FROM_NL, async (_e, { name, description, naturalLanguage, actions }) => {
+    const trigger = automationBuilder.triggerFromNaturalLanguage(naturalLanguage);
+    if (!trigger) return { error: `Could not parse schedule "${naturalLanguage}". Try "at 5am", "tomorrow at 4pm", or "every 2 hours".` };
+    return automationBuilder.createWorkflow({ name, description, trigger, actions });
+  });
 }
 

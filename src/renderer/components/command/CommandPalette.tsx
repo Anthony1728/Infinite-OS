@@ -22,6 +22,8 @@ const COMMANDS = [
   { id: 'testing', label: 'Testing Framework', icon: 'TS', category: 'Tools' },
   { id: 'enterprise', label: 'Enterprise', icon: 'EN', category: 'Platform' },
   { id: 'settings', label: 'Settings', icon: 'ST', category: 'App', shortcut: 'Ctrl+,' },
+  { id: 'quick-capture', label: 'Quick Capture (append note)', icon: 'QC', category: 'Actions', shortcut: 'Ctrl+Shift+Y' },
+  { id: 'quick-capture-open', label: 'Open Quick Notes folder', icon: 'QN', category: 'Actions' },
 ];
 
 interface CommandPaletteProps {
@@ -44,10 +46,15 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
         setOpen(!open);
       }
       if (e.key === 'Escape') setOpen(false);
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        setOpen(false);
+        onCommand?.('quick-capture');
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, setOpen]);
+  }, [open, setOpen, onCommand]);
 
   const query = search.toLowerCase();
   const filtered = COMMANDS.filter((c) => c.label.toLowerCase().includes(query) || c.category.toLowerCase().includes(query));

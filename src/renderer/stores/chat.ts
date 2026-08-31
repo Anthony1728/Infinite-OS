@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import type { ContentBlock, Message, Session } from '../../shared/types';
 import { useBrainStore } from './brain';
 import { useEditorStore } from './editor';
@@ -16,7 +16,7 @@ import {
 const SAFETY_INACTIVITY_TIMEOUT_MS = 150_000;
 const pendingSafetyTimers = new Map<
   string,
-  { timer: ReturnType<typeof setTimeout>; onTimeout: () => void | Promise<void> }
+  { timer: ReturnType<typeof setTimeout>; onTimeout: () => void | Promise<void>; ms: number }
 >();
 // A watchdog abort is reported back by the main process as a stream error.
 // Track those sessions so the expected abort cannot render a second message.
@@ -25,53 +25,10 @@ const activeChatTaskBySession = new Map<string, string>();
 const chatTaskByOrchestrator = new Map<string, string>();
 const orchestratorBySession = new Map<string, string>();
 const filesByChatTask = new Map<string, string[]>();
-
-// ── rAF batched streaming ────────────────────────────────────────────
-// Accumulates rapid text_delta events and flushes once per animation
-// frame so React only re-renders at display refresh rate (~60 fps)
-// instead of per-provider chunk (~200+ fps on fast connections).
-interface TextDeltaBuffer { messageId: string; text: string }
-const textDeltaBuffer: TextDeltaBuffer[] = [];
-let textDeltaRafId = 0;
-
-function flushTextDeltaBuffer() {
-  textDeltaRafId = 0;
-  if (textDeltaBuffer.length === 0) return;
-  const buffered = textDeltaBuffer.splice(0);
-  const targetId = buffered[0].messageId;
-  const combinedText = buffered.map((b) => b.text).join('');
-  useChatStore.setState((s) => ({
-    messages: s.messages.map((m) => {
-      if (m.id !== targetId) return m;
-      const last = m.content[m.content.length - 1];
-      if (last && last.type === 'text') {
-        return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + combinedText }] };
-      }
-      return { ...m, content: [...m.content, { type: 'text', text: combinedText }] };
-    }),
-  }));
-}
-
-function scheduleTextDeltaFlush() {
-  if (textDeltaRafId === 0) {
-    textDeltaRafId = requestAnimationFrame(flushTextDeltaBuffer);
-  }
-}
-
-function forceFlushTextDeltaBuffer() {
-  if (textDeltaBuffer.length > 0) {
-    if (textDeltaRafId !== 0) cancelAnimationFrame(textDeltaRafId);
-    textDeltaRafId = 0;
-    flushTextDeltaBuffer();
-  }
-}
-// ─────────────────────────────────────────────────────────────────────
-
 const selectedAgentRuns = new Map<
   string,
   { sessionId: string; chatTaskId: string; activityId: string; agentName: string; preview: string }
 >();
-const subagentMessageIds = new Map<string, string>(); // subTaskId → assistant message ID
 let activeTeachingChatSessionId: string | null = null;
 
 function clearSafetyTimer(sessionId: string): void {
@@ -80,20 +37,20 @@ function clearSafetyTimer(sessionId: string): void {
   pendingSafetyTimers.delete(sessionId);
 }
 
-function armSafetyTimer(sessionId: string, onTimeout: () => void | Promise<void>): void {
+function armSafetyTimer(sessionId: string, onTimeout: () => void | Promise<void>, ms = SAFETY_INACTIVITY_TIMEOUT_MS): void {
   clearSafetyTimer(sessionId);
   const timer = setTimeout(() => {
     pendingSafetyTimers.delete(sessionId);
     void Promise.resolve(onTimeout()).catch((error) => {
       console.error('[chat] Safety fallback failed:', error);
     });
-  }, SAFETY_INACTIVITY_TIMEOUT_MS);
-  pendingSafetyTimers.set(sessionId, { timer, onTimeout });
+  }, ms);
+  pendingSafetyTimers.set(sessionId, { timer, onTimeout, ms });
 }
 
 function touchSafetyTimer(sessionId: string): void {
   const watchdog = pendingSafetyTimers.get(sessionId);
-  if (watchdog) armSafetyTimer(sessionId, watchdog.onTimeout);
+  if (watchdog) armSafetyTimer(sessionId, watchdog.onTimeout, watchdog.ms);
 }
 
 function clearAllSafetyTimers(): void {
@@ -106,7 +63,7 @@ export type StreamEvent =
   | { type: 'message_discard'; message_id: string }
   | { type: 'text_delta'; message_id: string; text: string }
   | { type: 'tool_use_start'; message_id: string; tool_use_id: string; name: string }
-  | { type: 'tool_use_delta'; message_id: string; tool_use_id: string; partial_json: string }
+  | { type: 'tool_use_delta'; tool_use_id: string; partial_json: string }
   | { type: 'tool_use_end'; message_id: string; tool_use_id: string; name: string; input: unknown }
   | {
       type: 'tool_progress';
@@ -161,7 +118,7 @@ export interface BrainTeachingLiveState extends BrainTeachingStatus {
   chatSessionId: string | null;
 }
 
-export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build' | 'plan';
+export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build';
 
 export function isModelIdentityQuestion(text: string): boolean {
   const request = text.trim().toLowerCase().replace(/[?!.,]+$/g, '');
@@ -235,9 +192,11 @@ export function inferExecutionMode(text: string): ChatExecutionMode {
 }
 
 export function requiresOrchestration(text: string): boolean {
-  return text.length > 200 ||
+  return (
+    text.length > 200 ||
     (/\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
-      /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
+      /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text))
+  );
 }
 
 function promptForExecutionMode(text: string, mode: ChatExecutionMode): string {
@@ -251,104 +210,9 @@ function promptForExecutionMode(text: string, mode: ChatExecutionMode): string {
       return `Code mode is active. Treat this as a software task. Inspect the relevant workspace files, implement or explain the smallest solid solution, preserve unrelated work, run proportionate validation, and report the files and checks involved.\n\nCoding request:\n${request}`;
     case 'build':
       return `Build mode is active. Produce a complete working outcome, not only suggestions. Use the app-building and workspace tools where useful, connect the required functionality, test the result, and keep iterating through recoverable failures until it works.\n\nBuild request:\n${request}`;
-    case 'plan':
-      return `Plan mode is active. You are READ-ONLY. Do not modify any files, run state-changing commands, or reach approvals. Inspect the relevant workspace, files, and context thoroughly, then respond with a concise step-by-step implementation plan broken into phases: (1) what exists and the gap, (2) the exact steps/commands/tools that would be needed, (3) files or systems each step touches, (4) how the result will be verified. End with a one-line "Ready to execute" summary. Never make changes in plan mode.\n\nPlan request:\n${request}`;
     default:
       return request;
   }
-}
-
-// Builds a user message's content blocks, attaching any base64 image blocks
-// the composer collected (paste / drag-drop / file picker) alongside the text.
-function withImages(text: string, images?: ContentBlock[]): ContentBlock[] {
-  return images && images.length > 0
-    ? [{ type: 'text', text }, ...images]
-    : [{ type: 'text', text }];
-}
-
-// ── Local quiz generator ───────────────────────────────────────────────
-interface QuizQuestion {
-  id: string;
-  question: string;
-  options: Array<{ label: string; text: string; isCorrect: boolean }>;
-  explanation?: string;
-}
-interface QuizPayload {
-  quizId: string;
-  title: string;
-  description?: string;
-  questions: QuizQuestion[];
-}
-
-const QUIZ_BANK: Record<string, Array<{ q: string; opts: string[]; correct: number; explain: string }>> = {
-  javascript: [
-    { q: 'What does `typeof null` return in JavaScript?', opts: ['"null"', '"object"', '"undefined"', '"boolean"'], correct: 1, explain: 'A long-standing bug in JS: typeof null === "object".' },
-    { q: 'Which method adds an element to the end of an array?', opts: ['unshift()', 'push()', 'pop()', 'concat()'], correct: 1, explain: 'push() appends to the end; unshift() prepends.' },
-    { q: 'What is the output of `console.log(0.1 + 0.2 === 0.3)`?', opts: ['true', 'false', 'undefined', 'TypeError'], correct: 1, explain: 'Floating-point precision: 0.1 + 0.2 is 0.30000000000000004.' },
-    { q: 'Which keyword creates a constant in JavaScript?', opts: ['var', 'let', 'const', 'define'], correct: 2, explain: 'const declares a block-scoped, read-only binding.' },
-    { q: 'What does the `===` operator check?', opts: ['Value only', 'Value and type', 'Reference only', 'Value or type'], correct: 1, explain: 'Strict equality checks both value and type without coercion.' },
-    { q: 'Which array method returns a new array with elements that pass a test?', opts: ['forEach()', 'map()', 'filter()', 'reduce()'], correct: 2, explain: 'filter() tests each element and returns matching ones in a new array.' },
-    { q: 'What is a closure in JavaScript?', opts: ['A loop construct', 'A function with access to its outer scope', 'A closing bracket', 'An error handler'], correct: 1, explain: 'A closure retains access to variables from its enclosing function.' },
-    { q: 'Which symbol is used for template literals?', opts: ['Single quotes', 'Double quotes', 'Backticks', 'Parentheses'], correct: 2, explain: 'Template literals use backticks and support ${expression} interpolation.' },
-    { q: 'What does `Array.isArray([])` return?', opts: ['false', 'true', 'undefined', 'TypeError'], correct: 1, explain: 'Array.isArray correctly identifies arrays, unlike typeof.' },
-    { q: 'Which method removes the last element from an array?', opts: ['shift()', 'pop()', 'splice()', 'slice()'], correct: 1, explain: 'pop() removes and returns the last element.' },
-  ],
-  science: [
-    { q: 'What is the chemical symbol for gold?', opts: ['Go', 'Gd', 'Au', 'Ag'], correct: 2, explain: 'Au comes from the Latin "aurum".' },
-    { q: 'How many planets are in our solar system?', opts: ['7', '8', '9', '10'], correct: 1, explain: 'Eight planets since Pluto was reclassified in 2006.' },
-    { q: 'What gas do plants absorb from the atmosphere?', opts: ['Oxygen', 'Nitrogen', 'Carbon dioxide', 'Hydrogen'], correct: 2, explain: 'Plants use CO₂ in photosynthesis to produce glucose and oxygen.' },
-    { q: 'What is the speed of light approximately?', opts: ['300,000 km/s', '150,000 km/s', '500,000 km/s', '100,000 km/s'], correct: 0, explain: 'Light travels at roughly 299,792 km/s in a vacuum.' },
-    { q: 'Which planet has the most moons?', opts: ['Jupiter', 'Saturn', 'Neptune', 'Uranus'], correct: 1, explain: 'Saturn has over 140 known moons, surpassing Jupiter.' },
-    { q: 'What is the powerhouse of the cell?', opts: ['Nucleus', 'Ribosome', 'Mitochondria', 'Golgi apparatus'], correct: 2, explain: 'Mitochondria generate most of the cell\'s ATP supply.' },
-    { q: 'What element has the atomic number 1?', opts: ['Helium', 'Oxygen', 'Carbon', 'Hydrogen'], correct: 3, explain: 'Hydrogen has one proton, making it the lightest element.' },
-    { q: 'What force keeps planets in orbit?', opts: ['Magnetism', 'Gravity', 'Friction', 'Electricity'], correct: 1, explain: 'Gravitational attraction between the Sun and planets.' },
-  ],
-  mathematics: [
-    { q: 'What is the value of Pi to two decimal places?', opts: ['3.12', '3.14', '3.16', '3.18'], correct: 1, explain: 'Pi ≈ 3.14159…, commonly rounded to 3.14.' },
-    { q: 'What is the square root of 144?', opts: ['11', '12', '13', '14'], correct: 1, explain: '12 × 12 = 144.' },
-    { q: 'Solve: 15% of 200 = ?', opts: ['25', '30', '35', '40'], correct: 1, explain: '15/100 × 200 = 30.' },
-    { q: 'What is a triangle with all sides equal called?', opts: ['Isosceles', 'Scalene', 'Equilateral', 'Right'], correct: 2, explain: 'An equilateral triangle has three equal sides and angles.' },
-    { q: 'What is 7 factorial (7!)?', opts: ['720', '2520', '5040', '40320'], correct: 2, explain: '7! = 7 × 6 × 5 × 4 × 3 × 2 × 1 = 5040.' },
-    { q: 'What is the derivative of x²?', opts: ['x', '2x', 'x²', '2x²'], correct: 1, explain: 'Using the power rule: d/dx(x²) = 2x.' },
-    { q: 'In a right-angled triangle, the hypotenuse is:', opts: ['The shortest side', 'The longest side', 'Always 5', 'Adjacent to the right angle'], correct: 1, explain: 'The hypotenuse is always opposite the right angle and is the longest side.' },
-    { q: 'What is the sum of interior angles of a quadrilateral?', opts: ['180°', '270°', '360°', '540°'], correct: 2, explain: 'Any quadrilateral has interior angles summing to 360°.' },
-  ],
-  general: [
-    { q: 'Which country has the largest population?', opts: ['United States', 'India', 'China', 'Indonesia'], correct: 1, explain: 'India surpassed China as the most populous country in 2023.' },
-    { q: 'What year did the Berlin Wall fall?', opts: ['1987', '1989', '1991', '1993'], correct: 1, explain: 'The Berlin Wall fell on November 9, 1989.' },
-    { q: 'What is the largest ocean on Earth?', opts: ['Atlantic', 'Indian', 'Arctic', 'Pacific'], correct: 3, explain: 'The Pacific Ocean covers about 165 million km².' },
-    { q: 'Who painted the Mona Lisa?', opts: ['Michelangelo', 'Raphael', 'Leonardo da Vinci', 'Donatello'], correct: 2, explain: 'Leonardo da Vinci painted it between 1503 and 1519.' },
-    { q: 'What is the main language spoken in Brazil?', opts: ['Spanish', 'Portuguese', 'French', 'English'], correct: 1, explain: 'Brazil was colonized by Portugal; Portuguese is official.' },
-    { q: 'How many continents are there?', opts: ['5', '6', '7', '8'], correct: 2, explain: 'The seven continents are Asia, Africa, N. America, S. America, Antarctica, Europe, and Australia.' },
-    { q: 'What is the currency of Japan?', opts: ['Yuan', 'Won', 'Yen', 'Ringgit'], correct: 2, explain: 'The Japanese Yen (¥) has been the currency since 1871.' },
-    { q: 'Which element is essential for human breathing?', opts: ['Nitrogen', 'Carbon dioxide', 'Oxygen', 'Helium'], correct: 2, explain: 'Oxygen is required for cellular respiration in humans.' },
-  ],
-};
-
-function pickQuizQuestions(topic: string, count = 8): QuizQuestion[] {
-  const key = topic.toLowerCase().replace(/[^a-z]/g, '');
-  const bank = QUIZ_BANK[key] ?? QUIZ_BANK['general'];
-  const shuffled = [...bank].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count).map((item, i) => ({
-    id: `q${i + 1}`,
-    question: item.q,
-    options: item.opts.map((text, j) => ({
-      label: String.fromCharCode(65 + j), // A, B, C, D
-      text,
-      isCorrect: j === item.correct,
-    })),
-    explanation: item.explain,
-  }));
-}
-
-function generateQuiz(topic: string): QuizPayload {
-  const title = topic.charAt(0).toUpperCase() + topic.slice(1);
-  return {
-    quizId: crypto.randomUUID(),
-    title: `${title} Quiz`,
-    description: `Test your knowledge of ${title.toLowerCase()}. Select the best answer for each question.`,
-    questions: pickQuizQuestions(topic),
-  };
 }
 
 // Turn a tool name + input into a short, human-readable description of the
@@ -365,25 +229,25 @@ function summarizeTool(name: string, input: unknown): { label: string; detail: s
   if (/(browser|navigate|fill_form|web|scrape|crawl|url)/.test(n)) {
     const action = str(i.action ?? '');
     const target = str(i.url ?? i.selector ?? i.text ?? '');
-    return { label: `Using the browser · ${action || 'action'}`, detail: target, category: 'browser' };
+    return { label: `Using the browser ┬╖ ${action || 'action'}`, detail: target, category: 'browser' };
   }
   if (/(computer|desktop|mouse|keyboard|screen|press_key|type_text|click|scroll|screenshot)/.test(n)) {
     const action = str(i.action ?? i.action_type ?? '');
     const target = str(i.text ?? i.key ?? i.selector ?? i.application ?? i.app ?? '');
-    return { label: `Controlling the computer · ${action || 'action'}`, detail: target, category: 'computer' };
+    return { label: `Controlling the computer ┬╖ ${action || 'action'}`, detail: target, category: 'computer' };
   }
   if (/(file|read|write|edit|save|create|search_files|glob)/.test(n)) {
     const path = str(i.path ?? i.file_path ?? i.filename ?? i.pattern ?? i.query ?? '');
-    return { label: `Working with files · ${name}`, detail: path, category: 'file' };
+    return { label: `Working with files ┬╖ ${name}`, detail: path, category: 'file' };
   }
   if (/(memory|knowledge|recall|remember|brain|learn)/.test(n)) {
-    return { label: `Accessing memory · ${name}`, detail: str(i.query ?? i.topic ?? ''), category: 'memory' };
+    return { label: `Accessing memory ┬╖ ${name}`, detail: str(i.query ?? i.topic ?? ''), category: 'memory' };
   }
   if (/(web|fetch|scrape|crawl|search)/.test(n)) {
-    return { label: `Searching the web · ${name}`, detail: str(i.query ?? i.url ?? ''), category: 'web' };
+    return { label: `Searching the web ┬╖ ${name}`, detail: str(i.query ?? i.url ?? ''), category: 'web' };
   }
   if (/(agent|orchestrat|subagent|spawn)/.test(n)) {
-    return { label: `Delegating to an agent · ${name}`, detail: str(i.task ?? i.goal ?? i.instruction ?? ''), category: 'agent' };
+    return { label: `Delegating to an agent ┬╖ ${name}`, detail: str(i.task ?? i.goal ?? i.instruction ?? ''), category: 'agent' };
   }
   const detail = str(i.prompt ?? i.input ?? i.query ?? i.task ?? i.goal ?? '');
   return { label: name, detail, category: 'tool' };
@@ -398,9 +262,9 @@ interface ChatState {
   pendingPermission: { id: string; tool: string; input: unknown } | null;
   orchestratedTaskId: string | null;
   orchestratorEvents: unknown[];
-  // Real-time status from the main process (e.g. "Connecting to OpenRouter…")
+  // Real-time status from the main process (e.g. "Connecting to OpenRouterΓÇª")
   // so the Thinking bubble can reflect what's actually happening instead of
-  // showing a static "Reasoning through your request…" until the first token.
+  // showing a static "Reasoning through your requestΓÇª" until the first token.
   providerStatus: {
     label: string;
     detail: string;
@@ -419,9 +283,7 @@ interface ChatState {
   searchSessions: (query: string) => Promise<void>;
   branchSession: (id: string, messageId?: string) => Promise<void>;
   exportSession: (id: string, format?: 'markdown' | 'json') => Promise<void>;
-  shareSession: (id: string) => Promise<{ ok: boolean; length?: number }>;
   updateMessage: (messageId: string, text: string) => Promise<void>;
-  announceUncensoredMode: () => Promise<void>;
   sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
@@ -475,17 +337,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       handleStreamEvent(ev).catch((e) => console.error('[chat] handleStreamEvent error:', e));
     });
 
-    window.api.onAgentEvent((payload: unknown) => {
+    window.api.onAgentEvent(async (payload: unknown) => {
       const event = payload as {
-        type: 'start' | 'activity' | 'text_delta' | 'tool_call' | 'retrying' | 'complete' | 'fail';
+        type: 'start' | 'text_delta' | 'tool_call' | 'complete' | 'fail';
         runId?: string;
         text?: string;
         toolName?: string;
         result?: string;
         error?: string;
-        attempt?: number;
-        reason?: string;
-        activity?: { label: string; detail?: string };
       };
       if (!event.runId) return;
       const context = selectedAgentRuns.get(event.runId);
@@ -493,20 +352,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (event.type === 'text_delta') {
         context.preview = `${context.preview}${event.text ?? ''}`.slice(-500);
-        if (context.sessionId === get().currentSessionId) {
-          set((state) => ({
-            activity: state.activity.map((item) =>
-              item.id === context.activityId
-                ? { ...item, label: `${context.agentName} is working`, detail: context.preview }
-                : item,
-            ),
-          }));
-        }
-        return;
-      }
-
-      if (event.type === 'activity') {
-        context.preview = `${context.preview}\n${event.activity?.label ?? 'Working'}${event.activity?.detail ? `: ${event.activity.detail}` : ''}`.slice(-500);
         if (context.sessionId === get().currentSessionId) {
           set((state) => ({
             activity: state.activity.map((item) =>
@@ -536,29 +381,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      if (event.type === 'retrying') {
-        context.preview = `Retrying (attempt ${event.attempt ?? 2}): ${event.reason ?? 'recoverable failure'}`;
-        if (context.sessionId === get().currentSessionId) {
-          set((state) => ({
-            activity: state.activity.map((item) =>
-              item.id === context.activityId
-                ? { ...item, label: `${context.agentName} is recovering`, detail: context.preview }
-                : item,
-            ),
-          }));
-        }
-        return;
-      }
-
       if (event.type !== 'complete' && event.type !== 'fail') return;
       selectedAgentRuns.delete(event.runId);
       clearSafetyTimer(context.sessionId);
       activeChatTaskBySession.delete(context.sessionId);
 
       const successful = event.type === 'complete';
-      const responseText = successful
+      let responseText = successful
         ? event.result?.trim() || `${context.agentName} completed the task.`
         : `**${context.agentName} could not complete the task.**\n\n${event.error || 'Unknown agent error.'}`;
+      const isBillingError = !successful && /credits?error|insufficient balance|credits? exhausted|billing|402|401.*opencode/i.test(event.error || '');
+      const isVerifiedFail = !successful && /stopped before verified|reached the .* safety limit|did not produce a verified result|reached the .*turn safety/i.test(event.error || '');
+      if (isBillingError) {
+        const billingUrl = (event.error?.match(/https:\/\/opencode\.ai[^\s"']+/)?.[0]) ?? 'https://opencode.ai/billing';
+        responseText = `**OpenCode credits exhausted (401).**\n\n${event.error}\n\n**Fix now:**\n• Top up: ${billingUrl}\n• Or switch model: **Settings → AI Provider** → pick **nvidia / meta/llama-3.3-70b-instruct** (free), **Groq**, or any provider with a valid key — then retry.\n• The **Infinite AI Brain** is still available locally and will answer without credits (see next message).`;
+      } else if (isVerifiedFail) {
+        responseText = `**${context.agentName} had trouble verifying the task.**\n\n${event.error}\n\nThe task needed a tool call, but the model returned text only. Infinite OS will still help — see the Brain's answer next. If this repeats, try **Model: nvidia / meta/llama-3.3-70b-instruct** (best tool use) or rephrase to be more explicit (e.g. "Use Bash to...").`;
+      }
       const assistantMessage: Message = {
         id: crypto.randomUUID(),
         role: 'assistant',
@@ -586,6 +425,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
       }
       void window.api.appendSessionMessage({ sessionId: context.sessionId, message: assistantMessage }).catch(() => undefined);
+      if (isBillingError || isVerifiedFail) {
+        try {
+          const curMsgs = get().messages;
+          const lastUser = [...curMsgs].reverse().find((m) => m.role === 'user');
+          const userText = lastUser ? textFromMessage(lastUser) : '';
+          const brainText = userText ? await useBrainStore.getState().generateOfflineResponse(userText) : isBillingError ? 'Infinite AI Brain is ready. Fix your credits or switch provider and retry — I can still help locally.' : 'Infinite AI Brain is ready with a local answer while the agent recovers. Try a more explicit tool request if needed.';
+          const brainMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `🧠 **Infinite AI Brain (offline, no credits needed):**\n\n${brainText}` }], timestamp: Date.now(), provider: 'offline-brain', model: 'local-recovery' };
+          if (context.sessionId === get().currentSessionId) set((s) => ({ messages: [...s.messages, brainMsg] }));
+          void window.api.appendSessionMessage({ sessionId: context.sessionId, message: brainMsg }).catch(() => undefined);
+        } catch { /* ignore */ }
+      }
     });
 
     window.api.onPermissionRequest((req: { id: string; tool: string; input: unknown }) =>
@@ -607,7 +457,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         id: 'brain-teaching-live',
         toolUseId: 'brain-teaching-live',
         name: 'Brain learning',
-        label: complete ? 'Brain learning complete' : event.type === 'lesson' ? `Lesson saved · ${learned}` : 'Researching and learning',
+        label: complete ? 'Brain learning complete' : event.type === 'lesson' ? `Lesson saved ┬╖ ${learned}` : 'Researching and learning',
         detail: event.lesson?.title ?? event.status.currentTopic ?? event.status.message ?? '',
         category: 'memory',
         status: complete ? 'done' : 'running',
@@ -628,7 +478,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           type: 'text',
           text: complete
             ? `**Brain learning complete.** ${learned} verified lesson${learned === 1 ? '' : 's'} saved and ready for future requests.`
-            : `**Brain learning progress:** ${learned} lesson${learned === 1 ? '' : 's'} saved${event.lesson?.title ? ` · ${event.lesson.title}` : ''}.`,
+            : `**Brain learning progress:** ${learned} lesson${learned === 1 ? '' : 's'} saved${event.lesson?.title ? ` ┬╖ ${event.lesson.title}` : ''}.`,
         }],
         timestamp: Date.now(),
       };
@@ -648,8 +498,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (!data.subTaskId || !data.agentType || !data.description) return;
         agentStore.addSubTask(ev.taskId, data.subTaskId, data.agentType, data.description);
         if (isCurrentSession) {
-          const subAgentMsgId = crypto.randomUUID();
-          subagentMessageIds.set(data.subTaskId, subAgentMsgId);
           set((state) => ({
             activity: [
               ...state.activity.filter((item) => item.id !== `subtask-${data.subTaskId}`),
@@ -664,17 +512,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 timestamp: Date.now(),
               },
             ],
-            messages: [
-              ...state.messages,
-              {
-                id: subAgentMsgId,
-                role: 'assistant',
-                content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
-                timestamp: Date.now(),
-              },
-            ],
           }));
         }
+        // Show progress message
+        const progressMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
+          timestamp: Date.now(),
+        };
+        if (isCurrentSession) set((s) => ({ messages: [...s.messages, progressMsg] }));
       } else if (ev.type === 'task_updated') {
         if (!isCurrentSession) return;
         const data = ev.data as { interjection?: string; affectedPendingTasks?: number };
@@ -688,95 +535,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, updateMsg] }));
-      } else if (ev.type === 'subtask_retrying') {
-        const data = ev.data as { subTaskId: string; attempt: number; reason: string };
-        if (isCurrentSession) {
-          set((state) => ({
-            activity: state.activity.map((item) =>
-              item.id === `subtask-${data.subTaskId}`
-                ? { ...item, status: 'running' as const, label: `${item.name} agent retrying`, detail: `Attempt ${data.attempt}: ${data.reason}` }
-                : item,
-            ),
-          }));
-        }
-      } else if (ev.type === 'subtask_progress') {
-        const data = ev.data as {
-          subTaskId: string;
-          agentType: string;
-          event: {
-            type: 'activity' | 'text_delta' | 'tool_call' | 'retrying';
-            text?: string;
-            toolName?: string;
-            reason?: string;
-            activity?: { label: string; detail?: string };
-          };
-        };
-        if (isCurrentSession) {
-          const event = data.event;
-          const detail = event.activity?.detail || event.text || event.reason || (event.toolName ? `Using ${event.toolName}` : 'Working…');
-          const label = event.activity?.label || event.toolName || `${data.agentType} is working`;
-
-          // Update activity panel
-          set((state) => ({
-            activity: state.activity.map((item) =>
-              item.id === `subtask-${data.subTaskId}`
-                ? { ...item, status: 'running' as const, label: `${data.agentType} · ${label}`, detail: detail.slice(0, 500) }
-                : item,
-            ),
-          }));
-
-          // Stream subagent tool calls and text into the chat transcript
-          const subMsgId = subagentMessageIds.get(data.subTaskId);
-          if (subMsgId) {
-            if (event.type === 'tool_call' && event.toolName) {
-              set((state) => ({
-                messages: state.messages.map((m) => {
-                  if (m.id !== subMsgId) return m;
-                  return {
-                    ...m,
-                    content: [...m.content, { type: 'tool_use', id: `sub-${data.subTaskId}-${Date.now()}`, name: event.toolName!, input: {} }],
-                  };
-                }),
-              }));
-            } else if (event.type === 'text_delta' && event.text) {
-              set((state) => ({
-                messages: state.messages.map((m) => {
-                  if (m.id !== subMsgId) return m;
-                  const last = m.content[m.content.length - 1];
-                  if (last && last.type === 'text') {
-                    return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + event.text }] };
-                  }
-                  return { ...m, content: [...m.content, { type: 'text', text: event.text! }] };
-                }),
-              }));
-            } else if (event.type === 'activity' && event.activity) {
-              const actLabel = event.activity.label || 'Working';
-              const actDetail = event.activity.detail || '';
-              set((state) => ({
-                messages: state.messages.map((m) => {
-                  if (m.id !== subMsgId) return m;
-                  const actText = `\n> ${actLabel}${actDetail ? `: ${actDetail}` : ''}`;
-                  const last = m.content[m.content.length - 1];
-                  if (last && last.type === 'text') {
-                    return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + actText }] };
-                  }
-                  return { ...m, content: [...m.content, { type: 'text', text: actText }] };
-                }),
-              }));
-            }
-          }
-        }
       } else if (ev.type === 'task_completed') {
         if (isCurrentSession) set({ streaming: false, orchestratedTaskId: null });
-        // Clean up subagent message tracking
-        subagentMessageIds.clear();
-        const data = ev.data as {
-          totalSubTasks: number;
-          completed: number;
-          failed: number;
-          duration: number;
-          report?: { summary?: string; completed?: Array<{ description: string; result: string }>; retries?: Array<{ description: string; attempt: number; reason: string }> };
-        };
+        const data = ev.data as { totalSubTasks: number; completed: number; failed: number; duration: number };
         const chatTaskId = chatTaskByOrchestrator.get(ev.taskId) ?? activeChatTaskBySession.get(ev.sessionId);
         const verified = data.failed === 0 && data.completed === data.totalSubTasks;
         if (chatTaskId) {
@@ -787,10 +548,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           activeChatTaskBySession.delete(ev.sessionId);
         }
         orchestratorBySession.delete(ev.sessionId);
-        const report = data.report;
-        const reportText = report?.summary
-          ? `\n\n${report.summary}${report.retries?.length ? `\n\nRecovery attempts:\n${report.retries.map((retry) => `- ${retry.description}: attempt ${retry.attempt} (${retry.reason})`).join('\n')}` : ''}${report.completed?.length ? `\n\nCompleted phases:\n${report.completed.map((phase) => `- ${phase.description}`).join('\n')}` : ''}`
-          : '';
         const doneMsg: Message = {
           id: crypto.randomUUID(),
           role: 'assistant',
@@ -798,8 +555,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             {
               type: 'text',
               text: verified
-                ? `**All done.** ${data.completed} of ${data.totalSubTasks} sub-tasks completed successfully. Total time: ${(data.duration / 1000).toFixed(1)}s${reportText}`
-                : `**Finished the available work.** Results from ${data.completed} completed phase(s) are shown above.${reportText}`,
+                ? `**All done.** ${data.completed} of ${data.totalSubTasks} sub-tasks completed successfully. Total time: ${(data.duration / 1000).toFixed(1)}s`
+                : `**Finished the available work.** Results from ${data.completed} completed phase(s) are shown above.`,
             },
           ],
           timestamp: Date.now(),
@@ -807,11 +564,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (isCurrentSession) set((s) => ({ messages: [...s.messages, doneMsg] }));
       } else if (ev.type === 'task_failed') {
         if (isCurrentSession) set({ streaming: false, orchestratedTaskId: null });
-        // Clean up subagent message tracking
-        subagentMessageIds.clear();
-        const data = ev.data as {
-          report?: { summary?: string; failed?: Array<{ description: string; error: string; attempts: number }>; retries?: Array<{ description: string; attempt: number; reason: string }> };
-        };
         const chatTaskId = chatTaskByOrchestrator.get(ev.taskId) ?? activeChatTaskBySession.get(ev.sessionId);
         if (chatTaskId) {
           agentStore.failChatTask(chatTaskId, 'Automatic recovery exhausted.');
@@ -828,7 +580,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const resultMessage: Message = {
             id: crypto.randomUUID(),
             role: 'assistant',
-              content: [{ type: 'text', text: `${data.report?.summary ?? 'The task could not be fully completed.'}\n\n${result}${data.report?.failed?.length ? `\n\nUnresolved phases:\n${data.report.failed.map((phase) => `- ${phase.description}: ${phase.error} (attempts: ${phase.attempts})`).join('\n')}` : ''}` }],
+            content: [{ type: 'text', text: result }],
             timestamp: Date.now(),
             provider: 'offline-brain',
             model: 'local-recovery',
@@ -967,11 +719,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await window.api.exportSession({ sessionId: id, format });
   },
 
-  shareSession: async (id) => {
-    const result = await window.api.shareSession({ sessionId: id }) as { ok: boolean; length?: number };
-    return result;
-  },
-
   updateMessage: async (messageId, text) => {
     const { currentSessionId } = get();
     if (!currentSessionId || !text.trim()) return;
@@ -980,61 +727,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages });
   },
 
-  announceUncensoredMode: async () => {
-    let { currentSessionId } = get();
-    if (!currentSessionId) {
-      const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as {
-        cwd?: string;
-        model?: string;
-        provider?: string;
-      };
-      const session = await window.api.createSession({
-        cwd: current.cwd ?? '.',
-        model: current.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
-        provider: current.provider === 'local' ? 'ollama' : (current.provider ?? 'openrouter'),
-        title: 'Uncensored mode activated',
-      });
-      currentSessionId = session.id;
-      set((state) => ({ sessions: [session, ...state.sessions], currentSessionId: session.id, messages: [] }));
-    }
-    const message: Message = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: [{
-        type: 'text',
-        text: [
-          'Uncensored mode is now on.',
-          '',
-          'I will answer candidly, avoid unnecessary refusals and boilerplate, and use every capability authorized by your active permission profile. That can include coding and file changes, terminal commands, research, Chrome remote debugging, mouse and keyboard control, automation, agents, projects, and configured email or deployment tools. If one method fails, I will try materially different authorized routes and verify the result.',
-          '',
-          'This mode does not bypass account authentication, Windows security controls, tool permissions, privacy, explicit user cancellation, or non-bypassable safety boundaries. You remain in control and can switch it off from the chat bar at any time.',
-        ].join('\n'),
-      }],
-      timestamp: Date.now(),
-    };
-    await window.api.appendSessionMessage({ sessionId: currentSessionId, message });
-    set((state) => ({ messages: [...state.messages, message] }));
-  },
-
-  sendMessage: async (visibleText, images, mode = 'chat', agentId) => {
+  sendMessage: async (visibleText, _images, mode = 'chat', agentId) => {
     const text = promptForExecutionMode(visibleText, mode);
-    const { currentSessionId, streaming: wasStreaming } = get();
-
-    // If streaming is stuck from a previous failed/crashed run, reset it so the
-    // new message can actually be sent through the normal path instead of the
-    // interject path (which silently drops the message when there is no active run).
-    if (wasStreaming) {
-      console.warn('[chat] Resetting stuck streaming state before new send');
-      set({ streaming: false });
-    }
-
-    let settings: Record<string, string>;
-    try {
-      settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
-    } catch {
-      console.warn('[chat] Malformed settings in localStorage, using defaults');
-      settings = {};
-    }
+    const { currentSessionId } = get();
+    const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
     let model = settings.model ?? '';
     let modelLabel = '';
@@ -1046,7 +742,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: withImages(visibleText, images),
+        content: [{ type: 'text', text: visibleText }],
         timestamp: Date.now(),
       };
       set((state) => ({ messages: [...state.messages, userMessage], streaming: true }));
@@ -1198,7 +894,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: withImages(visibleText.trim(), images),
+        content: [{ type: 'text', text: visibleText.trim() }],
         timestamp: now,
       };
       const assistantMessage: Message = {
@@ -1211,37 +907,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         requested_provider: provider,
         requested_model: model,
       };
-      set((state) => ({ messages: [...state.messages, userMessage, assistantMessage], streaming: false }));
-      await persistLocalExchange(userMessage, assistantMessage);
-      return;
-    }
-
-    // ── /quiz command: generate an interactive quiz locally ───────────
-    if (textLower.startsWith('/quiz')) {
-      const topic = visibleText.replace(/^\/quiz\s*/i, '').trim() || 'General Knowledge';
-      const now = Date.now();
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: withImages(visibleText.trim(), images),
-        timestamp: now,
-      };
-
-      const quizData = generateQuiz(topic);
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: [
-          { type: 'text', text: `Here's your **${quizData.title}** quiz. Good luck!` },
-          { type: 'quiz', ...quizData } as ContentBlock,
-        ],
-        timestamp: now + 1,
-        provider,
-        model,
-        requested_provider: provider,
-        requested_model: model,
-      };
-
       set((state) => ({ messages: [...state.messages, userMessage, assistantMessage], streaming: false }));
       await persistLocalExchange(userMessage, assistantMessage);
       return;
@@ -1267,7 +932,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: withImages(visibleText, images),
+        content: [{ type: 'text', text: visibleText }],
         timestamp: Date.now(),
       };
       const activityId = `selected-agent-${crypto.randomUUID()}`;
@@ -1346,7 +1011,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: withImages(visibleText, images),
+        content: [{ type: 'text', text: visibleText }],
         timestamp: Date.now(),
       };
       set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
@@ -1363,7 +1028,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               type: 'text',
               text:
                 result?.status === 'success'
-                  ? `**Deployed successfully!**\n\n${result.steps?.map((s) => `- ${s.name}: \`${s.command}\` — ${s.status}`).join('\n')}`
+                  ? `**Deployed successfully!**\n\n${result.steps?.map((s) => `- ${s.name}: \`${s.command}\` ΓÇö ${s.status}`).join('\n')}`
                   : `**Deployment failed.**\n\n${
                       result?.steps
                         ?.filter((s) => s.status === 'failed')
@@ -1404,7 +1069,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const userMessage: Message = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: withImages(visibleText, images),
+        content: [{ type: 'text', text: visibleText }],
         timestamp: Date.now(),
       };
       set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
@@ -1472,11 +1137,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
 
-    // Check if Brain Mode is enabled — use Brain immediately without IPC delay
+    // Check if Brain Mode is enabled ΓÇö use Brain immediately without IPC delay
     // Default to true: Brain is the default when no preference is set
-    const brainMode = settings.brainMode !== 'false';
+    const brainMode = settings.brainMode !== false;
 
-    // Check if user has an API key configured — check directly via IPC
+    // Check if user has an API key configured ΓÇö check directly via IPC
     let providerRequiresApiKey = true;
     try {
       const providerList = await window.api.listProviders() as Array<{ id: string; requiresApiKey: boolean }>;
@@ -1512,7 +1177,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // If engine is dormant but we have credentials, bootstrap it
     if (brainStore.enginePhase === 'dormant' && (hasApiKey || ollamaAvailable)) {
-      console.log('[chat] Engine dormant — bootstrapping...');
+      console.log('[chat] Engine dormant ΓÇö bootstrapping...');
       try {
         await window.api.engineBootstrap();
         await brainStore.refreshEngineStatus();
@@ -1564,7 +1229,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const userMessage: Message = {
             id: crypto.randomUUID(),
             role: 'user',
-            content: withImages(visibleText, images),
+            content: [{ type: 'text', text: visibleText }],
             timestamp: Date.now(),
           };
           const assistantMessage: Message = {
@@ -1606,12 +1271,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.log(`[chat] Routing directly to local Ollama model: ${model}`);
       // Continue to the shared streaming agent path below so local models can use tools.
     } else if (isRealProvider) {
-      console.log('[chat] Real API provider — routing directly to API');
+      console.log('[chat] Real API provider ΓÇö routing directly to API');
       // Fall through to API path below (the code after this brainMode block)
     } else if (brainMode) {
-      console.log('[chat] Brain mode — local provider, using Brain patterns');
+      console.log('[chat] Brain mode ΓÇö local provider, using Brain patterns');
 
-      // Step 1: Try Brain patterns FIRST — these execute real actions (build, open, email, terminal, etc.)
+      // Step 1: Try Brain patterns FIRST ΓÇö these execute real actions (build, open, email, terminal, etc.)
       let brainResponse: string | null = null;
       let isActionResponse = false;
       try {
@@ -1625,39 +1290,39 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isActionResponse =
           brainResponse.startsWith('**$ ') ||
           brainResponse.includes('```') ||
-          brainResponse.startsWith('📁') ||
-          brainResponse.startsWith('✅') ||
-          brainResponse.startsWith('📸') ||
-          brainResponse.startsWith('📂') ||
-          brainResponse.startsWith('🖥️') ||
-          brainResponse.startsWith('🌐') ||
-          brainResponse.startsWith('📧') ||
-          brainResponse.startsWith('📬') ||
-          brainResponse.startsWith('📭') ||
-          brainResponse.startsWith('🔊') ||
-          brainResponse.startsWith('🔇') ||
-          brainResponse.startsWith('⏳') ||
+          brainResponse.startsWith('≡ƒôü') ||
+          brainResponse.startsWith('Γ£à') ||
+          brainResponse.startsWith('≡ƒô╕') ||
+          brainResponse.startsWith('≡ƒôé') ||
+          brainResponse.startsWith('≡ƒûÑ∩╕Å') ||
+          brainResponse.startsWith('≡ƒîÉ') ||
+          brainResponse.startsWith('≡ƒôº') ||
+          brainResponse.startsWith('≡ƒô¼') ||
+          brainResponse.startsWith('≡ƒô¡') ||
+          brainResponse.startsWith('≡ƒöè') ||
+          brainResponse.startsWith('≡ƒöç') ||
+          brainResponse.startsWith('ΓÅ│') ||
           brainResponse.includes('Exit code:') ||
           brainResponse.includes('created successfully') ||
           brainResponse.includes('Error:') ||
-          brainResponse.includes('❌');
+          brainResponse.includes('Γ¥î');
         } else {
           isActionResponse = false;
         }
 
         // If it's an ACTION, use the Brain response directly
         if (isActionResponse) {
-          console.log('[chat] Brain matched an action pattern — using Brain response');
+          console.log('[chat] Brain matched an action pattern ΓÇö using Brain response');
         }
-        // If it's conversational and user has an API key, skip Brain — go to API
+        // If it's conversational and user has an API key, skip Brain ΓÇö go to API
         else if (hasApiKey) {
-          console.log('[chat] Brain gave conversational response — routing to API instead');
+          console.log('[chat] Brain gave conversational response ΓÇö routing to API instead');
           brainResponse = null; // Don't use Brain response
         }
       } catch (brainErr: unknown) {
         const error = brainErr instanceof Error ? brainErr : new Error(String(brainErr));
         console.error('[chat] Brain error:', error);
-        brainResponse = `❌ Brain error: ${error.message}. Try again or check the console for details.`;
+        brainResponse = `Γ¥î Brain error: ${error.message}. Try again or check the console for details.`;
         isActionResponse = true; // Treat errors as action responses
       }
 
@@ -1666,7 +1331,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const userMessage: Message = {
           id: crypto.randomUUID(),
           role: 'user',
-          content: withImages(visibleText, images),
+          content: [{ type: 'text', text: visibleText }],
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
@@ -1700,7 +1365,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // If Brain gave conversational response but user has API key, fall through to API path
       if (!isActionResponse && hasApiKey) {
         console.log('[chat] Falling through to API path...');
-        // Don't add user message yet — the API path will add it
+        // Don't add user message yet ΓÇö the API path will add it
         // Fall through to the API code below (past the brainMode block)
       }
 
@@ -1709,7 +1374,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const userMessage: Message = {
           id: crypto.randomUUID(),
           role: 'user',
-          content: withImages(visibleText, images),
+          content: [{ type: 'text', text: visibleText }],
           timestamp: Date.now(),
         };
         set((s) => ({ messages: [...s.messages, userMessage], streaming: true }));
@@ -1735,7 +1400,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
         } catch {
-          // Ollama unavailable — keep the pattern-matching response
+          // Ollama unavailable ΓÇö keep the pattern-matching response
         }
 
         if (!finalResponse) {
@@ -1766,7 +1431,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    console.log('[chat] Brain mode OFF — proceeding with API call');
+    console.log('[chat] Brain mode OFF ΓÇö proceeding with API call');
 
     let sessionId = currentSessionId;
 
@@ -1787,21 +1452,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
       } catch (e) {
         console.error('[chat] Failed to create session:', e);
-        // Still show the user message and an error so the user gets feedback
-        // instead of a silent "nothing happens" experience.
-        const userMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: withImages(visibleText, images),
-          timestamp: Date.now(),
-        };
-        const errorMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: `**Could not start a session.** ${e instanceof Error ? e.message : String(e)}\n\nPlease check that the app backend is running and try again.` }],
-          timestamp: Date.now(),
-        };
-        set((s) => ({ messages: [...s.messages, userMessage, errorMsg], streaming: false }));
         return;
       }
     }
@@ -1811,41 +1461,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: withImages(visibleText, images),
+      content: [{ type: 'text', text: visibleText }],
       timestamp: Date.now(),
     };
-    const thinkingActivityId = `thinking-${crypto.randomUUID()}`;
-    set({ messages: [...get().messages, userMessage], streaming: true,
-      activity: [{
-        id: thinkingActivityId,
-        toolUseId: thinkingActivityId,
-        name: 'thinking',
-        label: 'Thinking',
-        detail: 'Preparing request…',
-        category: 'status',
-        status: 'running',
-        timestamp: Date.now(),
-      }],
-    });
+    set({ messages: [...get().messages, userMessage], streaming: true, activity: [] });
 
     // Create a chat task for the right panel
     const taskTitle = visibleText.length > 60 ? visibleText.slice(0, 60) + '...' : visibleText;
     const chatTaskId = prestartedTaskId ?? useAgentsStore.getState().addChatTask(taskTitle);
     activeChatTaskBySession.set(sessionId!, chatTaskId);
 
-    // Orchestrated work has its own subtask/provider progress and must not be
-    // cancelled by the single-chat inactivity fallback while phases run.
-    // Classify the user's request, not the internal mode wrapper. The wrapper
-    // itself is long enough to make every short request look complex and was
-    // incorrectly routing simple PC/browser actions through the orchestrator.
-    const isComplexTask = requiresOrchestration(visibleText);
-
     // Fall back only after 150 seconds without provider, token, or tool
     // activity. NVIDIA may legitimately take 120 seconds before retrying.
     safetyFallbackSessions.delete(sessionId);
-    if (!isComplexTask) armSafetyTimer(sessionId, async () => {
+    armSafetyTimer(sessionId, async () => {
       if (!activeChatTaskBySession.has(sessionId!)) return;
-      console.error('[chat] Safety timeout — stopping the unverified run and using the offline fallback');
+      console.error('[chat] Safety timeout ΓÇö stopping the unverified run and using the offline fallback');
       safetyFallbackSessions.add(sessionId!);
       await window.api.abortMessage({ sessionId: sessionId! }).catch(() => undefined);
       const brainStore = useBrainStore.getState();
@@ -1876,6 +1507,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeChatTaskBySession.delete(sessionId!);
     });
 
+    // Detect complex tasks that need orchestration
+    const isComplexTask =
+      text.length > 200 ||
+      (/\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
+        /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
+
     try {
       if (isComplexTask) {
         // Use orchestrator for complex tasks
@@ -1899,7 +1536,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             content: [
               {
                 type: 'text',
-                text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working — just type and send.`,
+                text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working ΓÇö just type and send.`,
               },
             ],
             timestamp: Date.now(),
@@ -1909,7 +1546,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.error('[chat] Orchestrator failed, falling back to direct:', e);
           await window.api.sendMessage({
             sessionId: sessionId!,
-            message: withImages(text, images),
+            message: [{ type: 'text', text }],
             displayMessage: userMessage.content,
             provider,
             model,
@@ -1920,7 +1557,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Use direct agent for simple tasks
         await window.api.sendMessage({
           sessionId: sessionId!,
-          message: withImages(text, images),
+          message: [{ type: 'text', text }],
           displayMessage: userMessage.content,
           provider,
           model,
@@ -2210,33 +1847,26 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'message_discard': {
-      forceFlushTextDeltaBuffer();
       // A provider/model failed before verification. Remove its partial output;
       // recovery continues in the background with another candidate.
       setState((s) => ({ messages: s.messages.filter((message) => message.id !== ev.message_id) }));
       break;
     }
     case 'text_delta': {
-      textDeltaBuffer.push({ messageId: ev.message_id, text: ev.text });
-      scheduleTextDeltaFlush();
+      setState((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== ev.message_id) return m;
+          const last = m.content[m.content.length - 1];
+          if (last && last.type === 'text') {
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + ev.text }] };
+          }
+          return { ...m, content: [...m.content, { type: 'text', text: ev.text }] };
+        }),
+      }));
       break;
     }
     case 'tool_use_start': {
       setState((s) => ({
-        // Show the tool card in the transcript immediately (running state)
-        // instead of waiting for completion, so the user sees live progress.
-        messages: s.messages.map((m) => {
-          if (m.id !== ev.message_id) return m;
-          return {
-            ...m,
-            content: [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: {} }],
-          };
-        }),
-        providerStatus: {
-          label: `Running ${ev.name}`,
-          detail: summarizeTool(ev.name, {}).detail,
-          receivedAt: Date.now(),
-        },
         activity: [
           ...s.activity,
           {
@@ -2253,44 +1883,11 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       }));
       break;
     }
-    case 'tool_use_delta': {
-      // Accumulate partial JSON input into the live tool card.
-      const currentMessages = getState().messages;
-      const target = currentMessages.find((m) => m.id === ev.message_id);
-      const existing = target?.content.find(
-        (c): c is Extract<ContentBlock, { type: 'tool_use' }> =>
-          c.type === 'tool_use' && c.id === ev.tool_use_id,
-      );
-      if (!existing) break;
-      let current = existing.input ?? {};
-      try {
-        const partial = JSON.parse(ev.partial_json);
-        current = typeof partial === 'object' && partial !== null ? partial : current;
-      } catch {
-        // Incomplete JSON chunk — keep what we have.
-      }
-      setState((s) => ({
-        messages: s.messages.map((m) => {
-          if (m.id !== ev.message_id) return m;
-          return {
-            ...m,
-            content: m.content.map((c) =>
-              c.type === 'tool_use' && c.id === ev.tool_use_id ? { ...c, input: current } : c,
-            ),
-          };
-        }),
-      }));
-      break;
-    }
     case 'tool_use_end': {
       const summary = summarizeTool(ev.name, ev.input);
       setState((s) => ({
-        // The tool_use block was already appended at tool_use_start — here we
-        // just finalize its input and mark the activity as running with a label.
         messages: s.messages.map((m) => {
           if (m.id !== ev.message_id) return m;
-          const hasToolUse = m.content.some((c) => c.type === 'tool_use' && c.id === ev.tool_use_id);
-          if (hasToolUse) return m;
           return {
             ...m,
             content: [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }],
@@ -2306,16 +1903,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
               status: 'running' as const, timestamp: Date.now(),
             }],
       }));
-      // Auto-open files in the editor when the agent writes/edits them.
-      const input = ev.input as Record<string, unknown> | undefined;
-      if (input && (ev.name === 'Write' || ev.name === 'write' || ev.name === 'write_file' || ev.name === 'create_file')) {
-        const filePath = (input.path ?? input.file_path ?? input.filePath) as string | undefined;
-        const content = (input.content ?? input.file_content ?? input.new_string) as string | undefined;
-        if (filePath && content && typeof content === 'string') {
-          const editorState = useEditorStore.getState();
-          editorState.openInEditor(filePath, content, undefined, false);
-        }
-      }
       break;
     }
     case 'tool_progress': {
@@ -2328,7 +1915,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
                 ...item,
                 name: ev.name,
                 label: summary.label,
-                detail: ev.detail || summary.detail || (status === 'running' ? 'Working…' : 'Completed'),
+                detail: ev.detail || summary.detail || (status === 'running' ? 'WorkingΓÇª' : 'Completed'),
                 category: summary.category,
                 status,
               }
@@ -2338,7 +1925,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
               toolUseId: ev.tool_use_id,
               name: ev.name,
               label: summary.label,
-              detail: ev.detail || summary.detail || (status === 'running' ? 'Working…' : 'Completed'),
+              detail: ev.detail || summary.detail || (status === 'running' ? 'WorkingΓÇª' : 'Completed'),
               category: summary.category,
               status,
               timestamp: Date.now(),
@@ -2348,9 +1935,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
     }
     case 'tool_result': {
       if (ev.partial) {
-        // Cap the live output shown in the activity feed to avoid huge rows.
-        const rawProgress = typeof ev.content === 'string' ? ev.content : 'Working...';
-        const progressText = rawProgress.length > 800 ? `${rawProgress.slice(0, 800)}…` : rawProgress;
+        const progressText = typeof ev.content === 'string' ? ev.content : 'Working...';
         setState((s) => ({
           activity: s.activity.map((item) => item.toolUseId === ev.tool_use_id
             ? { ...item, detail: progressText, status: 'running' as const }
@@ -2358,16 +1943,51 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
         }));
         break;
       }
-      // Auto-create sidebar tab when CreateTab tool returns
+      // Auto-create / update sidebar tab when CreateTab or TabBrowser tool returns
+      // Also handle AskUserQuestion — render beautiful multi-choice cards
       try {
-        const resultContent = typeof ev.content === 'string' ? ev.content : '';
+        const resultContent = typeof ev.content === 'string' ? ev.content : JSON.stringify(ev.content);
         const parsed = JSON.parse(resultContent);
+        if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+          // AskUserQuestion — create a single assistant message with 1-4 question blocks
+          const questionBlocks = parsed.questions.map((q: { question: string; header: string; options: Array<{ label: string; description: string }>; multiple?: boolean; questionId: string; allowCustom?: boolean }) => ({
+            type: 'question' as const,
+            question: q.question,
+            header: (q as unknown as { header: string }).header,
+            options: q.options,
+            multiple: q.multiple,
+            allowCustom: q.allowCustom ?? true,
+            questionId: q.questionId,
+          }));
+          const questionMessage: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: questionBlocks,
+            timestamp: Date.now(),
+          };
+          setState((s) => ({ messages: [...s.messages, questionMessage] }));
+          void window.api.appendSessionMessage({ sessionId: ev.sessionId!, message: questionMessage }).catch(() => undefined);
+          // Mark activity done without adding a raw tool_result bubble
+          setState((s) => ({
+            activity: s.activity.map((a) => a.toolUseId === ev.tool_use_id && a.status === 'running' ? { ...a, status: 'done' as const } : a),
+          }));
+          break;
+        }
         if (parsed.action === 'create_tab' && parsed.tab) {
           const { useAiTabsStore } = await import('./aiTabs.js');
-          useAiTabsStore.getState().createTab(parsed.tab);
+          const newTab = useAiTabsStore.getState().createTab(parsed.tab);
+          if (parsed.tab.kind === 'website' && newTab.id) {
+            // Tabs badge will pulse
+          }
+        } else if (parsed.action === 'update_tab' && parsed.tabId && parsed.patch) {
+          const { useAiTabsStore } = await import('./aiTabs.js');
+          useAiTabsStore.getState().updateTab(parsed.tabId, parsed.patch);
+        } else if (parsed.action === 'navigate_tab' && parsed.tabId && parsed.url) {
+          const { useAiTabsStore } = await import('./aiTabs.js');
+          useAiTabsStore.getState().updateTab(parsed.tabId, { htmlContent: parsed.url, metadata: { ...(parsed.metadata||{}), browserUrl: parsed.url } });
         }
       } catch {
-        // Not a CreateTab result or parse error — ignore
+        // Not a tab/question action — ignore
       }
       const last = getState().messages[getState().messages.length - 1];
       if (!last || last.role !== 'user') {
@@ -2403,7 +2023,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
     case 'provider_start': {
       // The agent loop told us it's about to call the model. Show that in
       // the Thinking bubble so the user sees real progress before any token
-      // arrives — important for slow free-tier providers that can take 10-30s.
+      // arrives ΓÇö important for slow free-tier providers that can take 10-30s.
       const modelLabel = ev.model || 'model';
       setState((state) => ({
         messages: state.messages.map((message) =>
@@ -2419,7 +2039,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
         ),
         providerStatus: {
           label: `Calling ${ev.provider}/${modelLabel}`,
-          detail: ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the request…',
+          detail: ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the requestΓÇª',
           receivedAt: Date.now(),
         },
       }));
@@ -2433,15 +2053,15 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       switch (ev.status) {
         case 'connecting':
           label = `Connecting to ${ev.provider ?? 'the provider'}`;
-          detail = ev.model ? `Model: ${ev.model}` : 'Opening the network connection…';
+          detail = ev.model ? `Model: ${ev.model}` : 'Opening the network connectionΓÇª';
           break;
         case 'streaming':
           label = `${ev.provider ?? 'Provider'} is streaming`;
-          detail = ev.model ? `Awaiting first token from ${ev.model}` : 'Awaiting first token…';
+          detail = ev.model ? `Awaiting first token from ${ev.model}` : 'Awaiting first tokenΓÇª';
           break;
         case 'failover':
           label = `Switching providers`;
-          detail = `${ev.from} → ${ev.to}${ev.reason ? ` (${ev.reason.slice(0, 80)})` : ''}`;
+          detail = `${ev.from} ΓåÆ ${ev.to}${ev.reason ? ` (${ev.reason.slice(0, 80)})` : ''}`;
           break;
         case 'cold_start':
           label = 'Provider is cold-starting';
@@ -2449,7 +2069,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
           break;
         case 'rate_limited':
           label = 'Rate limited';
-          detail = 'Waiting for the provider to allow the next request…';
+          detail = 'Waiting for the provider to allow the next requestΓÇª';
           break;
       }
       if (label) {
@@ -2458,7 +2078,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'message_end': {
-      forceFlushTextDeltaBuffer();
       // A provider turn ended, but tools or verification may still be running;
       // keep the session watchdog active until done/error.
       setState((s) => ({
@@ -2475,12 +2094,9 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
             : message,
         ),
         activity: s.activity,
-        // A model turn ended — tools may still be running. Keep the previous
-        // provider status so the UI shows context ("Streaming…" → tool work)
-        // instead of a frozen generic "Thinking".
-        providerStatus: s.providerStatus
-          ? { ...s.providerStatus, label: 'Tools running' }
-          : null,
+        // First text/token has landed; clear the placeholder status so the
+        // Thinking bubble knows it can stop showing "awaiting responseΓÇª".
+        providerStatus: null,
       }));
 
       // Auto-create files from code blocks in the AI response
@@ -2524,7 +2140,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     }
     case 'done':
-      forceFlushTextDeltaBuffer();
       // Clear safety timer immediately
       clearSafetyTimer(ev.sessionId);
       setState((s) => ({
@@ -2549,7 +2164,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       break;
     case 'fallback_required':
     case 'error': {
-      forceFlushTextDeltaBuffer();
       // Provider details stay in logs. If every configured model is exhausted,
       // return a useful local result instead of exposing transport failures.
       clearSafetyTimer(ev.sessionId);

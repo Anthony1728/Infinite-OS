@@ -1817,7 +1817,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
   if (msg?.type === 'reconnect') {
-    connect();
+connect();
+
+// ── Detach helpers ──────────────────────────────────────────────────────────
+async function detachAllDebuggedTabs() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab?.id) continue;
+      await new Promise((resolve) => {
+        try {
+          chrome.debugger.detach({ tabId: tab.id }, () => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
+  } catch {}
+}
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg?.type === 'detach-debugger') {
+    detachAllDebuggedTabs();
+    setConnected(false, 'detached by user');
+    if (typeof ws !== 'undefined' && ws) { try { ws.close(); } catch {} }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg?.type === 'agent:abort') {
+    // Inform the host bridge that the user pressed Emergency Stop.
+    if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
+      try {
+        ws.send(JSON.stringify({ id: 'agent:abort-' + Date.now(), type: 'agent:abort', reason: msg.reason || 'emergency-stop' }));
+      } catch {}
+    }
     sendResponse({ ok: true });
     return false;
   }

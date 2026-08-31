@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
 import { useNotificationStore } from '../../stores/notifications';
 import { CreateAgentModal } from '../agents/CreateAgentModal';
-import { AppIcon, type AppIconName } from '../brand/AppIcon';
+import type { AppIconName } from '../brand/AppIcon';
+import { NexusIcon } from '../brand/NexusIcon';
 
 type FilterStatus = 'all' | 'running' | 'completed' | 'failed';
 
@@ -37,10 +38,6 @@ function getAgentIconName(agent: { id: string; icon?: string }): AppIconName {
   return CATEGORY_ICONS.default;
 }
 
-function AgentGlyph({ agent, className }: { agent: { id: string; icon?: string }; className: string }) {
-  return <AppIcon name={getAgentIconName(agent)} className={className} strokeWidth={1.7} />;
-}
-
 function StatusBadge({ status }: { status: string }) {
   const cls =
     status === 'running'   ? 'badge-running' :
@@ -48,6 +45,47 @@ function StatusBadge({ status }: { status: string }) {
     status === 'failed'    ? 'badge-failed' :
     'badge-queued';
   return <span className={cls}>{status}</span>;
+}
+
+/** Human-role badge text from agent id. */
+function roleLabel(id: string): string {
+  const label = (id.match(/[a-z0-9]+/g) ?? ['general']).join(' ');
+  return label === 'general' ? 'general' : label;
+}
+
+/** Themed icon tile per agent id — violet/cyan/emerald/rose/indigo/amber. */
+const THEME_FOR: Record<string, string> = {
+  general: 'af-tile-purple',
+  research: 'af-tile-cyan',
+  code: 'af-tile-emerald',
+  html: 'af-tile-emerald',
+  design: 'af-tile-rose',
+  data: 'af-tile-indigo',
+  seo: 'af-tile-amber',
+  finance: 'af-tile-emerald',
+  marketing: 'af-tile-rose',
+  tester: 'af-tile-cyan',
+  security: 'af-tile-crimson',
+  devops: 'af-tile-purple',
+  writer: 'af-tile-gold',
+  architect: 'af-tile-purple',
+  mobile: 'af-tile-indigo',
+  aieng: 'af-tile-cyan',
+  business: 'af-tile-amber',
+  automation: 'af-tile-emerald',
+  desktop: 'af-tile-purple',
+  student: 'af-tile-gold',
+  music: 'af-tile-rose',
+  creator: 'af-tile-amber',
+  entrepreneur: 'af-tile-crimson',
+  generalist: 'af-tile-purple',
+};
+function themeFor(agent: { id: string; color?: string }): string {
+  const id = agent.id.toLowerCase();
+  for (const [key, name] of Object.entries(THEME_FOR)) {
+    if (id.includes(key)) return name;
+  }
+  return 'af-tile-custom';
 }
 
 export function AgentsView() {
@@ -100,12 +138,27 @@ export function AgentsView() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6 animate-fade-in custom-scrollbar">
+      {/* Shared gradient defs for themed agent icon tiles (reference visual). */}
+      <svg style={{ width: 0, height: 0, position: 'absolute' }} aria-hidden="true">
+        <defs>
+          <linearGradient id="af-purple" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#c084fc" /><stop offset="100%" stopColor="#7c3aed" /></linearGradient>
+          <linearGradient id="af-cyan" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#38bdf8" /><stop offset="100%" stopColor="#0284c7" /></linearGradient>
+          <linearGradient id="af-emerald" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#34d399" /><stop offset="100%" stopColor="#059669" /></linearGradient>
+          <linearGradient id="af-rose" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#f472b6" /><stop offset="100%" stopColor="#db2777" /></linearGradient>
+          <linearGradient id="af-amber" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#fbbf24" /><stop offset="100%" stopColor="#d97706" /></linearGradient>
+          <linearGradient id="af-indigo" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#818cf8" /><stop offset="100%" stopColor="#4f46e5" /></linearGradient>
+          <linearGradient id="af-crimson" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#fb7185" /><stop offset="100%" stopColor="#e11d48" /></linearGradient>
+          <linearGradient id="af-gold" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#fde047" /><stop offset="100%" stopColor="#ca8a04" /></linearGradient>
+          <linearGradient id="af-custom" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#38bdf8" /><stop offset="100%" stopColor="#a855f7" /></linearGradient>
+        </defs>
+      </svg>
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-textMain flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
-              <AppIcon name="agent.default" className="w-5 h-5 text-white" strokeWidth={1.8} />
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#2a1b47] to-[#101226] border border-white/10 shadow-lg shadow-violet-900/30 flex items-center justify-center">
+              <NexusIcon size={32} />
             </div>
             Agent Fleet
             {activeCount > 0 && (
@@ -115,7 +168,7 @@ export function AgentsView() {
               </span>
             )}
           </h1>
-          <p className="text-textMuted text-sm mt-1">Autonomous subagents ready to execute specialized tasks.</p>
+          <p className="text-textMuted text-sm mt-1">A specialized roster ready to execute your tasks. Pick an agent, describe the task, it runs.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -139,25 +192,27 @@ export function AgentsView() {
         </div>
       </div>
 
-      {/* Agent Grid */}
+      {/* Agent Grid — reference roster layout: branded card, themed icon tile,
+          role badge, description, Assign Task. Clicking a card reveals an
+          inline task input for that agent. */}
       <div className="mb-8">
         <h2 className="text-sm font-semibold mb-4 text-textMuted uppercase tracking-wider">Available Agents</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {types.map((agent) => (
-            <div key={agent.id} className="card-premium hover-lift flex flex-col justify-between group">
+            <div key={agent.id} className="agent-card group">
               <div>
-                <div className="flex items-start gap-3 mb-3">
-                  <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${agent.color || 'from-indigo-500 to-violet-600'} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                    <AgentGlyph agent={agent} className="w-6 h-6 text-white" />
+                <div className="flex items-start gap-3.5 mb-3">
+                  <div className={`af-tile ${themeFor(agent)}`}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke={`url(#af-${themeFor(agent).slice(8)})`} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d={agent.icon || 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'} />
+                    </svg>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-textMain truncate">{agent.name}</div>
-                    <div className="text-[10px] uppercase font-bold tracking-wider text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded w-max mt-0.5">
-                      {agent.id}
-                    </div>
+                    <span className="af-badge">{roleLabel(agent.id)}</span>
                   </div>
                 </div>
-                <div className="text-xs text-textMuted mb-4 line-clamp-2 min-h-[32px] leading-relaxed">{agent.description}</div>
+                <p className="af-desc">{agent.description}</p>
               </div>
 
               <div className="mt-auto">
@@ -166,7 +221,7 @@ export function AgentsView() {
                     <input
                       type="text"
                       placeholder="Describe the task for this agent…"
-                      className="input-premium w-full text-xs"
+                      className="af-task-input"
                       value={taskInput}
                       onChange={(e) => setTaskInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleSpawn(agent.id); if (e.key === 'Escape') setSelectedAgent(null); }}
@@ -199,7 +254,7 @@ export function AgentsView() {
                 ) : (
                   <button
                     onClick={() => setSelectedAgent(agent.id)}
-                    className="w-full px-4 py-2 rounded-xl bg-bgInput border border-borderSubtle text-sm font-medium text-textMain hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-all group-hover:border-indigo-500/20"
+                    className="af-action"
                   >
                     Assign Task
                   </button>
@@ -265,8 +320,10 @@ export function AgentsView() {
                     className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/[0.02]"
                     onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
                   >
-                    <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${agentInfo?.color || 'from-indigo-500 to-violet-600'} flex items-center justify-center shadow-md flex-shrink-0`}>
-                      <AgentGlyph agent={agentInfo ?? { id: run.agentId }} className="w-4 h-4 text-white" />
+                    <div className={`af-tile ${themeFor(agentInfo ?? { id: run.agentId })}`} style={{ width: 36, height: 36 }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke={`url(#af-${themeFor(agentInfo ?? { id: run.agentId }).slice(8)})`} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                        <path d={agentInfo?.icon || getAgentIconName(agentInfo ?? { id: run.agentId }) === 'agent.default' ? 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z' : getAgentIconName(agentInfo ?? { id: run.agentId })} />
+                      </svg>
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -364,4 +421,3 @@ export function AgentsView() {
     </div>
   );
 }
-

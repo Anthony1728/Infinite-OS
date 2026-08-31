@@ -198,24 +198,38 @@ function FileExplorer({
     [expanded, loadDir],
   );
 
-  const handleNewFile = useCallback(async () => {
-    const name = prompt('File name:');
-    if (!name) return;
-    const parentDir = cwd;
-    const fullPath = joinSystemPath(parentDir, name);
-    await window.api.fileWrite({ path: fullPath, content: '' });
-    await loadRoot();
-    onFileOpen(fullPath, name);
-  }, [cwd, loadRoot, onFileOpen]);
+  const [creating, setCreating] = useState<null | { type: 'file' | 'folder'; name: string }>(null);
+  const createInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (creating) setTimeout(() => createInputRef.current?.focus(), 0); }, [creating]);
 
-  const handleNewFolder = useCallback(async () => {
-    const name = prompt('Folder name:');
-    if (!name) return;
-    const parentDir = cwd;
-    const fullPath = joinSystemPath(parentDir, name);
-    await window.api.fileMkdir({ path: fullPath });
-    await loadRoot();
-  }, [cwd, loadRoot]);
+  const commitCreate = useCallback(async () => {
+    if (!creating || !creating.name.trim()) return;
+    const raw = creating.name.trim();
+    if (/[<>:"|?*\x00-\x1F]/.test(raw) || raw === '.' || raw === '..') return;
+    const fullPath = joinSystemPath(cwd, raw);
+    try {
+      if (creating.type === 'file') {
+        const r: { ok?: boolean; error?: string } = await window.api.fileWrite({ path: fullPath, content: '' });
+        if (r.error) throw new Error(r.error);
+        await loadRoot();
+        onFileOpen(fullPath, raw);
+      } else {
+        const r: { ok?: boolean; error?: string } = await window.api.fileMkdir({ path: fullPath });
+        if ((r as { error?: string }).error) throw new Error((r as { error?: string }).error);
+        await loadRoot();
+      }
+      setCreating(null);
+    } catch {
+      // keep open to let user correct name
+    }
+  }, [creating, cwd, loadRoot, onFileOpen]);
+
+  const handleNewFile = useCallback(() => {
+    setCreating({ type: 'file', name: '' });
+  }, []);
+  const handleNewFolder = useCallback(() => {
+    setCreating({ type: 'folder', name: '' });
+  }, []);
 
   const renderNode = (node: TreeNode, depth: number) => {
     const isExpanded = expanded.has(node.path);
@@ -231,9 +245,9 @@ function FileExplorer({
         >
           {node.isDirectory ? (
             isExpanded ? (
-              <ChevronDown className="w-3 h-3 flex-shrink-0 text-gray-500" />
+              <ChevronDown className="w-3 h-3 flex-shrink-0 text-textMuted" />
             ) : (
-              <ChevronRight className="w-3 h-3 flex-shrink-0 text-gray-500" />
+              <ChevronRight className="w-3 h-3 flex-shrink-0 text-textMuted" />
             )
           ) : (
             <span className="w-3 flex-shrink-0" />
@@ -257,20 +271,20 @@ function FileExplorer({
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 flex-shrink-0">
-        <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Explorer</span>
+    <div className="h-full flex flex-col bg-[var(--os-surface)]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--os-line)] flex-shrink-0">
+        <span className="text-[11px] font-medium text-textMuted uppercase tracking-wider">Explorer</span>
         <div className="flex items-center gap-0.5">
           <button
             onClick={handleNewFile}
-            className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
+            className="p-1 rounded hover:bg-white/5 text-textMuted hover:text-white transition-colors"
             title="New File"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={handleNewFolder}
-            className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
+            className="p-1 rounded hover:bg-white/5 text-textMuted hover:text-white transition-colors"
             title="New Folder"
           >
             <FolderIcon className="w-3.5 h-3.5" />
@@ -278,10 +292,28 @@ function FileExplorer({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
+        {creating && (
+          <div className="flex items-center gap-2 px-2 py-1.5 mx-1 rounded-md bg-[color-mix(in_srgb,var(--os-accent)_10%,transparent)] border border-[color-mix(in_srgb,var(--os-accent)_18%,transparent)]">
+            {creating.type === 'folder' ? <FolderIcon className="w-3.5 h-3.5 text-amber-400" /> : <FileIcon className="w-3.5 h-3.5 text-sky-400" />}
+            <input
+              ref={createInputRef}
+              value={creating.name}
+              onChange={(e) => setCreating({ ...creating, name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void commitCreate();
+                if (e.key === 'Escape') setCreating(null);
+              }}
+              placeholder={creating.type === 'folder' ? 'Folder name' : 'File name'}
+              className="flex-1 min-w-0 bg-transparent text-xs text-textMain placeholder:text-textMuted/50 outline-none"
+            />
+            <button onClick={() => void commitCreate()} className="px-2 py-0.5 rounded text-[11px] font-medium bg-[var(--os-accent)] text-white hover:opacity-90">Create</button>
+            <button onClick={() => setCreating(null)} className="p-1 rounded hover:bg-white/10 text-textMuted"><X className="w-3 h-3" /></button>
+          </div>
+        )}
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-gray-500 text-xs">Loading...</div>
-        ) : tree.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-gray-500 text-xs">Empty directory</div>
+          <div className="flex items-center justify-center py-8 text-textMuted text-xs">Loading...</div>
+        ) : tree.length === 0 && !creating ? (
+          <div className="flex items-center justify-center py-8 text-textMuted text-xs">Empty directory</div>
         ) : (
           tree.map((node) => renderNode(node, 0))
         )}
@@ -292,13 +324,13 @@ function FileExplorer({
 
 function OutlinePanel({ outline }: { outline: OutlineItem[] }) {
   return (
-    <div className="h-full flex flex-col bg-[#0a0a0f]">
-      <div className="flex items-center px-3 py-2 border-b border-white/10 flex-shrink-0">
-        <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wider">Outline</span>
+    <div className="h-full flex flex-col bg-[var(--os-surface)]">
+      <div className="flex items-center px-3 py-2 border-b border-[var(--os-line)] flex-shrink-0">
+        <span className="text-[11px] font-medium text-textMuted uppercase tracking-wider">Outline</span>
       </div>
       <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
         {outline.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-gray-500 text-xs">No symbols</div>
+          <div className="flex items-center justify-center py-8 text-textMuted text-xs">No symbols</div>
         ) : (
           outline.map((item, i) => (
             <div
@@ -337,6 +369,8 @@ export function WorkspaceView() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [renameValue, setRenameValue] = useState<string | null>(null);
   const [renamePath, setRenamePath] = useState<string | null>(null);
+  const [ctxCreate, setCtxCreate] = useState<null | { type: 'file' | 'folder'; parentPath: string; name: string }>(null);
+  const [deleteTarget, setDeleteTarget] = useState<null | { path: string }>(null);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [explorerVersion, setExplorerVersion] = useState(0);
@@ -532,37 +566,39 @@ export function WorkspaceView() {
     return () => window.removeEventListener('click', close);
   }, [contextMenu]);
 
-  const handleCtxNewFile = useCallback(async () => {
+  const handleCtxNewFile = useCallback(() => {
     if (!contextMenu) return;
-    const name = prompt('File name:');
-    if (!name) return;
     const parentDir = contextMenu.isDir ? contextMenu.path : parentSystemPath(contextMenu.path);
-    const fullPath = joinSystemPath(parentDir, name);
+    setCtxCreate({ type: 'file', parentPath: parentDir, name: '' });
+    setContextMenu(null);
+  }, [contextMenu]);
+  const handleCtxNewFolder = useCallback(() => {
+    if (!contextMenu) return;
+    const parentDir = contextMenu.isDir ? contextMenu.path : parentSystemPath(contextMenu.path);
+    setCtxCreate({ type: 'folder', parentPath: parentDir, name: '' });
+    setContextMenu(null);
+  }, [contextMenu]);
+  const commitCtxCreate = useCallback(async () => {
+    if (!ctxCreate || !ctxCreate.name.trim()) return;
+    const raw = ctxCreate.name.trim();
+    if (/[<>:"|?*\x00-\x1F]/.test(raw) || raw === '.' || raw === '..') return;
+    const fullPath = joinSystemPath(ctxCreate.parentPath, raw);
     try {
-      await window.api.fileWrite({ path: fullPath, content: '' });
-      setTerminalOutput((prev) => [...prev, `$ Created file ${fullPath}`]);
-      setExplorerVersion((value) => value + 1);
+      if (ctxCreate.type === 'file') {
+        const r: { ok?: boolean; error?: string } = await window.api.fileWrite({ path: fullPath, content: '' });
+        if (r.error) throw new Error(r.error);
+        setTerminalOutput((prev) => [...prev, `$ Created file ${fullPath}`]);
+      } else {
+        const r: { ok?: boolean; error?: string } = await window.api.fileMkdir({ path: fullPath });
+        if ((r as { error?: string }).error) throw new Error((r as { error?: string }).error);
+        setTerminalOutput((prev) => [...prev, `$ Created folder ${fullPath}`]);
+      }
+      setExplorerVersion((v) => v + 1);
+      setCtxCreate(null);
     } catch (e) {
       setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
     }
-    setContextMenu(null);
-  }, [contextMenu]);
-
-  const handleCtxNewFolder = useCallback(async () => {
-    if (!contextMenu) return;
-    const name = prompt('Folder name:');
-    if (!name) return;
-    const parentDir = contextMenu.isDir ? contextMenu.path : parentSystemPath(contextMenu.path);
-    const fullPath = joinSystemPath(parentDir, name);
-    try {
-      await window.api.fileMkdir({ path: fullPath });
-      setTerminalOutput((prev) => [...prev, `$ Created folder ${fullPath}`]);
-      setExplorerVersion((value) => value + 1);
-    } catch (e) {
-      setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
-    }
-    setContextMenu(null);
-  }, [contextMenu]);
+  }, [ctxCreate]);
 
   const handleCtxRename = useCallback(() => {
     if (!contextMenu) return;
@@ -571,18 +607,24 @@ export function WorkspaceView() {
     setContextMenu(null);
   }, [contextMenu]);
 
-  const handleCtxDelete = useCallback(async () => {
+  const handleCtxDelete = useCallback(() => {
     if (!contextMenu) return;
-    if (!confirm(`Delete ${systemBaseName(contextMenu.path)}?`)) return;
-    try {
-      await window.api.fileDelete({ path: contextMenu.path });
-      setTerminalOutput((prev) => [...prev, `$ Deleted ${contextMenu.path}`]);
-      setExplorerVersion((value) => value + 1);
-    } catch (e) {
-      setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
-    }
+    setDeleteTarget({ path: contextMenu.path });
     setContextMenu(null);
   }, [contextMenu]);
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      const r: { ok?: boolean; error?: string } = await window.api.fileDelete({ path: deleteTarget.path });
+      if (r && (r as { error?: string }).error) throw new Error((r as { error?: string }).error);
+      setTerminalOutput((prev) => [...prev, `$ Deleted ${deleteTarget.path}`]);
+      setExplorerVersion((v) => v + 1);
+    } catch (e) {
+      setTerminalOutput((prev) => [...prev, `Error: ${(e as Error).message}`]);
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [deleteTarget]);
 
   const submitRename = useCallback(async () => {
     if (!renamePath || !renameValue) return;
@@ -624,13 +666,13 @@ export function WorkspaceView() {
   );
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#0a0a0f]">
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-white/10 bg-[#0d0d13] px-3 py-2">
+    <div className="w-full h-full flex flex-col bg-[var(--os-surface)]">
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--os-line)] bg-[var(--os-surface-2)] px-3 py-2">
         <button
           type="button"
           onClick={() => openWorkspacePath(parentSystemPath(cwd))}
           disabled={parentSystemPath(cwd) === normalizeSystemPath(cwd)}
-          className="rounded border border-white/10 px-2 py-1 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white disabled:opacity-30"
+          className="rounded border border-[var(--os-line)] px-2 py-1 text-[10px] text-textMuted hover:bg-white/5 hover:text-white disabled:opacity-30"
           title="Parent folder"
         >
           Up
@@ -646,19 +688,19 @@ export function WorkspaceView() {
             value={workspacePath}
             onChange={(event) => setWorkspacePath(event.target.value)}
             aria-label="Workspace system path"
-            className="h-7 min-w-0 flex-1 rounded border border-white/10 bg-white/5 px-2 font-mono text-[11px] text-gray-300 outline-none focus:border-blue-500/50"
+            className="h-7 min-w-0 flex-1 rounded border border-[var(--os-line)] bg-white/5 px-2 font-mono text-[11px] text-gray-300 outline-none focus:border-[var(--os-accent)]/50"
             spellCheck={false}
           />
-          <button type="submit" className="h-7 rounded border border-white/10 px-3 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white">Go</button>
+          <button type="submit" className="h-7 rounded border border-[var(--os-line)] px-3 text-[10px] text-textMuted hover:bg-white/5 hover:text-white">Go</button>
         </form>
-        <button type="button" onClick={() => void chooseWorkspaceFolder()} className="h-7 rounded border border-white/10 px-3 text-[10px] text-gray-400 hover:bg-white/5 hover:text-white">Open Folder</button>
+        <button type="button" onClick={() => void chooseWorkspaceFolder()} className="h-7 rounded border border-[var(--os-line)] px-3 text-[10px] text-textMuted hover:bg-white/5 hover:text-white">Open Folder</button>
         <select
           aria-label="System locations"
           value=""
           onChange={(event) => {
             if (event.target.value) openWorkspacePath(event.target.value);
           }}
-          className="h-7 max-w-44 rounded border border-white/10 bg-[#15151d] px-2 text-[10px] text-gray-300 outline-none"
+          className="h-7 max-w-44 rounded border border-[var(--os-line)] bg-[#15151d] px-2 text-[10px] text-gray-300 outline-none"
         >
           <option value="">System locations</option>
           {[...systemRoots.common, ...systemRoots.drives].map((location) => (
@@ -668,16 +710,16 @@ export function WorkspaceView() {
       </div>
       <div className="flex-1 min-h-0 flex">
         {leftPanelOpen && (
-          <div className="w-52 flex-shrink-0 border-r border-white/10 overflow-hidden">
+          <div className="w-52 flex-shrink-0 border-r border-[var(--os-line)] overflow-hidden">
             <FileExplorer cwd={cwd} onFileOpen={handleFileOpen} onContextMenu={handleContextMenu} refreshKey={explorerVersion} />
           </div>
         )}
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center border-b border-white/10 bg-[#0a0a0f] flex-shrink-0">
+          <div className="flex items-center border-b border-[var(--os-line)] bg-[var(--os-surface)] flex-shrink-0">
             <button
               onClick={() => setLeftPanelOpen(!leftPanelOpen)}
-              className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white transition-colors flex-shrink-0"
+              className="p-1.5 hover:bg-white/5 text-textMuted hover:text-white transition-colors flex-shrink-0"
               title="Toggle Explorer"
             >
               <ListTree className="w-3.5 h-3.5" />
@@ -688,8 +730,8 @@ export function WorkspaceView() {
                   key={tab.path}
                   className={`group flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 cursor-pointer transition-colors flex-shrink-0 ${
                     activeTabIndex === i
-                      ? 'border-blue-500 text-white bg-white/[0.03]'
-                      : 'border-transparent text-gray-500 hover:text-white hover:bg-white/[0.02]'
+                      ? 'border-[var(--os-accent)] text-white bg-white/[0.03]'
+                      : 'border-transparent text-textMuted hover:text-white hover:bg-white/[0.02]'
                   }`}
                   onClick={() => setActiveTabIndex(i)}
                 >
@@ -701,7 +743,7 @@ export function WorkspaceView() {
                       e.stopPropagation();
                       handleCloseTab(i);
                     }}
-                    className="opacity-0 group-hover:opacity-100 ml-1 text-gray-500 hover:text-red-400 transition-all"
+                    className="opacity-0 group-hover:opacity-100 ml-1 text-textMuted hover:text-red-400 transition-all"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -713,7 +755,7 @@ export function WorkspaceView() {
                 <button
                   onClick={() => void handleSave()}
                   disabled={!activeTab.modified}
-                  className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-blue-400 hover:bg-blue-500/10 disabled:opacity-35"
+                  className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-[color-mix(in_srgb,var(--os-accent)_72%,white)] hover:bg-[color-mix(in_srgb,var(--os-accent)_10%,transparent)] disabled:opacity-35"
                   title="Save file (Ctrl+S)"
                 >
                   <Save className="w-3 h-3" /> Save
@@ -733,7 +775,7 @@ export function WorkspaceView() {
               {rightPanelOpen ? (
                 <button
                   onClick={() => setRightPanelOpen(false)}
-                  className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
+                  className="p-1.5 hover:bg-white/5 text-textMuted hover:text-white transition-colors"
                   title="Hide Outline"
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -741,7 +783,7 @@ export function WorkspaceView() {
               ) : (
                 <button
                   onClick={() => setRightPanelOpen(true)}
-                  className="p-1.5 hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
+                  className="p-1.5 hover:bg-white/5 text-textMuted hover:text-white transition-colors"
                   title="Show Outline"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -763,7 +805,7 @@ export function WorkspaceView() {
                 options={editorOptions}
               />
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+              <div className="flex items-center justify-center h-full text-textMuted text-sm">
                 Open a file from the explorer
               </div>
             )}
@@ -771,36 +813,36 @@ export function WorkspaceView() {
         </div>
 
         {rightPanelOpen && (
-          <div className="w-48 flex-shrink-0 border-l border-white/10 overflow-hidden">
+          <div className="w-48 flex-shrink-0 border-l border-[var(--os-line)] overflow-hidden">
             <OutlinePanel outline={outlineData} />
           </div>
         )}
       </div>
 
       {terminalOpen && (
-        <div className="h-44 flex-shrink-0 border-t border-white/10 flex flex-col bg-[#0a0a0f]">
-          <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 flex-shrink-0">
-            <div className="flex items-center gap-1.5 text-gray-400">
+        <div className="h-44 flex-shrink-0 border-t border-[var(--os-line)] flex flex-col bg-[var(--os-surface)]">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--os-line)] flex-shrink-0">
+            <div className="flex items-center gap-1.5 text-textMuted">
               <Terminal className="w-3.5 h-3.5" />
               <span className="text-[11px] font-medium uppercase tracking-wider">Terminal</span>
             </div>
             <button
               onClick={() => setTerminalOpen(false)}
-              className="p-1 rounded hover:bg-white/5 text-gray-500 hover:text-white transition-colors"
+              className="p-1 rounded hover:bg-white/5 text-textMuted hover:text-white transition-colors"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar px-3 py-2 font-mono text-[11px] text-gray-300">
             {terminalOutput.map((line, i) => (
-              <div key={i} className={line.startsWith('$') ? 'text-gray-400' : line.startsWith('Error') ? 'text-red-400' : 'text-gray-300'}>
+              <div key={i} className={line.startsWith('$') ? 'text-textMuted' : line.startsWith('Error') ? 'text-red-400' : 'text-gray-300'}>
                 {line}
               </div>
             ))}
             <div ref={terminalEndRef} />
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-white/10 flex-shrink-0">
-            <span className="text-gray-500 text-[11px]">$</span>
+          <div className="flex items-center gap-2 px-3 py-1.5 border-t border-[var(--os-line)] flex-shrink-0">
+            <span className="text-textMuted text-[11px]">$</span>
             <input
               value={terminalInput}
               onChange={(e) => setTerminalInput(e.target.value)}
@@ -814,7 +856,7 @@ export function WorkspaceView() {
         </div>
       )}
 
-      <div className="flex items-center justify-between px-3 py-1 border-t border-white/10 bg-[#0a0a0f] flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 border-t border-[var(--os-line)] bg-[var(--os-surface)] flex-shrink-0">
         <div className="flex items-center gap-3 text-[10px] text-gray-600">
           <span>{activeTab?.language ?? '--'}</span>
           <span>UTF-8</span>
@@ -823,7 +865,7 @@ export function WorkspaceView() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setTerminalOpen(!terminalOpen)}
-            className={`p-1 rounded hover:bg-white/5 transition-colors ${terminalOpen ? 'text-gray-300' : 'text-gray-500 hover:text-white'}`}
+            className={`p-1 rounded hover:bg-white/5 transition-colors ${terminalOpen ? 'text-gray-300' : 'text-textMuted hover:text-white'}`}
             title="Toggle Terminal"
           >
             {terminalOpen ? <PanelBottomClose className="w-3.5 h-3.5" /> : <PanelBottomOpen className="w-3.5 h-3.5" />}
@@ -833,7 +875,7 @@ export function WorkspaceView() {
 
       {contextMenu && (
         <div
-          className="fixed bg-[#1a1a24] border border-white/10 rounded-lg shadow-xl py-1 z-50 min-w-[140px]"
+          className="fixed bg-[var(--os-surface-2)] border border-[var(--os-line)] rounded-lg shadow-xl py-1 z-50 min-w-[140px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -846,7 +888,7 @@ export function WorkspaceView() {
           <button onClick={handleCtxRename} className="w-full px-3 py-1.5 text-left text-[11px] text-gray-300 hover:bg-white/5 hover:text-white">
             Rename
           </button>
-          <div className="mx-2 my-1 border-t border-white/10" />
+          <div className="mx-2 my-1 border-t border-[var(--os-line)]" />
           <button onClick={handleCtxDelete} className="w-full px-3 py-1.5 text-left text-[11px] text-red-400 hover:bg-white/5 hover:text-red-300">
             Delete
           </button>
@@ -855,7 +897,7 @@ export function WorkspaceView() {
 
       {renamePath && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => { setRenamePath(null); setRenameValue(null); }}>
-          <div className="bg-[#1a1a24] border border-white/10 rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--os-surface-2)] border border-[var(--os-line)] rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
             <div className="text-xs text-gray-300 mb-2">Rename</div>
             <input
               value={renameValue ?? ''}
@@ -864,16 +906,52 @@ export function WorkspaceView() {
                 if (e.key === 'Enter') submitRename();
                 if (e.key === 'Escape') { setRenamePath(null); setRenameValue(null); }
               }}
-              className="w-full h-8 rounded bg-white/5 border border-white/10 px-3 text-xs text-white outline-none focus:ring-1 focus:ring-blue-500/40"
+              className="w-full h-8 rounded bg-white/5 border border-[var(--os-line)] px-3 text-xs text-white outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
               autoFocus
             />
             <div className="flex justify-end gap-2 mt-3">
-              <button onClick={() => { setRenamePath(null); setRenameValue(null); }} className="px-3 py-1.5 text-[11px] text-gray-400 hover:text-white">
+              <button onClick={() => { setRenamePath(null); setRenameValue(null); }} className="px-3 py-1.5 text-[11px] text-textMuted hover:text-white">
                 Cancel
               </button>
-              <button onClick={submitRename} className="px-3 py-1.5 text-[11px] bg-blue-600 hover:bg-blue-500 text-white rounded">
+              <button onClick={submitRename} className="px-3 py-1.5 text-[11px] bg-[var(--os-accent)] hover:opacity-90 text-white rounded">
                 Rename
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {ctxCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCtxCreate(null)}>
+          <div className="bg-[var(--os-surface-2)] border border-[var(--os-line)] rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
+            <div className="text-xs text-gray-300 mb-2">{ctxCreate.type === 'folder' ? 'New Folder' : 'New File'}</div>
+            <div className="text-[11px] text-textMuted mb-2 truncate">In: {ctxCreate.parentPath}</div>
+            <input
+              value={ctxCreate.name}
+              onChange={(e) => setCtxCreate({ ...ctxCreate, name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void commitCtxCreate();
+                if (e.key === 'Escape') setCtxCreate(null);
+              }}
+              placeholder={ctxCreate.type === 'folder' ? 'Folder name' : 'File name e.g. app.ts'}
+              className="w-full h-8 rounded bg-white/5 border border-[var(--os-line)] px-3 text-xs text-white placeholder:text-textMuted/50 outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setCtxCreate(null)} className="px-3 py-1.5 text-[11px] text-textMuted hover:text-white">Cancel</button>
+              <button onClick={() => void commitCtxCreate()} className="px-3 py-1.5 text-[11px] bg-[var(--os-accent)] hover:opacity-90 text-white rounded">Create</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-[var(--os-surface-2)] border border-[var(--os-line)] rounded-lg shadow-xl p-4 w-80" onClick={(e) => e.stopPropagation()}>
+            <div className="text-xs font-medium text-white mb-1">Delete?</div>
+            <div className="text-[11px] text-textMuted mb-3 break-all">{deleteTarget.path}</div>
+            <div className="text-[11px] text-amber-300/80 mb-3">This cannot be undone.</div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDeleteTarget(null)} className="px-3 py-1.5 text-[11px] text-textMuted hover:text-white">Cancel</button>
+              <button onClick={() => void confirmDelete()} className="px-3 py-1.5 text-[11px] bg-red-600 hover:bg-red-500 text-white rounded">Delete</button>
             </div>
           </div>
         </div>

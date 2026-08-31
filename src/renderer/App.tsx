@@ -4,6 +4,7 @@ import { useSessionStore } from './stores/session';
 import { useAgentsStore } from './stores/agents';
 import { useBrainStore } from './stores/brain';
 import { useAiTabsStore } from './stores/aiTabs';
+import { useLayoutStore } from './stores/layout';
 import { useEditorStore } from './stores/editor';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
@@ -27,6 +28,22 @@ import { InfiniteLogo } from './components/brand/InfiniteLogo';
 type AuthView = 'login' | 'register';
 
 const LOCAL_PRIMARY_MODEL = 'minicpm-v4.6:latest';
+
+async function openQuickCapturePrompt(): Promise<void> {
+  // Native prompt() is the lowest-friction path that needs zero new UI.
+  // The intent is a "drop a thought here in 5 seconds" surface, not a modal.
+  const text = typeof window !== 'undefined' ? window.prompt('Quick Capture — what did you want to remember?') : null;
+  if (!text || !text.trim()) return;
+  const res = (await window.api.quickCaptureAppend({ text: text.trim() })) as
+    | { ok: true; path: string }
+    | { ok: false; error: string };
+  if (!res.ok) {
+    console.warn('[quick-capture] append failed:', res.error);
+    window.alert(`Quick Capture failed: ${res.error}`);
+  } else {
+    window.alert(`Saved to ${res.path}`);
+  }
+}
 const LOCAL_PRIMARY_MIGRATION = 'infinite:local-primary-minicpm-v46';
 
 function BriefLoading({ onComplete }: { onComplete: () => void }) {
@@ -82,6 +99,8 @@ export function App() {
   const [activeView, setActiveView] = useState('home');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const setActivityPanelOpen = useLayoutStore((s) => s.setActivityPanelOpen);
+  useEffect(() => { setActivityPanelOpen(rightPanelOpen); }, [rightPanelOpen, setActivityPanelOpen]);
   const [commandOpen, setCommandOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -98,8 +117,24 @@ export function App() {
   // marker prevents future launches from overriding a later manual choice.
   useEffect(() => {
     if (localStorage.getItem(LOCAL_PRIMARY_MIGRATION) === 'done') return;
-    window.api.listProviderModels({ provider: 'ollama' })
-      .then((models: Array<{ id: string }>) => {
+    (async () => {
+      try {
+        // Only auto-switch to the local model when the user has NO configured
+        // provider key. If they've already added keys, their choice is the
+        // source of truth — never override a working remote setup with local.
+        const providers = (await window.api.listProviders()) as Array<{ id: string; requiresApiKey: boolean }>;
+        let hasRemoteKey = false;
+        for (const p of providers) {
+          if (!p.requiresApiKey) continue;
+          const has = (await window.api.hasProviderKey({ provider: p.id })) as boolean;
+          if (has) { hasRemoteKey = true; break; }
+        }
+        if (hasRemoteKey) {
+          localStorage.setItem(LOCAL_PRIMARY_MIGRATION, 'done');
+          return;
+        }
+
+        const models = (await window.api.listProviderModels({ provider: 'ollama' })) as Array<{ id: string }>;
         const localPrimary = models.find((item) => item.id === LOCAL_PRIMARY_MODEL)
           ?? models.find((item) => item.id.toLowerCase().startsWith('minicpm-v4.6'));
         if (!localPrimary) return;
@@ -114,11 +149,10 @@ export function App() {
         }));
         localStorage.setItem(LOCAL_PRIMARY_MIGRATION, 'done');
         window.dispatchEvent(new Event('storage'));
-      })
-      .catch(() => {
-        // Ollama may not be running yet. Leave the migration pending so the
-        // next launch can select the installed model automatically.
-      });
+      } catch {
+        // Leave the migration pending — next launch retries safely.
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -223,20 +257,23 @@ export function App() {
           <MainView activeView={activeView} onViewChange={setActiveView} onOpenDeploy={() => setDeployOpen(true)} />
         </main>
       </div>
-      {(activeView === 'chats' || activeView === 'research') && (
+            {(activeView === 'chats' || activeView === 'research') && (
         <div
           className={`os-activity-panel-shell ${rightPanelOpen ? 'is-open' : 'is-closed'}`}
           aria-hidden={!rightPanelOpen}
         >
           <RightPanel onViewChange={setActiveView} />
         </div>
-      )}
-      <CommandPalette
+      )}      <CommandPalette
         open={commandOpen}
         onOpenChange={setCommandOpen}
         onCommand={(cmd) => {
           if (cmd === 'deploy') setDeployOpen(true);
-          else {
+          else if (cmd === 'quick-capture') {
+            void openQuickCapturePrompt();
+          } else if (cmd === 'quick-capture-open') {
+            void window.api.quickCaptureOpen();
+          } else {
             const commandRoutes: Record<string, string> = {
               'new-chat': 'chats',
               'open-canvas': 'canvas',

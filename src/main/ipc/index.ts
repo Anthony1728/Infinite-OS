@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { IPC } from '../../shared/ipc.js';
 import { settings } from '../settings/store.js';
 import { deleteApiKey, setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
-import { listProviders, getProvider } from '../providers/registry.js';
+import { listProviders, getProvider, providerRegistry } from '../providers/registry.js';
 import { toolRegistry } from '../tools/base.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect, getStatus as mcpGetStatus, listTools as mcpListTools } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
@@ -60,6 +60,7 @@ import { getEngine } from '../engine/intelligence.js';
 import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
 import { orchestrator, type OrchestratorEvent } from '../agent/orchestrator.js';
+import { buildCrewPlan, runCrew, listCrewRuns, type CrewEvent } from '../agent/crew.js';
 import { selectBestModel, getAllFreeModels } from '../providers/model-selector.js';
 import { videoEngine } from '../video/index.js';
 import { deploySystem } from '../deploy/index.js';
@@ -216,6 +217,15 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.CHAT_ABORT, async (_e, { sessionId }) => {
     activeRuns.get(sessionId)?.abort();
     orchestrator.cancelSession(sessionId);
+    // Also abort any crew / subagent runs for this session so Thinking never hangs 192m
+    try {
+      const { abortSessionRuns } = await import('../agent/runtime.js');
+      abortSessionRuns(sessionId);
+    } catch {}
+    try {
+      const { cancelCrewSession } = await import('../agent/crew.js');
+      cancelCrewSession(sessionId);
+    } catch {}
     return { ok: true };
   });
 
@@ -444,13 +454,45 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       if (s.isDirectory()) {
         const { readdir } = await import('node:fs/promises');
         const entries = await readdir(filePath, { withFileTypes: true });
+        const enriched = await Promise.all(entries.map(async (e) => {
+          try {
+            const full = (await import('node:path')).join(filePath, e.name);
+            const st = await stat(full);
+            return { name: e.name, isDirectory: e.isDirectory(), size: st.size, mtime: st.mtimeMs, ext: e.name.split('.').pop()?.toLowerCase() ?? '' };
+          } catch { return { name: e.name, isDirectory: e.isDirectory(), size: 0, mtime: 0, ext: '' }; }
+        }));
         return {
           type: 'directory',
-          entries: entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory() })),
+          entries: enriched,
         };
       }
+      // Detect binary / media types — serve as base64 so renderer can preview inline.
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+      const imageExts = new Set(['png','jpg','jpeg','gif','webp','bmp','ico','svg']);
+      const videoExts = new Set(['mp4','webm','mov','avi','mkv','m4v']);
+      const audioExts = new Set(['mp3','wav','ogg','flac','m4a','aac','wma']);
+      const isImage = imageExts.has(ext);
+      const isVideo = videoExts.has(ext);
+      const isAudio = audioExts.has(ext);
+      const isPdf = ext === 'pdf';
+      // For media/pdf, return base64; cap inline preview to 60 MB.
+      const MAX_INLINE = 60 * 1024 * 1024;
+      if ((isImage || isVideo || isAudio || isPdf) && s.size <= MAX_INLINE) {
+        const buf = await readFile(filePath);
+        const b64 = buf.toString('base64');
+        const mimeMap: Record<string,string> = {
+          png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', bmp:'image/bmp', ico:'image/x-icon', svg:'image/svg+xml',
+          mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime', avi:'video/x-msvideo', mkv:'video/x-matroska', m4v:'video/x-m4v',
+          mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', flac:'audio/flac', m4a:'audio/mp4', aac:'audio/aac', wma:'audio/x-ms-wma',
+          pdf:'application/pdf',
+        };
+        return { type: 'file', content: b64, size: s.size, isBinary: true, mimeType: mimeMap[ext] ?? 'application/octet-stream', encoding: 'base64' as const, mtime: s.mtimeMs };
+      }
+      if ((isImage || isVideo || isAudio || isPdf) && s.size > MAX_INLINE) {
+        return { type: 'file', content: '', size: s.size, isBinary: true, mimeType: 'application/octet-stream', tooLarge: true, mtime: s.mtimeMs };
+      }
       const content = await readFile(filePath, 'utf8');
-      return { type: 'file', content, size: s.size };
+      return { type: 'file', content, size: s.size, isBinary: false, mtime: s.mtimeMs };
     } catch (e) {
       return { error: (e as Error).message };
     }
@@ -526,21 +568,45 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     }
   });
   ipcMain.handle(IPC.FILE_MKDIR, async (_e, { path: filePath }: { path: string }) => {
-    const { mkdir } = await import('node:fs/promises');
-    await mkdir(filePath, { recursive: true });
-    return { ok: true };
+    try {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(filePath, { recursive: true });
+      return { ok: true };
+    } catch (e) { return { error: (e as Error).message }; }
   });
   ipcMain.handle(IPC.FILE_DELETE, async (_e, { path: filePath }: { path: string }) => {
-    const { rm } = await import('node:fs/promises');
-    await rm(filePath, { recursive: true, force: true });
-    return { ok: true };
+    try {
+      const { rm } = await import('node:fs/promises');
+      await rm(filePath, { recursive: true, force: true });
+      return { ok: true };
+    } catch (e) { return { error: (e as Error).message }; }
   });
   ipcMain.handle(IPC.FILE_RENAME, async (_e, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
-    const { mkdir, rename } = await import('node:fs/promises');
-    const { dirname } = await import('node:path');
-    await mkdir(dirname(newPath), { recursive: true });
-    await rename(oldPath, newPath);
-    return { ok: true };
+    try {
+      const { mkdir, rename } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      await mkdir(dirname(newPath), { recursive: true });
+      await rename(oldPath, newPath);
+      return { ok: true };
+    } catch (e) { return { error: (e as Error).message }; }
+  });
+  ipcMain.handle(IPC.FILE_COPY, async (_e, { src, dest }: { src: string; dest: string }) => {
+    try {
+      const { cp, mkdir, stat } = await import('node:fs/promises');
+      const { dirname } = await import('node:path');
+      await mkdir(dirname(dest), { recursive: true });
+      const s = await stat(src);
+      if (s.isDirectory()) await cp(src, dest, { recursive: true });
+      else await cp(src, dest);
+      return { ok: true };
+    } catch (e) { return { error: (e as Error).message }; }
+  });
+  ipcMain.handle(IPC.FILE_STAT, async (_e, { path: filePath }: { path: string }) => {
+    try {
+      const { stat } = await import('node:fs/promises');
+      const s = await stat(filePath);
+      return { ok: true, size: s.size, mtime: s.mtimeMs, isDirectory: s.isDirectory(), isFile: s.isFile() };
+    } catch (e) { return { error: (e as Error).message }; }
   });
   ipcMain.handle(
     IPC.TERMINAL_EXECUTE,
@@ -774,6 +840,100 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.ORCHESTRATOR_STATUS, async (_e, { taskId }: { taskId?: string }) => {
     if (taskId) return orchestrator.getTask(taskId);
     return orchestrator.getActiveTasks();
+  });
+
+  // ── Crew IPC (multi-agent + multi-model orchestration) ─────────────────
+  ipcMain.handle(IPC.CREW_START, async (_e, { prompt, displayPrompt, sessionId, cwd, provider, model, agents, provider2, model2 }) => {
+    const win = getMainWindow();
+    if (!win) throw new Error('No window');
+
+    await sessionStore.appendMessage(sessionId, {
+      id: uuid(),
+      role: 'user',
+      content: [{ type: 'text', text: displayPrompt ?? prompt }],
+      timestamp: Date.now(),
+    });
+
+    // Gather provider keys (only providers the user actually configured).
+    const available = new Map<string, { apiKey?: string; baseUrl?: string }>();
+    for (const p of listProviders()) {
+      const key = await getApiKey(p.id).catch(() => undefined);
+      if (key) available.set(p.id, { apiKey: key });
+    }
+    // Always include the current provider (it must at least hold the leader).
+    const curKey = await getApiKey(provider ?? '').catch(() => undefined);
+    if (provider && !available.has(provider) && (curKey || provider === 'ollama' || provider === 'opencode')) {
+      available.set(provider, { apiKey: curKey });
+    }
+    // The paired model's provider must be reachable too — keyless providers
+    // (ollama/opencode) join without a key, keyed providers require their key.
+    if (provider2 && !available.has(provider2)) {
+      const p2key = await getApiKey(provider2).catch(() => undefined);
+      if (p2key || provider2 === 'ollama' || provider2 === 'opencode') {
+        available.set(provider2, { apiKey: p2key });
+      }
+    }
+
+    const leader: { provider: string; model: string; free: boolean } = {
+      provider: provider ?? 'openrouter',
+      model: model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      free: false,
+    };
+    try {
+      const adapter = providerRegistry[leader.provider];
+      leader.free = adapter?.freeModels.some((m) => m.id === leader.model && m.free) ?? false;
+    } catch { /* best-effort */ }
+
+    const plan = buildCrewPlan(prompt, leader, available, agents?.length ? agents : undefined, provider2 && model2 ? { provider: provider2, model: model2 } : undefined);
+    const sink = (e: CrewEvent) => {
+      win.webContents.send(IPC.CREW_EVENT, { sessionId, ...e });
+    };
+
+    runCrew(plan, {
+      prompt,
+      sessionId,
+      cwd,
+      parentHistory: await sessionStore.loadMessages(sessionId).catch(() => []),
+      sink,
+    }).then(async (run) => {
+      // Persist the final leader answer into the transcript.
+      if (!(await sessionStore.loadSessionMeta(sessionId))) return;
+      if (!run.report?.leaderResult) return;
+      const memberLines = run.report.memberReports
+        .filter((m) => m.result)
+        .map((m) => `- ${m.role}: ${(m.result ?? '').slice(0, 300)}`)
+        .join('\n');
+      const fallbackLines = run.report.fallbacks.length
+        ? `\n\nModel fallbacks used:\n${run.report.fallbacks.map((f) => `- ${f}`).join('\n')}`
+        : '';
+      await sessionStore.appendMessage(sessionId, {
+        id: uuid(),
+        role: 'assistant',
+        content: [{ type: 'text', text: `${run.report.leaderResult}${memberLines ? `\n\nCrew summary:\n${memberLines}` : ''}${fallbackLines}` }],
+        timestamp: Date.now(),
+      });
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      win.webContents.send(IPC.CREW_EVENT, {
+        sessionId,
+        type: 'crew_failed',
+        runId: 'unknown',
+        data: { summary: `Crew crashed before completion: ${message}`, fallbacks: [], unresolved: [] },
+      });
+    });
+
+    const pairedMember = provider2 && model2 ? plan.members.find((m) => m.role === 'Collaborator') ?? null : null;
+    return {
+      runId: null,
+      strategy: plan.strategy,
+      members: plan.members.map((m) => ({ role: m.role, agentType: m.agentType, provider: m.assignment.provider, model: m.assignment.model })),
+      leader,
+      paired: pairedMember ? { role: pairedMember.role, provider: pairedMember.assignment.provider, model: pairedMember.assignment.model } : null,
+    };
+  });
+
+  ipcMain.handle(IPC.CREW_STATUS, async () => {
+    return listCrewRuns();
   });
 
   // Model Selector IPC

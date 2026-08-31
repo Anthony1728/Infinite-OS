@@ -27,10 +27,9 @@ const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ d
 const MultiAgentView = lazy(() => import('../views/MultiAgentView').then(m => ({ default: m.MultiAgentView })));
 const OSHomeView = lazy(() => import('../views/OSHomeView').then(m => ({ default: m.OSHomeView })));
 const PluginStoreView = lazy(() => import('../views/PluginStoreView').then(m => ({ default: m.PluginStoreView })));
-// Classic (original-look) variants shown when the Classic UI theme is active.
-const AutomationViewClassic = lazy(() => import('../views/AutomationViewClassic').then(m => ({ default: m.AutomationView })));
+// Classic (original-look) variant kept for Home only. Automations + Plugin Marketplace
+// now always use the modern UI blended into classic (per user request).
 const OSHomeViewClassic = lazy(() => import('../views/OSHomeViewClassic').then(m => ({ default: m.OSHomeView })));
-const PluginStoreViewClassic = lazy(() => import('../views/PluginStoreViewClassic').then(m => ({ default: m.PluginStoreView })));
 const TaskReplayView = lazy(() => import('../views/TaskReplayView').then(m => ({ default: m.TaskReplayView })));
 const TestView = lazy(() => import('../views/TestView').then(m => ({ default: m.TestView })));
 const VideoView = lazy(() => import('../views/VideoView').then(m => ({ default: m.VideoView })));
@@ -87,7 +86,9 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
           </div>
         );
       case 'automations':
-        return classic ? <AutomationViewClassic /> : <AutomationView />;
+        // Original Infinite OS look: always use the modern Automations UI
+        // blended into classic via CSS variables — replaces the classic variant.
+        return <AutomationView />;
       case 'memory':
         return <MemoryPanel onClose={() => onViewChange('chats')} />;
       case 'workspace':
@@ -116,7 +117,9 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
       case 'callcenter':
         return <CallCenterView />;
       case 'plugins':
-        return classic ? <PluginStoreViewClassic /> : <PluginStoreView />;
+        // Original Infinite OS look: modern Plugin Marketplace blended to classic
+        // palette — replaces the classic variant as requested.
+        return <PluginStoreView />;
       case 'app-builder':
         return <AppBuilderView />;
       case 'website-builder':

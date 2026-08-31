@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import type { AiWorkspaceTab, TabSection, TabMetric, TabChartData, TabTableData } from '../../stores/aiTabs';
 import { useChatStore } from '../../stores/chat';
+import { useAiTabsStore } from '../../stores/aiTabs';
 
 interface DynamicTabViewProps {
   tab: AiWorkspaceTab;
@@ -14,6 +15,32 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
     onViewChange('chats');
     void sendMessage(prompt);
   };
+
+  const isBrowserTab = tab.kind === 'website' || tab.kind === 'embed';
+  const initialUrl = (tab.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined;
+  const htmlIsUrl = typeof tab.htmlContent === 'string' && /^https?:\/\//i.test(tab.htmlContent.trim());
+  const shouldShowBrowser = isBrowserTab && (htmlIsUrl || typeof initialUrl === 'string');
+
+  if (shouldShowBrowser) {
+    return (
+      <div className="flex h-full min-h-0 bg-[#080a10]">
+        <div className="flex-1 min-w-0 flex flex-col">
+          <TabHeader tab={tab} compact />
+          <WebsiteBrowser tab={tab} />
+          {tab.filePath && (
+            <div className="mx-6 mb-4 rounded-lg border border-white/[0.07] bg-[#0c1018] p-3 flex items-center gap-3">
+              <span className="text-sm">📁</span>
+              <div className="text-xs text-zinc-400">Generated file</div>
+              <div className="text-xs text-zinc-200 font-mono truncate">{tab.filePath}</div>
+            </div>
+          )}
+        </div>
+        <aside className="hidden lg:flex w-[280px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0d14] p-4">
+          <TabActions tab={tab} onAction={continueInChat} />
+        </aside>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-[#080a10]">
@@ -30,7 +57,12 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
               ))}
             </div>
           )}
-          {tab.htmlContent && <HtmlBlock html={tab.htmlContent} />}
+          {tab.htmlContent && !htmlIsUrl && <HtmlBlock html={tab.htmlContent} />}
+          {htmlIsUrl && (
+            <div className="mt-4">
+              <WebsiteBrowser tab={tab} embedded />
+            </div>
+          )}
           {!tab.htmlContent && !tab.sections && !tab.chartData && !tab.tableData && !tab.metrics && (
             <div className="mt-4 rounded-xl border border-white/[0.07] bg-[#0c1018] p-5 shadow-[0_16px_44px_rgba(0,0,0,.22)]">
               <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-zinc-300">{tab.content}</pre>
@@ -54,7 +86,20 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
   );
 }
 
-function TabHeader({ tab }: { tab: AiWorkspaceTab }) {
+function TabHeader({ tab, compact }: { tab: AiWorkspaceTab; compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="px-6 pt-5 pb-3 border-b border-white/[0.06] bg-[#0c1018]/50 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{tab.icon || '🌐'}</span>
+          <span className="text-[10px] uppercase tracking-[0.18em]" style={{ color: tab.color || '#22d3ee' }}>{tab.kind}</span>
+          <span className="text-xs text-zinc-600">•</span>
+          <span className="text-xs text-zinc-500 truncate">{tab.title}</span>
+        </div>
+        <h2 className="mt-1 text-sm font-semibold text-zinc-100 truncate">{tab.title}</h2>
+      </div>
+    );
+  }
   return (
     <div className="mb-5 flex items-start justify-between gap-4">
       <div>
@@ -66,6 +111,136 @@ function TabHeader({ tab }: { tab: AiWorkspaceTab }) {
         </div>
         <h1 className="mt-1.5 text-2xl font-semibold text-zinc-100 tracking-[-0.02em]">{tab.title}</h1>
         <p className="mt-1.5 max-w-2xl text-sm text-zinc-500">{tab.prompt}</p>
+      </div>
+    </div>
+  );
+}
+
+function WebsiteBrowser({ tab, embedded }: { tab: AiWorkspaceTab; embedded?: boolean }) {
+  const updateTab = useAiTabsStore((s) => s.updateTab);
+  const metaUrl = (tab.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined;
+  const initial = metaUrl || (tab.htmlContent && /^https?:\/\//i.test(tab.htmlContent.trim()) ? tab.htmlContent.trim() : 'https://www.google.com');
+  const [url, setUrl] = useState(initial);
+  const [inputUrl, setInputUrl] = useState(initial);
+  const [history, setHistory] = useState<string[]>([initial]);
+  const [hIdx, setHIdx] = useState(0);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // AI can navigate by updating tab.htmlContent / metadata.browserUrl
+  useEffect(() => {
+    const newUrl = (tab.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined;
+    const htmlUrl = tab.htmlContent && /^https?:\/\//i.test(tab.htmlContent.trim()) ? tab.htmlContent.trim() : null;
+    const target = newUrl || htmlUrl;
+    if (target && target !== url) {
+      setUrl(target);
+      setInputUrl(target);
+      setHistory((prev) => {
+        const next = prev.slice(0, hIdx + 1);
+        next.push(target);
+        return next.slice(-30);
+      });
+      setHIdx((prev) => Math.min(prev + 1, 29));
+    }
+  }, [tab.htmlContent, (tab.metadata as Record<string, unknown> | undefined)?.browserUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const navigate = useCallback((nextUrl: string) => {
+    let target = nextUrl.trim();
+    if (!target) return;
+    if (!/^https?:\/\//i.test(target)) {
+      if (/^[\w-]+(\.[\w-]+)+/.test(target)) target = 'https://' + target;
+      else target = 'https://www.google.com/search?q=' + encodeURIComponent(target);
+    }
+    setUrl(target);
+    setInputUrl(target);
+    setHistory((prev) => {
+      const next = prev.slice(0, hIdx + 1);
+      next.push(target);
+      return next.slice(-30);
+    });
+    setHIdx((prev) => Math.min(prev + 1, 29));
+    // Persist so AI sees the new URL and user can return
+    updateTab(tab.id, { htmlContent: target, metadata: { ...(tab.metadata || {}), browserUrl: target } });
+  }, [hIdx, tab.id, tab.metadata, updateTab]);
+
+  const goBack = useCallback(() => {
+    if (hIdx > 0) {
+      const nextIdx = hIdx - 1;
+      setHIdx(nextIdx);
+      const target = history[nextIdx];
+      setUrl(target);
+      setInputUrl(target);
+    } else {
+      try { iframeRef.current?.contentWindow?.history.back(); } catch {}
+    }
+  }, [hIdx, history]);
+
+  const goForward = useCallback(() => {
+    if (hIdx < history.length - 1) {
+      const nextIdx = hIdx + 1;
+      setHIdx(nextIdx);
+      const target = history[nextIdx];
+      setUrl(target);
+      setInputUrl(target);
+    } else {
+      try { iframeRef.current?.contentWindow?.history.forward(); } catch {}
+    }
+  }, [hIdx, history]);
+
+  const reload = useCallback(() => {
+    const src = iframeRef.current?.src;
+    if (iframeRef.current && src) iframeRef.current.src = src;
+  }, []);
+
+  const lastBrowserActionRef = useRef<number>(0);
+  useEffect(() => {
+    const meta = tab.metadata as Record<string, unknown> | undefined;
+    const action = meta?.browserAction as string | undefined;
+    const at = meta?.at as number | undefined;
+    if (!action || !at || at === lastBrowserActionRef.current) return;
+    lastBrowserActionRef.current = at;
+    if (action === 'back') goBack();
+    else if (action === 'forward') goForward();
+    else if (action === 'reload') reload();
+  }, [tab.metadata, goBack, goForward, reload]);
+
+  const openExternal = useCallback(() => {
+    window.open(url, '_blank');
+  }, [url]);
+
+  return (
+    <div className={embedded ? 'rounded-xl overflow-hidden border border-white/[0.07] bg-[#0c1018]' : 'flex-1 min-h-0 flex flex-col bg-[#0c1018]'}>
+      <div className="flex items-center gap-1.5 px-2 py-2 border-b border-white/[0.06] bg-[#0b1018]">
+        <button onClick={goBack} disabled={hIdx <= 0} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Back">‹</button>
+        <button onClick={goForward} disabled={hIdx >= history.length - 1} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Forward">›</button>
+        <button onClick={reload} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100" title="Reload">↻</button>
+        <div className="flex-1 flex items-center gap-2 bg-black/30 border border-white/[0.07] rounded-full px-3 py-1.5">
+          <span className="text-[10px] text-emerald-400">●</span>
+          <input
+            value={inputUrl}
+            onChange={(e) => setInputUrl(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') navigate(inputUrl); }}
+            placeholder="Search or enter URL — AI can control this browser too"
+            className="flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-500 outline-none"
+          />
+          <button onClick={() => navigate(inputUrl)} className="text-[10px] font-medium text-cyan-300 hover:text-cyan-200">Go</button>
+        </div>
+        <button onClick={openExternal} className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-[11px] text-zinc-400 hover:text-zinc-100" title="Open in external Chrome">↗</button>
+        <span className="hidden sm:inline text-[10px] text-zinc-600 border border-white/[0.06] rounded-full px-2 py-1">AI controllable</span>
+      </div>
+      <div className={embedded ? 'h-[520px] bg-white' : 'flex-1 min-h-0 bg-white relative'}>
+        <iframe
+          ref={iframeRef}
+          src={url}
+          title={tab.title}
+          className="w-full h-full border-0 bg-white"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+          allow="fullscreen; clipboard-read; clipboard-write"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      </div>
+      <div className="px-3 py-1.5 bg-[#0b1018] border-t border-white/[0.06] flex items-center justify-between">
+        <span className="text-[11px] text-zinc-500 truncate">{url}</span>
+        <span className="text-[10px] text-zinc-600 hidden sm:inline">Tab as browser — AI uses this via TabBrowser tool • You can type, back, forward too</span>
       </div>
     </div>
   );
@@ -239,9 +414,50 @@ function SectionBlock({ section }: { section: TabSection }) {
       ) : section.type === 'chart' && section.data ? (
         <ChartSection data={section.data as unknown as TabChartData} title={section.title} />
       ) : section.type === 'image' ? (
-        <div className="text-sm text-zinc-400 italic">Image: {section.content}</div>
-      ) : section.type === 'embed' ? (
-        <div className="text-sm text-zinc-400 italic">Embedded content: {section.content}</div>
+        (() => {
+          const src = section.content.trim();
+          const isUrl = /^https?:\/\//i.test(src) || src.startsWith('data:image');
+          return isUrl ? (
+            <img src={src} alt={section.title || 'Generated image'} className="w-full rounded-lg border border-white/[0.07] max-h-[520px] object-contain bg-black/20" />
+          ) : (
+            <div className="text-sm text-zinc-400 italic">Image: {section.content}</div>
+          );
+        })()
+      ) : section.type === 'embed' || section.type === 'website' ? (
+        (() => {
+          const src = section.content.trim();
+          const isUrl = /^https?:\/\//i.test(src);
+          return isUrl ? (
+            <iframe src={src} title={section.title || 'Embedded content'} className="w-full h-[420px] rounded-lg border border-white/[0.07] bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" allow="fullscreen" />
+          ) : section.data && typeof (section.data as Record<string, unknown>).url === 'string' ? (
+            <iframe src={String((section.data as Record<string, unknown>).url)} title={section.title || 'Embedded content'} className="w-full h-[420px] rounded-lg border border-white/[0.07] bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" allow="fullscreen" />
+          ) : (
+            <div className="text-sm text-zinc-400 italic">Embedded content: {section.content}</div>
+          );
+        })()
+      ) : section.type === 'video' ? (
+        (() => {
+          const src = section.content.trim();
+          const isUrl = /^https?:\/\//i.test(src);
+          return isUrl ? (
+            <video src={src} controls className="w-full rounded-lg border border-white/[0.07] max-h-[420px] bg-black" />
+          ) : (
+            <div className="text-sm text-zinc-400 italic">Video: {section.content}</div>
+          );
+        })()
+      ) : section.type === 'media' ? (
+        (() => {
+          const src = section.content.trim();
+          const isUrl = /^https?:\/\//i.test(src);
+          const isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(src) || src.startsWith('data:image');
+          const isVideo = /\.(mp4|webm|mov)$/i.test(src);
+          if (isImage) return <img src={src} alt={section.title || 'Media'} className="w-full rounded-lg border border-white/[0.07] max-h-[520px] object-contain bg-black/20" />;
+          if (isVideo) return <video src={src} controls className="w-full rounded-lg border border-white/[0.07] bg-black" />;
+          if (isUrl) return <iframe src={src} title={section.title || 'Media'} className="w-full h-[420px] rounded-lg border border-white/[0.07] bg-white" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />;
+          return <div className="text-sm text-zinc-400">{section.content}</div>;
+        })()
+      ) : section.type === 'html' ? (
+        <HtmlBlock html={section.htmlContent || section.content} />
       ) : (
         <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-zinc-300">{section.content}</pre>
       )}
@@ -250,9 +466,21 @@ function SectionBlock({ section }: { section: TabSection }) {
 }
 
 function HtmlBlock({ html }: { html: string }) {
+  const sanitized = useMemo(() => {
+    let cleaned = html;
+    // Strip inline background styles that override Infinite OS theme
+    cleaned = cleaned.replace(/background(-color|-image)?:\s*[^;"]+;?/gi, '');
+    cleaned = cleaned.replace(/background:\s*[^;"]+;?/gi, '');
+    // Strip gradient patterns
+    cleaned = cleaned.replace(/linear-gradient\([^)]+\)/gi, 'transparent');
+    cleaned = cleaned.replace(/radial-gradient\([^)]+\)/gi, 'transparent');
+    // Strip background-image inline
+    cleaned = cleaned.replace(/style="[^"]*background[^"]*"/gi, 'style=""');
+    return cleaned;
+  }, [html]);
   return (
     <div className="mt-4 rounded-xl border border-white/[0.07] bg-[#0c1018] p-5 overflow-hidden">
-      <div dangerouslySetInnerHTML={{ __html: html }} />
+      <div dangerouslySetInnerHTML={{ __html: sanitized }} />
     </div>
   );
 }
@@ -315,6 +543,11 @@ function TabActions({ tab, onAction }: { tab: AiWorkspaceTab; onAction: (prompt:
     }
   }, [tab.kind, tab.prompt, tab.title]);
 
+  const allActions = useMemo(() => {
+    const custom = (tab.actions || []).map((a) => ({ label: a.label, prompt: a.prompt }));
+    return [...custom, ...actions];
+  }, [tab.actions, actions]);
+
   return (
     <>
       <div className="rounded-xl border p-4" style={{ borderColor: `${tab.color || '#22d3ee'}25`, background: `${tab.color || '#22d3ee'}08` }}>
@@ -324,9 +557,9 @@ function TabActions({ tab, onAction }: { tab: AiWorkspaceTab; onAction: (prompt:
         </p>
       </div>
       <div className="mt-3 space-y-1.5">
-        {actions.map((action) => (
+        {allActions.map((action) => (
           <button
-            key={action.label}
+            key={`${action.label}-${action.prompt.slice(0, 20)}`}
             onClick={() => onAction(action.prompt)}
             className="w-full rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2.5 text-left text-xs text-zinc-400 hover:border-cyan-400/25 hover:text-zinc-100 hover:bg-cyan-400/[0.035] transition-colors"
           >

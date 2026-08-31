@@ -1,6 +1,7 @@
 import type { Tool, ToolResult } from './base.js';
 import { getComputerAutomation } from '../automation/computer-automation.js';
 import { getAutomationDisplayState } from '../automation/display-policy.js';
+import { settings } from '../settings/store.js';
 
 const ACTIONS = [
   'mouse_click',
@@ -71,7 +72,22 @@ export const computerTool: Tool = {
       'type_text', 'key_press', 'hotkey', 'visual_click', 'visual_type', 'launch_app',
       'open_url', 'focus_window',
     ]);
-    if (display.mode === 'background' && foregroundActions.has(input.action)) {
+    // Never open a NEW Chrome window via Computer — always use browser_extension in the EXISTING Chrome.
+    // This is a hard product rule, even in Full System Access.
+    const isChromeLaunch = input.action === 'launch_app' && /chrome|edge|browser/i.test(String((input as Record<string, unknown>).app ?? (input as Record<string, unknown>).title ?? (input as Record<string, unknown>).name ?? ''));
+    const isBrowserOpenUrl = input.action === 'open_url';
+    if (isChromeLaunch || isBrowserOpenUrl) {
+      return {
+        content: `Never open Chrome via Computer (launch_app/open_url) — use browser_extension action=list_tabs or new_tab + navigate in the user's EXISTING Chrome. It is 10x faster and keeps their sessions. If browser_extension is disconnected, tell the user to reload it at chrome://extensions, then retry. For desktop apps like Notepad/VS Code, launch_app is fine.`,
+        is_error: true,
+      };
+    }
+    // Full system access has NO restrictions for true PC control — bypass the background guard.
+    // But browser Chrome is already blocked above, so this only affects Notepad, VS Code, etc.
+    const p = settings.get('permissionProfile') as string | undefined;
+    const m = settings.get('permissionMode') as string | undefined;
+    const isFullAccess = p === ':full-system-access' || p === 'fullSystemAccess' || p === 'full-system-access' || p === 'full_system_access' || m === 'fullSystemAccess' || m === 'bypassPermissions';
+    if (!isFullAccess && display.mode === 'background' && foregroundActions.has(input.action)) {
       return {
         content: `The ${input.action} action requires visible desktop control, but Infinite OS is in background automation mode. Use Operator for hidden browser/CDP work, use a direct API or shell/file tool, or ask the user to switch automation display to always-visible. Infinite OS kept focus.`,
         is_error: true,

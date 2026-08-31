@@ -3,6 +3,7 @@ import type { ProviderInfo } from '../../../shared/types';
 import { useNotificationStore } from '../../stores/notifications';
 import { useUIStore, type LogoStyle } from '../../stores/ui';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { useChatStore } from '../../stores/chat';
 
 const LOGO_STYLES: Array<{ id: LogoStyle; name: string; description: string }> = [
   { id: 'spectrum', name: 'Original Spectrum', description: 'The violet, cyan, and pink Infinite AI signature.' },
@@ -41,6 +42,54 @@ function loadCurrent(): CurrentSettings {
 function saveCurrent(patch: Partial<CurrentSettings>) {
   const current = loadCurrent();
   localStorage.setItem('infinite:current', JSON.stringify({ ...current, ...patch }));
+}
+
+function PhoneConnectCard() {
+  const [info, setInfo] = useState<{ url: string; qrDataUrl?: string; lanIp?: string; port?: number } | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await (window as unknown as { api?: { remotePhoneInfo?: () => Promise<unknown> } }).api?.remotePhoneInfo?.() as { url?: string; qrDataUrl?: string; lanIp?: string; port?: number } | undefined;
+        if (alive && res?.url) setInfo(res as never);
+      } catch { /* offline */ }
+    };
+    void load();
+    const id = window.setInterval(load, 8000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, []);
+  const url = info?.url ?? '';
+  return (
+    <div className="card-premium border-cyan-500/15">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-medium text-textMain flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-500 to-blue-500 text-white text-xs">◈</span>
+            Connect Your Phone
+          </h3>
+          <p className="text-xs text-textMuted mt-1 max-w-[560px]">Chat with your AI from anywhere on your network. Scan the QR or open the link on your phone — same Wi-Fi / LAN. Token-secured, no cloud.</p>
+        </div>
+        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/5 border border-white/10 px-2.5 py-1 text-[10px] text-textMuted">LAN only · 8766</span>
+      </div>
+      {url ? (
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          {info?.qrDataUrl ? <img src={info.qrDataUrl} alt="Phone QR" className="h-28 w-28 rounded-lg border border-white/10 bg-white p-1" /> : null}
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-wider text-textMuted/60">Phone URL</div>
+            <div className="mt-1 break-all font-mono text-xs text-textMain bg-black/20 border border-white/10 rounded-lg px-2.5 py-2">{url}</div>
+            <div className="mt-2 flex gap-2">
+              <button onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch {} }} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-textMain hover:bg-white/[0.07]">{copied ? 'Copied!' : 'Copy link'}</button>
+              <button onClick={() => window.open(url, '_blank')} className="rounded-lg bg-white text-black px-3 py-1.5 text-xs font-medium hover:bg-zinc-100">Open preview</button>
+            </div>
+            <p className="text-[10px] text-textMuted mt-2">Phone & PC must be on the same Wi-Fi/network (or VPN). If the page doesn't load, allow Infinite OS through Windows Firewall for port 8766.</p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-textMuted mt-3">Starting phone server… If this persists, check that Infinite OS is running and port 8766 is free.</p>
+      )}
+    </div>
+  );
 }
 
 export function SettingsView() {
@@ -339,6 +388,63 @@ export function SettingsView() {
             </div>
           )}
         </div>
+
+        {/* Self-Evolve — Infinite OS Lives */}
+        <div className="card-premium relative overflow-hidden border-purple-500/20">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-purple-600/10 via-cyan-500/10 to-pink-500/10" />
+          <div className="relative">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-medium text-textMain flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-cyan-500 text-white text-xs">✦</span>
+                  Self-Evolve — Infinite OS Lives
+                </h3>
+                <p className="text-xs text-textMuted mt-1 max-w-[560px]">
+                  One click: Infinite AI goes online, researches the best features from Claude, OpenCode, OpenClaw, Antigravity and every top app, finds what we're missing, and builds it into Infinite OS automatically — new tools, skills, automations, UI. Validated & checkpointed. Infinite OS improves itself.
+                </p>
+              </div>
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-medium text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Lives
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                onClick={async () => {
+                  const prompt = `SELF-EVOLVE Infinite OS now. Go online and research the latest best features from Claude, OpenCode, OpenClaw, Antigravity and other top AI workspace apps that Infinite OS does not have yet. Use WebSearch and WebFetch to read their changelogs, feature pages and docs, build a gap list, prioritize the most valuable missing features, then IMPLEMENT them directly into Infinite OS using BuildFeature (validated, checkpointed). Cover new tools, automations, UI polish, browser control, skills — anything that makes Infinite OS the best app that can do anything on the PC. Be bold, create what we lack. Report what you researched and what you built.`;
+                  try {
+                    await useChatStore.getState().sendMessage(prompt);
+                    useNotificationStore.getState().addToast({ title: 'Self-Evolve started', message: 'Infinite AI is researching and building — watch Chat for live progress.', type: 'success' });
+                    window.dispatchEvent(new CustomEvent('infinite:navigate', { detail: 'chats' }));
+                  } catch (e) {
+                    useNotificationStore.getState().addToast({ title: 'Self-Evolve', message: (e as Error).message, type: 'error' });
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-cyan-500 px-4 py-2 text-sm font-medium text-white shadow-[0_6px_18px_rgba(124,58,237,0.35)] hover:from-violet-500 hover:to-cyan-400 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09Z" /></svg>
+                Research & Evolve Now
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await (window as unknown as { api?: { selfImprovementAudit: (a:{cwd:string})=>Promise<unknown> } }).api?.selfImprovementAudit?.({ cwd: loadCurrent().cwd });
+                    const msg = typeof res === 'string' ? res : JSON.stringify(res, null, 2)?.slice(0, 4000);
+                    useNotificationStore.getState().addToast({ title: 'Health Audit done', message: msg?.slice(0, 300) ?? 'Done — see logs.', type: 'success' });
+                  } catch (e) {
+                    useNotificationStore.getState().addToast({ title: 'Audit failed', message: (e as Error).message, type: 'error' });
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-textMain hover:bg-white/[0.07]"
+              >
+                Quick Health Audit
+              </button>
+              <span className="text-[10px] text-textMuted">Uses WebSearch → WebFetch → BuildFeature. You can stop or talk to the AI mid-build in Chat.</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Connect Your Phone — Chat from anywhere on your network */}
+        <PhoneConnectCard />
 
         {/* AI Provider */}
         <div className="card-premium">

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ContentBlock, Message } from '../../../shared/types';
+import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
 import { inferExecutionMode, useChatStore, type ChatExecutionMode } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
@@ -16,60 +16,108 @@ import { QuizRenderer } from './QuizRenderer';
 import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
+import { useLayoutStore } from '../../stores/layout';
+import { useNotificationStore } from '../../stores/notifications';
 
-function InteractiveQuestion({ block, onAnswer }: { block: { question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }; onAnswer: (answer: string) => void }) {
-  const [customInput, setCustomInput] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+function InteractiveQuestion({ block, onAnswer }: { block: { question: string; header?: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string; multiple?: boolean }; onAnswer: (answer: string) => void }) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [customValue, setCustomValue] = useState('');
+  const [customSelected, setCustomSelected] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const isMultiple = !!(block as unknown as { multiple?: boolean }).multiple;
+  const header = (block as unknown as { header?: string }).header;
 
-  const handleSelect = (label: string) => {
-    setSelected(label);
-    onAnswer(label);
-  };
-
-  const handleCustomSubmit = () => {
-    if (customInput.trim()) {
-      onAnswer(customInput.trim());
+  const toggle = (label: string) => {
+    if (submitted) return;
+    if (isMultiple) {
+      setSelected((prev) => (prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label]));
+    } else {
+      setSelected([label]);
+      setCustomSelected(false);
     }
+  };
+  const handleCustomToggle = () => {
+    if (submitted) return;
+    const next = !customSelected;
+    setCustomSelected(next);
+    setShowCustomInput(next);
+    if (!isMultiple && next) setSelected([]);
+    if (!next) setCustomValue('');
+  };
+  const canSubmit = !submitted && (selected.length > 0 || (customSelected && customValue.trim().length > 0));
+  const submit = () => {
+    if (!canSubmit) return;
+    setSubmitted(true);
+    const parts: string[] = [];
+    if (selected.length > 0) parts.push(selected.join(', '));
+    if (customSelected && customValue.trim()) parts.push(customValue.trim());
+    onAnswer(parts.join(' | '));
   };
 
   return (
-    <div className="rounded-lg border border-white/10 bg-[#0c1018] p-4 space-y-3">
-      <p className="text-sm font-medium text-zinc-200">{block.question}</p>
-      <div className="space-y-2">
-        {block.options.map((opt, i) => (
-          <button
-            key={i}
-            onClick={() => handleSelect(opt.label)}
-            className={`w-full text-left px-3 py-2 rounded-md border text-sm transition-colors ${
-              selected === opt.label
-                ? 'border-indigo-400 bg-indigo-400/10 text-indigo-200'
-                : 'border-white/10 hover:border-white/20 hover:bg-white/5 text-zinc-300'
-            }`}
-          >
-            <span className="font-medium">{opt.label}</span>
-            {opt.description && <span className="text-zinc-500 ml-2">{opt.description}</span>}
-          </button>
-        ))}
-      </div>
-      {block.allowCustom !== false && (
-        <div className="flex gap-2 pt-1">
-          <input
-            type="text"
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleCustomSubmit()}
-            placeholder="Type your own answer..."
-            className="flex-1 px-3 py-2 rounded-md border border-white/10 bg-black/20 text-zinc-200 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-indigo-400/50"
-          />
-          <button
-            onClick={handleCustomSubmit}
-            disabled={!customInput.trim()}
-            className="px-3 py-2 rounded-md bg-indigo-500/15 border border-indigo-400/25 text-indigo-200 text-sm font-medium disabled:opacity-50"
-          >
-            Submit
-          </button>
+    <div className="my-3 rounded-2xl border border-white/[0.06] bg-[#0c1018]/80 backdrop-blur-xl overflow-hidden shadow-[0_12px_32px_rgba(0,0,0,.35)]">
+      <div className="px-4 pt-4 pb-3 border-b border-white/[0.05] bg-gradient-to-r from-violet-500/[0.06] via-cyan-500/[0.06] to-transparent">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-cyan-400 text-white text-[10px]">?</span>
+          <span className="text-[10px] font-semibold tracking-[0.14em] uppercase text-violet-300">{header || 'Question'}</span>
+          {isMultiple && <span className="ml-auto text-[10px] text-zinc-500 border border-white/10 rounded-full px-2 py-0.5">Multiple</span>}
         </div>
-      )}
+        <p className="mt-2 text-sm font-medium leading-6 text-zinc-100">{block.question}</p>
+      </div>
+      <div className="p-3 space-y-2">
+        {block.options.map((opt) => {
+          const isSelected = selected.includes(opt.label);
+          return (
+            <button
+              key={opt.label}
+              onClick={() => toggle(opt.label)}
+              disabled={submitted}
+              className={`w-full text-left rounded-xl border px-3 py-3 flex items-start gap-3 transition-all duration-150 ${isSelected ? 'bg-gradient-to-r from-violet-500/15 via-cyan-500/10 to-transparent border-violet-500/30 shadow-[0_4px_12px_rgba(139,92,246,.15)]' : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.09] hover:shadow-[0_4px_12px_rgba(0,0,0,.2)]'} ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors ${isSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-transparent'}`}>✓</span>
+              <span className="min-w-0 flex-1">
+                <span className={`block text-sm font-medium leading-5 ${isSelected ? 'text-violet-100' : 'text-zinc-200'}`}>{opt.label}</span>
+                {opt.description && <span className="block text-xs leading-5 text-zinc-500 mt-0.5">{opt.description}</span>}
+              </span>
+            </button>
+          );
+        })}
+        {block.allowCustom !== false && (
+          <>
+            <button
+              onClick={handleCustomToggle}
+              disabled={submitted}
+              className={`w-full text-left rounded-xl border px-3 py-3 flex items-center gap-3 transition-all ${customSelected ? 'bg-gradient-to-r from-violet-500/15 via-cyan-500/10 to-transparent border-violet-500/30' : 'bg-white/[0.02] border-dashed border-white/10 hover:bg-white/[0.04] hover:border-white/15'} ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] ${customSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-transparent'}`}>✓</span>
+              <span className={`text-sm ${customSelected ? 'text-violet-100 font-medium' : 'text-zinc-400'}`}>Type your own answer</span>
+              <span className="ml-auto text-xs text-zinc-600">Custom</span>
+            </button>
+            {showCustomInput && (
+              <textarea
+                value={customValue}
+                onChange={(e) => setCustomValue(e.target.value)}
+                disabled={submitted}
+                placeholder="Type your answer here..."
+                rows={2}
+                className="w-full rounded-xl bg-[#080a10] border border-white/[0.07] px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/30 focus:bg-[#0a0a14] transition-colors resize-none"
+                autoFocus
+              />
+            )}
+          </>
+        )}
+      </div>
+      <div className="px-3 pb-3 flex items-center justify-between">
+        <span className="text-[11px] text-zinc-600">{submitted ? 'Answered — continuing…' : isMultiple ? 'Select one or more, or type your own' : 'Select one or type your own'}</span>
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${canSubmit ? 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-[0_6px_16px_rgba(124,58,237,.3)] hover:from-violet-500 hover:to-cyan-400 active:scale-[0.98]' : 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'}`}
+        >
+          {submitted ? 'Sent ✓' : 'Submit'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -99,6 +147,13 @@ interface ImagePreview {
   data: string;
   mediaType: string;
   name: string;
+}
+interface FilePreview {
+  id: string;
+  data: string;
+  mimeType: string;
+  name: string;
+  size: number;
 }
 
 const SLASH_COMMANDS = [
@@ -296,7 +351,12 @@ function workspaceTabForPrompt(text: string): { kind: AiTabKind; title: string }
     return { kind: 'lesson', title: 'Learning Plan' };
   }
 
-  if (wantsTab) return { kind: 'workspace', title: 'AI Workspace' };
+  // Only create a generic workspace when the user explicitly wants to create/open one,
+  // not when they are searching for something that happens to contain the word "tab"
+  // e.g. "search for something to test tab" should run a search, not create a placeholder workspace
+  if (wantsTab && /\b(create|make|build|open|new|generate)\b/.test(lower)) {
+    return { kind: 'workspace', title: 'AI Workspace' };
+  }
   return null;
 }
 
@@ -674,29 +734,137 @@ function InputBar({
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [model2MenuOpen, setModel2MenuOpen] = useState(false);
+  const [model2Enabled, setModel2Enabled] = useState(false);
+  const [model2, setModel2] = useState('');
+  const [model2Label, setModel2Label] = useState('');
+  const [opponentModels, setOpponentModels] = useState<Array<{ id: string; label: string; provider: string }>>([]);
   const [uncensoredMode, setUncensoredMode] = useState(false);
   const [uncensoredConfirmOpen, setUncensoredConfirmOpen] = useState(false);
   const [images, setImages] = useState<ImagePreview[]>([]);
+  const [files, setFiles] = useState<FilePreview[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dictationPrefixRef = useRef('');
+  // Collapse low-priority controls when the notifications/activity panel is
+  // open so everything fits perfectly. The collapse is a smooth width/opacity
+  // fade — nothing jumps, nothing gets stuck.
+  const activityPanelOpen = useLayoutStore((s) => s.activityPanelOpen);
+
+  // ── Second model ("work together") optional pairing ─────────────────────
+  // Reads persist state on mount, syncs via the storage event.
+  useEffect(() => {
+    const read = () => {
+      try {
+        const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+        setModel2Enabled(Boolean(cur.secondModelEnabled));
+        setModel2(cur.model2 ?? '');
+        setModel2Label(cur.model2Label ?? '');
+      } catch { /* ignore */ }
+    };
+    read();
+    window.addEventListener('storage', read);
+    return () => window.removeEventListener('storage', read);
+  }, []);
+
+  const refreshOpponentModels = useCallback(async () => {
+    try {
+      const providers = (await window.api.listProviders()) as Array<ProviderInfo>;
+      const list: Array<{ id: string; label: string; provider: string }> = [];
+      // Only providers the user actually has access to: keyless ones are
+      // always available (ollama/opencode), key-requiring ones need the key.
+      const usable: typeof providers = [];
+      for (const p of providers) {
+        let hasAccess = true;
+        if (p.requiresApiKey) {
+          try {
+            hasAccess = (await window.api.hasProviderKey({ provider: p.id })) as boolean;
+          } catch {
+            hasAccess = false;
+          }
+        }
+        if (hasAccess) usable.push(p);
+      }
+      for (const p of usable) {
+        try {
+          const models = (await window.api.listProviderModels({ provider: p.id })) as Array<{ id: string; label?: string }>;
+          for (const m of models.slice(0, 40)) {
+            list.push({ id: m.id, label: m.label ?? m.id, provider: p.id });
+          }
+        } catch { /* provider may be unreachable — skip */ }
+        if (list.length > 120) break;
+      }
+      // De-duplicate by model id (same model may appear under several
+      // providers), keeping the first; sort by label for a stable list.
+      const seen = new Set<string>();
+      const deduped = list.filter((m) => {
+        if (seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+      });
+      setOpponentModels(deduped);
+    } catch { /* ignore */ }
+  }, []);
+
+  const persistModel2 = useCallback((patch: { enabled?: boolean; model2?: string; provider2?: string; model2Label?: string }) => {
+    try {
+      const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+      const mapped: Record<string, unknown> = {};
+      if (patch.enabled !== undefined) mapped.secondModelEnabled = patch.enabled;
+      if (patch.model2 !== undefined) mapped.model2 = patch.model2;
+      if (patch.provider2 !== undefined) mapped.provider2 = patch.provider2;
+      if (patch.model2Label !== undefined) mapped.model2Label = patch.model2Label;
+      const next = { ...cur, ...mapped };
+      localStorage.setItem('infinite:current', JSON.stringify(next));
+      window.dispatchEvent(new Event('storage'));
+    } catch { /* ignore */ }
+  }, []);
+
+  const mimeFromExt = useCallback((name: string): string => {
+    const ext = name.split('.').pop()?.toLowerCase() ?? '';
+    const map: Record<string,string> = {
+      pdf:'application/pdf', txt:'text/plain', md:'text/markdown', json:'application/json',
+      csv:'text/csv', js:'text/javascript', ts:'text/plain', py:'text/x-python',
+      html:'text/html', css:'text/css', doc:'application/msword',
+      docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xls:'application/vnd.ms-excel', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ppt:'application/vnd.ms-powerpoint', pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      zip:'application/zip', tar:'application/x-tar', gz:'application/gzip', rar:'application/x-rar-compressed',
+      mp3:'audio/mpeg', wav:'audio/wav', mp4:'video/mp4', mov:'video/quicktime',
+    };
+    return map[ext] ?? 'application/octet-stream';
+  }, []);
 
   const processFile = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) return;
+    const MAX_FILE_MB = 25;
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      try { useNotificationStore.getState().addToast({ title: 'File too large', message: `${file.name} is too large (max ${MAX_FILE_MB} MB)`, type: 'error' }); } catch {}
+      return;
+    }
+    const mime = file.type || mimeFromExt(file.name);
+    if (mime.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string | undefined;
+        const base64 = result?.split(',')[1];
+        if (!base64) return;
+        setImages((prev) => [...prev, { id: crypto.randomUUID(), data: base64, mediaType: mime, name: file.name }]);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+    // Any other file — attach as file block (base64)
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target?.result as string | undefined;
       const base64 = result?.split(',')[1];
       if (!base64) return;
-      setImages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), data: base64, mediaType: file.type, name: file.name },
-      ]);
+      setFiles((prev) => [...prev, { id: crypto.randomUUID(), data: base64, mimeType: mime, name: file.name, size: file.size }]);
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [mimeFromExt]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -708,30 +876,33 @@ function InputBar({
   const removeImage = useCallback((id: string) => {
     setImages((prev) => prev.filter((img) => img.id !== id));
   }, []);
+  const removeFile = useCallback((id: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+  }, []);
 
   const toImageBlocks = useCallback((): ContentBlock[] | undefined => {
-    if (images.length === 0) return undefined;
-    return images.map((img) => ({
-      type: 'image' as const,
-      source: { type: 'base64' as const, mediaType: img.mediaType, data: img.data },
-    }));
-  }, [images]);
+    const out: ContentBlock[] = [];
+    for (const img of images) out.push({ type: 'image' as const, source: { type: 'base64' as const, mediaType: img.mediaType, data: img.data } });
+    for (const f of files) out.push({ type: 'file' as const, name: f.name, mimeType: f.mimeType, data: f.data });
+    return out.length ? out : undefined;
+  }, [images, files]);
 
   const send = useCallback(() => {
-    if (!input.trim() && images.length === 0) return;
+    if (!input.trim() && images.length === 0 && files.length === 0) return;
     const blocks = toImageBlocks();
     onSend(input, blocks);
     setInput('');
     setImages([]);
+    setFiles([]);
     setShowSlashMenu(false);
     if (inputRef.current) inputRef.current.style.height = '';
-  }, [input, images, onSend, setInput, toImageBlocks, inputRef]);
+  }, [input, images, files, onSend, setInput, toImageBlocks, inputRef]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of Array.from(items)) {
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
+      if (item.kind === 'file') {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
@@ -760,6 +931,24 @@ function InputBar({
     if (!files) return;
     Array.from(files).forEach(processFile);
   }, [processFile]);
+
+  // Prevent Electron from navigating when a file is dropped outside the composer,
+  // and clear stuck drag overlay if the drag leaves the window.
+  useEffect(() => {
+    const onWindowDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    };
+    const onWindowDrop = (e: DragEvent) => e.preventDefault();
+    const onWindowDragEnd = () => setDragActive(false);
+    window.addEventListener('dragover', onWindowDragOver);
+    window.addEventListener('drop', onWindowDrop);
+    window.addEventListener('dragend', onWindowDragEnd);
+    return () => {
+      window.removeEventListener('dragover', onWindowDragOver);
+      window.removeEventListener('drop', onWindowDrop);
+      window.removeEventListener('dragend', onWindowDragEnd);
+    };
+  }, []);
   const {
     error: dictationError,
     interimTranscript,
@@ -964,7 +1153,7 @@ function InputBar({
         {dragActive && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-indigo-500/10">
             <span className="rounded-lg bg-[#0b101a]/90 px-3 py-1.5 text-xs font-medium text-indigo-300">
-              Drop images to attach
+              Drop files to attach — images, PDFs, docs, anything
             </span>
           </div>
         )}
@@ -988,7 +1177,7 @@ function InputBar({
           aria-label="Message Infinite OS"
           className="os-chat-textarea w-full min-h-[56px] max-h-40 overflow-y-auto bg-transparent text-textMain text-sm px-5 pt-4 pb-2 pr-4 outline-none resize-none placeholder:text-textMuted/50"
         />
-        {images.length > 0 && (
+        {(images.length > 0 || files.length > 0) && (
           <div className="flex flex-wrap gap-2 px-4 pt-1">
             {images.map((img) => (
               <div key={img.id} className="group relative">
@@ -1010,13 +1199,21 @@ function InputBar({
                 </button>
               </div>
             ))}
+            {files.map((f) => (
+              <div key={f.id} className="group relative flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+                <svg className="h-4 w-4 flex-shrink-0 text-zinc-400" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.5 1.5 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+                <span className="max-w-[120px] truncate text-[11px] text-zinc-300" title={f.name}>{f.name}</span>
+                <span className="text-[9px] text-zinc-500">{(f.size / 1024).toFixed(f.size < 10240 ? 1 : 0)} KB</span>
+                <button type="button" onClick={() => removeFile(f.id)} aria-label={`Remove ${f.name}`} className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-zinc-400 hover:text-white"><svg className="h-2 w-2" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button>
+              </div>
+            ))}
           </div>
         )}
         <div className="mt-auto flex flex-wrap items-center gap-2 px-4 pb-3 pt-2">
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="*/*"
             multiple
             onChange={handleFileChange}
             className="hidden"
@@ -1024,8 +1221,8 @@ function InputBar({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach an image"
-            title="Attach an image — paste or drag-drop also works"
+            aria-label="Attach a file"
+            title="Attach any file — images, PDFs, docs, code, anything. Drag-drop also works."
             className="flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-white/[0.08] text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-200"
           >
             <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
@@ -1201,6 +1398,114 @@ function InputBar({
               </svg>
             </button>
           </div>
+          <div className="relative ml-1">
+            {model2MenuOpen && (
+              <div className="absolute bottom-10 left-0 z-50 w-72 overflow-hidden rounded-lg bg-[#101521] p-1 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    persistModel2({ enabled: false });
+                    setModel2Enabled(false);
+                    setModel2MenuOpen(false);
+                    inputRef.current?.focus();
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                    !model2Enabled ? 'os-mode-menu-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                  }`}
+                  aria-pressed={!model2Enabled}
+                >
+                  <svg className="h-3.5 w-3.5 flex-none text-zinc-500" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m6-6H6" />
+                  </svg>
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-medium">Single model</span>
+                    <span className="block truncate text-[9px] text-zinc-600">Run with the selected model only</span>
+                  </span>
+                  {!model2Enabled && <span className="ml-auto h-1.5 w-1.5 flex-none rounded-full bg-cyan-400 shadow-[0_0_7px_rgba(34,211,238,.8)]" />}
+                </button>
+                <div className="mx-1 my-1 border-t border-white/[0.06]" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshOpponentModels();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[9px] font-medium text-cyan-300/80 transition-colors hover:bg-white/[0.05]"
+                >
+                  <svg className="h-3 w-3 flex-none" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                  </svg>
+                  Refresh model list
+                </button>
+                <div className="max-h-56 overflow-y-auto custom-scrollbar">
+                  {opponentModels.length === 0 && (
+                    <div className="px-2 py-2 text-[9px] text-zinc-600">Loading models across your providers…</div>
+                  )}
+                  {opponentModels.map((m) => {
+                    const isSelected = model2Enabled && model2 === m.id;
+                    return (
+                      <button
+                        key={`${m.provider}/${m.id}`}
+                        type="button"
+                        onClick={() => {
+                          persistModel2({ enabled: true, model2: m.id, provider2: m.provider, model2Label: m.label });
+                          setModel2Enabled(true);
+                          setModel2(m.id);
+                          setModel2Label(m.label);
+                          setModel2MenuOpen(false);
+                          inputRef.current?.focus();
+                        }}
+                        className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left transition-colors ${
+                          isSelected ? 'os-mode-menu-active text-zinc-100' : 'text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-100'
+                        }`}
+                        aria-pressed={isSelected}
+                      >
+                        <span className="flex h-4 w-5 flex-none items-center justify-center text-[8px] font-bold uppercase text-cyan-300/70">
+                          {m.provider.slice(0, 2)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[10px] font-medium">{m.label}</span>
+                          <span className="block truncate text-[9px] text-zinc-600">{m.provider}</span>
+                        </span>
+                        {isSelected && <span className="ml-auto h-1.5 w-1.5 flex-none rounded-full bg-cyan-400 shadow-[0_0_7px_rgba(34,211,238,.8)]" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mx-1 my-1 border-t border-white/[0.06]" />
+                <div className="px-2 py-1.5 text-[9px] leading-relaxed text-zinc-600">
+                  With two models, the leader you picked runs the show and your chosen second model joins as a specialist — faster, higher quality, still optional.
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setModel2MenuOpen((open) => !open);
+                setModeMenuOpen(false);
+                setAgentMenuOpen(false);
+                void refreshOpponentModels();
+              }}
+              className={`os-toolbar-collapse flex items-center gap-2 h-8 px-2 rounded-lg text-[10px] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.035] ${activityPanelOpen ? 'is-collapsed' : ''}`}
+              aria-expanded={model2MenuOpen}
+              aria-label={model2Enabled ? `Paired model: ${model2Label || model2}` : 'Pair a second model (optional)'}
+              title="Optional: pair a second model to work together"
+            >
+              <svg className={`h-3.5 w-3.5 flex-none ${model2Enabled ? 'text-cyan-300' : 'text-zinc-500'}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                {model2Enabled ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 2.25 2.25 7.5 12 12.75l9.75-5.25L12 2.25Zm0 10.5v9M18.75 11.75V21c0 .69-1.5 1.25-6.75 1.25s-6.75-.56-6.75-1.25v-9.25" />
+                ) : (
+                  <>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12 3 12m0 0 4.5-4.5M3 12l4.5 4.5M9 18l6 0a3 3 0 0 0 3-3l0-6a3 3 0 0 0-3-3l-6 0" />
+                  </>
+                )}
+              </svg>
+              {model2Enabled ? '2 models' : 'Pair model'}
+              <svg className={`h-3 w-3 text-zinc-700 transition-transform ${model2MenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+
           <div className="flex-1" />
           <div className="relative flex items-center gap-1.5">
             {(isListening || dictationError) && (
@@ -1220,7 +1525,8 @@ function InputBar({
               aria-pressed={isListening}
               aria-label={isListening ? 'Stop standalone dictation' : 'Start standalone dictation'}
               title={isSupported ? 'Standalone speech-to-text — no chat model is used' : 'Speech-to-text is unavailable on this system'}
-              className={`os-dictation-button flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] transition-all ${isListening ? 'is-listening' : ''}`}
+              className={`os-toolbar-collapse os-dictation-button flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] ${isListening ? 'is-listening' : ''} ${activityPanelOpen ? 'is-collapsed' : ''}`}
+              style={undefined}
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 15.75a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6.75a3 3 0 0 0 3 3Zm6-4.5v1.5a6 6 0 0 1-12 0v-1.5M12 18.75v3" />
@@ -1246,7 +1552,8 @@ function InputBar({
             onClick={async () => { await window.api.miniToggle(); }}
             aria-label="Toggle mini mode"
             title="Mini mode — float a chat bar on your desktop"
-            className="w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]"
+            className={`os-toolbar-collapse w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04] ${activityPanelOpen ? 'is-collapsed' : ''}`}
+            style={undefined}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />

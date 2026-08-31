@@ -68,6 +68,13 @@ export interface Session {
   folder?: string;
   parent_session_id?: string;
   branch_message_id?: string;
+  // OpenClaw session enhancements
+  dmScope?: 'main' | 'per-peer' | 'per-channel-peer' | 'per-account-channel-peer';
+  groupScope?: 'per-group' | 'main';
+  resetMode?: 'none' | 'daily' | 'idle';
+  resetAtHour?: number;
+  resetIdleMinutes?: number;
+  incognito?: boolean;
 }
 
 export interface ModelInfo {
@@ -104,4 +111,295 @@ export interface EngineStatus {
   thresholdMet: boolean;
   startedAt: number;
   lastInteractionAt: number;
+}
+
+// ============ OpenClaw Gateway/Node Types ============
+
+export type NodePlatform = 'ios' | 'watchos' | 'android' | 'macos' | 'windows' | 'linux' | 'unknown';
+
+export type NodeRole = 'node' | 'operator' | 'mixed';
+
+export interface NodeCommand {
+  name: string;
+  description?: string;
+  platform?: NodePlatform;
+  dangerous?: boolean;
+  privacyHeavy?: boolean;
+}
+
+export interface NodeInfo {
+  id: string;
+  name: string;
+  platform: NodePlatform;
+  role: NodeRole;
+  displayName?: string;
+  connected: boolean;
+  lastSeen: number;
+  commands: string[];
+  capabilities: string[];
+  clientInstanceId?: string;
+  deviceId?: string;
+  version?: string;
+}
+
+export interface DevicePairingRequest {
+  requestId: string;
+  deviceId: string;
+  deviceName: string;
+  role: NodeRole;
+  requestedCommands: string[];
+  requestedScopes: string[];
+  createdAt: number;
+  expiresAt: number;
+  publicKey: string;
+  platform: NodePlatform;
+}
+
+export interface DeviceIdentity {
+  deviceId: string;
+  publicKey: string;
+  privateKey: string;
+  createdAt: number;
+  roles: NodeRole[];
+  approvedCommands: string[];
+}
+
+// Media types
+export type MediaKind = 'image' | 'audio' | 'video' | 'document';
+
+export interface MediaAttachment {
+  kind: MediaKind;
+  path?: string;
+  url?: string;
+  contentType?: string;
+  filename?: string;
+  size?: number;
+  caption?: string;
+  // WhatsApp specific
+  gifPlayback?: boolean;
+  forceDocument?: boolean;
+  // Voice note
+  ptt?: boolean;
+}
+
+export interface MediaLimits {
+  imageMaxMb: number;
+  audioVideoMaxMb: number;
+  documentMaxMb: number;
+  // Understanding caps
+  imageUnderstandingMaxMb: number;
+  audioUnderstandingMaxMb: number;
+  videoUnderstandingMaxMb: number;
+}
+
+export interface MediaUnderstandingResult {
+  kind: MediaKind;
+  description?: string;
+  transcript?: string;
+  ipaTags?: string[];
+  error?: string;
+}
+
+// Session routing
+export type DmScope = 'main' | 'per-peer' | 'per-channel-peer' | 'per-account-channel-peer';
+export type GroupScope = 'per-group' | 'main';
+export type ResetMode = 'none' | 'daily' | 'idle';
+
+export interface SessionRoutingConfig {
+  dmScope: DmScope;
+  groupScope: GroupScope;
+  identityLinks?: Record<string, string>;
+  reset: {
+    mode: ResetMode;
+    atHour?: number;
+    idleMinutes?: number;
+    resetByType?: Record<string, { mode: ResetMode; atHour?: number; idleMinutes?: number }>;
+    resetByChannel?: Record<string, { mode: ResetMode; atHour?: number; idleMinutes?: number }>;
+  };
+  maintenance: {
+    mode: 'enforce' | 'warn';
+    pruneAfter: string;
+    archiveDashboardAfter: string;
+    maxEntries: number;
+    preserveRecent?: string;
+  };
+}
+
+// Streaming
+export type BlockStreamingBreak = 'text_end' | 'message_end';
+export type BlockStreamingDefault = 'on' | 'off';
+export type ChunkMode = 'length' | 'newline';
+export type StreamingMode = 'off' | 'partial' | 'block' | 'progress';
+export type HumanDelayMode = 'off' | 'natural' | 'custom';
+
+export interface BlockStreamingConfig {
+  default: BlockStreamingDefault;
+  break: BlockStreamingBreak;
+  chunk: { minChars: number; maxChars: number; breakPreference?: 'paragraph' | 'newline' | 'sentence' | 'whitespace' };
+  coalesce?: { minChars?: number; maxChars?: number; idleMs?: number };
+  humanDelay?: { mode: HumanDelayMode; minMs?: number; maxMs?: number };
+}
+
+export interface PreviewStreamingConfig {
+  mode: StreamingMode;
+  preview?: { chunk: { minChars: number; maxChars: number; breakPreference?: 'paragraph' | 'newline' | 'sentence' | 'whitespace' }; toolProgress?: boolean; commandText?: 'status' | 'raw' };
+  progress?: { maxLines: number; maxLineChars: number; label: string | false; labels: string[]; commentary?: boolean; toolProgress?: boolean; commandText?: 'status' | 'raw' };
+  block?: { enabled: boolean; coalesce?: { minChars?: number; maxChars?: number; idleMs?: number } };
+  nativeTransport?: boolean;
+}
+
+export interface StreamingConfig {
+  block: BlockStreamingConfig;
+  preview: Record<string, PreviewStreamingConfig>;
+}
+
+// Queue
+export type QueueMode = 'steer' | 'followup' | 'collect' | 'interrupt';
+export type QueueDrop = 'summarize' | 'old' | 'new';
+
+export interface QueueConfig {
+  mode: QueueMode;
+  cap: number;
+  drop: QueueDrop;
+  debounceMs: number;
+  debounceMsByChannel?: Record<string, number>;
+  byChannel?: Record<string, QueueMode>;
+}
+
+export interface QueueOptions {
+  debounce?: string | number;
+  cap?: number;
+  drop?: QueueDrop;
+}
+
+export interface QueuedMessage {
+  id: string;
+  sessionId: string;
+  content: string;
+  timestamp: number;
+  channel?: string;
+  threadId?: string;
+  runId?: string;
+  steerable: boolean;
+}
+
+// Steering
+export interface SteerConfig {
+  drainMode: 'one-at-a-time' | 'all';
+  quietWindowMs: number;
+}
+
+export interface SteerPayload {
+  message: string;
+  sessionId: string;
+  timestamp: number;
+}
+
+// Node commands
+export interface NodeInvokeRequest {
+  nodeId: string;
+  command: string;
+  params: Record<string, unknown>;
+  stream?: boolean;
+}
+
+export interface NodeInvokeProgress {
+  invokeId: string;
+  sequence: number;
+  chunk: string;
+}
+
+export interface NodeInvokeResult {
+  invokeId: string;
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  progress?: NodeInvokeProgress[];
+}
+
+// Approvals
+export interface ExecApproval {
+  id: string;
+  nodeId: string;
+  command: string;
+  args: string[];
+  cwd: string;
+  createdAt: number;
+  approved?: boolean;
+  approvedAt?: number;
+  approvedBy?: string;
+  expiresAt?: number;
+}
+
+export interface ExecAllowlistEntry {
+  id: string;
+  nodeId: string;
+  command: string;
+  args?: string[];
+  createdAt: number;
+}
+
+// MCP on nodes
+export interface NodeMcpServer {
+  name: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  transport?: 'stdio' | 'streamable-http' | 'sse';
+  headers?: Record<string, string>;
+  toolFilter?: { include?: string[]; exclude?: string[] };
+}
+
+// Skills on nodes
+export interface NodeSkill {
+  name: string;
+  description: string;
+  category: string;
+  instructions: string;
+  triggers: string[];
+  nodeId: string;
+  nodePath: string;
+}
+
+// Codex/Claude sessions
+export interface CodexSession {
+  id: string;
+  projectPath: string;
+  title?: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  nodeId?: string;
+  turns: number;
+}
+
+export interface ClaudeSession {
+  id: string;
+  projectPath: string;
+  title?: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
+  source: 'cli' | 'desktop' | 'sdk-cli';
+  nodeId?: string;
+  turns: number;
+}
+
+// Terminal uploads
+export interface TerminalUpload {
+  id: string;
+  nodeId: string;
+  filename: string;
+  size: number;
+  path: string;
+  uploadedAt: number;
+}
+
+// Experimental features
+export interface ExperimentalFeatures {
+  localModelLean?: boolean;
+  codexSandboxExecServer?: boolean;
+  codeMode?: boolean | 'auto';
+  cloudWorkersDesktop?: boolean;
+  swarm?: boolean;
 }

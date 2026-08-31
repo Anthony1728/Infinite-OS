@@ -300,48 +300,178 @@ class PhoneRemoteServer {
 }
 
 function mobilePage(): string {
+  // Premium Infinite OS aesthetic — matches desktop globals.css / globals-classic.css
+  // Logo is the real infinite loop (same ORBIT_PATH as InfiniteLogo.tsx) with spectrum gradient.
+  const ORBIT_PATH = 'M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z';
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d0d0f">
-<title>Infinite OS</title>
+<meta name="theme-color" content="#080a10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Infinite OS — Phone</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
-  body { background: #0d0d0f; color: #e4e4e7; font-family: -apple-system, 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; }
-  header { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; padding: calc(env(safe-area-inset-top) + 14px) 18px 12px; border-bottom: 1px solid rgba(255,255,255,.06); }
-  .logo { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, #27272a, #18181b); display: grid; place-items: center; font-size: 13px; color: #a78bfa; font-weight: 700; }
-  h1 { font-size: 15px; font-weight: 600; color: #fafafa; letter-spacing: -.01em; }
-  .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #71717a; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: #52525b; }
-  .dot.live { background: #4ade80; }
-  main { flex: 1 1 auto; overflow-y: auto; padding: 16px 14px 10px; -webkit-overflow-scrolling: touch; }
-  .msg { max-width: 86%; margin-bottom: 10px; padding: 10px 13px; border-radius: 14px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
-  .user { margin-left: auto; background: #ececec; color: #18181b; border-bottom-right-radius: 4px; }
-  .assistant { background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.06); border-bottom-left-radius: 4px; }
-  .activity { display: flex; align-items: center; gap: 7px; margin: 0 auto 10px; width: fit-content; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); font-size: 11.5px; color: #a1a1aa; }
-  .spinner { width: 10px; height: 10px; border: 1.5px solid #52525b; border-top-color: #e4e4e7; border-radius: 50%; animation: spin .8s linear infinite; }
+  html { background: #080a10; }
+  body {
+    min-height: 100%;
+    background:
+      radial-gradient(1200px 600px at 18% -10%, rgba(139,92,246,.14), transparent 55%),
+      radial-gradient(900px 500px at 88% -6%, rgba(34,211,238,.10), transparent 50%),
+      radial-gradient(700px 400px at 70% 110%, rgba(236,72,153,.08), transparent 60%),
+      #080a10;
+    color: #e4e4e7; font-family: Inter, -apple-system, 'Segoe UI', system-ui, sans-serif;
+    display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    flex: 0 0 auto;
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(env(safe-area-inset-top) + 12px) 14px 12px;
+    background: rgba(12,16,24,.72);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .logo-wrap {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.07);
+    display: grid; place-items: center; flex: 0 0 auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .logo-wrap svg { width: 22px; height: 11px; overflow: visible; }
+  .brand-text { line-height: 1; }
+  .brand-text b { display: block; font-size: 13px; font-weight: 700; letter-spacing: -.02em; color: #fafafa; }
+  .brand-text span { display: block; font-size: 10px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: #71717a; margin-top: 2px; }
+  .hdr-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07);
+    font-size: 11px; font-weight: 500; color: #a1a1aa; letter-spacing: .02em;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #52525b; box-shadow: 0 0 0 2px rgba(82,82,91,.25); }
+  .dot.live { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,.55), 0 0 0 2px rgba(34,197,94,.18); }
+  /* Infinite loop runners — same as InfiniteLogo.tsx spectrum */
+  .infinite-runner { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .runner-violet { stroke: #8b5cf6; stroke-width: 3; opacity: .95; stroke-dasharray: 18 82; animation: dash 1.35s linear infinite; }
+  .runner-cyan { stroke: #22d3ee; stroke-width: 3; opacity: .95; stroke-dasharray: 18 82; animation: dash 1.35s linear infinite .22s; }
+  .runner-pink { stroke: #ec4899; stroke-width: 3; opacity: .95; stroke-dasharray: 18 82; animation: dash 1.35s linear infinite .44s; }
+  @keyframes dash { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
   @keyframes spin { to { transform: rotate(360deg); } }
-  footer { flex: 0 0 auto; display: flex; gap: 9px; padding: 10px 12px calc(env(safe-area-inset-bottom) + 12px); border-top: 1px solid rgba(255,255,255,.06); background: #101013; }
-  input { flex: 1; min-width: 0; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 12px; padding: 12px 14px; color: #fafafa; font-size: 15px; outline: none; }
-  input:focus { border-color: rgba(255,255,255,.2); }
-  button { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 12px; border: 1px solid rgba(255,255,255,.1); background: #ececec; color: #18181b; font-size: 18px; cursor: pointer; transition: background .15s ease; }
-  button:disabled { background: #232327; color: #71717a; border-color: rgba(255,255,255,.07); }
-  .empty { text-align: center; color: #52525b; font-size: 13px; margin-top: 38vh; line-height: 1.6; }
+  main { flex: 1 1 auto; overflow-y: auto; padding: 18px 14px 12px; -webkit-overflow-scrolling: touch; }
+  .empty {
+    max-width: 340px; margin: 18vh auto 0; text-align: center;
+    padding: 24px 18px; border-radius: 16px;
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06);
+    backdrop-filter: blur(12px);
+  }
+  .empty .hero-logo { width: 120px; height: 60px; margin: 0 auto 14px; display: block; filter: drop-shadow(0 8px 20px rgba(139,92,246,.25)); }
+  .empty h2 { font-size: 14px; font-weight: 600; color: #fafafa; letter-spacing: -.01em; }
+  .empty p { font-size: 12.5px; line-height: 1.55; color: #a1a1aa; margin-top: 8px; }
+  .empty .hint { margin-top: 14px; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #71717a; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); padding: 6px 10px; border-radius: 999px; }
+  .msg { max-width: 86%; margin-bottom: 10px; padding: 11px 13px; border-radius: 14px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; border: 1px solid transparent; }
+  .user { margin-left: auto; background: linear-gradient(135deg, #ececec, #f4f4f5); color: #18181b; border-bottom-right-radius: 4px; border-color: rgba(255,255,255,.6); }
+  .assistant { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.06); backdrop-filter: blur(8px); border-bottom-left-radius: 4px; color: #e4e4e7; }
+  .activity {
+    display: flex; align-items: center; gap: 8px; margin: 6px auto 10px; width: fit-content;
+    padding: 7px 12px; border-radius: 999px;
+    background: rgba(139,92,246,.08); border: 1px solid rgba(139,92,246,.14);
+    font-size: 11.5px; font-weight: 500; color: #c4b5fd; letter-spacing: .01em;
+  }
+  .spinner { width: 10px; height: 10px; border: 1.5px solid rgba(196,181,253,.35); border-top-color: #c4b5fd; border-radius: 50%; animation: spin .8s linear infinite; }
+  footer {
+    flex: 0 0 auto; display: flex; gap: 10px;
+    padding: 12px 12px calc(env(safe-area-inset-bottom) + 14px);
+    background: rgba(12,16,24,.78); border-top: 1px solid rgba(255,255,255,.06);
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+  .input-wrap {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+    border-radius: 14px; padding: 6px 6px 6px 14px;
+    transition: border-color .15s, background .15s;
+  }
+  .input-wrap:focus-within { border-color: rgba(139,92,246,.35); background: rgba(255,255,255,.06); }
+  input {
+    flex: 1; min-width: 0; background: transparent; border: 0;
+    color: #fafafa; font-size: 15px; outline: none; padding: 6px 0;
+  }
+  input::placeholder { color: #71717a; }
+  .send {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 11px;
+    border: 1px solid rgba(255,255,255,.08);
+    background: linear-gradient(135deg, #8b5cf6, #22d3ee);
+    color: white; font-size: 18px; cursor: pointer;
+    display: grid; place-items: center;
+    box-shadow: 0 6px 16px rgba(139,92,246,.25);
+    transition: transform .08s, opacity .15s;
+  }
+  .send:active { transform: scale(.98); }
+  .send:disabled { background: rgba(255,255,255,.06); color: #71717a; border-color: rgba(255,255,255,.06); box-shadow: none; }
+  .corner-watermark {
+    position: fixed; right: 10px; bottom: calc(env(safe-area-inset-bottom) + 72px);
+    opacity: .04; pointer-events: none; user-select: none;
+  }
+  .corner-watermark svg { width: 140px; height: 70px; }
 </style>
 </head>
 <body>
 <header>
-  <div class="logo">&#8734;</div>
-  <h1>Infinite OS</h1>
-  <div class="status"><span class="dot live" id="dot"></span><span id="conn">live</span></div>
+  <div class="brand">
+    <div class="logo-wrap" aria-hidden="true">
+      <svg viewBox="0 0 200 100" fill="none" role="img" aria-label="Infinite OS">
+        <defs>
+          <linearGradient id="g-phone" x1="18" y1="16" x2="182" y2="84" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#8b5cf6"/><stop offset=".5" stop-color="#22d3ee"/><stop offset="1" stop-color="#ec4899"/>
+          </linearGradient>
+        </defs>
+        <path d="${ORBIT_PATH}" stroke="url(#g-phone)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".95"/>
+        <path class="infinite-runner runner-violet" d="${ORBIT_PATH}" pathLength="100"/>
+        <path class="infinite-runner runner-cyan" d="${ORBIT_PATH}" pathLength="100"/>
+        <path class="infinite-runner runner-pink" d="${ORBIT_PATH}" pathLength="100"/>
+      </svg>
+    </div>
+    <div class="brand-text"><b>Infinite OS</b><span>Phone — Control your PC</span></div>
+  </div>
+  <div class="hdr-actions">
+    <div class="status-pill" title="Secure LAN connection"><span class="dot live" id="dot"></span><span id="conn">live</span></div>
+  </div>
 </header>
-<main id="log"><div class="empty">Connected to your Infinite AI.<br>Send a task — you'll see every step here.</div></main>
+<main id="log">
+  <div class="empty" id="empty">
+    <svg class="hero-logo" viewBox="0 0 200 100" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="g-hero" x1="18" y1="16" x2="182" y2="84" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#8b5cf6"/><stop offset=".5" stop-color="#22d3ee"/><stop offset="1" stop-color="#ec4899"/>
+        </linearGradient>
+      </defs>
+      <path d="${ORBIT_PATH}" stroke="url(#g-hero)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".92"/>
+      <path class="infinite-runner runner-violet" d="${ORBIT_PATH}" pathLength="100"/>
+      <path class="infinite-runner runner-cyan" d="${ORBIT_PATH}" pathLength="100"/>
+      <path class="infinite-runner runner-pink" d="${ORBIT_PATH}" pathLength="100"/>
+    </svg>
+    <h2>Connected to your Infinite AI</h2>
+    <p>Control Infinite OS from your phone — chat, build, automate, and see every step live. Matches your desktop perfectly.</p>
+    <div class="hint">▸ Type below to start</div>
+  </div>
+</main>
+<div class="corner-watermark" aria-hidden="true">
+  <svg viewBox="0 0 200 100" fill="none">
+    <path d="${ORBIT_PATH}" stroke="rgba(255,255,255,.9)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</div>
 <footer>
-  <input id="input" type="text" placeholder="Message your AI..." autocomplete="off" enterkeyhint="send">
-  <button id="send" aria-label="Send">&#8593;</button>
+  <label class="input-wrap" for="input">
+    <input id="input" type="text" placeholder="Message your AI — control your PC..." autocomplete="off" enterkeyhint="send">
+  </label>
+  <button id="send" class="send" aria-label="Send">↑</button>
 </footer>
 <script>
 (function () {

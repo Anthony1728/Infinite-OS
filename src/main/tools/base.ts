@@ -78,6 +78,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   createskill: 'SkillManage', create_skill: 'SkillManage', skillmanage: 'SkillManage', skill_manage: 'SkillManage', manageskill: 'SkillManage', manage_skill: 'SkillManage',
   listskills: 'Skills', list_skills: 'Skills', getskills: 'Skills', get_skills: 'Skills', searchskills: 'Skills', search_skills: 'Skills',
   delegate: 'Agent', runagent: 'Agent', run_agent: 'Agent', spawnagent: 'Agent', spawn_agent: 'Agent', createagent: 'Agent', create_agent: 'Agent', runtask: 'Agent', run_task: 'Agent', task: 'Agent',
+  crew: 'Crew', crewinfo: 'Crew', teamup: 'Crew', multiagent: 'Crew',
   customagent: 'create_custom_agent', custom_agent: 'create_custom_agent', createcustomagent: 'create_custom_agent', create_custom_agent: 'create_custom_agent',
   // Computer / browser
   computercontrol: 'Computer', computer_control: 'Computer', controlcomputer: 'Computer', control_computer: 'Computer', computeraction: 'Computer', computer_action: 'Computer', takescreenshot: 'Computer', take_screenshot: 'Computer', screenshot: 'Computer',

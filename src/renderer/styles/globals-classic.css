@@ -47,6 +47,136 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Composer toolbar slide-collapse — same motion contract as globals.css. */
+.os-toolbar-collapse {
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s ease,
+    max-width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    padding 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    margin 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.os-toolbar-collapse.is-collapsed {
+  max-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  margin-right: 0;
+  margin-left: 0;
+  opacity: 0;
+  transform: translateX(14px);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* ── Agent Fleet tiles (reference design parity) ─────────────────────────── */
+.af-tile {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 4px 16px rgba(0,0,0,0.25);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.af-tile svg { width: 30px; height: 30px; }
+.agent-card:hover .af-tile {
+  transform: scale(1.08);
+  box-shadow: 0 0 18px var(--af-glow, rgba(139, 92, 246, 0.25));
+}
+.af-tile-purple  { background: radial-gradient(circle, rgba(168, 85, 247, 0.18) 0%, transparent 100%); border-color: rgba(168, 85, 247, 0.35); --af-glow: rgba(168, 85, 247, 0.3); }
+.af-tile-cyan    { background: radial-gradient(circle, rgba(6, 182, 212, 0.18) 0%, transparent 100%); border-color: rgba(6, 182, 212, 0.35); --af-glow: rgba(6, 182, 212, 0.3); }
+.af-tile-emerald { background: radial-gradient(circle, rgba(16, 185, 129, 0.18) 0%, transparent 100%); border-color: rgba(16, 185, 129, 0.35); --af-glow: rgba(16, 185, 129, 0.3); }
+.af-tile-rose    { background: radial-gradient(circle, rgba(236, 72, 153, 0.18) 0%, transparent 100%); border-color: rgba(236, 72, 153, 0.35); --af-glow: rgba(236, 72, 153, 0.3); }
+.af-tile-amber   { background: radial-gradient(circle, rgba(245, 158, 11, 0.18) 0%, transparent 100%); border-color: rgba(245, 158, 11, 0.35); --af-glow: rgba(245, 158, 11, 0.3); }
+.af-tile-indigo  { background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, transparent 100%); border-color: rgba(99, 102, 241, 0.35); --af-glow: rgba(99, 102, 241, 0.3); }
+.af-tile-crimson { background: radial-gradient(circle, rgba(244, 63, 94, 0.18) 0%, transparent 100%); border-color: rgba(244, 63, 94, 0.35); --af-glow: rgba(244, 63, 94, 0.3); }
+.af-tile-gold    { background: radial-gradient(circle, rgba(251, 191, 36, 0.18) 0%, transparent 100%); border-color: rgba(251, 191, 36, 0.35); --af-glow: rgba(251, 191, 36, 0.3); }
+.af-tile-custom  { background: radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 100%); border-color: rgba(56, 189, 248, 0.35); --af-glow: rgba(56, 189, 248, 0.3); }
+
+.agent-card {
+  background: rgba(15, 12, 26, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.agent-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.6), 0 0 24px rgba(139, 92, 246, 0.25);
+}
+.af-badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  background: rgba(124, 58, 237, 0.15);
+  color: #c4b5fd;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.af-desc {
+  font-size: 12.5px;
+  color: #9ca3af;
+  line-height: 1.5;
+  min-height: 42px;
+}
+.af-action {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f3f4f6;
+  padding: 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.agent-card:hover .af-action {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: #ffffff;
+}
+.af-task-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #f3f4f6;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.af-task-input:focus {
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+}
+.af-task-input::placeholder { color: #6b7280; }
+
 .app-shell {
   background-image: radial-gradient(circle at 52% -15%, rgba(99, 102, 241, 0.07), transparent 34%);
 }
@@ -213,9 +343,12 @@ button:disabled {
 .os-active-mode {
   border-color: color-mix(in srgb, var(--os-accent) 58%, transparent);
   background: color-mix(in srgb, var(--os-accent) 14%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--os-accent) 22%, transparent), inset 0 1px 0 rgba(255,255,255,.06);
+  box-shadow:
+    0 0 0 0.5px color-mix(in srgb, var(--os-accent) 55%, transparent),
+    0 1px 6px -1px color-mix(in srgb, var(--os-accent) 22%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.06);
 }
-.os-active-mode svg { filter: drop-shadow(0 0 2.5px currentColor); }
+.os-active-mode svg { filter: drop-shadow(0 0 1.5px currentColor); }
 .os-accent-control-active {
   color: color-mix(in srgb, var(--os-accent) 72%, white) !important;
   border-color: color-mix(in srgb, var(--os-accent) 38%, transparent) !important;
@@ -235,9 +368,9 @@ button:disabled {
 }
 .os-nav-item.is-active svg {
   filter:
-    drop-shadow(0 0 2.5px var(--glow-color, currentColor))
-    drop-shadow(0 0 9px color-mix(in srgb, var(--glow-color, currentColor) 55%, transparent));
-  transform: scale(1.06);
+    drop-shadow(0 0 2px var(--glow-color, currentColor))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--glow-color, currentColor) 38%, transparent));
+  transform: scale(1.04);
 }
 /* Specific glow colors per nav item — high alpha keeps the tight glow color-true */
 .os-nav-item[data-nav="chats"] svg { --glow-color: rgba(129, 140, 248, 0.85); }

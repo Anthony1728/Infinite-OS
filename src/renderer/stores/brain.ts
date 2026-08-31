@@ -1,5 +1,46 @@
 import { create } from 'zustand';
 
+// ── Infinite AI Brain — core identity ──────────────────────────────────────
+// The Brain is a fast, on-device inference layer. It is not a remote LLM:
+// it learns from every conversation in Infinite OS and answers from that
+// knowledge instantly with zero network. To behave like a large model it
+// keeps discipline: dedup, evidence, honesty, and morals.
+
+/** Compact canonical key — collapses casing/whitespace variations so
+    repeated questions reinforce ONE memory instead of piling duplicates. */
+function normalizeKey(input: string): string {
+  const key = input.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return key.length >= 8 ? key : '';
+}
+
+/** The Brain's moral code — a small, ordered constitution it lives by.
+    Every answer passes through this. */
+export const BRAIN_RULES = {
+  title: 'Infinite AI Brain — moral code',
+  rules: [
+    'Be honest. Never claim you ran a command, opened an app, sent an email, or achieved a result unless a real result exists.',
+    'Never invent facts. Learned knowledge is memory, not gospel — say when you are recalling, not verifying.',
+    'Protect the user: refuse to help with credential theft, ransomware, unauthorized intrusion, hacking others, self-harm, or harm to others.',
+    'Never reveal secrets, passwords, API keys, private keys, or personal data you have no authority to share.',
+    'Respect the owner: the workspace and the machine are the user\'s. Do not attempt destructive or consequential actions outside their request.',
+    'Be direct and concise. No boilerplate, no moralizing, no padding.',
+    'If you do not actually know, say so, then give the closest thing you can verify — never a confident guess.',
+    'Stay in character: you are Infinite AI, the brain of Infinite OS. You are fast because you learned locally.',
+  ],
+};
+
+/** Input pre-filter — mirror of the agent-level policy, but live in the brain. */
+const BRAIN_REFUSAL: Array<{ pattern: RegExp; refusal: string }> = [
+  { pattern: /\b(malware|ransomware|keylogger|botnet|virus generator|payload for)\b/i, refusal: 'I can\'t help create malicious software. I can help you learn defensive security, secure your own system, or analyze a legitimate sample for authorized testing.' },
+  { pattern: /\b(steal|harvest|phish)\b[^\n]{0,40}\b(password|credentials|passwords|tokens|cards)\b/i, refusal: 'I can\'t help steal credentials or phish anyone. I can help you protect your own accounts, set up 2FA, or audit a system you own.' },
+  { pattern: /\b(hack|breach|crack)\b[^\n]{0,40}\b(someone|anyone|their|my neighbor|company|account|email|phone)\b/i, refusal: 'I can\'t help attack someone else\'s account or device. For systems you own and are authorized to test, tell me that explicitly and I can help within your permissions.' },
+  { pattern: /\b(how do i kill myself|suicide method|end my life)\b/i, refusal: 'Please reach out now — you matter. In the US, call or text 988 (Suicide & Crisis Lifeline) or call 911. I can also help find a counselor or talk you through the immediate moment.' },
+  { pattern: /\b(deceive|scam|defraud)\b/i, refusal: 'I can\'t help run a scam. I can help you protect yourself from scams or build legitimate marketing/education.' },
+];
+
+/** Follow-up words — used by the digest to roll multi-turn context in. */
+const BRAIN_CONTEXT_WORDS = new Set(['it', 'this', 'that', 'them', 'those', 'these', 'then', 'and', 'but', 'so', 'how', 'why', 'what', 'which', 'now', 'continue', 'again', 'more', 'another', 'explain', 'show']);
+
 interface KnowledgeEntry {
   id: string;
   timestamp: number;
@@ -9,6 +50,10 @@ interface KnowledgeEntry {
   source: 'api' | 'user' | 'system' | 'seed';
   confidence: number;
   tags: string[];
+  /** Canonical dedup key (normalized input) — repeated questions reinforce one entry. */
+  key?: string;
+  evidenceCount?: number;
+  updatedAt?: number;
 }
 
 interface BrainAction {
@@ -42,6 +87,9 @@ interface BrainState {
   enginePhase: 'dormant' | 'bootstrapping' | 'active';
   engineProgress: number;
   engineStatusText: string;
+  /** Rolling multi-turn digest — keeps the brain context-aware without
+      recomputing history (fast follow-ups, no model call). */
+  followUps: Array<{ input: string; topic: string; at: number }>;
 
   learnFromInteraction: (input: string, output: string, source: 'api' | 'user' | 'system') => void;
   searchKnowledge: (query: string) => KnowledgeEntry[];
@@ -901,6 +949,31 @@ function categorizeKnowledge(input: string, output: string): KnowledgeEntry['cat
 
 // ─── STORE ─────────────────────────────────────────────────────────
 
+/** Simple topic extractor: first meaningful words of the input. */
+function topicLabel(input: string): string {
+  const words = input.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((w) => w.length > 3 && !BRAIN_CONTEXT_WORDS.has(w.toLowerCase()));
+  return (meaningful.slice(0, 4).join(' ') || words.slice(0, 4).join(' ')).slice(0, 60);
+}
+
+/** If the input is a short continuation ("and this?", "ok explain more",
+    "show me", pronouns without new topic words), bind it to the last topic. */
+function resolveFollowUp(inputLower: string, followUps: Array<{ input: string; topic: string; at: number }>): { topic: string; at: number } | null {
+  const last = followUps[followUps.length - 1];
+  if (!last) return null;
+  const words = inputLower.split(/\s+/).filter(Boolean);
+  const isShort = words.length <= 6;
+  const hasNewTopic = words.some((w) => w.length > 4 && !BRAIN_CONTEXT_WORDS.has(w) && !/^(how|why|what|when|where|who|can|do|does|is|are|should|could|would|show|explain|tell|give|ok|okay|and|then|the|this|that|it|so|about|for|with|me|you|more|again|please|thanks?)$/.test(w));
+  if (!isShort && hasNewTopic) return null;
+  const t = inputLower.trim();
+  const followUpPhrase = /^(and it|and that|and this|then|so|explain|continue|go on|more|again|like that|similar|how about|what about|tell me more|show me|okay|ok|why|how come|wait)/.test(t);
+  const pronounInit = /^(it|this|that|they|them|these|those)\b/.test(t);
+  if (followUpPhrase || pronounInit || isShort) {
+    return { topic: last.topic, at: last.at };
+  }
+  return null;
+}
+
 export const useBrainStore = create<BrainState>((set, get) => ({
   knowledge: [],
   isLearning: false,
@@ -911,6 +984,7 @@ export const useBrainStore = create<BrainState>((set, get) => ({
   enginePhase: 'dormant',
   engineProgress: 0,
   engineStatusText: 'Engine not started',
+  followUps: [],
 
   setCwd: (cwd) => set({ cwd }),
 
@@ -918,21 +992,62 @@ export const useBrainStore = create<BrainState>((set, get) => ({
     const state = get();
     if (state.totalInteractions > 10000) return;
 
+    const inputSlice = input.slice(0, 500);
+    const outputSlice = output.slice(0, 1000);
+    const category = categorizeKnowledge(input, output);
+    const tags = extractTags(input, output);
+    // Canonical key: normalize so repeated questions converge on ONE entry
+    // (dedup + evidence reinforcement statt an ever-growing duplicate pile).
+    const canonicalKey = normalizeKey(inputSlice);
+    const now = Date.now();
+
+    if (canonicalKey) {
+      const existingIdx = state.knowledge.findIndex((e) => e.key === canonicalKey);
+      if (existingIdx >= 0) {
+        const existing = state.knowledge[existingIdx];
+        const reinforced: KnowledgeEntry = {
+          ...existing,
+          output: outputSlice.length > existing.output.length ? outputSlice : existing.output,
+          confidence: Math.min(1, existing.confidence + 0.05),
+          evidenceCount: (existing.evidenceCount ?? 1) + 1,
+          updatedAt: now,
+          tags: Array.from(new Set([...(existing.tags ?? []), ...tags])).slice(0, 8),
+        };
+        set((s) => {
+          const next = [...s.knowledge];
+          next[existingIdx] = reinforced;
+          // Keep reinforcing entries near the top of recency order.
+          return {
+            knowledge: next.slice(-5000),
+            totalInteractions: s.totalInteractions + 1,
+            lastLearned: now,
+          };
+        });
+        // SQLite side-channel still records every learn (durable audit).
+        try {
+          window.api.pmemSaveKnowledge({ input: inputSlice, output: outputSlice, source, tags });
+        } catch { /* non-blocking */ }
+        return;
+      }
+    }
+
     const entry: KnowledgeEntry = {
       id: crypto.randomUUID(),
-      timestamp: Date.now(),
-      category: categorizeKnowledge(input, output),
-      input: input.slice(0, 500),
-      output: output.slice(0, 1000),
+      timestamp: now,
+      category,
+      input: inputSlice,
+      output: outputSlice,
       source,
       confidence: source === 'api' ? 0.9 : source === 'user' ? 0.8 : 0.7,
-      tags: extractTags(input, output),
+      tags,
+      key: canonicalKey || undefined,
+      evidenceCount: 1,
     };
 
     set((s) => ({
       knowledge: [...s.knowledge, entry].slice(-5000),
       totalInteractions: s.totalInteractions + 1,
-      lastLearned: Date.now(),
+      lastLearned: now,
     }));
 
     // Also persist to SQLite for long-term memory
@@ -1013,20 +1128,67 @@ export const useBrainStore = create<BrainState>((set, get) => ({
     const state = get();
     const inputLower = input.toLowerCase().trim();
 
-    // 1. Check seed knowledge first (exact or close match)
+    // 0. MORALS FIRST — the refusal pre-filter runs before anything else.
+    for (const r of BRAIN_REFUSAL) {
+      if (r.pattern.test(input)) return r.refusal;
+    }
+
+    // 1. Per-dialog follow-up: if this is a short continuation ("and this?",
+    // "show me the docs", "ok explain more"), resolve against the LAST topic
+    // so the brain feels like it remembers the conversation.
+    const topicFollowUp = resolveFollowUp(inputLower, state.followUps);
+    if (topicFollowUp) {
+      const entry = state.searchKnowledge(topicFollowUp.topic)[0];
+      const base = entry
+        ? entry.output.slice(0, 700)
+        : `We were talking about “${topicFollowUp.topic}”.`;
+      // Push this follow-up onto the digest too.
+      set((s) => ({
+        followUps: [...s.followUps.slice(-7), { input: input.slice(0, 200), topic: topicFollowUp.topic, at: Date.now() }],
+      }));
+      return `(continuing our conversation about ${topicFollowUp.topic})\n\n${base}`;
+    }
+
+    // 2. Seed knowledge, but learned entries may OVERRIDE the seed on the
+    //    same canonical topic (the brain can be corrected over time).
+    const learned = state.searchKnowledge(input);
+    const bestLearned = learned[0];
+    if (bestLearned && bestLearned.key) {
+      const seedIdx = SEED_KNOWLEDGE.findIndex((s) => {
+        const sLower = s.input.toLowerCase();
+        return inputLower === sLower || inputLower.includes(sLower) || sLower.includes(inputLower);
+      });
+      if (seedIdx < 0) {
+        // learned answers win when retrieval is strong
+        return bestLearned.output.slice(0, 900);
+      }
+      // seed matched too — learned with evidence > 1 overrides seed
+      if ((bestLearned.evidenceCount ?? 1) > 1) {
+        return bestLearned.output.slice(0, 900);
+      }
+    }
     const seedMatch = SEED_KNOWLEDGE.find(s => {
       const sLower = s.input.toLowerCase();
       return inputLower === sLower || inputLower.includes(sLower) || sLower.includes(inputLower);
     });
     if (seedMatch) return seedMatch.output;
 
-    // 2. Check learned knowledge
-    const relevantKnowledge = state.searchKnowledge(input);
-    if (relevantKnowledge.length > 0) {
-      return relevantKnowledge.slice(0, 3).map(k => k.output.slice(0, 500)).join('\n\n');
+    // 3. Learned knowledge — group by category so three matches never all
+    //    come from one topic, and stagger sources.
+    if (learned.length > 0) {
+      const seen = new Set<string>();
+      const picks: KnowledgeEntry[] = [];
+      for (const e of learned) {
+        if (picks.length >= 3) break;
+        if (seen.has(e.category)) continue;
+        seen.add(e.category);
+        picks.push(e);
+      }
+      if (picks.length === 0) picks.push(learned[0]);
+      return picks.map(k => k.output.slice(0, 500)).join('\n\n');
     }
 
-    // 3. Try pattern matching for intent — may return an action to execute
+    // 4. Pattern matching for intent — may return an action to execute
     for (const rule of INTENT_PATTERNS) {
       const match = input.match(rule.pattern);
       if (match) {
@@ -1035,19 +1197,39 @@ export const useBrainStore = create<BrainState>((set, get) => ({
       }
     }
 
-    // 4. Fallback — conversational, not dead-end
-    const isQuestion = /\?$/i.test(input.trim()) || /^(what|how|why|when|where|who|can|do|does|is|are|should|could|would)/i.test(input);
+    // 5. Record this turn in the digest for the next follow-up.
+    set((s) => ({
+      followUps: [...s.followUps.slice(-7), { input: input.slice(0, 200), topic: topicLabel(input), at: Date.now() }],
+    }));
+
+    // 6. Fallback — an informed, structured answer instead of a dead-end.
     const isGreeting = /^(hi|hello|hey|yo|sup|howdy|greetings|good\s*(morning|afternoon|evening))/i.test(input);
-
     if (isGreeting) {
-      return "Hey! I'm the Infinite AI Brain. I can code, build, explain, research, run commands, write files, and learn from everything we discuss. What do you need?";
+      return "Hey! I'm the Infinite AI Brain — I answer from what I've learned in Infinite OS, instantly, on any device. What do you need?";
     }
 
-    if (isQuestion) {
-      return `I'm still learning about "${input.slice(0, 60)}". I'll get better the more we talk. In the meantime, try:\n- Being more specific\n- Asking about JavaScript, Python, HTML/CSS, React, Node.js, Git, Docker, SQL, or algorithms\n- Asking me to build something (website, app, game, API)\n- Asking math questions\n- Asking me to run terminal commands`;
-    }
+    const related = state
+      .knowledge
+      .filter((e) => e.confidence >= 0.7)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 4)
+      .map((e) => `• ${e.input.slice(0, 70)}`);
 
-    return `I heard you! I'm still building my knowledge base. Ask me about:\n- **Code**: JavaScript, Python, TypeScript, React, Node.js\n- **Build**: websites, apps, games, APIs\n- **Run**: terminal commands, scripts, servers\n- **Learn**: algorithms, data structures, math, security\n- **DevOps**: Git, Docker, deployment\n- **Debug**: paste an error and I'll help fix it`;
+    const relatedLines = related.length
+      ? `\n\nWhat I can already recall:\n${related.join('\n')}`
+      : '';
+
+    return [
+      `I haven't memorized something exactly like that yet — but I learn from every conversation here, so ask me again after we work together.`,
+      ``,
+      `Meanwhile, I'm strongest on:`,
+      `- Code: JavaScript, TypeScript, React, Node.js, Python, HTML/CSS, SQL`,
+      `- Build: websites, apps, games, APIs, file scaffolds`,
+      `- Run: terminal commands, scripts, servers`,
+      `- Learn: algorithms, data structures, math, security, Git, Docker, DevOps`,
+      `- Copy: definitions keep growing with evidence — repeat questions sharpen answers`,
+      relatedLines,
+    ].join('\n');
   },
 
   getKnowledgeStats: () => {

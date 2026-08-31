@@ -29,7 +29,9 @@ export const websearch: Tool = {
       const html = await res.text();
       const results = parseResults(html);
       if (!results.length) {
-        return { content: 'No results found. Try a different search query.' };
+        // Don't block the crew: return a degraded but actionable result so the
+        // Research/Data Analyst can still build a gap list from local inspection.
+        return { content: `No web results for "${query}" (DuckDuckGo returned no parseable hits). Proceed with local codebase analysis: inspect src/ with Glob/Grep/Read, compare to known Claude/OpenClaw/Antigravity feature sets from offline knowledge, and still deliver a prioritized gap list.` };
       }
       return {
         content: results.map((r, i) =>

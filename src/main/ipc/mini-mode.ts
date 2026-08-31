@@ -101,6 +101,20 @@ export function registerMiniMode(getMainWindow: () => BrowserWindow | null): voi
     return { active: true };
   });
 
+  ipcMain.handle(IPC.MINI_ABORT, (_e, args: { sessionId?: string } = {}) => {
+    const sid = typeof args?.sessionId === 'string' ? args.sessionId : '';
+    if (!sid) {
+      // No session: abort every active run (best-effort).
+      for (const controller of activeMiniRuns.values()) controller.abort();
+      activeMiniRuns.clear();
+      return { ok: true, aborted: 'all' };
+    }
+    const controller = activeMiniRuns.get(sid);
+    if (!controller) return { ok: false, error: 'No active run for session' };
+    controller.abort(new Error('User stopped the mini-mode run.'));
+    return { ok: true };
+  });
+
   ipcMain.handle(IPC.MINI_RESTORE, () => {
     const main = mainWinGetter();
     if (main && !main.isDestroyed()) {

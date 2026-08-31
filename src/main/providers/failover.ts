@@ -28,7 +28,7 @@ export function recordProviderSuccess(candidate: Pick<ProviderCandidate, 'provid
 }
 
 export function isProviderWideFailure(error: string): boolean {
-  return /\b(?:401|402|403|408|409|429|5\d\d|api.?key|auth|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse)\b/i.test(error);
+  return /\b(?:401|402|403|408|409|429|5\d\d|api.?key|auth|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|stalled|stall|no provider progress|supervisor.*restart|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted.*stream)\b/i.test(error);
 }
 
 export function prioritizeProviderCandidates(candidates: ProviderCandidate[], now = Date.now()): ProviderCandidate[] {
@@ -53,6 +53,11 @@ export function prioritizeProviderCandidates(candidates: ProviderCandidate[], no
 
 /** Errors that mean the selected provider itself is unusable and the run may leave it. */
 const CREDENTIAL_FAILURE = /\b(401|402|403|api.?key|auth|unauthori[sz]ed|forbidden|quota|credit|insufficient\s+balance|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i;
+// A 404 from an OpenAI-compatible endpoint almost always means "that model
+// string does not exist on this provider" — the configured (provider, model)
+// pair is wrong. That is a hard misconfiguration, not a transient issue, so
+// the agent must be allowed to try the next candidate anywhere.
+const BAD_MODEL_FAILURE = /\b(404|model\s*(?:not found|unavailable|doesn'?t exist|does not exist)|page not found|invalid model|unknown model)\b/i;
 
 export function selectNextProviderCandidate(
   plan: ProviderCandidate[],
@@ -70,7 +75,20 @@ export function selectNextProviderCandidate(
   // silently answering from a model the user did not pick.
   const selectionFailing = currentIndex === 0;
   if (selectionFailing && !CREDENTIAL_FAILURE.test(error)) {
-    return remaining.find((candidate) => candidate.provider === active.provider && candidate.model !== active.model);
+    const sameProvider = remaining.find((candidate) => candidate.provider === active.provider && candidate.model !== active.model);
+    if (sameProvider) return sameProvider;
+    // No other model on this provider — if the error is a bad-model 404 or a
+    // provider-wide transient (429/5xx/timeout/network), the chosen provider
+    // itself cannot serve this turn; hop to the next healthy provider instead
+    // of killing the run.
+    if (BAD_MODEL_FAILURE.test(error)) {
+      return remaining[0];
+    }
+    if (isProviderWideFailure(error)) {
+      const otherProvider = remaining.find((candidate) => candidate.provider !== active.provider);
+      if (otherProvider) return otherProvider;
+    }
+    return undefined;
   }
   return (isProviderWideFailure(error)
     ? remaining.find((candidate) => candidate.provider !== active.provider)
@@ -107,11 +125,14 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
     if (provider.defaultModel) await add(providerId, provider.defaultModel);
   }
 
+  // Cap the chain so a heavily-configured install never tries providers for hours.
+  const MAX_CANDIDATES = 10;
+  const prioritized = prioritizeProviderCandidates(candidates);
   // Live model scanning belongs in settings. Keeping it off the request path
   // lets an agent begin and publish visible activity immediately.
   // Preserve configured preference while moving recently failed models behind
   // healthy candidates. Cooldowns are in-memory and never expose key material.
-  return prioritizeProviderCandidates(candidates);
+  return prioritized.slice(0, MAX_CANDIDATES);
 }
 
 export function isRecoverableProviderError(error: string): boolean {

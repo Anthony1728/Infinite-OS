@@ -27,11 +27,11 @@ const MAX_FILE_BYTES = 1_500_000;
 export const buildFeatureTool: Tool = {
   name: 'BuildFeature',
   description: [
-    'Atomically add a user-requested feature to the current application or workspace.',
-    'Use after inspecting the code and agreeing on the implementation with the user.',
-    'Accepts full-file writes or exact text replacements, creates a rollback checkpoint before writing,',
-    'restricts every path to the current workspace, validates the result, and automatically rolls back failed validation.',
-    'Prefer this tool over separate Write/Edit calls when baking a new feature into an application.',
+    'Atomically add, fix, or improve any feature in Infinite OS itself or the current workspace.',
+    'This is your primary tool for self-improvement: use it whenever the user says "improve Infinite OS", "add a feature", "fix this", "make it better", "sharpen the UI", or requests any capability that does not yet exist.',
+    'You can create new files, modify existing UI components, add new tools, fix bugs, improve animations, and enhance any part of the application — all with automatic rollback checkpoints, workspace sandboxing, and validation (typecheck/test/build).',
+    'Inspect the code first, then use BuildFeature for atomic, validated changes with automatic rollback on failure. Prefer it over separate Write/Edit for any multi-file or UI change.',
+    'If the user needs something you cannot do yet, create a Tab explaining the next step and then use BuildFeature to add the missing capability.',
   ].join(' '),
   inputSchema: {
     type: 'object',

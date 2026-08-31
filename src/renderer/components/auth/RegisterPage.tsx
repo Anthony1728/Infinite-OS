@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuthStore } from '../../stores/auth';
+import { InfiniteLogo } from '../brand/InfiniteLogo';
 
 interface RegisterPageProps {
   onSwitchToLogin: () => void;
@@ -49,16 +50,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
       <div className="relative w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <svg className="w-16 h-16 mx-auto mb-4" viewBox="0 0 32 18" fill="none">
-            <defs>
-              <linearGradient id="authGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#818cf8" />
-                <stop offset="50%" stopColor="#14b8a6" />
-                <stop offset="100%" stopColor="#ec4899" />
-              </linearGradient>
-            </defs>
-            <path d="M9 14.5C13.1421 14.5 16.5 11.1421 16.5 7C16.5 2.85786 19.8579 -0.5 24 -0.5C28.1421 -0.5 31.5 2.85786 31.5 7C31.5 11.1421 28.1421 14.5 24 14.5C19.8579 14.5 16.5 11.1421 16.5 7C16.5 2.85786 13.1421 -0.5 9 -0.5C4.85786 -0.5 1.5 2.85786 1.5 7C1.5 11.1421 4.85786 14.5 9 14.5Z" stroke="url(#authGrad2)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+          <InfiniteLogo className="w-24 h-12 mx-auto mb-5" animated variant="spectrum" />
           <h1 className="text-2xl font-bold text-white">Create your account</h1>
           <p className="text-gray-500 text-sm mt-2">Start your journey with Infinite OS</p>
         </div>
@@ -99,7 +91,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
               className="w-full bg-[#12121a] border border-white/[0.06] rounded-xl px-4 py-3 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
           </div>
@@ -110,7 +102,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
               className="w-full bg-[#12121a] border border-white/[0.06] rounded-xl px-4 py-3 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
           </div>

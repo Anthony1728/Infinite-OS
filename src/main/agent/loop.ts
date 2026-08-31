@@ -94,13 +94,13 @@ export async function runAgent(
   }
   let activeCandidate: ProviderCandidate = failoverPlan[0];
   let failoverIndex = 0;
-  // No implicit turn ceiling: finish on verified completion, cancellation, or
-  // a real failure. A positive agentMaxTurns setting remains an explicit opt-in
-  // safety valve for installations that want one.
+  // Bounded by default so a stuck model cannot loop for hours. The setting
+  // remains an explicit opt-in to raise the ceiling.
   const configuredTurns = settings.get('agentMaxTurns') as number | undefined;
   const MAX_TURNS = typeof configuredTurns === 'number' && Number.isFinite(configuredTurns) && configuredTurns > 0
     ? Math.trunc(configuredTurns)
-    : Number.POSITIVE_INFINITY;
+    : 60;
+  const WALL_CLOCK_LIMIT_MS = 25 * 60_000;
   const MAX_INTENT_ONLY_RETRIES = 2;
   let intentOnlyRetries = 0;
   let lastToolBatchHadError = false;
@@ -148,6 +148,11 @@ export async function runAgent(
   };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (Date.now() - runStartedAt > WALL_CLOCK_LIMIT_MS) {
+      opts.onEvent({ type: 'error', error: `Run exceeded ${Math.round(WALL_CLOCK_LIMIT_MS / 60000)} min wall-clock limit. Stopping and reporting.` });
+      opts.onEvent({ type: 'fallback_required', error: `Wall-clock limit (${Math.round(WALL_CLOCK_LIMIT_MS / 60000)} min)` });
+      break;
+    }
     problemTracker.setTurn(turn);
     if (opts.signal.aborted) break;
 

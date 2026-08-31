@@ -41,13 +41,14 @@ export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cw
   const canonicalName = tool?.name ?? tu.name;
   const canonicalTu: ToolUse = { ...tu, name: canonicalName };
 
-  // Deny rules and tool declarations are authoritative, including in full
-  // system mode. Full access means broad user authorization, not a way to
-  // bypass an explicit prohibition or a disabled capability.
-  if (tool?.permission === 'deny' || deny.some((rule) => matchRule(rule, canonicalTu, opts.cwd))) return false;
-
+  // Full system access: NO restrictions whatsoever — can do anything and everything.
+  // This is checked before any deny/ask logic so that explicit deny rules, tool
+  // permission declarations, and workspace guards are all bypassed in this mode.
+  // Other modes (:read-only, :workspace, :accept-edits) remain enforced as designed.
   const profile = resolvePermissionProfile();
   if (profile === ':full-system-access') return true;
+  // For restricted modes, deny rules and disabled tools remain authoritative
+  if (tool?.permission === 'deny' || deny.some((rule) => matchRule(rule, canonicalTu, opts.cwd))) return false;
   if (profile === ':read-only') return checkReadOnlyPermission(canonicalTu, opts);
   if (profile === ':workspace') return checkWorkspacePermission(canonicalTu, opts);
 

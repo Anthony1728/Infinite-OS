@@ -101,7 +101,7 @@ class AutomationScheduler {
     if (type === 'interval') {
       const intervalMs = Number(workflow.trigger.config?.intervalMs);
       if (!Number.isFinite(intervalMs) || intervalMs < 60_000) return null;
-      const base = Math.max(workflow.lastRun ?? Date.now(), Date.now());
+      const base = workflow.lastRun ?? this.lastTickByWorkflow.get(workflow.id) ?? Date.now();
       return new Date(base + intervalMs).toISOString();
     }
     if (type === 'once') {
@@ -230,7 +230,12 @@ class AutomationScheduler {
   private tickIdle(wf: Workflow): void {
     const minutes = Number(wf.trigger.config?.idleMinutes);
     const thresholdMs = (Number.isFinite(minutes) && minutes > 0 ? minutes : 10) * 60_000;
-    const idleMs = powerMonitor.getSystemIdleTime() * 1000;
+    let idleMs = 0;
+    try {
+      idleMs = powerMonitor.getSystemIdleTime() * 1000;
+    } catch {
+      return; // powerMonitor not available on this platform
+    }
 
     if (idleMs >= thresholdMs) {
       if (!this.idleFiredForEpisode.has(wf.id)) {

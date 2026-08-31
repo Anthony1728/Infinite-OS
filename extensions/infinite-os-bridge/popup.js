@@ -7,16 +7,22 @@ let currentTabs = [];
 
 // ── Status rendering ──────────────────────────────────────────────────────────
 function renderStatus(s) {
+  const pill = $('connPill');
+  const label = $('connLabel');
   if (!s) {
     $('connText').textContent = 'unknown';
     $('dot').className = 'dot off';
     $('latencyBadge').classList.add('hidden');
+    if (pill) pill.classList.add('off');
+    if (label) label.textContent = 'Offline';
     return;
   }
 
   $('connText').textContent = s.connected ? 'Connected' : 'Disconnected';
   $('connText').style.color = s.connected ? 'var(--green)' : 'var(--red)';
   $('dot').className = 'dot ' + (s.connected ? 'on' : 'off');
+  if (pill) pill.classList.toggle('off', !s.connected);
+  if (label) label.textContent = s.connected ? 'Connected' : 'Disconnected';
   $('portText').textContent = String(s.port ?? '--');
   $('verText').textContent = s.version || '--';
   $('commandsText').textContent = String(s.commandsServed ?? 0);
@@ -431,6 +437,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     } catch {}
   }, 1000);
+
+  // Emergency stop: detach agent & halt control
+  const emergencyStop = $('emergencyStop');
+  if (emergencyStop) {
+    emergencyStop.addEventListener('click', async () => {
+      const feed = $('logFeed');
+      const stamp = () => new Date().toLocaleTimeString();
+
+      if (typeof chrome?.runtime?.id === 'string') {
+        try {
+          await sendToBackground({ type: 'detach-debugger' });
+          // also tell host to release control
+          chrome.runtime.sendMessage({ type: 'agent:abort', reason: 'emergency-stop' }).catch?.(() => {});
+          if (feed) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.style.color = 'var(--status-red)';
+            entry.innerHTML = `<span class="log-time">[${stamp()}]</span> Emergency detach triggered — control released.`;
+            feed.appendChild(entry);
+            feed.scrollTop = feed.scrollHeight;
+          }
+        } catch (err) {
+          if (feed) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.style.color = 'var(--status-red)';
+            entry.innerHTML = `<span class="log-time">[${stamp()}]</span> Detach failed: ${err?.message || err}`;
+            feed.appendChild(entry);
+            feed.scrollTop = feed.scrollHeight;
+          }
+        }
+      }
+    });
+  }
 });
 
 // Listen for status updates

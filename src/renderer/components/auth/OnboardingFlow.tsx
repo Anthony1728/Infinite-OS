@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../stores/auth';
+import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { useUIStore, TEMPLATE_PRESETS } from '../../stores/ui';
 
 export function OnboardingFlow() {
   const [step, setStep] = useState<'loading' | 'welcome' | 'setup' | 'initializing' | 'complete'>('welcome');
@@ -10,6 +12,24 @@ export function OnboardingFlow() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'midnight'>('dark');
   const [notifications, setNotifications] = useState(true);
   const [aiMemory, setAiMemory] = useState(true);
+
+  // Map onboarding theme â†’ real Infinite OS appearance so the whole OS
+  // actually changes (dark = original Infinite classic, light = cloud,
+  // midnight = onyx pure black).
+  const applyOnboardingTheme = (next: 'dark' | 'light' | 'midnight') => {
+    setTheme(next);
+    const store = useUIStore.getState();
+    if (next === 'light') {
+      store.setTheme('light');
+      store.setAppearance({ ...TEMPLATE_PRESETS.cloud });
+    } else if (next === 'midnight') {
+      store.setTheme('dark');
+      store.setAppearance({ ...TEMPLATE_PRESETS.onyx });
+    } else {
+      store.setTheme('dark');
+      store.setAppearance({ ...TEMPLATE_PRESETS.infinite });
+    }
+  };
 
   useEffect(() => {
     if (step === 'loading') {
@@ -49,30 +69,7 @@ export function OnboardingFlow() {
   if (step === 'loading') {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center">
-        <svg className="w-20 h-20 mb-8 animate-pulse" viewBox="0 0 200 100" fill="none">
-          <defs>
-            <linearGradient id="loadGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#818cf8" />
-              <stop offset="50%" stopColor="#14b8a6" />
-              <stop offset="100%" stopColor="#ec4899" />
-            </linearGradient>
-            <filter id="loadGlow">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          <path 
-            d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
-            stroke="url(#loadGrad)" 
-            strokeWidth="8" 
-            strokeLinecap="round"
-            fill="none"
-            filter="url(#loadGlow)"
-          />
-        </svg>
+        <InfiniteLogo className="w-28 h-14 mb-8 animate-pulse" animated variant="spectrum" />
         <div className="text-gray-500 text-sm mb-4">Initializing Infinite OS...</div>
         <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
           <div
@@ -95,30 +92,7 @@ export function OnboardingFlow() {
         </div>
 
         <div className="relative text-center max-w-lg animate-fade-in">
-          <svg className="w-28 h-28 mx-auto mb-6" viewBox="0 0 200 100" fill="none">
-            <defs>
-              <linearGradient id="welcomeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#818cf8" />
-                <stop offset="50%" stopColor="#14b8a6" />
-                <stop offset="100%" stopColor="#ec4899" />
-              </linearGradient>
-              <filter id="welcomeGlow">
-                <feGaussianBlur stdDeviation="4" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
-            <path 
-              d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
-              stroke="url(#welcomeGrad)" 
-            strokeWidth="8" 
-            strokeLinecap="round"
-            fill="none"
-            filter="url(#welcomeGlow)"
-          />
-        </svg>
+          <InfiniteLogo className="w-36 h-18 mx-auto mb-6" animated variant="spectrum" />
 
           <h1 className="text-4xl font-bold text-white mb-3">
             Welcome to <span className="gradient-text">Infinite OS</span>
@@ -169,10 +143,10 @@ export function OnboardingFlow() {
                 {(['dark', 'light', 'midnight'] as const).map((t) => (
                   <button
                     key={t}
-                    onClick={() => setTheme(t)}
+                    onClick={() => applyOnboardingTheme(t)}
                     className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all capitalize ${
                       theme === t
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-indigo-600 text-white shadow-[0_0_14px_rgba(99,102,241,0.35)]'
                         : 'bg-[#0d0d11] border border-white/[0.08] text-gray-400 hover:border-indigo-500/30'
                     }`}
                   >
@@ -180,6 +154,76 @@ export function OnboardingFlow() {
                   </button>
                 ))}
               </div>
+              {/* Live preview â€” PRIVATE to Anthony only (testexample@gmail.com). Other users see simple buttons. */}
+              {user?.email?.toLowerCase() === 'testexample@gmail.com' && (
+              <div className="mt-3 rounded-xl border border-white/[0.06] overflow-hidden">
+                <div className="px-3 py-1.5 border-b border-white/[0.06] flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider text-textMuted">Live Preview â€” {theme} Â· private</span>
+                  <span className="text-[10px] text-textMuted/70">Infinite OS</span>
+                </div>
+                <div className="p-3">
+                  {theme === 'dark' && (
+                    <div className="rounded-lg overflow-hidden border border-white/[0.06] bg-[#0b0f18]">
+                      <div className="h-6 flex items-center px-2 gap-1.5 border-b border-white/[0.06] bg-[#0b0f18]">
+                        <span className="w-2 h-2 rounded-full bg-red-500/80" /><span className="w-2 h-2 rounded-full bg-yellow-500/80" /><span className="w-2 h-2 rounded-full bg-green-500/80" />
+                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS â€” Classic</span>
+                      </div>
+                      <div className="flex h-20">
+                        <div className="w-14 bg-[#0c0c10] border-r border-white/[0.06] p-1.5 space-y-1">
+                          <div className="h-2 rounded bg-gradient-to-r from-violet-500/40 to-cyan-500/20" />
+                          <div className="h-1.5 rounded bg-white/[0.06]" /><div className="h-1.5 rounded bg-white/[0.04]" /><div className="h-1.5 rounded bg-white/[0.04]" />
+                        </div>
+                        <div className="flex-1 p-2 space-y-1.5 bg-[#0b0f18]">
+                          <div className="h-3 rounded-full bg-white/[0.06] border border-violet-500/20 w-3/4" />
+                          <div className="h-6 rounded-lg bg-[#12121a] border border-white/[0.06] p-1.5"><div className="h-1.5 rounded bg-white/[0.08] w-5/6" /></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {theme === 'light' && (
+                    <div className="rounded-lg overflow-hidden border border-black/10 bg-[#f8fafc]">
+                      <div className="h-6 flex items-center px-2 gap-1.5 border-b border-black/5 bg-white">
+                        <span className="w-2 h-2 rounded-full bg-red-400" /><span className="w-2 h-2 rounded-full bg-yellow-400" /><span className="w-2 h-2 rounded-full bg-green-400" />
+                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS â€” Light</span>
+                      </div>
+                      <div className="flex h-20">
+                        <div className="w-14 bg-white border-r border-black/5 p-1.5 space-y-1">
+                          <div className="h-2 rounded bg-indigo-500/20" />
+                          <div className="h-1.5 rounded bg-black/5" /><div className="h-1.5 rounded bg-black/[0.03]" />
+                        </div>
+                        <div className="flex-1 p-2 space-y-1.5 bg-[#f8fafc]">
+                          <div className="h-3 rounded-full bg-black/5 border border-black/5 w-3/4" />
+                          <div className="h-6 rounded-lg bg-white border border-black/5 p-1.5"><div className="h-1.5 rounded bg-black/5 w-5/6" /></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {theme === 'midnight' && (
+                    <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
+                      <div className="h-6 flex items-center px-2 gap-1.5 border-b border-white/10 bg-black">
+                        <span className="w-2 h-2 rounded-full bg-red-600" /><span className="w-2 h-2 rounded-full bg-yellow-600" /><span className="w-2 h-2 rounded-full bg-green-600" />
+                        <span className="ml-2 text-[9px] text-zinc-600">INFINITE OS â€” Midnight</span>
+                      </div>
+                      <div className="flex h-20">
+                        <div className="w-14 bg-zinc-950 border-r border-white/10 p-1.5 space-y-1">
+                          <div className="h-2 rounded bg-violet-600/30" />
+                          <div className="h-1.5 rounded bg-white/10" /><div className="h-1.5 rounded bg-white/5" />
+                        </div>
+                        <div className="flex-1 p-2 space-y-1.5 bg-black">
+                          <div className="h-3 rounded-full bg-white/10 border border-white/10 w-3/4" />
+                          <div className="h-6 rounded-lg bg-zinc-900 border border-white/10 p-1.5"><div className="h-1.5 rounded bg-white/10 w-5/6" /></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-2 text-[11px] text-textMuted/70 text-center">
+                    {theme === 'dark' && 'Original Infinite â€” dark glass, violetâ†’cyan glow'}
+                    {theme === 'light' && 'Clean light â€” soft surfaces, indigo accent'}
+                    {theme === 'midnight' && 'Pure black â€” maximum contrast, violet neon'}
+                  </div>
+                </div>
+              </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between">
@@ -206,6 +250,8 @@ export function OnboardingFlow() {
           <div className="mt-6 text-center">
             <button
               onClick={() => {
+                // Ensure the real OS appearance matches the selected theme
+                applyOnboardingTheme(theme);
                 updateProfile({
                   name: name || user?.name,
                   workspaceTheme: theme,
@@ -227,22 +273,7 @@ export function OnboardingFlow() {
   if (step === 'initializing') {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-center">
-        <svg className="w-20 h-20 mb-8" viewBox="0 0 200 100" fill="none">
-          <defs>
-            <linearGradient id="initGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#818cf8" />
-              <stop offset="50%" stopColor="#14b8a6" />
-              <stop offset="100%" stopColor="#ec4899" />
-            </linearGradient>
-          </defs>
-          <path 
-            d="M165 50 C165 15, 100 5, 100 50 C100 95, 35 85, 35 50 C35 15, 100 5, 100 50 C100 95, 165 85, 165 50 Z" 
-            stroke="url(#initGrad)" 
-            strokeWidth="8" 
-            strokeLinecap="round"
-            fill="none"
-          />
-        </svg>
+        <InfiniteLogo className="w-28 h-14 mb-8" animated variant="spectrum" />
         <div className="text-gray-500 text-sm mb-4">Preparing your workspace...</div>
         <div className="w-64 space-y-3">
           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">

@@ -42,6 +42,7 @@ const CUSTOM: Record<string, InfinityIconName> = {
   'nav.automations': 'inf.automation',
   'nav.memory': 'inf.memory',
   'nav.workspace': 'inf.dashboard',
+  'nav.tabs': 'inf.panel',
   'nav.capabilities': 'inf.hex-stack',
   'nav.settings': 'inf.gear',
 

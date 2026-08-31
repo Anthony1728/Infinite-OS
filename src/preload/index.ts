@@ -120,6 +120,8 @@ const api = {
   fileMkdir: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_MKDIR, args),
   fileDelete: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_DELETE, args),
   fileRename: (args: { oldPath: string; newPath: string }) => ipcRenderer.invoke(IPC.FILE_RENAME, args),
+  fileCopy: (args: { src: string; dest: string }) => ipcRenderer.invoke(IPC.FILE_COPY, args),
+  fileStat: (args: { path: string }) => ipcRenderer.invoke(IPC.FILE_STAT, args),
   terminalExecute: (args: { command: string; cwd?: string }) => ipcRenderer.invoke(IPC.TERMINAL_EXECUTE, args),
 
   // App
@@ -221,6 +223,8 @@ const api = {
   automationSchedulerStatus: () => ipcRenderer.invoke(IPC.AUTOMATION_SCHEDULER_STATUS),
   automationSetKeepAwake: (enabled: boolean) => ipcRenderer.invoke(IPC.AUTOMATION_SET_KEEP_AWAKE, { enabled }),
   automationNextRuns: () => ipcRenderer.invoke(IPC.AUTOMATION_NEXT_RUNS),
+  automationCancelRun: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CANCEL_RUN, args),
+  automationCreateFromNL: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CREATE_FROM_NL, args),
 
   // Phone remote
   remotePhoneInfo: () => ipcRenderer.invoke(IPC.REMOTE_PHONE_INFO),
@@ -357,6 +361,16 @@ const api = {
     const handler = (_e: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on(IPC.ORCHESTRATOR_EVENT, handler);
     return () => ipcRenderer.removeListener(IPC.ORCHESTRATOR_EVENT, handler);
+  },
+
+  // Crew — multi-agent, multi-model orchestration
+  crewStart: (args: { prompt: string; displayPrompt?: string; sessionId: string; cwd: string; provider: string; model: string; agents?: string[]; preferPaid?: boolean }) =>
+    ipcRenderer.invoke(IPC.CREW_START, args),
+  crewStatus: () => ipcRenderer.invoke(IPC.CREW_STATUS),
+  onCrewEvent: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.CREW_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.CREW_EVENT, handler);
   },
 
   // Model Selector
@@ -875,6 +889,10 @@ const api = {
   miniRestore: () => ipcRenderer.invoke(IPC.MINI_RESTORE),
   miniSend: (args: { sessionId: string; message: string; provider: string; model: string; cwd: string }) =>
     ipcRenderer.invoke(IPC.MINI_SEND, args),
+  miniAbort: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.MINI_ABORT, args),
+  quickCaptureAppend: (args: { text: string }) => ipcRenderer.invoke(IPC.QUICK_CAPTURE_APPEND, args),
+  quickCaptureOpen: () => ipcRenderer.invoke(IPC.QUICK_CAPTURE_OPEN),
+  quickCaptureLatest: () => ipcRenderer.invoke(IPC.QUICK_CAPTURE_LATEST) as Promise<{ path: string; preview: string } | null>,
   onMiniStreamEvent: (cb: (e: unknown) => void) => {
     const handler = (_e: unknown, payload: unknown) => cb(payload);
     ipcRenderer.on(IPC.MINI_STREAM_EVENT, handler);

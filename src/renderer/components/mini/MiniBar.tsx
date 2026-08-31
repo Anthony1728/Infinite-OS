@@ -6,6 +6,7 @@ declare global {
     api: {
       miniRestore: () => Promise<void>;
       miniSend: (args: { sessionId: string; message: string; provider: string; model: string; cwd: string }) => Promise<unknown>;
+      miniAbort: (args: { sessionId: string }) => Promise<{ ok: boolean }>;
       onMiniStreamEvent: (cb: (e: unknown) => void) => () => void;
       onMiniState: (cb: (e: unknown) => void) => () => void;
       listSessions: () => Promise<Array<{ id: string; title?: string }>>;
@@ -28,11 +29,8 @@ export function MiniBar() {
   const [sending, setSending] = useState(false);
   const [noteError, setNoteError] = useState('');
   const [visible, setVisible] = useState(false);
-  const [dragging, setDragging] = useState(false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dragStart = useRef({ x: 0, y: 0 });
   const sessionIdRef = useRef<string>('');
 
   useEffect(() => {
@@ -82,7 +80,7 @@ export function MiniBar() {
     setNoteError('');
 
     try {
-      const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+      const settings = readSettings();
       // Dedicated mini channel: streams back to THIS window via
       // onMiniStreamEvent (CHAT_SEND only streams to the main window).
       const result = (await window.api.miniSend({
@@ -103,34 +101,39 @@ export function MiniBar() {
     }
   }, [input, sending]);
 
+  const handleAbort = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid) {
+      setSending(false);
+      return;
+    }
+    try {
+      await window.api.miniAbort({ sessionId: sid });
+    } catch {
+      // Best-effort: surface failure locally but always clear the spinner.
+    }
+    setSending(false);
+    setNoteError('Stopped');
+  }, []);
+
+  function readSettings(): { provider?: string; model?: string; cwd?: string } {
+    try {
+      const raw = localStorage.getItem('infinite:current');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return typeof parsed === 'object' && parsed !== null ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
   const handleRestore = useCallback(() => {
     setVisible(false);
     setTimeout(() => window.api.miniRestore(), 300);
   }, []);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
-    setDragging(true);
-    dragStart.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
-  }, [pos]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragging) return;
-    setPos({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
-  }, [dragging]);
-
-  const handleMouseUp = useCallback(() => {
-    setDragging(false);
-  }, []);
-
   return (
-    <div
-      className="fixed inset-0 select-none"
-      style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-    >
+    <div className="fixed inset-0 select-none">
       <style>{`
         @keyframes mini-slide-in {
           0% { opacity: 0; transform: translateY(20px) scale(0.95); }
@@ -144,6 +147,10 @@ export function MiniBar() {
           0%, 100% { opacity: 0.35; }
           50% { opacity: 1; }
         }
+        /* Native OS drag region: the bar itself moves the whole window across
+           the desktop. Interactive children must opt out or clicks die. */
+        .mini-drag { -webkit-app-region: drag; }
+        .mini-no-drag { -webkit-app-region: no-drag; }
       `}</style>
 
       {/* Chat bar — a floating, draggable bar. The surface is a soft rounded
@@ -151,7 +158,7 @@ export function MiniBar() {
           window, so the box itself is the interface and the desktop shows
           through everywhere else. */}
       <div
-        className="relative flex items-center gap-0 h-[48px] mx-2 overflow-hidden rounded-xl"
+        className="mini-drag relative flex items-center gap-0 h-[48px] mx-2 overflow-hidden rounded-xl"
         style={{
           background: 'rgba(8,11,20,0.85)',
           border: `1px solid ${focused ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.08)'}`,
@@ -161,12 +168,11 @@ export function MiniBar() {
             : 'mini-slide-out 0.25s cubic-bezier(0.7, 0, 0.84, 0) forwards',
           opacity: visible ? undefined : 0,
         }}
-        onMouseDown={handleMouseDown}
       >
         {/* Infinite mark */}
         <button
           onClick={handleRestore}
-          className="flex-shrink-0 w-8 h-8 ml-1.5 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-white/[0.04]"
+          className="mini-no-drag flex-shrink-0 w-8 h-8 ml-1.5 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-white/[0.04]"
           title="Open Infinite OS"
           aria-label="Open Infinite OS"
         >
@@ -188,12 +194,12 @@ export function MiniBar() {
           onBlur={() => setFocused(false)}
           placeholder={sending ? 'Thinking...' : 'Ask Infinite OS anything...'}
           disabled={sending}
-          className="relative flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-zinc-500 disabled:opacity-40 min-w-0 px-2 py-2"
+          className="mini-no-drag relative flex-1 bg-transparent text-[13px] text-white outline-none placeholder:text-zinc-500 disabled:opacity-40 min-w-0 px-2 py-2"
           style={{ caretColor: 'rgba(255,255,255,0.85)' }}
         />
 
         {sending && (
-          <span className="flex-shrink-0 pr-1 flex items-center gap-1.5">
+          <span className="mini-no-drag flex-shrink-0 pr-1 flex items-center gap-1.5">
             <span
               className="w-1.5 h-1.5 rounded-full bg-emerald-400"
               style={{ animation: 'mini-dot-pulse 1.2s ease-in-out infinite' }}
@@ -202,7 +208,7 @@ export function MiniBar() {
           </span>
         )}
         {noteError && !sending && (
-          <span className="flex-shrink-0 pr-1 flex items-center gap-1.5 max-w-[160px]">
+          <span className="mini-no-drag flex-shrink-0 pr-1 flex items-center gap-1.5 max-w-[160px]">
             <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
             <span className="text-[10px] text-red-300 truncate">{noteError}</span>
           </span>
@@ -210,9 +216,9 @@ export function MiniBar() {
 
         {/* Send */}
         <button
-          onClick={sending ? () => { setSending(false); } : handleSend}
+          onClick={sending ? handleAbort : handleSend}
           disabled={!input.trim() && !sending}
-          className="flex-shrink-0 w-7 h-7 mr-1.5 rounded-lg flex items-center justify-center transition-all duration-200 disabled:opacity-20 hover:bg-white/[0.06]"
+          className="mini-no-drag flex-shrink-0 w-7 h-7 mr-1.5 rounded-lg flex items-center justify-center transition-all duration-200 disabled:opacity-20 hover:bg-white/[0.06]"
           style={{
             background: input.trim() ? 'rgba(255,255,255,0.08)' : 'transparent',
           }}

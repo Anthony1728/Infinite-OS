@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc/index.js';
 import { registerMiniMode } from './ipc/mini-mode.js';
+import { registerQuickCapture } from './ipc/quick-capture.js';
 import { registerBuiltinTools } from './tools/registry.js';
 import { settings } from './settings/store.js';
 import { connectAll as mcpConnectAll } from './mcp/manager.js';
@@ -123,6 +124,15 @@ function createWindow(): void {
     console.log('[main] Window ready-to-show, showing...');
     mainWindow?.show();
     mainWindow?.focus();
+    // Normal maximizable window — fills the desktop but keeps the Windows
+    // taskbar and chrome visible; user can minimize/resize. F11 / Ctrl+Shift+F
+    // still toggles true fullscreen when they want it.
+    try {
+      mainWindow?.maximize();
+    } catch (err) {
+      console.error('[main] Maximize failed:', err);
+      mainWindow?.setFullScreen(true);
+    }
   });
 
   // Open DevTools automatically to surface render errors
@@ -206,6 +216,7 @@ app.whenReady().then(async () => {
   registerBuiltinTools();
   registerIpc(() => mainWindow);
   registerMiniMode(() => mainWindow);
+  registerQuickCapture();
   const cwd = process.cwd();
 
   // Settings and external services initialize in the background. Slow disk,

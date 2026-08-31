@@ -94,6 +94,8 @@ export const IPC = {
   FILE_MKDIR: 'file:mkdir',
   FILE_DELETE: 'file:delete',
   FILE_RENAME: 'file:rename',
+  FILE_COPY: 'file:copy',
+  FILE_STAT: 'file:stat',
 
   TERMINAL_EXECUTE: 'terminal:execute',
 
@@ -169,7 +171,8 @@ export const IPC = {
   AUTOMATION_STATS: 'automation:stats',
   AUTOMATION_SCHEDULER_STATUS: 'automation:scheduler-status',
   AUTOMATION_SET_KEEP_AWAKE: 'automation:set-keep-awake',
-  AUTOMATION_NEXT_RUNS: 'automation:next-runs',
+  AUTOMATION_CANCEL_RUN: 'automation:cancel-run',
+  AUTOMATION_CREATE_FROM_NL: 'automation:create-from-nl',
 
   // Phone remote (LAN companion)
   REMOTE_PHONE_INFO: 'remote:phone-info',
@@ -277,6 +280,11 @@ export const IPC = {
   ORCHESTRATOR_INTERJECT: 'orchestrator:interject',
   ORCHESTRATOR_STATUS: 'orchestrator:status',
   ORCHESTRATOR_EVENT: 'orchestrator:event', // main → renderer push
+
+  // Crew (multi-agent, multi-model orchestration)
+  CREW_START: 'crew:start',
+  CREW_STATUS: 'crew:status',
+  CREW_EVENT: 'crew:event', // main → renderer push
 
   // Free Model Selector
   MODEL_SELECT: 'model:select',
@@ -545,13 +553,82 @@ export const IPC = {
   // Mini Mode (desktop floating chat bar)
   MINI_TOGGLE: 'mini:toggle',
   MINI_SEND: 'mini:send',
-  MINI_STATE: 'mini:state',           // main → mini push
-  MINI_STREAM_EVENT: 'mini:stream',   // main → mini push
-  MINI_RESTORE: 'mini:restore',       // mini → main: restore main window
+  MINI_ABORT: 'mini:abort',
+  MINI_STATE: 'mini:state', // main → mini push
+  MINI_STREAM_EVENT: 'mini:stream', // main → mini push
+  MINI_RESTORE: 'mini:restore', // mini → main: restore main window
+
+  // Quick Capture — appends a timestamped entry to ~/Documents/Infinite OS/Quick Notes/<date>.md
+  QUICK_CAPTURE_APPEND: 'quick-capture:append',
+  QUICK_CAPTURE_OPEN: 'quick-capture:open',
+  QUICK_CAPTURE_LATEST: 'quick-capture:latest',
 
   // Browser Bridge (Infinite OS Bridge browser extension)
   BRIDGE_STATUS: 'bridge:status',
   BRIDGE_EXEC: 'bridge:exec',
-} as const;
 
-export type IpcChannel = (typeof IPC)[keyof typeof IPC];
+  // ============ OpenClaw Gateway/Node ============
+  NODE_PAIRING_REQUEST: 'node:pairing-request',
+  NODE_PAIRING_RESPONSE: 'node:pairing-response',
+  NODE_LIST: 'node:list',
+  NODE_INVOKE: 'node:invoke',
+  NODE_INVOKE_PROGRESS: 'node:invoke-progress',
+  NODE_INVOKE_RESULT: 'node:invoke-result',
+  NODE_DISCONNECT: 'node:disconnect',
+  NODE_APPROVAL_REQUEST: 'node:approval-request',
+  NODE_APPROVAL_RESPONSE: 'node:approval-response',
+  NODE_EXEC_ALLOWLIST: 'node:exec-allowlist',
+  NODE_MCP_SERVER: 'node:mcp-server',
+  NODE_SKILL: 'node:skill',
+  NODE_SESSION: 'node:session',
+
+  // Media
+  MEDIA_UNDERSTAND: 'media:understand',
+  MEDIA_LIMITS_GET: 'media:limits:get',
+  MEDIA_LIMITS_SET: 'media:limits:set',
+
+  // Session routing
+  SESSION_ROUTING_CONFIG_GET: 'session:routing-config:get',
+  SESSION_ROUTING_CONFIG_SET: 'session:routing-config:set',
+
+  // Streaming
+  STREAMING_CONFIG_GET: 'streaming:config:get',
+  STREAMING_CONFIG_SET: 'streaming:config:set',
+
+  // Queue
+  QUEUE_CONFIG_GET: 'queue:config:get',
+  QUEUE_CONFIG_SET: 'queue:config:set',
+  QUEUE_OPTIONS_SET: 'queue:options:set',
+
+  // Steering
+  STEER_PAYLOAD: 'steer:payload',
+
+  // Experimental
+  EXPERIMENTAL_GET: 'experimental:get',
+  EXPERIMENTAL_SET: 'experimental:set',
+
+  // ============ OpenClaw Gateway/Node (continued) ============
+  // Node commands
+  NODE_COMMAND_EXECUTE: 'node:command:execute',
+  NODE_COMMAND_APPROVE: 'node:command:approve',
+  NODE_COMMAND_DENY: 'node:command:deny',
+
+  // Media attachments
+  MEDIA_ATTACHMENT_ADD: 'media:attachment:add',
+  MEDIA_ATTACHMENT_REMOVE: 'media:attachment:remove',
+
+  // Session management
+  SESSION_RESET: 'session:reset',
+  SESSION_INCOGNITO: 'session:incognito',
+  SESSION_DM_SCOPE: 'session:dm-scope',
+  SESSION_GROUP_SCOPE: 'session:group-scope',
+
+  // Queue modes
+  QUEUE_MODE_SET: 'queue:mode:set',
+
+  // Experimental features
+  EXPERIMENTAL_LOCAL_MODEL_LEAN: 'experimental:local-model-lean',
+  EXPERIMENTAL_CODE_MODE: 'experimental:code-mode',
+  EXPERIMENTAL_CLOUD_WORKERS_DESKTOP: 'experimental:cloud-workers-desktop',
+  EXPERIMENTAL_SWARM: 'experimental:swarm',
+};

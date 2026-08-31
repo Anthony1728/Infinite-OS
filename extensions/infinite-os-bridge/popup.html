@@ -2,43 +2,55 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Infinite AI Bridge</title>
+    <title>Infinite OS | Browser Control Bridge</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
+    <!-- Header: brand mark + connection pill (reference layout) -->
     <header>
-      <div class="logo">
-        <!-- Infinite OS lemniscate mark (matches the app identity) -->
-        <svg width="34" height="34" viewBox="0 0 200 100" fill="none">
-          <path d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="url(#grad1)" stroke-width="8" stroke-linecap="round"/>
-          <defs>
-            <linearGradient id="grad1" x1="18" y1="16" x2="150" y2="84" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#8b5cf6"/>
-              <stop offset="50%" stop-color="#22d3ee"/>
-              <stop offset="100%" stop-color="#ec4899"/>
-            </linearGradient>
-          </defs>
-        </svg>
-      </div>
-      <div class="header-text">
-        <h1>Infinite AI</h1>
-        <p class="subtitle">Browser Extension v4.0</p>
+      <div class="brand">
+        <div class="logo-box">
+          <!-- Infinite OS animated spectrum loop — the company lemniscate,
+               runner beads trace violet→cyan→pink around the orbit. -->
+          <svg class="logo-loop" viewBox="0 0 200 100" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="exGrad" x1="18" y1="16" x2="182" y2="84" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#8b5cf6" />
+                <stop offset="50%" stop-color="#22d3ee" />
+                <stop offset="100%" stop-color="#ec4899" />
+              </linearGradient>
+            </defs>
+            <path class="loop-glow" d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="url(#exGrad)" stroke-width="12" />
+            <path class="loop-base" d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="url(#exGrad)" stroke-width="7" />
+            <path class="loop-run runner-violet" d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="#8b5cf6" stroke-width="6" pathLength="100" />
+            <path class="loop-run runner-cyan" d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="#22d3ee" stroke-width="6" pathLength="100" />
+            <path class="loop-run runner-pink" d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="#ec4899" stroke-width="6" pathLength="100" />
+          </svg>
+        </div>
+        <div class="title-group">
+          <span class="brand-name">INFINITE OS</span>
+          <span class="brand-sub">Browser Control Bridge</span>
+        </div>
       </div>
       <div class="header-right">
         <div id="latencyBadge" class="latency hidden" title="Connection latency">
           <span id="latencyText">0ms</span>
         </div>
-        <div id="dot" class="dot off" title="Connection status"></div>
+        <div class="connection-pill" id="connPill">
+          <div id="dot" class="status-dot off" title="Connection status"></div>
+          <span id="connLabel">Connecting</span>
+        </div>
       </div>
     </header>
 
+    <!-- Attached Target + model stats -->
     <section id="statusCard" class="card">
       <div class="card-header">
         <span class="card-title">Connection</span>
         <button id="refreshStatus" class="icon-btn" title="Refresh status">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>
       </div>
@@ -71,136 +83,91 @@
       <div id="errBox" class="error hidden"></div>
     </section>
 
+    <!-- Quick Actions (every action button wired to existing popup.js) -->
     <section class="card">
       <div class="card-header">
         <span class="card-title">Quick Actions</span>
       </div>
       <div class="actions-grid">
         <button data-act="ping" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           <span>Ping</span>
         </button>
         <button data-act="tabs" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 3h18v18H3zM3 9h18M9 21V9"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
           <span>Tabs</span>
         </button>
         <button data-act="inspect" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/>
-            <path d="M21 21l-4.35-4.35"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           <span>Inspect</span>
         </button>
         <button data-act="screenshot" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-          <span>Screenshot</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span>Shot</span>
         </button>
         <button data-act="reload" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           <span>Reload</span>
         </button>
         <button data-act="extract" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
           <span>Extract</span>
         </button>
         <button data-act="links" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           <span>Links</span>
         </button>
         <button data-act="forms" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-            <path d="M3 9h18M9 21V9"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M3 9h18M9 21V9"/></svg>
           <span>Forms</span>
         </button>
         <button data-act="back" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           <span>Back</span>
         </button>
         <button data-act="forward" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
-          <span>Forward</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          <span>Fwd</span>
         </button>
         <button data-act="newtab" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
           <span>New Tab</span>
         </button>
         <button data-act="clipboard" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-          </svg>
-          <span>Clipboard</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+          <span>Clip</span>
         </button>
         <button data-act="performance" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
           <span>Perf</span>
         </button>
         <button data-act="cookies" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/>
-            <path d="M8.5 8.5v.01M16 15.5v.01M12 12v.01M11 17v.01M7 14v.01"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><path d="M8.5 8.5v.01M16 15.5v.01M12 12v.01M11 17v.01M7 14v.01"/></svg>
           <span>Cookies</span>
         </button>
         <button data-act="storage" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-            <line x1="12" y1="22.08" x2="12" y2="12"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
           <span>Storage</span>
         </button>
         <button data-act="history" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span>History</span>
         </button>
         <button data-act="downloads" class="action-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <span>Downloads</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>DL</span>
         </button>
       </div>
     </section>
 
+    <!-- Tab Manager -->
     <section class="card">
       <div class="card-header">
         <span class="card-title">Tab Manager</span>
         <button id="refreshTabs" class="icon-btn" title="Refresh tabs">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>
       </div>
@@ -209,34 +176,60 @@
       </div>
     </section>
 
+    <!-- Command -->
     <section class="card">
       <div class="card-header">
         <span class="card-title">Command</span>
       </div>
       <div class="command-input">
-        <input type="text" id="commandInput" placeholder="Enter command (e.g., navigate https://google.com)" />
+        <input type="text" id="commandInput" placeholder="e.g. navigate https://google.com" />
         <button id="runCommand" class="run-btn">Run</button>
       </div>
     </section>
 
+    <!-- Result -->
     <section id="resultCard" class="card hidden">
       <div class="card-header">
         <span class="card-title">Result</span>
         <button id="closeResult" class="icon-btn" title="Close result">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
+            <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
       </div>
       <pre id="result" class="result-content"></pre>
     </section>
 
+    <!-- Live activity feed (reference design) -->
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title">Live Activity Feed</span>
+      </div>
+      <div class="log-container" id="logFeed">
+        <div class="log-entry">
+          <span class="log-time">[--:--:--]</span> Extension ready.
+        </div>
+        <div class="log-entry">
+          <span class="log-time">[--:--:--]</span> Awaiting payload from Host...
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer: bridge info + emergency stop -->
     <footer>
       <div class="footer-info">
         <span>Bridge: <code id="portCode">127.0.0.1:8765</code></span>
         <span class="footer-sep">|</span>
         <span>Auto-connects to Infinite OS</span>
       </div>
+      <button class="btn-emergency" id="emergencyStop" title="Detach agent and stop control">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="15" y1="9" x2="9" y2="15" />
+          <line x1="9" y1="9" x2="15" y2="15" />
+        </svg>
+        Detach Agent &amp; Emergency Stop
+      </button>
     </footer>
 
     <script src="popup.js"></script>

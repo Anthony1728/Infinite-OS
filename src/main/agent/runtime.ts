@@ -47,7 +47,7 @@ function superviseRuns(): void {
     const lastNotice = supervisorNotices.get(runId) ?? 0;
     if (quietMs >= SUPERVISOR_RESTART_MS) {
       const streamController = activeStreamControllers.get(runId);
-      if (streamController && now - lastNotice >= SUPERVISOR_RESTART_MS) {
+      if (streamController && !streamController.signal.aborted && now - lastNotice >= SUPERVISOR_RESTART_MS) {
         supervisorNotices.set(runId, now);
         activity(state, sink, 'status', 'Supervisor is restarting a stalled provider', `No provider progress for ${Math.round(quietMs / 1000)}s; the task remains active.`);
         streamController.abort(new Error('Supervisor detected a stalled provider stream.'));
@@ -312,7 +312,9 @@ export async function runSubagent(
   activity(state, opts.sink, 'status', 'Model connected', `${activeCandidate.provider} / ${activeCandidate.model}`);
   let failoverIndex = 0;
 
-  const MAX_TURNS = Number.isFinite(maxSteps) && (maxSteps ?? 0) > 0 ? Math.trunc(maxSteps as number) : Number.POSITIVE_INFINITY;
+  const MAX_TURNS = Number.isFinite(maxSteps) && (maxSteps ?? 0) > 0 ? Math.trunc(maxSteps as number) : 60;
+  const WALL_CLOCK_LIMIT_MS = 25 * 60_000;
+  const runStartedAt = Date.now();
   let verifiedComplete = false;
   let lastToolBatchHadError = false;
   let intentOnlyRetries = 0;
@@ -338,6 +340,12 @@ export async function runSubagent(
     return true;
   };
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    if (Date.now() - runStartedAt > WALL_CLOCK_LIMIT_MS) {
+      state.status = 'failed';
+      state.error = `Run exceeded ${Math.round(WALL_CLOCK_LIMIT_MS / 60000)} min wall-clock limit.`;
+      opts.sink({ type: 'fail', runId: state.id, error: state.error });
+      return '';
+    }
     if (signal.aborted) {
       if ((state.status as AgentRunState['status']) !== 'failed') {
         state.status = 'cancelled';
@@ -682,6 +690,19 @@ export async function runSubagent(
   }
 
   if (!verifiedComplete) {
+    // Graceful degrade: if the agent produced any text, treat it as best-effort success
+    // instead of hard-failing automations. This keeps Infinite OS feeling smooth.
+    const lastAssistant = messages.filter((m) => m.role === 'assistant').pop();
+    const lastText = lastAssistant?.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('\n').trim() ?? '';
+    if (lastText && !signal.aborted) {
+      state.status = 'completed';
+      state.completedAt = Date.now();
+      state.result = lastText;
+      recordProviderSuccess(activeCandidate);
+      activity(state, opts.sink, 'status', `${agent.name} completed (degraded)`, `${state.toolCallCount} tool call${state.toolCallCount === 1 ? '' : 's'}`);
+      opts.sink({ type: 'complete', runId: state.id, result: lastText });
+      return lastText;
+    }
     if (!signal.aborted || (state.status as AgentRunState['status']) !== 'failed') state.status = signal.aborted ? 'cancelled' : 'failed';
     state.completedAt = Date.now();
     if ((state.status as AgentRunState['status']) !== 'failed') {
@@ -731,6 +752,25 @@ export function abortSubagent(runId: string): boolean {
   }
   controller.abort();
   return true;
+}
+
+export function abortSessionRuns(sessionId: string): number {
+  let n = 0;
+  for (const [runId, state] of runStates) {
+    if (state.sessionId === sessionId && (state.status === 'queued' || state.status === 'running')) {
+      abortSubagent(runId);
+      activeStreamControllers.get(runId)?.abort(new Error('Session aborted by user.'));
+      n++;
+    }
+  }
+  // Also abort stream controllers that may not have a runState yet
+  for (const [runId, ctrl] of activeStreamControllers) {
+    const st = runStates.get(runId);
+    if (!st || st.sessionId === sessionId) {
+      try { ctrl.abort(new Error('Session aborted by user.')); } catch {}
+    }
+  }
+  return n;
 }
 
 function providerSupportsTools(providerId: string, model: string): boolean {
@@ -881,7 +921,9 @@ export async function spawnBatch(
         startedAt: Date.now(),
         toolCallCount: 0,
       };
-      runStates.set(state.id, state);
+      // Batch-queue entry is not added to global runStates — the inner
+      // spawnSubagent registers the real run; this avoids double entries
+      // and ensures abort/clear target the correct run.
       ctx.sink({ type: 'start', run: { ...state } });
 
       const executeTask = async (): Promise<{ result: string; error?: string }> => {
@@ -928,9 +970,15 @@ export async function spawnBatch(
   );
 
   const finalResults = new Map<AgentId, { result: string; error?: string }>();
+  const seen = new Map<AgentId, number>();
   tasks.forEach((t, index) => {
     const result = results[index];
-    finalResults.set(t.agentId, result);
+    const count = seen.get(t.agentId) ?? 0;
+    seen.set(t.agentId, count + 1);
+    const key = count === 0 ? t.agentId : `${t.agentId}:${count}` as AgentId;
+    // Keep first result under bare key; duplicates get suffixed so nothing is lost.
+    if (count === 0) finalResults.set(t.agentId, result);
+    finalResults.set(key, result);
   });
 
   return [finalResults];

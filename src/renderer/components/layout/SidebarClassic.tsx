@@ -15,7 +15,6 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
-  { id: 'capabilities', label: 'Capabilities', icon: 'nav.capabilities', color: 'text-fuchsia-400' },
   { id: 'settings', label: 'Settings', icon: 'nav.settings', color: 'text-slate-400' },
 ];
 
@@ -62,6 +61,7 @@ export function SidebarClassic({
   const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryError, setClearHistoryError] = useState('');
+  const [tabsExpanded, setTabsExpanded] = useState(true);
 
   const activeAgents = runs.filter((r) => r.status === 'running').length;
 
@@ -97,6 +97,10 @@ export function SidebarClassic({
     }, 220);
     return () => clearTimeout(timer);
   }, [chatSearch, searchSessions, loadSessions]);
+
+  useEffect(() => {
+    if (aiTabs.length > 0) setTabsExpanded(true);
+  }, [aiTabs.length]);
 
   const handleNewChat = async () => {
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
@@ -136,6 +140,10 @@ export function SidebarClassic({
       code: 'tab.code', research: 'tab.research', lesson: 'tab.lesson', workspace: 'tab.workspace',
       chart: 'tab.chart', document: 'tab.document', video: 'tab.video', invoice: 'tab.invoice',
       data: 'tab.data', dashboard: 'tab.dashboard', financial: 'tab.financial', custom: 'tab.custom',
+      website: 'tab.workspace', image: 'tab.document', embed: 'tab.workspace', media: 'tab.video',
+      schedule: 'tab.document', tracker: 'tab.data', portfolio: 'tab.workspace', comparison: 'tab.chart',
+      calculator: 'tab.data', presentation: 'tab.document', mindmap: 'tab.chart', checklist: 'tab.feature',
+      timeline: 'tab.document', kanban: 'tab.workspace',
     };
     return icons[kind] ?? 'tab.custom';
   };
@@ -218,57 +226,112 @@ export function SidebarClassic({
           );
         })}
 
-        {!collapsed && aiTabs.length > 0 && (
-          <>
-            <div className="pt-6 pb-2 px-2.5 flex items-center justify-between text-[9px] font-semibold text-cyan-400/70 uppercase tracking-widest">
-              <span>AI Workspaces</span>
-              <span>{aiTabs.length}</span>
-            </div>
-            {aiTabs.map((tab) => {
-              const isActive = activeView === tab.id;
-              const hasEmoji = tab.icon && /[\u{1F300}-\u{1F9FF}]/u.test(tab.icon);
-              return (
-                <div key={tab.id} className="relative group/tab">
-                  <button
-                    onClick={() => onNavChange(tab.id)}
-                    className={`group relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-all duration-150 text-xs ${
-                      isActive
-                        ? 'bg-cyan-400/[0.08] text-white font-medium'
-                        : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'
-                    }`}
-                  >
-                    {isActive && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full bg-cyan-400" />
-                    )}
-                    {hasEmoji ? (
-                      <span className="w-4 h-4 flex-shrink-0 text-center text-sm leading-4">{tab.icon}</span>
-                    ) : (
-                      <AppIcon
-                        name={tabIconName(tab.kind)}
-                        className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-cyan-300' : 'text-gray-500 group-hover:text-cyan-300'}`}
-                        strokeWidth={1.7}
-                      />
-                    )}
-                    <span className="truncate flex-1 text-left">{tab.title}</span>
-                  </button>
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeAiTab(tab.id);
-                      if (activeView === tab.id) onNavChange('chats');
-                    }}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md opacity-0 group-hover/tab:opacity-100 text-zinc-600 hover:text-zinc-200 hover:bg-white/[0.06] transition-opacity"
-                    aria-label={`Close ${tab.title}`}
-                    title="Close tab"
-                  >
-                    <svg className="w-3 h-3 mx-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
-                    </svg>
-                  </button>
+        {/* Tabs — unified dropdown for all AI-created tabs (classic) */}
+        {collapsed ? (
+          <div className="mt-4 space-y-0.5">
+            <button
+              onClick={() => { onToggleCollapse(); setTabsExpanded(true); }}
+              title={`Tabs${aiTabs.length ? ` — ${aiTabs.length} open` : ''}`}
+              className={`relative w-full flex items-center justify-center p-2 rounded-lg transition-colors duration-150 ${aiTabs.length ? 'text-cyan-300 bg-cyan-400/10 border border-cyan-400/20' : 'text-gray-500 hover:text-white hover:bg-white/[0.03]'}`}
+            >
+              <AppIcon name="nav.tabs" className="w-4 h-4 flex-shrink-0" strokeWidth={1.7} />
+              {aiTabs.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-cyan-500 text-white text-[9px] font-bold flex items-center justify-center border border-[#0c0c10]">
+                  {aiTabs.length}
+                </span>
+              )}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <button
+              onClick={() => setTabsExpanded(!tabsExpanded)}
+              className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors duration-150 text-zinc-300 hover:text-white hover:bg-white/[0.04] border border-transparent hover:border-white/[0.06]"
+            >
+              <AppIcon name="nav.tabs" className="w-4 h-4 flex-shrink-0 text-cyan-400" strokeWidth={1.7} />
+              <span className="flex-1 text-left tracking-wide">Tabs</span>
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border transition-colors ${aiTabs.length ? 'bg-cyan-400/15 text-cyan-300 border-cyan-400/20' : 'bg-white/[0.06] text-zinc-500 border-white/[0.08]'}`}>
+                {aiTabs.length}
+              </span>
+              <svg className={`w-3 h-3 text-zinc-500 transition-transform duration-200 ${tabsExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+              </svg>
+            </button>
+            <div className={`grid transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${tabsExpanded ? 'grid-rows-[1fr] opacity-100 mt-1.5' : 'grid-rows-[0fr] opacity-0'}`}>
+              <div className="overflow-hidden">
+                <div className="space-y-1 px-1">
+                  {aiTabs.length === 0 ? (
+                    <div className="mx-1 rounded-lg border border-dashed border-white/[0.06] bg-white/[0.02] px-3 py-4 text-center">
+                      <div className="w-8 h-8 mx-auto mb-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
+                        <AppIcon name="nav.tabs" className="w-4 h-4 text-cyan-400" strokeWidth={1.7} />
+                      </div>
+                      <p className="text-[11px] font-medium text-zinc-300">No tabs yet</p>
+                      <p className="text-[10px] text-zinc-500 mt-1 leading-relaxed">Ask the AI to create anything — website, image, video, quiz, document — it will appear here.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between px-1 pb-1">
+                        <span className="text-[10px] text-zinc-500">{aiTabs.length} open</span>
+                        <button
+                          onClick={() => { aiTabs.forEach(t => closeAiTab(t.id)); if (aiTabs.some(t => t.id === activeView)) onNavChange('chats'); }}
+                          className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors"
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      {aiTabs.map((tab) => {
+                        const isActive = activeView === tab.id;
+                        const hasEmoji = tab.icon && /[\u{1F300}-\u{1F9FF}]/u.test(tab.icon);
+                        return (
+                          <div key={tab.id} className="relative group/tab">
+                            <button
+                              onClick={() => onNavChange(tab.id)}
+                              className={`group relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-colors duration-150 text-xs text-left ${
+                                isActive
+                                  ? 'bg-cyan-400/[0.08] text-white font-medium border border-cyan-400/20'
+                                  : 'text-gray-500 hover:text-white hover:bg-white/[0.03] border border-transparent'
+                              }`}
+                            >
+                              {isActive && (
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full bg-cyan-400" />
+                              )}
+                              {hasEmoji ? (
+                                <span className="w-4 h-4 flex-shrink-0 text-center text-sm leading-4">{tab.icon}</span>
+                              ) : (
+                                <AppIcon
+                                  name={tabIconName(tab.kind)}
+                                  className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-cyan-300' : 'text-gray-500 group-hover:text-cyan-300'}`}
+                                  strokeWidth={1.7}
+                                />
+                              )}
+                              <span className="truncate flex-1">{tab.title}</span>
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] text-zinc-500 capitalize hidden group-hover/tab:inline-flex">
+                                {tab.kind}
+                              </span>
+                            </button>
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                closeAiTab(tab.id);
+                                if (activeView === tab.id) onNavChange('chats');
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md opacity-0 group-hover/tab:opacity-100 text-zinc-600 hover:text-zinc-200 hover:bg-white/[0.06] transition-opacity"
+                              aria-label={`Close ${tab.title}`}
+                              title="Close tab"
+                            >
+                              <svg className="w-3 h-3 mx-auto" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" d="M6 6l12 12M18 6 6 18" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
-              );
-            })}
-          </>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Starred section - only show when there are active starred items */}

@@ -98,12 +98,38 @@ export interface AutomationTemplate {
   tags: string[];
 }
 
+/**
+ * Quick NL → cron helper for prompts like "at 5am", "tomorrow at 4pm",
+ * "every day at 9am", "every Monday". Used when the chat agent creates a
+ * workflow from free-form scheduling language.
+ */
+export function nlToCron(nl: string): string | null {
+  const s = nl.toLowerCase().trim();
+  // "every day at 5am" / "daily at 17:00" / "at 5am"
+  const atMatch = s.match(/at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (atMatch) {
+    let h = parseInt(atMatch[1], 10);
+    const m = parseInt(atMatch[2] ?? '0', 10);
+    const ap = atMatch[3];
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${m} ${h} * * *`;
+  }
+  // "every monday" / "every friday"
+  const dayNames: Record<string,number> = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+  const everyDay = s.match(/every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)/);
+  if (everyDay) return `0 9 * * ${dayNames[everyDay[1]]}`;
+  // "tomorrow at 4pm" -> one-shot, not cron — caller should use trigger type once
+  return null;
+}
+
 export class AutomationBuilder {
   private config: AutomationConfig;
   private workflows: Map<string, Workflow> = new Map();
   private runs: Map<string, WorkflowRun> = new Map();
   private templates: AutomationTemplate[] = [];
   private dataDir: string;
+  private activeControllers: Map<string, AbortController> = new Map();
 
   constructor(config?: Partial<AutomationConfig>) {
     this.config = {
@@ -415,12 +441,22 @@ export class AutomationBuilder {
       });
     };
     const runController = new AbortController();
+    this.activeControllers.set(run.id, runController);
     emit({ type: 'run_started', message: `Started ${workflow.name}` });
 
     // Execute actions sequentially with durable per-action retry counts.
     const actionAttempts = new Map<string, number>();
     let actionIndex = 0;
     while (actionIndex < workflow.actions.length) {
+      if (runController.signal.aborted) {
+        run.status = 'cancelled';
+        run.error = 'Cancelled by user.';
+        workflow.status = 'idle';
+        this.runs.set(run.id, run);
+        this.activeControllers.delete(run.id);
+        emit({ type: 'run_completed', message: 'Cancelled by user.', result: 'Cancelled', status: 'cancelled' });
+        return run;
+      }
       const action = workflow.actions[actionIndex];
       const attempt = (actionAttempts.get(action.id) ?? 0) + 1;
       actionAttempts.set(action.id, attempt);
@@ -520,6 +556,7 @@ export class AutomationBuilder {
               }
             } catch (e) {
               result = `Script error: ${(e as Error).message}`;
+              throw new Error(result);
             }
             break;
           }
@@ -596,8 +633,36 @@ export class AutomationBuilder {
 
     this.runs.set(run.id, run);
     this.saveData();
+    this.activeControllers.delete(run.id);
     emit({ type: 'run_completed', message: run.result, result: run.error ?? run.result, status: run.status });
     return run;
+  }
+
+  cancelRun(runId: string): boolean {
+    const c = this.activeControllers.get(runId);
+    if (c) { c.abort(); return true; }
+    return false;
+  }
+
+  /** If the user says "at 5am" or "tomorrow at 4pm", produce a trigger. Used by the agent. */
+  triggerFromNaturalLanguage(nl: string): Trigger | null {
+    const lower = nl.toLowerCase();
+    // "tomorrow at 4pm" -> once
+    if (/tomorrow/.test(lower)) {
+      const at = nlToCron(nl);
+      if (at) {
+        const m = parseInt(at.split(' ')[0], 10);
+        const h = parseInt(at.split(' ')[1], 10);
+        const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(h, m, 0, 0);
+        return { type: 'once', config: { onceAt: d.toISOString() } };
+      }
+    }
+    const cron = nlToCron(nl);
+    if (cron) return { type: 'cron', config: { cron } };
+    // fallback: interval like "every 2 hours"
+    const everyH = lower.match(/every\s+(\d+)\s*hours?/);
+    if (everyH) return { type: 'interval', config: { intervalMs: parseInt(everyH[1], 10) * 3600000 } };
+    return null;
   }
 
   getWorkflow(workflowId: string): Workflow | undefined {

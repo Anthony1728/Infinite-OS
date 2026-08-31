@@ -151,7 +151,7 @@ export class TaskOrchestrator {
       }
 
       // Count currently running tasks
-      const runningCount = task.subTasks.filter((st) => st.status === 'running').length;
+      let runningCount = task.subTasks.filter((st) => st.status === 'running').length;
 
       // Deploy newly ready sub-tasks (up to MAX_PARALLEL)
       if (runningCount < MAX_PARALLEL) {
@@ -177,6 +177,7 @@ export class TaskOrchestrator {
 
           if (depsComplete) {
             this.deploySubTask(task, subTask, sessionId, cwd, provider, model, sink);
+            runningCount++;
           }
         }
       }
