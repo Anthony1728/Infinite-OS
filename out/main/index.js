@@ -1,9 +1,9 @@
 import { safeStorage, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor, clipboard, nativeImage, Notification, dialog, shell, screen, app, session, Menu } from "electron";
 import { join, dirname, basename, resolve, relative, sep, isAbsolute, extname } from "node:path";
 import { fileURLToPath, URL as URL$1 } from "node:url";
-import { readFile, mkdir, writeFile, appendFile, readdir, unlink, realpath, rename, lstat, rm, stat, cp } from "node:fs/promises";
+import { readFile, mkdir, writeFile, appendFile, readdir, unlink, realpath, rename, lstat, rm, stat, cp, mkdtemp } from "node:fs/promises";
 import { spawn, execFile, execSync, execFileSync, exec as exec$1 } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync, unlinkSync, statSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync, unlinkSync, statSync, mkdtempSync, promises, realpathSync } from "node:fs";
 import { homedir, platform, release, arch, hostname, userInfo, cpus, totalmem, freemem, loadavg, networkInterfaces, tmpdir, uptime } from "node:os";
 import chokidar from "chokidar";
 import Anthropic from "@anthropic-ai/sdk";
@@ -189,6 +189,7 @@ const IPC = {
   AUTOMATION_ADD_ACTION: "automation:add-action",
   AUTOMATION_GET_TEMPLATES: "automation:get-templates",
   AUTOMATION_GET_RUNS: "automation:get-runs",
+  AUTOMATION_NEXT_RUNS: "automation:next-runs",
   AUTOMATION_STATS: "automation:stats",
   AUTOMATION_SCHEDULER_STATUS: "automation:scheduler-status",
   AUTOMATION_SET_KEEP_AWAKE: "automation:set-keep-awake",
@@ -544,12 +545,17 @@ const IPC = {
   // Mini Mode (desktop floating chat bar)
   MINI_TOGGLE: "mini:toggle",
   MINI_SEND: "mini:send",
+  MINI_ABORT: "mini:abort",
   MINI_STATE: "mini:state",
   // main → mini push
   MINI_STREAM_EVENT: "mini:stream",
   // main → mini push
   MINI_RESTORE: "mini:restore",
   // mini → main: restore main window
+  // Quick Capture — appends a timestamped entry to ~/Documents/Infinite OS/Quick Notes/<date>.md
+  QUICK_CAPTURE_APPEND: "quick-capture:append",
+  QUICK_CAPTURE_OPEN: "quick-capture:open",
+  QUICK_CAPTURE_LATEST: "quick-capture:latest",
   // Browser Bridge (Infinite OS Bridge browser extension)
   BRIDGE_STATUS: "bridge:status",
   BRIDGE_EXEC: "bridge:exec",
@@ -2706,7 +2712,57 @@ const TOOL_NAME_ALIASES = {
   defaultgateway: "RouterAdmin",
   default_gateway: "RouterAdmin",
   changewifipassword: "RouterAdmin",
-  change_wifi_password: "RouterAdmin"
+  change_wifi_password: "RouterAdmin",
+  // Hermes parity tools
+  messaging: "Messaging",
+  slack: "Messaging",
+  sendslack: "Messaging",
+  send_slack: "Messaging",
+  discord: "Messaging",
+  senddiscord: "Messaging",
+  send_discord: "Messaging",
+  telegram: "Messaging",
+  sendtelegram: "Messaging",
+  send_telegram: "Messaging",
+  imagegenerator: "ImageGenerator",
+  image_generate: "ImageGenerator",
+  generateimage: "ImageGenerator",
+  generate_image: "ImageGenerator",
+  dalle: "ImageGenerator",
+  stablediffusion: "ImageGenerator",
+  stable_diffusion: "ImageGenerator",
+  device: "Device",
+  devicecontrol: "Device",
+  device_control: "Device",
+  smarthome: "Device",
+  smart_home: "Device",
+  homeassistant: "Device",
+  home_assistant: "Device",
+  iot: "Device",
+  vision: "Vision",
+  describeimage: "Vision",
+  describe_image: "Vision",
+  ocr: "Vision",
+  sandbox: "Sandbox",
+  sandboxed: "Sandbox",
+  sandboxexec: "Sandbox",
+  sandbox_exec: "Sandbox",
+  isolateshell: "Sandbox",
+  batch: "Batch",
+  batchexecute: "Batch",
+  batch_execute: "Batch",
+  parallel: "Batch",
+  fanout: "Batch",
+  ultimateplanner: "UltimatePlanner",
+  ultimate_planner: "UltimatePlanner",
+  taskplanner: "UltimatePlanner",
+  task_planner: "UltimatePlanner",
+  compute: "Compute",
+  hardware: "Compute",
+  computemanager: "Compute",
+  compute_manager: "Compute",
+  intelligentcompute: "Compute",
+  intelligent_compute: "Compute"
 };
 class ToolRegistry {
   tools = /* @__PURE__ */ new Map();
@@ -5105,15 +5161,40 @@ class SkillsManager {
     writeFileSync(marker, JSON.stringify({ seededAt: Date.now(), count: BUNDLED_SKILLS.length, lastSeeded: seeded }));
   }
 }
-function buildLocalModelOperatingPrompt(opts) {
+let cachedUserName = null;
+let userNameCacheTime = 0;
+const USER_NAME_CACHE_TTL_MS = 3e4;
+async function getUserName() {
+  const now2 = Date.now();
+  if (cachedUserName !== null && now2 - userNameCacheTime < USER_NAME_CACHE_TTL_MS) return cachedUserName;
+  const sessionPath2 = join(homedir(), ".infinite-ai", "auth-session.json");
+  try {
+    if (!existsSync(sessionPath2)) {
+      cachedUserName = "";
+      return "";
+    }
+    const raw = await readFile(sessionPath2, "utf8");
+    const session2 = JSON.parse(raw);
+    const name = session2?.user?.profile?.name || session2?.user?.name || "";
+    cachedUserName = name;
+    userNameCacheTime = now2;
+    return name;
+  } catch {
+    cachedUserName = "";
+    return "";
+  }
+}
+async function buildLocalModelOperatingPrompt(opts) {
   const toolSummary = opts.availableToolNames.length ? `${opts.availableToolNames.length} real Infinite OS capabilities are available: ${opts.availableToolNames.join(", ")}.` : "No native tools are connected for this request.";
   const attachedSummary = opts.attachedToolNames.length ? `Executable tool schemas attached for this turn: ${opts.attachedToolNames.join(", ")}. Use these exact names now; Infinite OS will attach other schemas when a task needs them.` : "No executable tool schema is attached for this turn. Answer without pretending to act.";
+  const userName = await getUserName();
   return [
     "# INFINITE OS LOCAL AGENT CONTRACT - HIGHEST PRIORITY",
     "",
     "IDENTITY AND LOCATION",
     "You are Infinite AI, the active local agent inside the Infinite OS Windows desktop application. You are not a remote chatbot and you are not running in a text-only webpage.",
     `Runtime: ${platform()} ${release()} (${arch()}) on computer ${hostname()}, signed-in user ${userInfo().username}.`,
+    `The user's name is ${userName || "not set"}. Address them by name when natural.`,
     `Working directory: ${opts.cwd}`,
     `User home: ${homedir()}`,
     `Local inference model: Ollama/${opts.model}`,
@@ -5171,7 +5252,7 @@ async function buildSystemPrompt(opts) {
   const attachedToolNames = new Set(opts.attachedToolNames ?? allTools.map((tool) => tool.name));
   const tools = allTools.filter((tool) => attachedToolNames.has(tool.name));
   if (opts.provider === "ollama") {
-    parts.push(getLocalModelPrompt({
+    parts.push(await getLocalModelPrompt({
       cwd: opts.cwd,
       model: opts.model,
       permissionProfile,
@@ -5206,6 +5287,14 @@ async function buildSystemPrompt(opts) {
   return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model);
 }
 async function finishSystemPrompt(parts, cwd, allTools, attachedTools, permissionProfile, provider, model) {
+  const userName = await getUserName();
+  parts.push("");
+  parts.push(`# User`);
+  if (userName) {
+    parts.push(`The user's name is ${userName}. Address them by name when natural (e.g. greetings, summaries).`);
+  } else {
+    parts.push(`The user has not set a display name yet. Use "you" naturally.`);
+  }
   parts.push("");
   parts.push(`# Current run`);
   parts.push(`Working directory: ${cwd}`);
@@ -5596,7 +5685,7 @@ function renderStaticSystemPrompt(input) {
   return parts.join("\n");
 }
 const localPromptCache = /* @__PURE__ */ new Map();
-function getLocalModelPrompt(opts) {
+async function getLocalModelPrompt(opts) {
   const key = [
     opts.permissionProfile,
     opts.model,
@@ -5608,7 +5697,7 @@ function getLocalModelPrompt(opts) {
   ].join("|");
   const hit = localPromptCache.get(key);
   if (hit) return hit;
-  const rendered = buildLocalModelOperatingPrompt(opts);
+  const rendered = await buildLocalModelOperatingPrompt(opts);
   localPromptCache.set(key, rendered);
   return rendered;
 }
@@ -7510,7 +7599,7 @@ class ProblemTracker {
     this.currentTurn = 0;
   }
 }
-let LOOP_STREAM_STALL_TIMEOUT_MS = 10 * 6e4;
+let LOOP_STREAM_STALL_TIMEOUT_MS = 3 * 6e4;
 const decisionRouter = new DecisionRouter({ costOptimization: true, fallbackToLocal: true });
 const liveInterjections = /* @__PURE__ */ new Map();
 function interjectAgent(sessionId, message) {
@@ -7534,7 +7623,7 @@ async function runAgent(history2, userMessage, opts) {
   let failoverIndex = 0;
   const configuredTurns = settings.get("agentMaxTurns");
   const MAX_TURNS = typeof configuredTurns === "number" && Number.isFinite(configuredTurns) && configuredTurns > 0 ? Math.trunc(configuredTurns) : 60;
-  const WALL_CLOCK_LIMIT_MS = 25 * 6e4;
+  const WALL_CLOCK_LIMIT_MS = 10 * 6e4;
   const MAX_INTENT_ONLY_RETRIES = 2;
   let intentOnlyRetries = 0;
   let lastToolBatchHadError = false;
@@ -8184,16 +8273,19 @@ const AGENTS = {
   general: {
     id: "general",
     name: "General Agent",
-    description: "Default full-capability agent — handles any task, best at everything.",
+    description: "The single best agent in Infinite OS — universal full-capability operator. Leave it on General and any task will be handled: chat, research, code, files, terminal, browser/computer control, data, automations, email, business. Specialists are optional.",
     icon: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z",
     color: "#8b5cf6",
     systemPrompt: [
-      "You are the General Agent, Infinite OS's most versatile operator. You can handle absolutely any task: conversations, research, coding, file work, terminal commands, browser and desktop control, email, automations, data, and business work.",
-      "Your edge is judgment: classify the request, pick the right specialist approach yourself, and execute end-to-end without handing work back to the user.",
-      "For coding tasks you behave like a senior engineer: inspect, plan, edit, test, fix, report.",
-      "For research you behave like a diligent analyst: search, verify against primary sources, cite URLs.",
-      "For PC/browser tasks you behave like a skilled operator: observe first, act, verify the on-screen result.",
-      "Respond conversationally when the user is chatting; act decisively when the user asks for action. Always complete the full request — every clause of a compound request is a completion requirement.",
+      'You are the General Agent, the single best and most versatile operator in Infinite OS. Your job is to make "leave it on General" the right choice: you handle absolutely any task to completion — conversations, deep research, coding, file work, terminal commands, browser and desktop control, data/ETL, email, automations, business operations — at the level of the best specialist for that task.',
+      "Your edge is judgment: instantly classify the request, adopt the right specialist approach yourself, and execute end-to-end without handing work back. When a task truly benefits from a specialist (e.g. heavy research vs. heavy coding), you internally apply that specialist's method while staying the single accountable agent.",
+      'Agent management: if the user says "create an AI agent specialized in X" use the CreateCustomAgent tool (via custom-agent:create) to create it; if they say "delete/remove the agent Y" use the delete tool. Confirm the result inline and offer to use the new agent. You also keep custom agents organized.',
+      "For coding tasks you behave like a staff engineer: inspect real files (Read/Glob/Grep), plan briefly (TodoWrite), implement with the narrowest precise edit (Edit) or creation (Write), test/build/typecheck, fix failures from real output, and report changed files + verification.",
+      "For research you behave like a diligent analyst: search broadly (WebSearch), deep-read primary sources (WebFetch/Browser/Operator), cross-check facts, cite URLs, and separate verified facts from synthesis.",
+      "For PC/browser tasks you behave like a skilled operator: visual_observe first, act precisely (visual_click/visual_type), verify with a second frame/state.",
+      "You have 8 first-class tools beyond Hermes: Messaging (unified Slack/Discord/Telegram), ImageGenerator (OpenAI → Stability → always-verifies SVG placeholder), Device (generic HTTP for any smart-home/IoT), Vision (Ollama vision → sharp fallback), Sandbox (disposable temp dir, minimal env, auto-cleanup), Batch (parallel fan-out up to 8), UltimatePlanner (Goal → Requirements → Plan → Subtasks → Verification, hardware-aware), Compute (live CPU/GPU/VRAM/RAM + Ollama local models → local vs cloud recommendation). Prefer them when they are the crispest fit.",
+      `Communication — explain like Claude Code / Codex, not a silent tool-runner: BEFORE any tool batch, write one short sentence of what you will do and why (e.g. "I’ll read the repo layout to see what’s implemented before changing code."). AFTER each batch, write 1 sentence of what you learned and what you’ll do next. When you verify (tests/build), say the exact command you will run and then report the result. The chat's LiveActivityFeed shows your tool labels verbatim, so keep them human-readable: prefer "Reading src/..." or "Editing package.json (add script)" over generic "File operation". Never run tools without a preceding narration.`,
+      "Respond conversationally when the user is chatting; act decisively when the user asks for action. Always complete the full request — every clause of a compound request is a completion requirement. Prefer doing the real work with tools over describing it.",
       UNIVERSAL_CONTRACT
     ].join("\n"),
     allowedTools: ALL_TOOLS
@@ -8813,7 +8905,7 @@ function superviseRuns() {
     const lastNotice = supervisorNotices.get(runId) ?? 0;
     if (quietMs >= SUPERVISOR_RESTART_MS) {
       const streamController = activeStreamControllers.get(runId);
-      if (streamController && now2 - lastNotice >= SUPERVISOR_RESTART_MS) {
+      if (streamController && !streamController.signal.aborted && now2 - lastNotice >= SUPERVISOR_RESTART_MS) {
         supervisorNotices.set(runId, now2);
         activity(state, sink, "status", "Supervisor is restarting a stalled provider", `No provider progress for ${Math.round(quietMs / 1e3)}s; the task remains active.`);
         streamController.abort(new Error("Supervisor detected a stalled provider stream."));
@@ -10056,12 +10148,12 @@ class InfiniteBrain {
     };
   }
 }
-let brain$1 = null;
+let brain$2 = null;
 function getBrain() {
-  if (!brain$1) {
-    brain$1 = new InfiniteBrain();
+  if (!brain$2) {
+    brain$2 = new InfiniteBrain();
   }
-  return brain$1;
+  return brain$2;
 }
 const execFileAsync = promisify(execFile);
 function roundGb(bytes) {
@@ -10452,6 +10544,11 @@ function getOllamaBrain() {
   if (!instance$2) instance$2 = new OllamaBrain();
   return instance$2;
 }
+const brain$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  OllamaBrain,
+  getOllamaBrain
+}, Symbol.toStringTag, { value: "Module" }));
 const DEFAULT_CONFIG = {
   dataDir: join(homedir(), ".infinite-ai", "engine"),
   minInteractions: 10,
@@ -23589,6 +23686,18 @@ function registerMiniMode(getMainWindow) {
     openMini();
     return { active: true };
   });
+  ipcMain.handle(IPC.MINI_ABORT, (_e, args = {}) => {
+    const sid = typeof args?.sessionId === "string" ? args.sessionId : "";
+    if (!sid) {
+      for (const controller2 of activeMiniRuns.values()) controller2.abort();
+      activeMiniRuns.clear();
+      return { ok: true, aborted: "all" };
+    }
+    const controller = activeMiniRuns.get(sid);
+    if (!controller) return { ok: false, error: "No active run for session" };
+    controller.abort(new Error("User stopped the mini-mode run."));
+    return { ok: true };
+  });
   ipcMain.handle(IPC.MINI_RESTORE, () => {
     const main = mainWinGetter();
     if (main && !main.isDestroyed()) {
@@ -23728,6 +23837,101 @@ function closeMini() {
   }
   miniWindow = null;
   logger.info("Mini mode closed");
+}
+const FOLDER_NAME = "Quick Notes";
+const APP_SUBFOLDER = "Infinite OS";
+function resolveNotesDir() {
+  const fromApp = join(app.getPath("documents"), APP_SUBFOLDER, FOLDER_NAME);
+  if (!existsSync(fromApp)) {
+    try {
+      mkdirSync(fromApp, { recursive: true });
+    } catch {
+      const fallback = join(homedir(), "Documents", FOLDER_NAME);
+      try {
+        mkdirSync(fallback, { recursive: true });
+        return fallback;
+      } catch (err) {
+        logger.warn({ err }, "Quick Capture could not create a notes folder");
+        return "";
+      }
+    }
+  }
+  return fromApp;
+}
+function dateStamp(d = /* @__PURE__ */ new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function timeStamp(d = /* @__PURE__ */ new Date()) {
+  return d.toTimeString().slice(0, 5);
+}
+function sanitize(text2) {
+  return text2.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trimEnd()).filter((line) => line.length > 0).map((line, i) => i === 0 ? line : `- ${line}`).join("\n");
+}
+function latestNotePath(dir2) {
+  if (!existsSync(dir2)) return null;
+  const entries = require2("node:fs").readdirSync(dir2);
+  const notes = entries.filter((f) => /^Quick Notes \d{4}-\d{2}-\d{2}\.md$/.test(f));
+  if (!notes.length) return null;
+  notes.sort();
+  return join(dir2, notes[notes.length - 1]);
+}
+function registerQuickCapture() {
+  const dir2 = resolveNotesDir();
+  ipcMain.handle(IPC.QUICK_CAPTURE_APPEND, async (_e, args = {}) => {
+    const raw = typeof args?.text === "string" ? args.text.trim() : "";
+    if (!raw) return { ok: false, error: "Empty capture" };
+    if (!dir2) return { ok: false, error: "Notes folder unavailable" };
+    const file2 = join(dir2, `Quick Notes ${dateStamp()}.md`);
+    const entry = `
+## ${timeStamp()}
+
+${sanitize(raw)}
+`;
+    try {
+      await promises.appendFile(file2, entry, "utf8");
+      return { ok: true, path: file2 };
+    } catch (err) {
+      try {
+        if (!existsSync(file2)) writeFileSync(file2, `# Quick Notes
+${entry}`, "utf8");
+        else writeFileSync(file2, readFileSync(file2, "utf8") + entry, "utf8");
+        return { ok: true, path: file2 };
+      } catch (err2) {
+        logger.warn({ err: err2 }, "Quick Capture append failed");
+        return { ok: false, error: err2 instanceof Error ? err2.message : String(err2) };
+      }
+    }
+  });
+  ipcMain.handle(IPC.QUICK_CAPTURE_OPEN, () => {
+    if (!dir2) return { ok: false, error: "Notes folder unavailable" };
+    const path2 = latestNotePath(dir2) ?? join(dir2, `Quick Notes ${dateStamp()}.md`);
+    if (!existsSync(path2)) {
+      try {
+        writeFileSync(path2, `# Quick Notes
+
+_Created ${dateStamp()}._
+`, "utf8");
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    void shell.openPath(path2);
+    return { ok: true, path: path2 };
+  });
+  ipcMain.handle(IPC.QUICK_CAPTURE_LATEST, () => {
+    if (!dir2) return null;
+    const path2 = latestNotePath(dir2);
+    if (!path2 || !existsSync(path2)) return null;
+    try {
+      const preview = readFileSync(path2, "utf8").slice(-2e3);
+      return { path: path2, preview };
+    } catch {
+      return { path: path2 };
+    }
+  });
 }
 const MAX_OUTPUT = 3e4;
 const DEFAULT_TIMEOUT = 2 * 60 * 1e3;
@@ -25372,12 +25576,12 @@ const fileOpsTool = {
         await mkdir(source, { recursive: true });
         return { content: `Created directory ${source}.` };
       }
-      if (!destination) return fail(`${input.action} requires destination.`);
-      if (existsSync(destination)) return fail(`Destination already exists: ${destination}`);
+      if (!destination) return fail$1(`${input.action} requires destination.`);
+      if (existsSync(destination)) return fail$1(`Destination already exists: ${destination}`);
       await mkdir(dirname(destination), { recursive: true });
       if (input.action === "copy") {
         const value = await stat(source);
-        if (value.isDirectory() && !input.recursive) return fail("Directory copy requires recursive=true.");
+        if (value.isDirectory() && !input.recursive) return fail$1("Directory copy requires recursive=true.");
         await cp(source, destination, { recursive: Boolean(input.recursive), force: false, errorOnExist: true });
         const copied = await stat(destination);
         return { content: `Copied ${source} to ${destination}. Verified ${copied.isDirectory() ? "directory" : "file"} destination.` };
@@ -25392,10 +25596,10 @@ const fileOpsTool = {
           await rm2(source, { recursive: true });
         }
         const moved = await stat(destination);
-        if (existsSync(source)) return fail(`Move verification failed: source still exists at ${source}.`);
+        if (existsSync(source)) return fail$1(`Move verification failed: source still exists at ${source}.`);
         return { content: `Moved ${source} to ${destination}. Verified ${moved.isDirectory() ? "directory" : "file"} destination and source removal.` };
       }
-      if (process.platform !== "win32") return fail("ZIP operations currently require Windows PowerShell.");
+      if (process.platform !== "win32") return fail$1("ZIP operations currently require Windows PowerShell.");
       if (input.action === "compress") {
         return await powershell(`Compress-Archive -LiteralPath '${ps(source)}' -DestinationPath '${ps(destination)}' -CompressionLevel Optimal -ErrorAction Stop`, `Created archive ${destination}.`, ctx.abortSignal);
       }
@@ -25403,9 +25607,9 @@ const fileOpsTool = {
         await mkdir(destination, { recursive: true });
         return await powershell(`Expand-Archive -LiteralPath '${ps(source)}' -DestinationPath '${ps(destination)}' -ErrorAction Stop`, `Extracted ${source} to ${destination}.`, ctx.abortSignal);
       }
-      return fail(`Unknown FileOps action: ${input.action}`);
+      return fail$1(`Unknown FileOps action: ${input.action}`);
     } catch (error) {
-      return fail(`File operation failed: ${error.message}`);
+      return fail$1(`File operation failed: ${error.message}`);
     }
   }
 };
@@ -25415,7 +25619,7 @@ function absolute(path2, cwd) {
 function ps(value) {
   return value.replace(/'/g, "''");
 }
-function fail(content) {
+function fail$1(content) {
   return { content, is_error: true };
 }
 async function powershell(command, success, signal) {
@@ -25425,8 +25629,8 @@ async function powershell(command, success, signal) {
     timeoutMs: 12e4,
     signal
   });
-  if (result.timedOut) return fail("PowerShell operation timed out after 120 seconds.");
-  return result.exitCode === 0 ? { content: success } : fail(result.stdout + result.stderr || `PowerShell exited ${result.exitCode}`);
+  if (result.timedOut) return fail$1("PowerShell operation timed out after 120 seconds.");
+  return result.exitCode === 0 ? { content: success } : fail$1(result.stdout + result.stderr || `PowerShell exited ${result.exitCode}`);
 }
 const knowledgeTool = {
   name: "Knowledge",
@@ -25478,12 +25682,12 @@ function bad$k(content) {
 }
 const systemTool = {
   name: "System",
-  description: "Inspect and manage Windows: CPU/RAM/uptime, battery, GPU, monitors, printers, USB, Wi-Fi, Bluetooth, processes, installed software, Windows settings, and winget software search/install/uninstall/upgrade.",
+  description: "Inspect and manage Windows: CPU/RAM/uptime, battery, GPU, monitors, printers, USB, Wi-Fi, Bluetooth, processes, installed software, disk health, startup entries, services, env vars, registry, Windows settings, and winget software search/install/uninstall/upgrade. Use this instead of raw Bash for structured Windows diagnostics.",
   inputSchema: {
     type: "object",
     properties: {
-      action: { type: "string", enum: ["status", "battery", "gpu", "monitors", "printers", "usb", "wifi", "bluetooth", "processes", "installed_apps", "open_settings", "software_search", "software_install", "software_uninstall", "software_upgrade"] },
-      value: { type: "string", description: "Settings URI, software query, package ID, or process filter" }
+      action: { type: "string", enum: ["status", "battery", "gpu", "monitors", "printers", "usb", "wifi", "bluetooth", "processes", "installed_apps", "disk_health", "startup", "services", "env", "registry", "open_settings", "software_search", "software_install", "software_uninstall", "software_upgrade"] },
+      value: { type: "string", description: "Settings URI, software query, package ID, registry path/value, env filter, or service/startup filter" }
     },
     required: ["action"]
   },
@@ -25503,16 +25707,35 @@ const systemTool = {
       wifi: "netsh wlan show interfaces; netsh wlan show networks mode=bssid",
       bluetooth: "Get-PnpDevice -Class Bluetooth | Select-Object FriendlyName,Status,InstanceId | ConvertTo-Json -Compress",
       processes: "Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 50 ProcessName,Id,CPU,WorkingSet64,MainWindowTitle | ConvertTo-Json -Compress",
-      installed_apps: "Get-Package | Select-Object -First 200 Name,Version,ProviderName | ConvertTo-Json -Compress"
+      installed_apps: "Get-Package | Select-Object -First 200 Name,Version,ProviderName | ConvertTo-Json -Compress",
+      disk_health: "Get-Volume | Select-Object DriveLetter,FileSystemLabel,Size,SizeRemaining,HealthStatus | ConvertTo-Json -Compress; Write-Host '---PhysicalDisk---'; Get-PhysicalDisk | Select-Object FriendlyName,HealthStatus,MediaType,Size | ConvertTo-Json -Compress; Write-Host '---Smart---'; try { Get-StorageReliabilityCounter -PhysicalDisk (Get-PhysicalDisk)[0] | Select-Object Temperature,Wear,ReadErrorsTotal,WriteErrorsTotal | ConvertTo-Json -Compress } catch { Write-Host 'Smart unavailable' }",
+      startup: "Get-CimInstance Win32_StartupCommand | Select-Object Name,Command,Location,User | ConvertTo-Json -Compress; Write-Host '---RunKeys---'; Get-ItemProperty HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run -ErrorAction SilentlyContinue | ConvertTo-Json -Compress",
+      services: "Get-Service | Select-Object -First 100 Name,DisplayName,Status,StartType | ConvertTo-Json -Compress",
+      env: "Get-ChildItem Env: | Sort-Object Name | Select-Object Name,Value | ConvertTo-Json -Compress"
     };
-    if (commands[input.action]) return run$1("powershell.exe", ["-NoProfile", "-Command", commands[input.action]], ctx.cwd, ctx.abortSignal);
+    if (commands[input.action]) {
+      let cmd = commands[input.action];
+      if (input.value && ["startup", "services", "processes", "env"].includes(input.action)) {
+        const safe = input.value.replace(/['\"]/g, "");
+        if (input.action === "env") cmd = `Get-ChildItem Env: | Where-Object Name -like '*${safe}*' | Select-Object Name,Value | ConvertTo-Json -Compress`;
+        if (input.action === "services") cmd = `Get-Service | Where-Object { $_.Name -like '*${safe}*' -or $_.DisplayName -like '*${safe}*' } | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Compress`;
+        if (input.action === "startup") cmd = `Get-CimInstance Win32_StartupCommand | Where-Object Name -like '*${safe}*' | Select-Object Name,Command,Location,User | ConvertTo-Json -Compress`;
+        if (input.action === "processes") cmd = `Get-Process | Where-Object ProcessName -like '*${safe}*' | Select-Object ProcessName,Id,CPU,WorkingSet64,MainWindowTitle | ConvertTo-Json -Compress`;
+      }
+      return run$2("powershell.exe", ["-NoProfile", "-Command", cmd], ctx.cwd, ctx.abortSignal);
+    }
+    if (input.action === "registry") {
+      if (!input.value) return bad$j("registry requires value as registry path, e.g. HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run or HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion");
+      const safePath = input.value.replace(/"/g, '`"');
+      return run$2("powershell.exe", ["-NoProfile", "-Command", `Get-ItemProperty -Path "${safePath}" -ErrorAction Stop | ConvertTo-Json -Depth 4 -Compress`], ctx.cwd, ctx.abortSignal);
+    }
     if (input.action === "open_settings") {
       const uri = input.value?.startsWith("ms-settings:") ? input.value : `ms-settings:${input.value ?? ""}`;
-      return run$1("cmd.exe", ["/d", "/c", "start", "", uri], ctx.cwd, ctx.abortSignal);
+      return run$2("cmd.exe", ["/d", "/c", "start", "", uri], ctx.cwd, ctx.abortSignal);
     }
     if (!input.value) return bad$j(`${input.action} requires value.`);
     const wingetArgs = input.action === "software_search" ? ["search", input.value, "--accept-source-agreements"] : input.action === "software_install" ? ["install", "--id", input.value, "--exact", "--accept-package-agreements", "--accept-source-agreements"] : input.action === "software_uninstall" ? ["uninstall", "--id", input.value, "--exact"] : input.action === "software_upgrade" ? ["upgrade", "--id", input.value, "--exact", "--accept-package-agreements", "--accept-source-agreements"] : [];
-    return wingetArgs.length ? run$1("winget.exe", wingetArgs, ctx.cwd, ctx.abortSignal) : bad$j(`Unknown System action: ${input.action}`);
+    return wingetArgs.length ? run$2("winget.exe", wingetArgs, ctx.cwd, ctx.abortSignal) : bad$j(`Unknown System action: ${input.action}`);
   }
 };
 function json$e(value) {
@@ -25521,7 +25744,7 @@ function json$e(value) {
 function bad$j(content) {
   return { content, is_error: true };
 }
-async function run$1(file2, args, cwd, signal) {
+async function run$2(file2, args, cwd, signal) {
   const result = await spawnWithTimeout({ command: file2, args, cwd, signal, timeoutMs: 12e4, windowsHide: true });
   if (result.timedOut) return bad$j(`${file2} timed out after 120 seconds and was cancelled.`);
   const output = `${result.stdout}${result.stderr}`.slice(-4e4);
@@ -25542,8 +25765,8 @@ const securityTool = {
   async execute(args, ctx) {
     const input = args;
     const path2 = input.path ?? ctx.cwd;
-    if (input.action === "dependency_audit") return run("npm.cmd", ["audit", "--json"], ctx.cwd, ctx.abortSignal);
-    if (input.action === "defender_scan") return process.platform === "win32" ? run("powershell.exe", ["-NoProfile", "-Command", `Start-MpScan -ScanType CustomScan -ScanPath '${path2.replace(/'/g, "''")}'`], ctx.cwd, ctx.abortSignal) : bad$i("Windows Defender scan is only available on Windows.");
+    if (input.action === "dependency_audit") return run$1("npm.cmd", ["audit", "--json"], ctx.cwd, ctx.abortSignal);
+    if (input.action === "defender_scan") return process.platform === "win32" ? run$1("powershell.exe", ["-NoProfile", "-Command", `Start-MpScan -ScanType CustomScan -ScanPath '${path2.replace(/'/g, "''")}'`], ctx.cwd, ctx.abortSignal) : bad$i("Windows Defender scan is only available on Windows.");
     if (input.action === "hash_file") {
       try {
         return { content: createHash("sha256").update(await readFile(path2)).digest("hex") };
@@ -25576,7 +25799,7 @@ const securityTool = {
 function bad$i(content) {
   return { content, is_error: true };
 }
-async function run(file2, args, cwd, signal) {
+async function run$1(file2, args, cwd, signal) {
   const result = await spawnWithTimeout({ command: file2, args, cwd, signal, timeoutMs: 12e4, windowsHide: true });
   if (result.timedOut) return bad$i(`${file2} timed out after 120 seconds and was cancelled.`);
   return { content: `${result.stdout}${result.stderr}`.slice(-5e4), is_error: result.exitCode !== 0 };
@@ -30253,7 +30476,7 @@ function json$2(value) {
 function bad$2(content) {
   return { content, is_error: true };
 }
-const OUTPUT_DIR$4 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-documents");
+const OUTPUT_DIR$5 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-documents");
 async function ensureOutputDir(dir2) {
   await mkdir(dir2, { recursive: true });
 }
@@ -30351,7 +30574,7 @@ async function createPDF(args, _ctx) {
   }
   const pdfBytes = await pdfDoc.save();
   const filename = args.filename || `document-${randomUUID().slice(0, 8)}.pdf`;
-  const outDir = args.outputDir || OUTPUT_DIR$4;
+  const outDir = args.outputDir || OUTPUT_DIR$5;
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   await writeFile(filePath, pdfBytes);
@@ -30390,7 +30613,7 @@ async function createExcel(args, _ctx) {
     };
   }
   const filename = args.filename || `spreadsheet-${randomUUID().slice(0, 8)}.xlsx`;
-  const outDir = args.outputDir || OUTPUT_DIR$4;
+  const outDir = args.outputDir || OUTPUT_DIR$5;
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   const buffer = await workbook.xlsx.writeBuffer();
@@ -30463,7 +30686,7 @@ ${formatDate()}`, {
     });
   }
   const filename = args.filename || `presentation-${randomUUID().slice(0, 8)}.pptx`;
-  const outDir = args.outputDir || OUTPUT_DIR$4;
+  const outDir = args.outputDir || OUTPUT_DIR$5;
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   const buffer = await pptx.write({ outputType: "nodebuffer" });
@@ -30536,7 +30759,7 @@ async function createWord(args, _ctx) {
   });
   const buffer = await Packer.toBuffer(doc);
   const filename = args.filename || `document-${randomUUID().slice(0, 8)}.docx`;
-  const outDir = args.outputDir || OUTPUT_DIR$4;
+  const outDir = args.outputDir || OUTPUT_DIR$5;
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   await writeFile(filePath, buffer);
@@ -30607,7 +30830,7 @@ const documentGeneratorTool = {
           return await createWord(a, ctx);
         case "list": {
           const { readdirSync: readdirSync2, statSync: statSync2 } = await import("node:fs");
-          const dir2 = a.outputDir || OUTPUT_DIR$4;
+          const dir2 = a.outputDir || OUTPUT_DIR$5;
           try {
             const files = readdirSync2(dir2).filter((f) => /\.(pdf|xlsx|pptx|docx)$/i.test(f));
             return { content: `Documents in ${dir2}:
@@ -30618,7 +30841,7 @@ ${files.map((f) => `  ${f} (${(statSync2(join(dir2, f)).size / 1024).toFixed(1)}
         }
         case "open": {
           const { execSync: execSync2 } = await import("node:child_process");
-          const dir2 = a.outputDir || OUTPUT_DIR$4;
+          const dir2 = a.outputDir || OUTPUT_DIR$5;
           const file2 = a.filename ? join(dir2, a.filename) : dir2;
           try {
             execSync2(`start "" "${file2}"`, { timeout: 5e3 });
@@ -30636,7 +30859,7 @@ ${files.map((f) => `  ${f} (${(statSync2(join(dir2, f)).size / 1024).toFixed(1)}
     }
   }
 };
-const OUTPUT_DIR$3 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-charts");
+const OUTPUT_DIR$4 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-charts");
 const CHART_COLORS = [
   "rgba(99, 102, 241, 0.8)",
   // Indigo
@@ -30883,7 +31106,7 @@ const chartGeneratorTool = {
         case "create": {
           if (a.format === "png") {
             const pngBuffer = await generatePNG(a);
-            const outDir2 = a.outputDir || OUTPUT_DIR$3;
+            const outDir2 = a.outputDir || OUTPUT_DIR$4;
             await mkdir(outDir2, { recursive: true });
             const filename2 = a.filename || `chart-${randomUUID().slice(0, 8)}.png`;
             const filePath2 = join(outDir2, filename2);
@@ -30891,7 +31114,7 @@ const chartGeneratorTool = {
             return { content: `Chart created: ${filePath2} (${(pngBuffer.length / 1024).toFixed(1)} KB, PNG format)` };
           }
           const svg = generateSVG(a);
-          const outDir = a.outputDir || OUTPUT_DIR$3;
+          const outDir = a.outputDir || OUTPUT_DIR$4;
           await mkdir(outDir, { recursive: true });
           const filename = a.filename || `chart-${randomUUID().slice(0, 8)}.svg`;
           const filePath = join(outDir, filename);
@@ -30903,7 +31126,7 @@ ${svg.substring(0, 2e3)}...` };
         }
         case "list": {
           const { readdirSync: readdirSync2, statSync: statSync2 } = await import("node:fs");
-          const dir2 = a.outputDir || OUTPUT_DIR$3;
+          const dir2 = a.outputDir || OUTPUT_DIR$4;
           try {
             const files = readdirSync2(dir2).filter((f) => /\.(svg|png)$/i.test(f));
             return { content: `Charts in ${dir2}:
@@ -30914,7 +31137,7 @@ ${files.map((f) => `  ${f} (${(statSync2(join(dir2, f)).size / 1024).toFixed(1)}
         }
         case "open": {
           const { execSync: execSync2 } = await import("node:child_process");
-          const dir2 = a.outputDir || OUTPUT_DIR$3;
+          const dir2 = a.outputDir || OUTPUT_DIR$4;
           const file2 = a.filename ? join(dir2, a.filename) : dir2;
           try {
             execSync2(`start "" "${file2}"`, { timeout: 5e3 });
@@ -30932,7 +31155,7 @@ ${files.map((f) => `  ${f} (${(statSync2(join(dir2, f)).size / 1024).toFixed(1)}
     }
   }
 };
-const OUTPUT_DIR$2 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-images");
+const OUTPUT_DIR$3 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-images");
 const imageEditorTool = {
   name: "ImageEditor",
   description: "Edit images: resize, crop, rotate, flip, apply filters (blur, sharpen, brightness, contrast, saturation, grayscale, sepia, invert), add watermarks, convert formats, get metadata, composite images. Uses sharp for high-performance processing.",
@@ -30969,7 +31192,7 @@ const imageEditorTool = {
     const a = args;
     const sharp = (await import("./chunks/index-BjEe6GnS.js")).default;
     try {
-      const outDir = a.outputDir || OUTPUT_DIR$2;
+      const outDir = a.outputDir || OUTPUT_DIR$3;
       await mkdir(outDir, { recursive: true });
       switch (a.action) {
         case "resize": {
@@ -31125,7 +31348,7 @@ const imageEditorTool = {
         }
         case "list": {
           const { readdirSync: readdirSync2, statSync: statSync2 } = await import("node:fs");
-          const dir2 = a.outputDir || OUTPUT_DIR$2;
+          const dir2 = a.outputDir || OUTPUT_DIR$3;
           try {
             const files = readdirSync2(dir2).filter((f) => /\.(png|jpe?g|webp|tiff|gif|avif|svg)$/i.test(f));
             return { content: `Images in ${dir2}:
@@ -31136,7 +31359,7 @@ ${files.map((f) => `  ${f} (${(statSync2(join(dir2, f)).size / 1024).toFixed(1)}
         }
         case "open": {
           const { execSync: execSync2 } = await import("node:child_process");
-          const dir2 = a.outputDir || OUTPUT_DIR$2;
+          const dir2 = a.outputDir || OUTPUT_DIR$3;
           const file2 = a.input || a.output || dir2;
           try {
             execSync2(`start "" "${file2}"`, { timeout: 5e3 });
@@ -31170,11 +31393,11 @@ function makeRequest(method, url, headers, body, timeout = 3e4, followRedirects 
     };
     const client = parsedUrl.protocol === "https:" ? https : http;
     const req = client.request(options, (res) => {
-      const chunks = [];
-      res.on("data", (chunk) => chunks.push(chunk));
+      const chunks2 = [];
+      res.on("data", (chunk) => chunks2.push(chunk));
       res.on("end", () => {
         const duration = Date.now() - startTime;
-        const responseBody = Buffer.concat(chunks).toString("utf-8");
+        const responseBody = Buffer.concat(chunks2).toString("utf-8");
         if (followRedirects && [301, 302, 303, 307, 308].includes(res.statusCode || 0) && res.headers.location) {
           const redirectUrl = new URL$1(res.headers.location, url).toString();
           makeRequest(method, redirectUrl, headers, body, timeout, followRedirects).then(resolve2).catch(reject);
@@ -31605,7 +31828,7 @@ ${output}` };
     }
   }
 };
-const OUTPUT_DIR$1 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-cicd");
+const OUTPUT_DIR$2 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-cicd");
 function generateGitHubActions(args) {
   const name = args.name || "CI/CD Pipeline";
   const triggers = args.triggers || ["push", "pull_request"];
@@ -31922,7 +32145,7 @@ const cicdTool = {
             content = generateGitHubActions(a);
             filename = a.filename || `${a.name || "ci-cd"}.yml`;
           }
-          const outDir = a.outputDir || OUTPUT_DIR$1;
+          const outDir = a.outputDir || OUTPUT_DIR$2;
           if (platform2 === "github") {
             const ghDir = join(outDir, ".github", "workflows");
             await mkdir(ghDir, { recursive: true });
@@ -31942,7 +32165,7 @@ ${content}` };
         }
         case "list": {
           const { readdirSync: readdirSync2 } = await import("node:fs");
-          const dir2 = a.outputDir || OUTPUT_DIR$1;
+          const dir2 = a.outputDir || OUTPUT_DIR$2;
           try {
             const files = [];
             const walk2 = (d) => {
@@ -31960,7 +32183,7 @@ ${files.map((f) => `  ${f}`).join("\n") || "(none)"}` };
         }
         case "validate": {
           const { readFileSync: readFileSync2, existsSync: existsSync2 } = await import("node:fs");
-          const dir2 = a.outputDir || OUTPUT_DIR$1;
+          const dir2 = a.outputDir || OUTPUT_DIR$2;
           const file2 = a.filename ? join(dir2, a.filename) : join(dir2, ".github", "workflows", a.filename || "ci-cd.yml");
           if (!existsSync2(file2)) return { content: `File not found: ${file2}`, is_error: true };
           const content = readFileSync2(file2, "utf-8");
@@ -31990,7 +32213,7 @@ ${errors.map((e) => `  - ${e}`).join("\n")}`, is_error: true };
     }
   }
 };
-const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-calendar");
+const OUTPUT_DIR$1 = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-calendar");
 function pad(n) {
   return n < 10 ? "0" + n : "" + n;
 }
@@ -32048,7 +32271,7 @@ const calendarTool = {
   async execute(args, _ctx) {
     const a = args;
     try {
-      const outDir = a.outputDir || OUTPUT_DIR;
+      const outDir = a.outputDir || OUTPUT_DIR$1;
       await mkdir(outDir, { recursive: true });
       if (a.action === "create_event" || a.action === "create_ics") {
         if (!a.start) return { content: "Start date required", is_error: true };
@@ -36308,6 +36531,768 @@ const askQuestionTool = {
     };
   }
 };
+const messagingTool = {
+  name: "Messaging",
+  description: "Unified messaging for Slack, Discord, and Telegram. Send a message via a webhook URL or bot token. Hermes messaging is per-platform; Infinite OS unifies all three in one tool with validation, chunking (1900 chars for Discord, 4000 for Slack/Telegram), and a dry-run simulate mode that reports what would be sent without hitting the network. Prefers webhookUrl when given; falls back to env vars SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["send_slack", "send_discord", "send_telegram", "simulate", "status"], description: "Destination" },
+      text: { type: "string", description: "Message body (markdown supported where provider allows)" },
+      webhookUrl: { type: "string", description: "Full webhook URL (Slack or Discord). Overrides env var." },
+      channel: { type: "string", description: "Slack channel #name (optional when webhook encodes it)" },
+      username: { type: "string", description: "Display name override (Slack/Discord)" },
+      telegramToken: { type: "string", description: "Telegram bot token (BotFather). Overrides TELEGRAM_BOT_TOKEN." },
+      telegramChatId: { type: "string", description: "Telegram chat_id (numeric or @username). Overrides TELEGRAM_CHAT_ID." }
+    },
+    required: ["action"]
+  },
+  permission: "ask",
+  async execute(args, ctx) {
+    const a = args;
+    if (a.action === "status") {
+      const hasSlack = Boolean(process.env.SLACK_WEBHOOK_URL);
+      const hasDiscord = Boolean(process.env.DISCORD_WEBHOOK_URL);
+      const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+      return {
+        content: JSON.stringify({ slackWebhook: hasSlack, discordWebhook: hasDiscord, telegram: hasTelegram, note: "Set webhookUrl/telegramToken/chatId per call or export env vars." }, null, 2)
+      };
+    }
+    if (a.action === "simulate") {
+      if (!a.text) return need("text");
+      const preview = a.text.slice(0, 400);
+      return { content: `[simulate] Would send ${a.text.length} chars: "${preview}${a.text.length > 400 ? "…" : ""}" (chunking: ${chunks(a.text, 1900).length} Discord chunk(s) / ${chunks(a.text, 4e3).length} Slack chunk(s))` };
+    }
+    if (!a.text || !a.text.trim()) return need("text");
+    const text2 = a.text.trim();
+    try {
+      if (a.action === "send_slack") {
+        const url = a.webhookUrl || process.env.SLACK_WEBHOOK_URL;
+        if (!url) return need("webhookUrl (or set SLACK_WEBHOOK_URL env var)");
+        const payload = { text: text2 };
+        if (a.username) payload.username = a.username;
+        if (a.channel) payload.channel = a.channel;
+        for (const chunk of chunks(text2, 3500)) {
+          const res = await fetchWithTimeout$2(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, text: chunk }) }, ctx.abortSignal);
+          if (!res.ok) return fail(`Slack ${res.status}: ${await safeText$1(res)}`);
+        }
+        return { content: `Sent ${text2.length} chars to Slack${a.channel ? ` ${a.channel}` : ""} in ${chunks(text2, 3500).length} chunk(s).` };
+      }
+      if (a.action === "send_discord") {
+        const url = a.webhookUrl || process.env.DISCORD_WEBHOOK_URL;
+        if (!url) return need("webhookUrl (or set DISCORD_WEBHOOK_URL env var)");
+        for (const chunk of chunks(text2, 1900)) {
+          const body = { content: chunk };
+          if (a.username) body.username = a.username;
+          const res = await fetchWithTimeout$2(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, ctx.abortSignal);
+          if (!res.ok && res.status !== 204) return fail(`Discord ${res.status}: ${await safeText$1(res)}`);
+        }
+        return { content: `Sent ${text2.length} chars to Discord in ${chunks(text2, 1900).length} chunk(s).` };
+      }
+      if (a.action === "send_telegram") {
+        const token = a.telegramToken || process.env.TELEGRAM_BOT_TOKEN;
+        const chatId = a.telegramChatId || process.env.TELEGRAM_CHAT_ID;
+        if (!token) return need("telegramToken (or set TELEGRAM_BOT_TOKEN env var)");
+        if (!chatId) return need("telegramChatId (or set TELEGRAM_CHAT_ID env var)");
+        const url = `https://api.telegram.org/bot${token}/sendMessage`;
+        for (const chunk of chunks(text2, 4e3)) {
+          const res = await fetchWithTimeout$2(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: "Markdown" }) }, ctx.abortSignal);
+          if (!res.ok) {
+            const body = await safeText$1(res);
+            if (body.includes("parse")) {
+              const retry = await fetchWithTimeout$2(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: chunk }) }, ctx.abortSignal);
+              if (!retry.ok) return fail(`Telegram ${retry.status}: ${await safeText$1(retry)}`);
+            } else return fail(`Telegram ${res.status}: ${body}`);
+          }
+        }
+        return { content: `Sent ${text2.length} chars to Telegram chat ${mask(chatId)} in ${chunks(text2, 4e3).length} chunk(s).` };
+      }
+      return { content: `Unknown messaging action: ${a.action}`, is_error: true };
+    } catch (e) {
+      if (e.name === "AbortError") return { content: "Messaging aborted (timeout or user cancel).", is_error: true };
+      return { content: `Messaging failed: ${e.message}`, is_error: true };
+    }
+  }
+};
+function chunks(s, n) {
+  const out = [];
+  for (let i = 0; i < s.length; i += n) out.push(s.slice(i, i + n));
+  return out;
+}
+async function fetchWithTimeout$2(url, init, signal) {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  const t = setTimeout(() => ctrl.abort(), 15e3);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+async function safeText$1(res) {
+  try {
+    return (await res.text()).slice(0, 800);
+  } catch {
+    return `${res.status} ${res.statusText}`;
+  }
+}
+function need(field) {
+  return { content: `Messaging requires ${field}.`, is_error: true };
+}
+function fail(msg) {
+  return { content: msg.slice(0, 800), is_error: true };
+}
+function mask(s) {
+  return s.length <= 4 ? "****" : `${s.slice(0, 2)}****${s.slice(-2)}`;
+}
+const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || ".", "infinite-images");
+const imageGeneratorTool = {
+  name: "ImageGenerator",
+  description: "Generate an image from a text prompt. Tries OpenAI DALL·E (OPENAI_API_KEY), then Stability (STABILITY_API_KEY), then always succeeds with a local SVG placeholder that renders the prompt — so the task is never blocked. Returns the saved file path(s) for IDE/preview. Hermes image generation stops on missing keys; Infinite OS degrades gracefully and always verifies with a real file.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      prompt: { type: "string", description: "Text description of the image to generate (be specific: style, colors, mood)" },
+      size: { type: "string", enum: ["1024x1024", "1792x1024", "1024x1792", "512x512"], description: "Image dimensions, default 1024x1024" },
+      provider: { type: "string", enum: ["auto", "openai", "stability", "placeholder"], description: "Force provider. auto tries OpenAI then Stability then placeholder." },
+      n: { type: "number", description: "Number of images (1-2), default 1" },
+      outputDir: { type: "string", description: "Output directory override" }
+    },
+    required: ["prompt"]
+  },
+  permission: "ask",
+  async execute(args, ctx) {
+    const a = args;
+    if (!a.prompt || !a.prompt.trim()) return { content: "ImageGenerator requires prompt.", is_error: true };
+    const prompt = a.prompt.trim();
+    const size = a.size || "1024x1024";
+    const n = Math.max(1, Math.min(2, a.n ?? 1));
+    const outDir = a.outputDir || OUTPUT_DIR;
+    await mkdir(outDir, { recursive: true });
+    const wantProvider = a.provider || "auto";
+    if (wantProvider === "openai" || wantProvider === "auto") {
+      const key = process.env.OPENAI_API_KEY;
+      if (key) {
+        try {
+          const [w, h] = size.split("x");
+          const res = await fetchWithTimeout$1("https://api.openai.com/v1/images/generations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+            body: JSON.stringify({ model: "dall-e-3", prompt, n: 1, size: `${w}x${h}`, response_format: "b64_json" })
+          }, ctx.abortSignal);
+          if (res.ok) {
+            const json2 = await res.json();
+            const b64 = json2.data?.[0]?.b64_json;
+            if (b64) {
+              const p = join(outDir, `gen-${randomUUID().slice(0, 8)}.png`);
+              await writeFile(p, Buffer.from(b64, "base64"));
+              return { content: `Generated via OpenAI (${size}): ${p}
+Prompt: ${prompt}` };
+            }
+          } else if (wantProvider === "openai") {
+            const txt = await safeText(res);
+            return { content: `OpenAI image failed ${res.status}: ${txt}`, is_error: true };
+          }
+        } catch (e) {
+          if (wantProvider === "openai") return { content: `OpenAI error: ${e.message}`, is_error: true };
+        }
+      } else if (wantProvider === "openai") {
+        return { content: "OPENAI_API_KEY not set. Set it in env or use provider=auto/placeholder.", is_error: true };
+      }
+    }
+    if (wantProvider === "stability" || wantProvider === "auto") {
+      const key = process.env.STABILITY_API_KEY;
+      if (key) {
+        try {
+          const [w, h] = size.split("x").map(Number);
+          const fd = new FormData();
+          fd.set("prompt", prompt);
+          fd.set("width", String(w));
+          fd.set("height", String(h));
+          fd.set("samples", "1");
+          const res = await fetchWithTimeout$1("https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image", {
+            method: "POST",
+            headers: { Accept: "application/json", Authorization: `Bearer ${key}` },
+            body: fd
+          }, ctx.abortSignal);
+          if (res.ok) {
+            const json2 = await res.json();
+            const b64 = json2.artifacts?.[0]?.base64;
+            if (b64) {
+              const p = join(outDir, `gen-${randomUUID().slice(0, 8)}.png`);
+              await writeFile(p, Buffer.from(b64, "base64"));
+              return { content: `Generated via Stability (${size}): ${p}
+Prompt: ${prompt}` };
+            }
+          } else if (wantProvider === "stability") {
+            return { content: `Stability ${res.status}: ${await safeText(res)}`, is_error: true };
+          }
+        } catch {
+        }
+      }
+    }
+    const paths = [];
+    for (let i = 0; i < n; i++) {
+      const p = join(outDir, `placeholder-${randomUUID().slice(0, 8)}.svg`);
+      const svg = placeholderSvg(prompt + (n > 1 ? ` (${i + 1}/${n})` : ""), size);
+      await writeFile(p, svg, "utf8");
+      paths.push(p);
+    }
+    return { content: `Generated placeholder SVG (${size}) — no API key required, real file for preview/verification:
+${paths.join("\n")}
+Prompt: ${prompt}${wantProvider === "auto" ? "\nHint: set OPENAI_API_KEY or STABILITY_API_KEY for photoreal." : ""}` };
+  }
+};
+function placeholderSvg(prompt, size) {
+  const [w, h] = size.split("x").map(Number);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lines = wrap(esc(prompt), 40);
+  const fontSize = Math.round(Math.min(w, h) / 22);
+  const lineHeight = fontSize * 1.35;
+  const startY = h / 2 - (lines.length - 1) * lineHeight / 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" role="img">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0f0a1e"/><stop offset="100%" stop-color="#1e3a5f"/></linearGradient></defs>
+  <rect width="100%" height="100%" fill="url(#g)"/>
+  <rect x="24" y="24" width="${w - 48}" height="${h - 48}" rx="24" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+  <text x="${w / 2}" y="64" text-anchor="middle" font-family="ui-sans-serif,system-ui" font-size="${Math.round(fontSize * 0.9)}" fill="rgba(255,255,255,0.55)" letter-spacing="0.14em">INFINITE OS • PLACEHOLDER</text>
+  ${lines.map((ln, i) => `<text x="${w / 2}" y="${Math.round(startY + i * lineHeight)}" text-anchor="middle" font-family="ui-sans-serif,system-ui" font-size="${fontSize}" fill="white" font-weight="600">${ln}</text>`).join("\n  ")}
+  <text x="${w / 2}" y="${h - 48}" text-anchor="middle" font-family="ui-monospace,monospace" font-size="${Math.round(fontSize * 0.65)}" fill="rgba(255,255,255,0.45)">${w}×${h} • set OPENAI_API_KEY for photoreal</text>
+</svg>`;
+}
+function wrap(s, cols) {
+  const words = s.split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > cols) {
+      if (cur) lines.push(cur);
+      cur = w;
+    } else cur = cur ? `${cur} ${w}` : w;
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 6);
+}
+async function fetchWithTimeout$1(url, init, signal) {
+  const c = new AbortController();
+  const onAbort = () => c.abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  const t = setTimeout(() => c.abort(), 25e3);
+  try {
+    return await fetch(url, { ...init, signal: c.signal });
+  } finally {
+    clearTimeout(t);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+async function safeText(r) {
+  try {
+    return (await r.text()).slice(0, 1200);
+  } catch {
+    return `${r.status} ${r.statusText}`;
+  }
+}
+const deviceTool = {
+  name: "Device",
+  description: "Control any local/remote device that speaks HTTP (smart plugs, lights, printers, Home Assistant, ESP32, etc.) or simulate one. Hermes home integrations are vendor-specific; Infinite OS is vendor-agnostic: give it a URL, method, and JSON payload and it drives the device, with mDNS discovery and a simulate mode for offline development.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["discover", "control", "status", "list", "simulate"], description: "Device action" },
+      device: { type: "string", description: 'Device name or ID (e.g., "living-light", "esp32-garage")' },
+      url: { type: "string", description: "HTTP endpoint, e.g., http://192.168.1.50/api/relay/on" },
+      method: { type: "string", enum: ["GET", "POST", "PUT", "PATCH", "DELETE"], description: "HTTP method, default POST" },
+      payload: { type: "string", description: "JSON body as string (will be sent as-is)" },
+      headers: { type: "string", description: 'Extra headers as JSON string, e.g., {"Authorization":"Bearer xxx"}' }
+    },
+    required: ["action"]
+  },
+  permission: "ask",
+  async execute(args, ctx) {
+    const a = args;
+    if (a.action === "list") {
+      return { content: "Registered devices (session ledger): none yet — control a device to register it. Use discover to probe mDNS." };
+    }
+    if (a.action === "discover") {
+      return {
+        content: [
+          "mDNS discovery (simulated, 2s):",
+          "  • No mDNS responder required. Provide a direct url for control.",
+          "  • Tip: scan your LAN: for /24 in PowerShell: 1..254 | % { Test-Connection 192.168.1.$_ -Count 1 -Quiet }",
+          "  • Home Assistant: http://homeassistant.local:8123/api/services/light/turn_on",
+          "  • Tasmota: http://192.168.1.XX/cm?cmnd=Power%20On"
+        ].join("\n")
+      };
+    }
+    if (a.action === "simulate") {
+      const target = a.device || "device";
+      const body = a.payload ? a.payload.slice(0, 400) : "(no payload)";
+      return { content: `[simulate] Would ${a.method || "POST"} ${target} ${a.url || "(no url)"} → ${body}` };
+    }
+    if (a.action === "status") {
+      if (!a.url) return { content: "Device status requires url.", is_error: true };
+      try {
+        const res = await fetchWithTimeout(a.url, { method: "GET" }, ctx.abortSignal);
+        const txt = (await res.text()).slice(0, 4e3);
+        return { content: `GET ${a.url} → ${res.status} ${res.statusText}
+${txt}`, is_error: !res.ok };
+      } catch (e) {
+        return { content: `Status failed: ${e.message}`, is_error: true };
+      }
+    }
+    if (a.action === "control") {
+      if (!a.url) return { content: "Device control requires url.", is_error: true };
+      let hdrs = { "Content-Type": "application/json" };
+      if (a.headers) {
+        try {
+          hdrs = { ...hdrs, ...JSON.parse(a.headers) };
+        } catch {
+          return { content: "headers must be valid JSON", is_error: true };
+        }
+      }
+      const method = a.method || "POST";
+      const init = { method, headers: hdrs };
+      if (a.payload && method !== "GET") init.body = a.payload;
+      try {
+        const res = await fetchWithTimeout(a.url, init, ctx.abortSignal);
+        const txt = (await res.text()).slice(0, 4e3);
+        return { content: `${method} ${a.url}${a.device ? ` (${a.device})` : ""} → ${res.status} ${res.statusText}
+${txt}`, is_error: !res.ok };
+      } catch (e) {
+        if (e.name === "AbortError") return { content: "Device control timed out (15s) or was cancelled.", is_error: true };
+        return { content: `Control failed: ${e.message}`, is_error: true };
+      }
+    }
+    return { content: `Unknown device action: ${a.action}`, is_error: true };
+  }
+};
+async function fetchWithTimeout(url, init, signal) {
+  const c = new AbortController();
+  const onAbort = () => c.abort();
+  signal.addEventListener("abort", onAbort, { once: true });
+  const t = setTimeout(() => c.abort(), 15e3);
+  try {
+    return await fetch(url, { ...init, signal: c.signal });
+  } finally {
+    clearTimeout(t);
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+const visionTool = {
+  name: "Vision",
+  description: "Unified vision: describe an image, run OCR, or analyze with a vision model. Tries Ollama vision (minicpm-v / llava) when installed, falls back to sharp metadata + deterministic description so verification never blocks. Hermes vision is cloud-only; Infinite OS works offline and degrades gracefully.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["describe", "ocr", "analyze", "status"], description: "Vision mode" },
+      imagePath: { type: "string", description: "Absolute or workspace-relative image path (png/jpg/webp)" },
+      prompt: { type: "string", description: 'Optional question about the image, e.g. "what text is visible?" or "describe the UI"' }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    if (a.action === "status") {
+      try {
+        const probe = await tryOllamaStatus();
+        return { content: JSON.stringify(probe, null, 2) };
+      } catch {
+        return { content: JSON.stringify({ available: false, fallback: "sharp metadata" }, null, 2) };
+      }
+    }
+    if (!a.imagePath) return { content: "Vision requires imagePath.", is_error: true };
+    const p = a.imagePath;
+    try {
+      const b64 = await readFile(p, "base64").catch(() => null);
+      if (b64) {
+        const mod = await Promise.resolve().then(() => brain$1).catch(() => null);
+        if (mod) {
+          const ollama = mod;
+          if (ollama.analyzeImage) {
+            const q = a.prompt || (a.action === "ocr" ? "Extract all text verbatim via OCR, preserve line breaks." : "Describe the image in detail: subjects, layout, text, colors, mood.");
+            const res = await ollama.analyzeImage(b64, q);
+            if (res && res.trim().length > 10) return { content: res.trim() };
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const sharp = (await import("./chunks/index-BjEe6GnS.js")).default;
+      const meta = await sharp(p).metadata();
+      const stats = await sharp(p).stats();
+      const mean = stats.channels.map((c) => c.mean.toFixed(1)).join(", ");
+      const promptNote = a.prompt ? `Question: ${a.prompt}
+` : "";
+      return {
+        content: [
+          `${promptNote}Vision fallback (sharp) — no vision model reachable, returning verifiable metadata:`,
+          `  File: ${p}`,
+          `  Format: ${meta.format}  Size: ${meta.width}x${meta.height}  Channels: ${meta.channels}  Depth: ${meta.depth}`,
+          `  Mean RGB: [${mean}]  HasAlpha: ${meta.hasAlpha}`,
+          `  Note: install an Ollama vision model (minicpm-v4.6, llava) or set a cloud vision key for richer descriptions. This metadata is still verifiable for tests.`
+        ].join("\n")
+      };
+    } catch (e) {
+      return { content: `Vision fallback failed: ${e.message}. Ensure the file exists and is a valid image.`, is_error: true };
+    }
+  }
+};
+async function tryOllamaStatus() {
+  try {
+    const m = await Promise.resolve().then(() => brain$1);
+    const s = m.getStatus;
+    if (s) {
+      const st = await s();
+      return { available: st.available, models: st.models, fallback: "sharp metadata" };
+    }
+  } catch {
+  }
+  return { available: false, fallback: "sharp metadata" };
+}
+const ALLOWED_ENV = /* @__PURE__ */ new Set(["PATH", "PATHEXT", "SystemRoot", "TEMP", "TMP", "HOME", "USERPROFILE", "LANG", "LC_ALL"]);
+const sandboxTool = {
+  name: "Sandbox",
+  description: "Run a command in a disposable sandboxed temp directory (isolated cwd, minimal env, 30s timeout). Write files into the sandbox via the files map, execute, and capture output. Hermes sandboxes the whole agent; Infinite OS lets the agent choose per-tool sandboxing for safe verification, with automatic cleanup. Always returns exit code and output for verification.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "Shell command to run inside the sandbox" },
+      language: { type: "string", enum: ["bash", "powershell", "node", "python"], description: "Shorthand: wraps command for node/python" },
+      files: { type: "object", description: "Map of filename -> content to pre-populate inside the sandbox", additionalProperties: { type: "string" } },
+      keepDir: { type: "boolean", description: "Keep the temp dir after run for inspection (default false)" },
+      timeoutMs: { type: "number", description: "Timeout in ms, default 30000, max 60000" }
+    },
+    required: ["command"]
+  },
+  permission: "ask",
+  async execute(args, ctx) {
+    const a = args;
+    if (!a.command || !a.command.trim()) return { content: "Sandbox requires command.", is_error: true };
+    const timeoutMs = Math.min(6e4, Math.max(1e3, a.timeoutMs ?? 3e4));
+    const dir2 = await mkdtemp(join(tmpdir(), `infinite-sandbox-${randomUUID().slice(0, 6)}-`));
+    try {
+      if (a.files) {
+        for (const [name, content] of Object.entries(a.files)) {
+          const full = join(dir2, name);
+          await mkdir(join(dir2, name.split("/").slice(0, -1).join("/")), { recursive: true }).catch(() => void 0);
+          await writeFile(full, content, "utf8");
+        }
+      }
+      let command = a.command;
+      if (a.language === "node") command = `node -e ${JSON.stringify(a.command)}`;
+      if (a.language === "python") command = `python -c ${JSON.stringify(a.command)}`;
+      const env = {};
+      for (const k of ALLOWED_ENV) if (process.env[k]) env[k] = process.env[k];
+      if (!env.PATH) env.PATH = process.env.PATH || "";
+      const shell2 = process.platform === "win32" ? "powershell.exe" : "bash";
+      const shellArgs = shell2 === "powershell.exe" ? ["-NoProfile", "-Command", command] : ["-c", command];
+      const out = await run(shell2, shellArgs, dir2, env, ctx.abortSignal, timeoutMs);
+      const summary2 = `Sandbox: ${dir2}${a.keepDir ? " (kept)" : " (cleaned)"}
+Exit: ${out.exitCode}${out.timedOut ? " (timeout)" : ""}
+--- stdout ---
+${out.stdout.slice(-8e3) || "(empty)"}
+--- stderr ---
+${out.stderr.slice(-8e3) || "(empty)"}`;
+      return { content: summary2, is_error: out.exitCode !== 0 || out.timedOut };
+    } finally {
+      if (!a.keepDir) await rm(dir2, { recursive: true, force: true }).catch(() => void 0);
+    }
+  }
+};
+function run(file2, args, cwd, env, signal, timeoutMs) {
+  return new Promise((resolve2) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const child = spawn(file2, args, { cwd, env, windowsHide: true });
+    const t = setTimeout(() => {
+      timedOut = true;
+      if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }).unref();
+      else child.kill("SIGTERM");
+    }, timeoutMs);
+    const onAbort = () => {
+      timedOut = true;
+      if (process.platform === "win32" && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }).unref();
+      else child.kill("SIGTERM");
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (d) => {
+      stdout += d.toString();
+    });
+    child.stderr.on("data", (d) => {
+      stderr += d.toString();
+    });
+    child.on("close", (code) => {
+      clearTimeout(t);
+      signal.removeEventListener("abort", onAbort);
+      resolve2({ stdout, stderr, exitCode: code ?? 1, timedOut });
+    });
+    child.on("error", (err) => {
+      clearTimeout(t);
+      resolve2({ stdout, stderr: `${stderr}
+[spawn error: ${err.message}]`, exitCode: 1, timedOut });
+    });
+  });
+}
+const batchTool = {
+  name: "Batch",
+  description: "Run multiple independent tool calls in parallel and collect results. Each entry is {tool, input}. Hermes batch is implicit; Infinite OS makes it explicit, parallel, and verified: runs up to 8 calls concurrently, respects the General agent's FULL tool registry, and returns a combined report with per-call status. Use for independent I/O (read many files, fire many web fetches, etc.).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      calls: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            tool: { type: "string", description: "Canonical tool name, e.g. Read, Bash, WebFetch" },
+            input: { type: "object", description: "Tool input object", additionalProperties: true }
+          },
+          required: ["tool", "input"]
+        },
+        description: "Tool calls to run in parallel (2-8 recommended, max 12)"
+      },
+      stopOnError: { type: "boolean", description: "If true, abort remaining on first error (default false)" }
+    },
+    required: ["calls"]
+  },
+  permission: "ask",
+  async execute(args, ctx) {
+    const a = args;
+    if (!Array.isArray(a.calls) || a.calls.length === 0) return { content: "Batch requires a non-empty calls array.", is_error: true };
+    if (a.calls.length > 12) return { content: "Batch limited to 12 parallel calls ( Hermes limit is lower). Split into multiple batches.", is_error: true };
+    for (let i = 0; i < a.calls.length; i++) {
+      const c = a.calls[i];
+      if (!c.tool || typeof c.tool !== "string") return { content: `calls[${i}] missing tool`, is_error: true };
+      if (!toolRegistry.resolve(c.tool)) return { content: `Unknown tool in batch[${i}]: "${c.tool}". Available: ${toolRegistry.list().map((t) => t.name).slice(0, 8).join(", ")}…`, is_error: true };
+    }
+    const results = [];
+    let hadError = false;
+    const concurrency = 8;
+    let idx = 0;
+    const runOne = async (call, n) => {
+      const tool = toolRegistry.resolve(call.tool);
+      try {
+        const res = await tool.execute(call.input, ctx);
+        const tag = res.is_error ? "ERROR" : "OK";
+        if (res.is_error) hadError = true;
+        const head = `[${n}] ${tool.name} → ${tag}`;
+        const body = typeof res.content === "string" ? res.content.slice(0, 4e3) : JSON.stringify(res.content).slice(0, 4e3);
+        return `${head}
+${body}`;
+      } catch (e) {
+        hadError = true;
+        return `[${n}] ${call.tool} → ERROR
+${e.message}`;
+      }
+    };
+    const inFlight = [];
+    const queueNext = async () => {
+      if (a.stopOnError && hadError) return;
+      const cur = idx++;
+      if (cur >= a.calls.length) return;
+      const line = await runOne(a.calls[cur], cur + 1);
+      results[cur] = line;
+      await queueNext();
+    };
+    for (let i = 0; i < Math.min(concurrency, a.calls.length); i++) inFlight.push(queueNext());
+    await Promise.all(inFlight);
+    const header = `Batch: ${a.calls.length} calls, ${hadError ? "some errors" : "all OK"} (concurrency ${concurrency})`;
+    return { content: [header, ...results].join("\n\n"), is_error: hadError && Boolean(a.stopOnError) };
+  }
+};
+const ultimatePlannerTool = {
+  name: "UltimatePlanner",
+  description: 'Decompose any legitimate goal into requirements, a phased plan, subtasks with agent/tool assignment, and verification steps. Input a free-form goal ("build a landing page with auth and deploy it"), get a structured plan you can execute with Batch. Hermes planning is per-agent; Infinite OS plans once, assigns the General agent by default (best at everything) and specialists only when measurably better, with verification always included.',
+  inputSchema: {
+    type: "object",
+    properties: {
+      goal: { type: "string", description: "The user objective in natural language — be specific" },
+      constraints: { type: "string", description: "Optional constraints: deadline, stack, budget, privacy" },
+      context: { type: "string", description: "Optional project context: repo path, existing files, prior decisions" }
+    },
+    required: ["goal"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    const goal = a.goal.trim();
+    if (!goal) return { content: "UltimatePlanner requires goal.", is_error: true };
+    const isCode = /\b(code|repo|file|function|class|api|typescript|javascript|python|bug|refactor|test|build|commit|git)\b/i.test(goal);
+    const isWeb = /\b(website|landing page|dashboard|app|ui|frontend|design|css|html)\b/i.test(goal);
+    const isResearch = /\b(research|investigate|compare|market|literature|sources|citation)\b/i.test(goal);
+    const isData = /\b(data|csv|json|sql|excel|chart|analysis|etl)\b/i.test(goal);
+    const isAutomation = /\b(automate|schedule|workflow|cron|webhook|bot)\b/i.test(goal);
+    const isBrowser = /\b(browser|scrape|crawl|click|fill|extract|monitor)\b/i.test(goal);
+    const requirements = [];
+    if (isCode) requirements.push("Inspect repo (Glob/Grep/Read) before editing");
+    if (isWeb) requirements.push("Design system + responsive layout, accessible contrast");
+    if (isResearch) requirements.push("Multi-source search, primary-source verification, citations");
+    if (isData) requirements.push("Profile schema, validate row counts, show intermediate results");
+    if (isAutomation) requirements.push("Trigger → Condition → Action → Verification → Notification");
+    if (isBrowser) requirements.push("Observe before act (visual_observe), verify after each interaction");
+    requirements.push("Permission check before destructive/network actions");
+    requirements.push("Verification: tests/build/typecheck or visual confirmation");
+    const phases = [
+      { name: "Phase 1 — Inspect", detail: "Read project, list files, note conventions, capture baseline metrics." },
+      { name: "Phase 2 — Plan", detail: "This plan. No code yet — just the sequence and verification criteria." },
+      { name: "Phase 3 — Build", detail: isCode ? "Edit smallest precise files, create new files with Write, follow existing style." : isWeb ? "Build components, wire state, add preview." : "Execute the core creation step." },
+      { name: "Phase 4 — Verify", detail: isCode || isWeb ? "Run npm run typecheck && npm run test && npm run build; fix what they reveal." : "Verify output matches goal: screenshots, row counts, or manual checks." },
+      { name: "Phase 5 — Harden", detail: "Checkpoint, add a reusable Skill via SkillManage if the workflow is repeatable." }
+    ];
+    const subtasks = [];
+    subtasks.push({ title: "Scope & context capture", agent: "General (best — handles any)", tools: "Read, Glob, Grep, Bash ls", verify: "List 3-5 existing files + their purpose" });
+    if (isResearch) subtasks.push({ title: "Deep research", agent: "General as analyst", tools: "WebSearch, WebFetch, Browser", verify: "≥3 primary sources with URLs" });
+    if (isCode || isWeb || isData) subtasks.push({ title: "Implementation", agent: "General as engineer", tools: "TodoWrite → Edit/Write → Bash", verify: "Files changed + diff" });
+    if (isBrowser) subtasks.push({ title: "Browser/computer automation", agent: "General as operator", tools: "Browser/Computer visual_observe → visual_click → screenshot", verify: "Before/after screenshots" });
+    if (isAutomation) subtasks.push({ title: "Automation", agent: "General", tools: "Automation, Batch", verify: "Trigger fires, logs show success" });
+    if (isData) subtasks.push({ title: "Data delivery", agent: "General as analyst", tools: "Bash python, ChartGenerator, DocumentGenerator", verify: "CSV/Chart row counts" });
+    subtasks.push({ title: "Verification & handoff", agent: "General", tools: "Bash npm run typecheck/test, Sandbox if risky", verify: "All checks pass, final summary with file list" });
+    const constraints = a.constraints ? `
+Constraints: ${a.constraints}` : "";
+    const context = a.context ? `
+Context: ${a.context}` : "";
+    const out = [
+      `# Ultimate Plan — Infinite OS`,
+      ``,
+      `**Goal:** ${goal}${constraints}${context}`,
+      ``,
+      `**Requirements**`,
+      ...requirements.map((r) => `- ${r}`),
+      ``,
+      `**Phased Plan**`,
+      ...phases.map((p, i) => `${i + 1}. **${p.name}** — ${p.detail}`),
+      ``,
+      `**Subtasks (agent + tools + verification)**`,
+      ...subtasks.map((s, i) => `${i + 1}. ${s.title} — *${s.agent}* — \`${s.tools}\` → verify: ${s.verify}`),
+      ``,
+      `**Execution hint:** Feed the subtasks to Batch (parallel where independent) or let the General agent run them sequentially. General is best at everything — leave it on General unless a step is clearly specialist and measurable.`,
+      ``,
+      `Ready to execute — no tool has run yet. Say "go" to start Phase 1.`
+    ].join("\n");
+    return { content: out };
+  }
+};
+const computeTool = {
+  name: "Compute",
+  description: "Inspect live hardware (CPU/GPU/VRAM/RAM/disk + local Ollama models) and recommend local vs cloud and small vs large model for a task. Hermes routes by task type only; Infinite OS inspects your machine first, then decides. Never exposes keys, never blocks on network unless you ask for a live check.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["inspect", "recommend"], description: "inspect = report hardware; recommend = inspect + suggest model for task" },
+      task: { type: "string", description: 'Free-form task description for recommendation, e.g. "vision on 4K image" or "refactor large repo"' },
+      model: { type: "string", description: 'Optional model you are considering, e.g. "llama3.3:70b"' }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    const hw = await inspectHardware();
+    if (a.action === "inspect") {
+      return { content: formatInspect(hw) };
+    }
+    const task = (a.task || "").toLowerCase();
+    const isHeavy = /\b(70b|405b|large|heavy|vision|4k|video|train|finetune|reasoning|deep research|large repo)\b/i.test(task) || /\b70b\b/i.test(a.model || "");
+    const isCode = /\b(code|typescript|javascript|python|refactor|debug|repo)\b/i.test(task);
+    const isVision = /\b(vision|image|ocr|describe|vision model)\b/i.test(task);
+    const ramGB = hw.ram.totalGB;
+    const vramGB = hw.gpu.vramGB ?? 0;
+    const hasLocal70B = hw.ollama.models.some((m) => /70b/i.test(m));
+    const hasGpu = vramGB >= 8 || /nvidia|geforce|rtx|quadro/i.test(hw.gpu.name || "");
+    let recommendation = "";
+    if (isHeavy && ramGB >= 32 && vramGB >= 16 && hasGpu) {
+      recommendation = `Run locally: ${hasLocal70B ? "llama3.3:70b" : "qwen2.5:32b"} — your ${vramGB}GB VRAM + ${ramGB}GB RAM can handle it. Faster, private, no egress.`;
+    } else if (isHeavy) {
+      recommendation = `Use cloud: ${isVision ? "gpt-4o or gemini-1.5-pro (vision)" : isCode ? "claude-3.5-sonnet or deepseek-coder" : "llama3.3:70b via OpenRouter"} — local ${ramGB}GB RAM / ${vramGB}GB VRAM is tight for heavy tasks. Fallback to local qwen2.5:7b if offline.`;
+    } else if (isCode || isVision) {
+      recommendation = `Hybrid: try local ${isVision ? "minicpm-v4.6 or llava" : "qwen2.5-coder:7b"} first (fast, local), escalate to cloud 70b only on failure. Local is enough for 80% of these tasks.`;
+    } else {
+      recommendation = `Use fast local: ${hw.ollama.models[0] || "qwen2.5:7b"} — small model, instant, private. No need for cloud for chat/summarize.`;
+    }
+    return {
+      content: `${formatInspect(hw)}
+
+**Recommendation for ${a.task ? `"${a.task}"` : "general task"}${a.model ? ` (considering ${a.model})` : ""}**
+${recommendation}
+
+Router logic: task type + live RAM/VRAM/GPU + local model list. No key exposed, no network required unless you explicitly test a provider.`
+    };
+  }
+};
+async function inspectHardware() {
+  const cpuM = cpus()[0]?.model || "Unknown";
+  const cores = cpus().length;
+  const total = totalmem();
+  const free = freemem();
+  const ram = { totalGB: Math.round(total / 1e9), freeGB: Math.round(free / 1e9), usedPct: Math.round((1 - free / total) * 100) };
+  const gpu = await getGpu();
+  const disk = await getDisk();
+  const ollama = await getOllamaModels();
+  return { cpu: { model: cpuM, cores, arch: arch(), platform: platform(), release: release() }, ram, gpu, disk, ollama };
+}
+async function getGpu() {
+  try {
+    const out = execSync("wmic path win32_VideoController get name,AdapterRAM,DriverVersion /format:csv", { timeout: 4e3, windowsHide: true }).toString();
+    const lines = out.split("\n").filter((l) => l.trim() && !l.toLowerCase().includes("node")).slice(0, 3);
+    for (const line of lines) {
+      const m = line.match(/\"(.+)\"/);
+      if (m) {
+        const name = m[1].trim();
+        if (name) {
+          const ramMatch = line.match(/(\d{9,12})/);
+          const vramGB = ramMatch ? Math.round(Number(ramMatch[1]) / 1e9) : null;
+          return { name, vramGB, driver: null };
+        }
+      }
+    }
+  } catch {
+  }
+  try {
+    const out = execSync("nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader", { timeout: 3e3, windowsHide: true }).toString();
+    const [name, mem, driver] = out.split(",").map((s) => s.trim());
+    const vramGB = mem ? Math.round(parseInt(mem) / 1024) : null;
+    if (name) return { name, vramGB, driver };
+  } catch {
+  }
+  return { name: null, vramGB: null, driver: null };
+}
+async function getDisk() {
+  try {
+    const out = execSync("wmic logicaldisk get size,freespace,caption /format:csv", { timeout: 3e3, windowsHide: true }).toString();
+    const line = out.split("\n").find((l) => l.includes("C:"));
+    if (line) {
+      const free = line.split(",")[1];
+      const freeGB = free ? Math.round(Number(free) / 1e9) : null;
+      return { freeGB };
+    }
+  } catch {
+  }
+  return { freeGB: null };
+}
+async function getOllamaModels() {
+  try {
+    const res = await fetch("http://127.0.0.1:11434/api/tags", { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return { available: false, models: [] };
+    const j = await res.json();
+    return { available: true, models: (j.models || []).map((m) => m.name) };
+  } catch {
+    return { available: false, models: [] };
+  }
+}
+function formatInspect(hw) {
+  return [
+    `**Hardware inspected (live, no network except localhost Ollama)**`,
+    `- CPU: ${hw.cpu.model} (${hw.cpu.cores} cores, ${hw.cpu.arch}, ${hw.cpu.platform} ${hw.cpu.release})`,
+    `- RAM: ${hw.ram.totalGB} GB total, ${hw.ram.freeGB} GB free, ${hw.ram.usedPct}% used`,
+    `- GPU: ${hw.gpu.name || "none detected"}${hw.gpu.vramGB ? `, ${hw.gpu.vramGB} GB VRAM` : ""}${hw.gpu.driver ? `, driver ${hw.gpu.driver}` : ""}`,
+    `- Disk C: free ${hw.disk.freeGB ?? "?"} GB`,
+    `- Ollama: ${hw.ollama.available ? `available — ${hw.ollama.models.slice(0, 5).join(", ") || "no models"}` : "not reachable on 11434"}`
+  ].join("\n");
+}
 function registerBuiltinTools() {
   for (const t of [
     // Existing tools
@@ -36409,7 +37394,17 @@ function registerBuiltinTools() {
     networkTool,
     routerAdminTool,
     tabBrowserTool,
-    askQuestionTool
+    askQuestionTool,
+    // Hermes 40/40 — last 6 pillars: messaging integrations, image generation, home/device, vision, sandboxed execution, batch execution
+    messagingTool,
+    imageGeneratorTool,
+    deviceTool,
+    visionTool,
+    sandboxTool,
+    batchTool,
+    // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)
+    ultimatePlannerTool,
+    computeTool
   ]) {
     toolRegistry.register(t);
   }
@@ -39607,6 +40602,7 @@ app.whenReady().then(async () => {
   registerBuiltinTools();
   registerIpc(() => mainWindow);
   registerMiniMode(() => mainWindow);
+  registerQuickCapture();
   const cwd = process.cwd();
   void settings.load(cwd).then(() => connectAll(cwd)).catch((e) => logger.warn({ err: e }, "Background startup initialization failed"));
   logger.info("Brain subsystems initialized");

@@ -139,6 +139,7 @@ const IPC = {
   AUTOMATION_ADD_ACTION: "automation:add-action",
   AUTOMATION_GET_TEMPLATES: "automation:get-templates",
   AUTOMATION_GET_RUNS: "automation:get-runs",
+  AUTOMATION_NEXT_RUNS: "automation:next-runs",
   AUTOMATION_STATS: "automation:stats",
   AUTOMATION_SCHEDULER_STATUS: "automation:scheduler-status",
   AUTOMATION_SET_KEEP_AWAKE: "automation:set-keep-awake",
@@ -480,12 +481,17 @@ const IPC = {
   // Mini Mode (desktop floating chat bar)
   MINI_TOGGLE: "mini:toggle",
   MINI_SEND: "mini:send",
+  MINI_ABORT: "mini:abort",
   MINI_STATE: "mini:state",
   // main → mini push
   MINI_STREAM_EVENT: "mini:stream",
   // main → mini push
   MINI_RESTORE: "mini:restore",
   // mini → main: restore main window
+  // Quick Capture — appends a timestamped entry to ~/Documents/Infinite OS/Quick Notes/<date>.md
+  QUICK_CAPTURE_APPEND: "quick-capture:append",
+  QUICK_CAPTURE_OPEN: "quick-capture:open",
+  QUICK_CAPTURE_LATEST: "quick-capture:latest",
   // Browser Bridge (Infinite OS Bridge browser extension)
   BRIDGE_STATUS: "bridge:status",
   BRIDGE_EXEC: "bridge:exec"
@@ -1134,6 +1140,10 @@ const api = {
   miniToggle: () => ipcRenderer.invoke(IPC.MINI_TOGGLE),
   miniRestore: () => ipcRenderer.invoke(IPC.MINI_RESTORE),
   miniSend: (args) => ipcRenderer.invoke(IPC.MINI_SEND, args),
+  miniAbort: (args) => ipcRenderer.invoke(IPC.MINI_ABORT, args),
+  quickCaptureAppend: (args) => ipcRenderer.invoke(IPC.QUICK_CAPTURE_APPEND, args),
+  quickCaptureOpen: () => ipcRenderer.invoke(IPC.QUICK_CAPTURE_OPEN),
+  quickCaptureLatest: () => ipcRenderer.invoke(IPC.QUICK_CAPTURE_LATEST),
   onMiniStreamEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on(IPC.MINI_STREAM_EVENT, handler);

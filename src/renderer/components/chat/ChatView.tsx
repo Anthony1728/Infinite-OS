@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
@@ -665,8 +665,6 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
   const modes: { label: string; view: string; icon: AppIconName }[] = [
     { label: 'Chat', view: 'chats', icon: 'home.chat' },
     { label: 'Code', view: 'workspace', icon: 'home.code' },
-    { label: 'Agent', view: 'agents', icon: 'home.agents' },
-    { label: 'Build', view: 'app-builder', icon: 'action.build' },
     { label: 'Canvas', view: 'canvas', icon: 'home.canvas' },
   ];
   return (
@@ -678,7 +676,7 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
         <p className="mt-2 text-[12px] text-zinc-500">
           How can I help you build, create and automate today?
         </p>
-        <div className="mx-auto mt-4 grid grid-cols-5 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/95 p-1.5 shadow-[0_2px_8px_rgba(0,0,0,.35),0_0_0_0.5px_rgba(255,255,255,0.03)]">
+        <div className="mx-auto mt-4 grid grid-cols-3 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/95 p-1.5 shadow-[0_2px_8px_rgba(0,0,0,.35),0_0_0_0.5px_rgba(255,255,255,0.03)]">
           {modes.map((mode, index) => (
             <button
               key={mode.label}
@@ -744,6 +742,7 @@ function InputBar({
   const [images, setImages] = useState<ImagePreview[]>([]);
   const [files, setFiles] = useState<FilePreview[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [ghost, setGhost] = useState('');
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -752,6 +751,49 @@ function InputBar({
   // open so everything fits perfectly. The collapse is a smooth width/opacity
   // fade — nothing jumps, nothing gets stuck.
   const activityPanelOpen = useLayoutStore((s) => s.activityPanelOpen);
+
+  // ── Non-annoying ghost autofill: faint suffix (history + common starters), Tab to accept ──
+  const COMMON_SUGGESTIONS = useMemo(() => [
+    'create an AI agent specialized in ',
+    'delete the agent ',
+    'help me build a ',
+    'explain ',
+    'summarize ',
+    'fix the bug where ',
+    'add a feature to ',
+    'search for ',
+    'write a ',
+    'generate a ',
+    'what is ',
+    'how do I ',
+    'can you ',
+    'deploy the project to ',
+    'run the tests for ',
+    'open the file ',
+  ], []);
+  useEffect(() => {
+    if (input.startsWith('/') || showSlashMenu) { setGhost(''); return; }
+    const trimmed = input;
+    if (trimmed.length < 2 || trimmed.length > 80 || trimmed.includes('\n')) { setGhost(''); return; }
+    const lower = trimmed.toLowerCase();
+    // Prefer exact history match first (user's own phrasing)
+    try {
+      const hist = JSON.parse(localStorage.getItem('infinite:input-history') || '[]') as string[];
+      for (const h of hist) {
+        if (h.toLowerCase().startsWith(lower) && h.length > trimmed.length && h.length - trimmed.length <= 60) {
+          setGhost(h.slice(trimmed.length));
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+    for (const c of COMMON_SUGGESTIONS) {
+      if (c.toLowerCase().startsWith(lower) && c.length > trimmed.length) {
+        setGhost(c.slice(trimmed.length));
+        return;
+      }
+    }
+    setGhost('');
+  }, [input, showSlashMenu, COMMON_SUGGESTIONS]);
 
   // ── Second model ("work together") optional pairing ─────────────────────
   // Reads persist state on mount, syncs via the storage event.
@@ -890,8 +932,18 @@ function InputBar({
   const send = useCallback(() => {
     if (!input.trim() && images.length === 0 && files.length === 0) return;
     const blocks = toImageBlocks();
+    // Persist to history for ghost autofill (non-annoying: only suggests your own prior prompts)
+    try {
+      const hist = JSON.parse(localStorage.getItem('infinite:input-history') || '[]') as string[];
+      const trimmed = input.trim();
+      if (trimmed.length >= 3 && hist[0] !== trimmed) {
+        hist.unshift(trimmed);
+        localStorage.setItem('infinite:input-history', JSON.stringify(hist.slice(0, 80)));
+      }
+    } catch { /* ignore */ }
     onSend(input, blocks);
     setInput('');
+    setGhost('');
     setImages([]);
     setFiles([]);
     setShowSlashMenu(false);
@@ -1041,10 +1093,32 @@ function InputBar({
         onSend(`/${cmd.id}`);
         setInput('');
         setShowSlashMenu(false);
+        setGhost('');
         return;
       }
       if (e.key === 'Escape') {
         setShowSlashMenu(false);
+        return;
+      }
+    }
+
+    // Ghost autofill: Tab or Right Arrow at end accepts faint suggestion (non-annoying: never auto-inserts, only on explicit key)
+    if (ghost && !showSlashMenu) {
+      if (e.key === 'Tab' || (e.key === 'ArrowRight' && inputRef.current?.selectionStart === input.length && inputRef.current?.selectionEnd === input.length)) {
+        e.preventDefault();
+        const next = input + ghost;
+        setInput(next);
+        setGhost('');
+        // keep caret at end
+        requestAnimationFrame(() => {
+          if (inputRef.current) {
+            inputRef.current.selectionStart = inputRef.current.selectionEnd = next.length;
+          }
+        });
+        return;
+      }
+      if (e.key === 'Escape') {
+        setGhost('');
         return;
       }
     }
@@ -1157,26 +1231,37 @@ function InputBar({
             </span>
           </div>
         )}
-        <textarea
-          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-          value={input}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onInput={(e) => {
-            const t = e.currentTarget;
-            if (!t.value) {
-              t.style.height = '';
-              return;
-            }
-            t.style.height = 'auto';
-            t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
-          }}
-          placeholder={placeholder || (isOnline ? 'Ask Infinite OS anything...' : 'Ask the Infinite AI Brain anything...')}
-          rows={1}
-          aria-label="Message Infinite OS"
-          className="os-chat-textarea w-full min-h-[56px] max-h-40 overflow-y-auto bg-transparent text-textMain text-sm px-5 pt-4 pb-2 pr-4 outline-none resize-none placeholder:text-textMuted/50"
-        />
+        <div className="relative w-full">
+          {ghost && (
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 max-h-40 overflow-hidden whitespace-pre-wrap break-words px-5 pt-4 pb-2 pr-4 text-sm leading-6">
+              <span className="invisible whitespace-pre-wrap break-words">{input}</span>
+              <span className="text-zinc-500/45">{ghost}</span>
+            </div>
+          )}
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            value={input}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            onInput={(e) => {
+              const t = e.currentTarget;
+              if (!t.value) {
+                t.style.height = '';
+                return;
+              }
+              t.style.height = 'auto';
+              t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
+            }}
+            placeholder={placeholder || (isOnline ? 'Ask Infinite OS anything...' : 'Ask the Infinite AI Brain anything...')}
+            rows={1}
+            aria-label="Message Infinite OS"
+            className="os-chat-textarea relative w-full min-h-[56px] max-h-40 overflow-y-auto bg-transparent text-textMain text-sm px-5 pt-4 pb-2 pr-4 outline-none resize-none placeholder:text-textMuted/50"
+          />
+          {ghost && (
+            <span className="pointer-events-none absolute bottom-1 right-3 rounded border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-medium tracking-wide text-zinc-500">Tab ↹</span>
+          )}
+        </div>
         {(images.length > 0 || files.length > 0) && (
           <div className="flex flex-wrap gap-2 px-4 pt-1">
             {images.map((img) => (

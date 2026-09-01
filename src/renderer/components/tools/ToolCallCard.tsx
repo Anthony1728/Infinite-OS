@@ -93,57 +93,62 @@ export function ToolCallCard({
 }) {
   const [open, setOpen] = useState(false);
   const running = status === 'running';
+  const summary = (() => {
+    const i = (input ?? {}) as Record<string, unknown>;
+    const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+    const cmd = s(i.command ?? i.cmd ?? i.path ?? i.file_path ?? i.query ?? i.url ?? '').slice(0, 80);
+    return cmd ? `· ${cmd}` : '';
+  })();
 
   return (
     <div
       className={`group my-2 rounded-xl border bg-[#0c1018] overflow-hidden transition-colors ${
-        running ? 'border-indigo-500/40 animate-glow-border' : 'border-borderSubtle'
+        running ? 'border-indigo-500/40 animate-glow-border' : 'border-white/[0.06]'
       }`}
     >
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.03]"
+        title={summary || name}
       >
         <span
           className={`relative flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 ${
-            running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-300'
+            running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-400'
           }`}
         >
           {running && <span className="absolute inset-0 rounded-lg border border-indigo-400/50 animate-ping" />}
           <ToolIcon name={name} />
         </span>
 
-        <span className="text-sm font-medium font-mono text-zinc-200 truncate">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium font-mono text-zinc-200">
+          {name} <span className="font-sans text-xs font-normal text-zinc-500 truncate">{summary}</span>
+        </span>
 
         <span className="ml-auto flex items-center gap-2 text-xs flex-shrink-0">
           {running ? (
             <>
-              <span className="w-3.5 h-3.5 rounded-full border-2 border-indigo-400/30 border-t-indigo-400 animate-spin" />
-              <span className="text-indigo-300">running…</span>
+              <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current/40 border-t-current text-indigo-300" />
+              <span className="text-indigo-300">running</span>
             </>
           ) : (
             <>
-              <svg
-                className="w-3.5 h-3.5 text-emerald-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                viewBox="0 0 24 24"
-              >
-                <path d="M4.5 12.75l6 6 9-13.5" />
-              </svg>
-              <span className="text-emerald-400/80">done</span>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="text-zinc-500">done</span>
             </>
           )}
-          <span className="text-textMuted ml-1">{open ? '▾' : '▸'}</span>
+          <span className="text-zinc-600 ml-1 text-[10px]">{open ? '▾' : '▸'}</span>
         </span>
       </button>
 
       {open && (
-        <pre className="px-3 py-2 text-[11px] text-zinc-400 border-t border-borderSubtle overflow-x-auto bg-black/20">
-          {JSON.stringify(input, null, 2)}
+        <pre className="max-h-48 overflow-auto border-t border-white/[0.06] bg-black/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+          {(() => {
+            try {
+              return JSON.stringify(input, null, 2).slice(0, 4000);
+            } catch {
+              return String(input).slice(0, 4000);
+            }
+          })()}
         </pre>
       )}
     </div>

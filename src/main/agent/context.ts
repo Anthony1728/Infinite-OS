@@ -2,11 +2,36 @@
 
 import { resolve, join } from 'node:path';
 import { arch, homedir, hostname, platform, release, userInfo } from 'node:os';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import type { Message } from '../../shared/types.js';
 import { settings } from '../settings/store.js';
 import { getBrainTeachingManager } from '../brain/teacher.js';
 import { retrieveLearningContext } from '../brain/learning.js';
 import { SkillsManager } from '../skills/manager.js';
+
+// Read the user's display name from auth-session.json (written by the renderer auth store).
+let cachedUserName: string | null = null;
+let userNameCacheTime = 0;
+const USER_NAME_CACHE_TTL_MS = 30_000;
+
+async function getUserName(): Promise<string> {
+  const now = Date.now();
+  if (cachedUserName !== null && now - userNameCacheTime < USER_NAME_CACHE_TTL_MS) return cachedUserName;
+  const sessionPath = join(homedir(), '.infinite-ai', 'auth-session.json');
+  try {
+    if (!existsSync(sessionPath)) { cachedUserName = ''; return ''; }
+    const raw = await readFile(sessionPath, 'utf8');
+    const session = JSON.parse(raw) as { user?: { name?: string; profile?: { name?: string } } };
+    const name = session?.user?.profile?.name || session?.user?.name || '';
+    cachedUserName = name;
+    userNameCacheTime = now;
+    return name;
+  } catch {
+    cachedUserName = '';
+    return '';
+  }
+}
 
 interface LocalModelPromptOptions {
   cwd: string;
@@ -24,19 +49,21 @@ interface LocalModelPromptOptions {
  * attention. Infinite OS attaches the relevant schemas for this turn and
  * keeps a concise catalog of every other capability in the prompt.
  */
-export function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptions): string {
+export async function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptions): Promise<string> {
   const toolSummary = opts.availableToolNames.length
     ? `${opts.availableToolNames.length} real Infinite OS capabilities are available: ${opts.availableToolNames.join(', ')}.`
     : 'No native tools are connected for this request.';
   const attachedSummary = opts.attachedToolNames.length
     ? `Executable tool schemas attached for this turn: ${opts.attachedToolNames.join(', ')}. Use these exact names now; Infinite OS will attach other schemas when a task needs them.`
     : 'No executable tool schema is attached for this turn. Answer without pretending to act.';
+  const userName = await getUserName();
   return [
     '# INFINITE OS LOCAL AGENT CONTRACT - HIGHEST PRIORITY',
     '',
     'IDENTITY AND LOCATION',
     'You are Infinite AI, the active local agent inside the Infinite OS Windows desktop application. You are not a remote chatbot and you are not running in a text-only webpage.',
     `Runtime: ${platform()} ${release()} (${arch()}) on computer ${hostname()}, signed-in user ${userInfo().username}.`,
+    `The user's name is ${userName || 'not set'}. Address them by name when natural.`,
     `Working directory: ${opts.cwd}`,
     `User home: ${homedir()}`,
     `Local inference model: Ollama/${opts.model}`,
@@ -107,7 +134,7 @@ export async function buildSystemPrompt(opts: {
   const tools = allTools.filter((tool) => attachedToolNames.has(tool.name));
 
   if (opts.provider === 'ollama') {
-    parts.push(getLocalModelPrompt({
+    parts.push(await getLocalModelPrompt({
       cwd: opts.cwd,
       model: opts.model,
       permissionProfile,
@@ -164,6 +191,16 @@ async function finishSystemPrompt(
   void permissionProfile;
   void provider;
   void model;
+
+  // User identity — the AI should know who it's talking to.
+  const userName = await getUserName();
+  parts.push('');
+  parts.push(`# User`);
+  if (userName) {
+    parts.push(`The user's name is ${userName}. Address them by name when natural (e.g. greetings, summaries).`);
+  } else {
+    parts.push(`The user has not set a display name yet. Use "you" naturally.`);
+  }
 
   parts.push('');
   parts.push(`# Current run`);
@@ -622,7 +659,7 @@ export function renderStaticSystemPrompt(input: {
 // (model, permission profile, tool set). Cache it on the same key shape.
 const localPromptCache = new Map<string, string>();
 
-function getLocalModelPrompt(opts: LocalModelPromptOptions): string {
+async function getLocalModelPrompt(opts: LocalModelPromptOptions): Promise<string> {
   const key = [
     opts.permissionProfile,
     opts.model,
@@ -634,7 +671,7 @@ function getLocalModelPrompt(opts: LocalModelPromptOptions): string {
   ].join('|');
   const hit = localPromptCache.get(key);
   if (hit) return hit;
-  const rendered = buildLocalModelOperatingPrompt(opts);
+  const rendered = await buildLocalModelOperatingPrompt(opts);
   localPromptCache.set(key, rendered);
   return rendered;
 }

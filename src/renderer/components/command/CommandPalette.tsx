@@ -3,13 +3,12 @@ import { motion } from 'framer-motion';
 import { Command } from 'cmdk';
 
 const COMMANDS = [
-  { id: 'home', label: 'Open OS Home', icon: 'OS', category: 'Workspace' },
   { id: 'new-chat', label: 'New Chat', icon: 'AI', category: 'Chat', shortcut: 'Ctrl+N' },
   { id: 'open-canvas', label: 'Open Canvas', icon: 'CN', category: 'Workspace' },
   { id: 'open-code', label: 'Open Code Editor', icon: 'CD', category: 'Workspace' },
-  { id: 'agents', label: 'Agent Builder', icon: 'AG', category: 'Agents' },
-  { id: 'create-agent', label: 'Create Agent', icon: 'CA', category: 'Agents' },
-  { id: 'multi-agent', label: 'Multi-Agent System', icon: 'MA', category: 'Agents' },
+  { id: 'standing-orders', label: 'Standing Orders', icon: 'SO', category: 'Automation' },
+  { id: 'active-memory', label: 'Active Memory', icon: 'AM', category: 'Knowledge' },
+  { id: 'capabilities', label: 'Tools & Skills', icon: 'TS', category: 'Platform' },
   { id: 'automations', label: 'Automation Studio', icon: 'AU', category: 'Automation' },
   { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace' },
   { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace' },

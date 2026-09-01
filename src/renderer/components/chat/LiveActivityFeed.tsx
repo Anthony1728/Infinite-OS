@@ -94,16 +94,33 @@ function StepRow({ item, connect }: { item: ActivityItem; connect: boolean }) {
 export function LiveActivityFeed() {
   const activity = useChatStore((s) => s.activity);
   const streaming = useChatStore((s) => s.streaming);
+  const providerStatus = useChatStore((s) => s.providerStatus);
 
   if (!streaming) return null;
 
-  const visible = activity.slice(-6);
-  const runningCount = activity.filter((a) => a.status === 'running').length;
-  const trailing =
-    runningCount > 0 || visible.length > 0 ? 'Working…' : 'Starting…';
+  const visible = activity.slice(-8);
+  const running = activity.filter((a) => a.status === 'running');
+  const done = activity.filter((a) => a.status === 'done').length;
+  const errors = activity.filter((a) => a.status === 'error').length;
+
+  // Claude/Codex style: show what the agent is *thinking* when no tool is active but text is streaming
+  const trailing = (() => {
+    if (running.length > 0) {
+      const names = running.slice(0, 2).map((r) => r.label.split(':')[0] || r.label).join(', ');
+      return running.length === 1 ? `${names} — running` : `${running.length} tools — ${names}… running`;
+    }
+    if (providerStatus?.label) return providerStatus.label;
+    if (visible.length === 0) return 'Thinking — planning your task…';
+    return done > 0 ? `Done ${done} step${done > 1 ? 's' : ''}${errors ? ` • ${errors} error${errors > 1 ? 's' : ''}` : ''} — thinking next…` : 'Thinking…';
+  })();
 
   return (
     <div className="px-1" aria-live="polite" aria-label="Live progress">
+      <div className="mb-1 flex items-center gap-2 text-[10px] font-medium tracking-wide text-zinc-500">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+        Live — {running.length} running • {done} done{errors ? ` • ${errors} failed` : ''}
+        {providerStatus?.detail ? <span className="ml-auto truncate font-mono text-[10px] text-zinc-600" title={providerStatus.detail}>{providerStatus.detail.slice(0, 60)}</span> : null}
+      </div>
       <div className="flex flex-col">
         {visible.map((item) => (
           <StepRow key={item.id} item={item} connect />
@@ -116,7 +133,8 @@ export function LiveActivityFeed() {
             </span>
           </div>
           <div className="min-w-0 flex-1 pt-1">
-            <span className="text-xs font-medium text-indigo-300/90">{trailing}</span>
+            <span className="truncate text-xs font-medium text-indigo-300/90">{trailing}</span>
+            {providerStatus?.detail ? <div className="truncate font-mono text-[10px] text-zinc-600">{providerStatus.detail.slice(0, 90)}</div> : null}
           </div>
         </div>
       </div>

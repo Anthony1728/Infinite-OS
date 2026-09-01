@@ -168,6 +168,7 @@ export const IPC = {
   AUTOMATION_ADD_ACTION: 'automation:add-action',
   AUTOMATION_GET_TEMPLATES: 'automation:get-templates',
   AUTOMATION_GET_RUNS: 'automation:get-runs',
+  AUTOMATION_NEXT_RUNS: 'automation:next-runs',
   AUTOMATION_STATS: 'automation:stats',
   AUTOMATION_SCHEDULER_STATUS: 'automation:scheduler-status',
   AUTOMATION_SET_KEEP_AWAKE: 'automation:set-keep-awake',

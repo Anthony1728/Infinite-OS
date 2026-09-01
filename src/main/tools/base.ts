@@ -121,6 +121,15 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   // Network / router self-help
   network: 'Network', netinfo: 'Network', net_info: 'Network', networkinfo: 'Network', network_info: 'Network', wifi: 'Network', wifipassword: 'Network', wifi_password: 'Network', getwifipassword: 'Network', get_wifi_password: 'Network', findwifipassword: 'Network', find_wifi_password: 'Network', networkselfhelp: 'Network', network_self_help: 'Network', networkdiagnostics: 'Network', network_diagnostics: 'Network', networkdiagnose: 'Network', network_diagnose: 'Network', wifiprofiles: 'Network', wifi_profiles: 'Network', nslookup: 'Network', traceroute: 'Network', tracert: 'Network', pinghost: 'Network', ping_host: 'Network', flushdns: 'Network', flush_dns: 'Network', dnstest: 'Network', dns_test: 'Network', setdns: 'Network', set_dns: 'Network', checkports: 'Network', check_ports: 'Network', portcheck: 'Network', port_check: 'Network',
   router: 'RouterAdmin', routeradmin: 'RouterAdmin', router_admin: 'RouterAdmin', routerhelp: 'RouterAdmin', router_help: 'RouterAdmin', routeraccess: 'RouterAdmin', router_access: 'RouterAdmin', recoverrouter: 'RouterAdmin', recover_router: 'RouterAdmin', resetrouter: 'RouterAdmin', reset_router: 'RouterAdmin', portforward: 'RouterAdmin', port_forward: 'RouterAdmin', routerguidance: 'RouterAdmin', router_guidance: 'RouterAdmin', gatewayinfo: 'RouterAdmin', gateway_info: 'RouterAdmin', defaultgateway: 'RouterAdmin', default_gateway: 'RouterAdmin', changewifipassword: 'RouterAdmin', change_wifi_password: 'RouterAdmin',
+  // Hermes parity tools
+  messaging: 'Messaging', slack: 'Messaging', sendslack: 'Messaging', send_slack: 'Messaging', discord: 'Messaging', senddiscord: 'Messaging', send_discord: 'Messaging', telegram: 'Messaging', sendtelegram: 'Messaging', send_telegram: 'Messaging',
+  imagegenerator: 'ImageGenerator', image_generate: 'ImageGenerator', generateimage: 'ImageGenerator', generate_image: 'ImageGenerator', dalle: 'ImageGenerator', stablediffusion: 'ImageGenerator', stable_diffusion: 'ImageGenerator',
+  device: 'Device', devicecontrol: 'Device', device_control: 'Device', smarthome: 'Device', smart_home: 'Device', homeassistant: 'Device', home_assistant: 'Device', iot: 'Device',
+  vision: 'Vision', describeimage: 'Vision', describe_image: 'Vision', ocr: 'Vision',
+  sandbox: 'Sandbox', sandboxed: 'Sandbox', sandboxexec: 'Sandbox', sandbox_exec: 'Sandbox', isolateshell: 'Sandbox',
+  batch: 'Batch', batchexecute: 'Batch', batch_execute: 'Batch', parallel: 'Batch', fanout: 'Batch',
+  ultimateplanner: 'UltimatePlanner', ultimate_planner: 'UltimatePlanner', taskplanner: 'UltimatePlanner', task_planner: 'UltimatePlanner',
+  compute: 'Compute', hardware: 'Compute', computemanager: 'Compute', compute_manager: 'Compute', intelligentcompute: 'Compute', intelligent_compute: 'Compute',
 };
 
 class ToolRegistry {

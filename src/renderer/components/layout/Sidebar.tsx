@@ -12,7 +12,6 @@ import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 // whole rail reads as one system instead of a set of colored widgets.
 const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'chats', label: 'Chats', icon: 'nav.chats' },
-  { id: 'agents', label: 'Agents', icon: 'nav.agents' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files' },
 ];
@@ -20,6 +19,10 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
 const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'memory', label: 'Memory', icon: 'nav.memory' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
+  { id: 'active-memory', label: 'Active Memory', icon: 'home.memory' },
+  { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
+  { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
+  { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
 ];
 
 interface SidebarProps {
@@ -234,9 +237,9 @@ export function Sidebar({
       >
         {!collapsed && (
           <button
-            onClick={() => onNavChange('home')}
+            onClick={() => onNavChange('chats')}
             className="flex items-center gap-3 min-w-0 text-left rounded-lg"
-            aria-label="Open Infinite OS home"
+            aria-label="Open AI Chat"
           >
             <span className="w-9 h-8 flex items-center justify-center">
               <InfiniteLogo className="w-9 h-5" animated />

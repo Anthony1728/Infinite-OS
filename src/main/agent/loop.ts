@@ -22,8 +22,9 @@ export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
 // for this long with zero events, abort the fetch and trigger failover. This
 // prevents the agent from hanging indefinitely when the provider goes silent.
-// Configurable via setLoopStallTimeout for tests; 10 minutes default.
-export let LOOP_STREAM_STALL_TIMEOUT_MS = 10 * 60_000;
+// Reduced from 10min to 3min — users expect fast responses; 3min is generous
+// enough for cold starts but fast enough to failover to a working provider.
+export let LOOP_STREAM_STALL_TIMEOUT_MS = 3 * 60_000;
 export const setLoopStallTimeout = (ms: number) => { LOOP_STREAM_STALL_TIMEOUT_MS = ms; };
 
 import { routeForcedResearchTool } from './research-routing.js';
@@ -100,7 +101,7 @@ export async function runAgent(
   const MAX_TURNS = typeof configuredTurns === 'number' && Number.isFinite(configuredTurns) && configuredTurns > 0
     ? Math.trunc(configuredTurns)
     : 60;
-  const WALL_CLOCK_LIMIT_MS = 25 * 60_000;
+  const WALL_CLOCK_LIMIT_MS = 10 * 60_000;
   const MAX_INTENT_ONLY_RETRIES = 2;
   let intentOnlyRetries = 0;
   let lastToolBatchHadError = false;

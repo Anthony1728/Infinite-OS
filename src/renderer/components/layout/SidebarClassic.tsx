@@ -9,12 +9,15 @@ import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 
 const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'chats', label: 'Chats', icon: 'nav.chats', color: 'text-cyan-400' },
-  { id: 'agents', label: 'Agents', icon: 'nav.agents', color: 'text-violet-400' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects', color: 'text-emerald-400' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files', color: 'text-sky-400' },
   { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
+  { id: 'active-memory', label: 'Active Memory', icon: 'nav.memory', color: 'text-cyan-400' },
+  { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders', color: 'text-violet-400' },
+  { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins', color: 'text-emerald-400' },
+  { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities', color: 'text-indigo-400' },
   { id: 'settings', label: 'Settings', icon: 'nav.settings', color: 'text-slate-400' },
 ];
 
@@ -158,9 +161,9 @@ export function SidebarClassic({
       >
         {!collapsed && (
           <button
-            onClick={() => onNavChange('home')}
+            onClick={() => onNavChange('chats')}
             className="flex items-center gap-3 min-w-0 text-left rounded-lg"
-            aria-label="Open Infinite OS home"
+            aria-label="Open AI Chat"
           >
             <span className="w-9 h-8 flex items-center justify-center">
               <InfiniteLogo className="w-9 h-5" animated />

@@ -96,6 +96,16 @@ import { routerAdminTool } from './router-admin.js';
 import { tabBrowserTool } from './tab-browser.js';
 import { askQuestionTool } from './ask-question.js';
 
+// Hermes-beating: Messaging, Image generation, Device/Home integrations (40/40 parity + beyond)
+import { messagingTool } from './messaging.js';
+import { imageGeneratorTool } from './image-generator.js';
+import { deviceTool } from './device.js';
+import { visionTool } from './vision.js';
+import { sandboxTool } from './sandbox.js';
+import { batchTool } from './batch.js';
+import { ultimatePlannerTool } from './ultimate-planner.js';
+import { computeTool } from './compute.js';
+
 export function registerBuiltinTools(): void {
   for (const t of [
     // Existing tools
@@ -199,6 +209,17 @@ export function registerBuiltinTools(): void {
     routerAdminTool,
     tabBrowserTool,
     askQuestionTool,
+
+    // Hermes 40/40 — last 6 pillars: messaging integrations, image generation, home/device, vision, sandboxed execution, batch execution
+    messagingTool,
+    imageGeneratorTool,
+    deviceTool,
+    visionTool,
+    sandboxTool,
+    batchTool,
+    // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)
+    ultimatePlannerTool,
+    computeTool,
   ]) {
     toolRegistry.register(t);
   }

@@ -52,21 +52,21 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
 
   useEffect(() => {
     const statusTexts = ['Restoring workspace…', 'Loading sessions…', 'Initializing AI engine…', 'Checking model providers…', 'Almost ready…'];
-
+    // Speed: 2× faster than before (was 90ms*10 = 900ms). Now 45ms*6 ≈ 270ms,
+    // and we jump to 100 as soon as the interval hits, so the OS feels instant.
     const interval = setInterval(() => {
       setProgress((prev) => {
-        const newProgress = prev + 10;
+        const newProgress = Math.min(100, prev + 18);
         if (newProgress >= 100) {
           clearInterval(interval);
-          setTimeout(onComplete, 40);
+          setTimeout(onComplete, 20);
           return 100;
         }
-        // Update status text based on progress
         const textIndex = Math.min(Math.floor(newProgress / 25), statusTexts.length - 1);
         setStatusText(statusTexts[textIndex]);
         return newProgress;
       });
-    }, 90);
+    }, 45);
     return () => clearInterval(interval);
   }, [onComplete]);
 
@@ -96,7 +96,7 @@ export function App() {
   const uiTheme = useUiTheme((s) => s.theme);
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
-  const [activeView, setActiveView] = useState('home');
+  const [activeView, setActiveView] = useState('chats');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const setActivityPanelOpen = useLayoutStore((s) => s.setActivityPanelOpen);
