@@ -100,16 +100,49 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerQueueIpc();
   registerGitIpc();
   registerLearningIpc(getMainWindow);
+  ipcMain.handle(IPC.HEARTBEAT_STATUS, async () => {
+    const { heartbeatStatus } = await import('../heartbeat/index.js');
+    return heartbeatStatus();
+  });
+
+  // Background build — app stays running while AI edits code
+  ipcMain.handle(IPC.BUILD_START, async () => {
+    const { buildInBackground } = await import('../auto-update/index.js');
+    const cwd = settings.get('cwd') as string | undefined ?? process.cwd();
+    const result = await buildInBackground(cwd);
+    // Notify renderer that a new build is ready
+    if (result.phase === 'ready') {
+      const win = getMainWindow();
+      win?.webContents.send(IPC.BUILD_HAS_UPDATE, result);
+    }
+    return result;
+  });
+  ipcMain.handle(IPC.BUILD_STATUS, async () => {
+    const { getBuildStatus } = await import('../auto-update/index.js');
+    return getBuildStatus();
+  });
+  ipcMain.handle(IPC.BUILD_CANCEL, async () => {
+    const { cancelBuild } = await import('../auto-update/index.js');
+    return { cancelled: cancelBuild() };
+  });
+  ipcMain.handle(IPC.BUILD_HAS_UPDATE, async () => {
+    const { hasStagedUpdate } = await import('../auto-update/index.js');
+    return { hasUpdate: hasStagedUpdate() };
+  });
+  ipcMain.handle(IPC.BUILD_CLEAR_UPDATE, async () => {
+    const { clearStagedUpdate } = await import('../auto-update/index.js');
+    clearStagedUpdate();
+    return { ok: true };
+  });
   // Chat
   ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd }) => {
+    // Mark heartbeat as active — don't run consolidation while user is chatting.
+    void import('../heartbeat/index.js').then(({ heartbeatTouch }) => heartbeatTouch()).catch(() => {});
     const win = getMainWindow();
     if (!win) {
       console.error('[IPC] CHAT_SEND: No window available');
       throw new Error('No window');
     }
-
-    console.log(`[IPC] CHAT_SEND: session=${sessionId} provider=${provider} model=${model} cwd=${cwd}`);
-    console.log(`[IPC] CHAT_SEND: message type=${typeof message} isArray=${Array.isArray(message)}`);
 
     const controller = new AbortController();
     activeRuns.set(sessionId, controller);
@@ -117,11 +150,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
     const storedUserMessage: Message = { ...userMessage, content: displayMessage ?? message };
     const history = await sessionStore.loadMessages(sessionId);
-    console.log(`[IPC] CHAT_SEND: history length=${history.length}`);
     await sessionStore.appendMessage(sessionId, storedUserMessage);
 
     try {
-      console.log(`[IPC] CHAT_SEND: calling runAgent...`);
       const startTime = Date.now();
       const completedMessages = await runAgent(history, userMessage, {
         sessionId,
@@ -130,7 +161,6 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         model,
         signal: controller.signal,
         onEvent: (ev) => {
-          console.log(`[IPC] CHAT_SEND: sending event type=${ev.type}`);
           win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev });
         },
       });
@@ -189,7 +219,6 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           await sessionStore.appendMessage(sessionId, message);
         }
       }
-      console.log(`[IPC] CHAT_SEND: runAgent completed`);
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error

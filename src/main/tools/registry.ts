@@ -105,6 +105,12 @@ import { sandboxTool } from './sandbox.js';
 import { batchTool } from './batch.js';
 import { ultimatePlannerTool } from './ultimate-planner.js';
 import { computeTool } from './compute.js';
+// New high-value tools
+import { codeReviewTool } from './code-review.js';
+import { regexTool } from './regex.js';
+import { csvTool } from './csv.js';
+import { translateTool } from './translate.js';
+import { colorTool } from './color.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -220,6 +226,12 @@ export function registerBuiltinTools(): void {
     // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)
     ultimatePlannerTool,
     computeTool,
+    // High-value utilities — deterministic, no model call
+    codeReviewTool,
+    regexTool,
+    csvTool,
+    translateTool,
+    colorTool,
   ]) {
     toolRegistry.register(t);
   }

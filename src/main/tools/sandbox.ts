@@ -47,8 +47,12 @@ export const sandboxTool: Tool = {
     try {
       if (a.files) {
         for (const [name, content] of Object.entries(a.files)) {
-          const full = join(dir, name);
-          await mkdir(join(dir, name.split('/').slice(0, -1).join('/')), { recursive: true }).catch(() => undefined);
+          // Prevent path traversal — strip leading slashes and .. segments
+          const safeName = name.replace(/^[/\\]+/, '').replace(/\.\.[/\\]/g, '');
+          if (!safeName) continue;
+          const full = join(dir, safeName);
+          const dirParts = safeName.split(/[/\\]/).slice(0, -1);
+          if (dirParts.length) await mkdir(join(dir, ...dirParts), { recursive: true }).catch(() => undefined);
           await writeFile(full, content, 'utf8');
         }
       }

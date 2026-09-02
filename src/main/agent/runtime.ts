@@ -33,8 +33,8 @@ const supervisorNotices = new Map<string, number>();
 const runProgressAt = new Map<string, number>();
 const activeStreamControllers = new Map<string, AbortController>();
 let supervisorTimer: ReturnType<typeof setInterval> | undefined;
-const SUPERVISOR_NOTICE_MS = 30_000;
-const SUPERVISOR_RESTART_MS = 120_000;
+const SUPERVISOR_NOTICE_MS = 20_000;
+const SUPERVISOR_RESTART_MS = 45_000;
 
 function superviseRuns(): void {
   const now = Date.now();
@@ -372,9 +372,19 @@ export async function runSubagent(
             return agent.allowedTools.includes('*') || agent.allowedTools.includes(tool.name) || Boolean(config?.toolOverride?.include?.includes(tool.name));
           })
       : [];
+    // CORE TOOL SET — ~24 essential tools sent every turn. Cuts ~15k tokens vs 50.
+    // Non-core tools (CodeReview, Regex, CSV, etc.) are available via Agent spawning.
+    const CORE_TOOL_SET = new Set([
+      'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+      'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
+      'Computer', 'browser_extension', 'Operator',
+      'FileOps', 'Knowledge', 'System',
+      'Git', 'CreateTab', 'BuildFeature',
+      'Batch', 'AskQuestion', 'TaskGroup',
+    ]);
     const tools = activeCandidate.provider === 'ollama'
       ? selectLocalModelTools(opts.task, allowedTools)
-      : allowedTools;
+      : allowedTools.filter((t) => CORE_TOOL_SET.has(t.name));
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${tools.map((tool) => tool.name).join(',')}`;
     let baseSystem = runSystemPrompts.get(systemKey);
     if (!baseSystem) baseSystem = [
@@ -458,7 +468,7 @@ export async function runSubagent(
     const subagentStallInterval = setInterval(() => {
       if (providerFailure) return;
       if (Date.now() - streamLastEvent >= LOOP_STREAM_STALL_TIMEOUT_MS) {
-        providerFailure = `Subagent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 60_000)} min)`;
+        providerFailure = `Subagent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 1000)}s)`;
         console.error(`[agent] ${providerFailure} — aborting stream`);
         subagentStreamController.abort();
       }

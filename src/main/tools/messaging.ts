@@ -49,7 +49,7 @@ export const messagingTool: Tool = {
     if (a.action === 'simulate') {
       if (!a.text) return need('text');
       const preview = a.text.slice(0, 400);
-      return { content: `[simulate] Would send ${a.text.length} chars: "${preview}${a.text.length > 400 ? '…' : ''}" (chunking: ${chunks(a.text, 1900).length} Discord chunk(s) / ${chunks(a.text, 4000).length} Slack chunk(s))` };
+      return { content: `[simulate] Would send ${a.text.length} chars: "${preview}${a.text.length > 400 ? '…' : ''}" (chunking: ${chunks(a.text, 1900).length} Discord chunk(s) / ${chunks(a.text, 4000).length} Slack/Telegram chunk(s))` };
     }
     if (!a.text || !a.text.trim()) return need('text');
     const text = a.text.trim();
@@ -62,11 +62,11 @@ export const messagingTool: Tool = {
         if (a.username) payload.username = a.username;
         if (a.channel) payload.channel = a.channel;
         // Slack limit 40000? we chunk at 4000 for safety
-        for (const chunk of chunks(text, 3500)) {
+        for (const chunk of chunks(text, 4000)) {
           const res = await fetchWithTimeout(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, text: chunk }) }, ctx.abortSignal);
           if (!res.ok) return fail(`Slack ${res.status}: ${await safeText(res)}`);
         }
-        return { content: `Sent ${text.length} chars to Slack${a.channel ? ` ${a.channel}` : ''} in ${chunks(text, 3500).length} chunk(s).` };
+        return { content: `Sent ${text.length} chars to Slack${a.channel ? ` ${a.channel}` : ''} in ${chunks(text, 4000).length} chunk(s).` };
       }
       if (a.action === 'send_discord') {
         const url = a.webhookUrl || process.env.DISCORD_WEBHOOK_URL;

@@ -22,9 +22,9 @@ export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
 // for this long with zero events, abort the fetch and trigger failover. This
 // prevents the agent from hanging indefinitely when the provider goes silent.
-// Reduced from 10min to 3min — users expect fast responses; 3min is generous
-// enough for cold starts but fast enough to failover to a working provider.
-export let LOOP_STREAM_STALL_TIMEOUT_MS = 3 * 60_000;
+// Reduced from 3min to 45s — users expect instant responses. Slow models get
+// 45s before failover to the next provider. Keeps the chat feeling fast.
+export let LOOP_STREAM_STALL_TIMEOUT_MS = 45_000;
 export const setLoopStallTimeout = (ms: number) => { LOOP_STREAM_STALL_TIMEOUT_MS = ms; };
 
 import { routeForcedResearchTool } from './research-routing.js';
@@ -168,9 +168,19 @@ export async function runAgent(
     const activeToolsEnabled = providerSupportsTools(activeCandidate.provider, activeCandidate.model);
     const allActiveTools = activeToolsEnabled ? toolRegistry.asProviderTools() : [];
     const requestContext = [...history.slice(-6), userMessage].map(messageText).join('\n');
+    // CORE TOOL SET — ~24 essential tools sent every turn. Cuts ~15k tokens vs 50.
+    // Non-core tools (CodeReview, Regex, CSV, etc.) are available via Agent spawning.
+    const CORE_TOOL_SET = new Set([
+      'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+      'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
+      'Computer', 'browser_extension', 'Operator',
+      'FileOps', 'Knowledge', 'System',
+      'Git', 'CreateTab', 'BuildFeature',
+      'Batch', 'AskQuestion', 'TaskGroup',
+    ]);
     const activeTools = activeCandidate.provider === 'ollama'
       ? selectLocalModelTools(requestContext, allActiveTools)
-      : allActiveTools;
+      : allActiveTools.filter((t) => CORE_TOOL_SET.has(t.name));
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${activeTools.map((tool) => tool.name).join(',')}`;
     let activeSystem = runSystemPrompts.get(systemKey);
     if (!activeSystem) {
@@ -269,7 +279,7 @@ export async function runAgent(
       streamStallInterval = setInterval(() => {
         if (providerFailure) return;
         if (Date.now() - streamLastEvent >= LOOP_STREAM_STALL_TIMEOUT_MS) {
-          providerFailure = `Agent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 60_000)} min)`;
+          providerFailure = `Agent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 1000)}s)`;
           console.error(`[agent] ${providerFailure} — aborting stream`);
           streamController.abort();
         }

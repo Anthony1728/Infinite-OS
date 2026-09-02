@@ -39,11 +39,17 @@ export const bash: Tool = {
         : ['-c', command];
 
     return new Promise<ToolResult>((resolve) => {
-      const child = spawn(shell, shellArgs, {
-        cwd: ctx.cwd,
-        env: process.env,
-        windowsHide: true,
-      });
+      let child;
+      try {
+        child = spawn(shell, shellArgs, {
+          cwd: ctx.cwd,
+          env: process.env,
+          windowsHide: true,
+        });
+      } catch (error) {
+        resolve({ content: `Failed to start shell: ${(error as Error).message}`, is_error: true });
+        return;
+      }
 
       let out = '';
       let finished = false;

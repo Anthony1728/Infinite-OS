@@ -427,10 +427,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ? event.result?.trim() || `${context.agentName} completed the task.`
         : `**${context.agentName} could not complete the task.**\n\n${event.error || 'Unknown agent error.'}`;
       const isBillingError = !successful && /credits?error|insufficient balance|credits? exhausted|billing|402|401.*opencode/i.test(event.error || '');
+      const isUsageLimitError = !successful && /429|usage limit|rate limit|GoUsageLimitError|too many requests|quota/i.test(event.error || '');
       const isVerifiedFail = !successful && /stopped before verified|reached the .* safety limit|did not produce a verified result|reached the .*turn safety/i.test(event.error || '');
       if (isBillingError) {
         const billingUrl = (event.error?.match(/https:\/\/opencode\.ai[^\s"']+/)?.[0]) ?? 'https://opencode.ai/billing';
         responseText = `**OpenCode credits exhausted (401).**\n\n${event.error}\n\n**Fix now:**\n• Top up: ${billingUrl}\n• Or switch model: **Settings → AI Provider** → pick **nvidia / meta/llama-3.3-70b-instruct** (free), **Groq**, or any provider with a valid key — then retry.\n• The **Infinite AI Brain** is still available locally and will answer without credits (see next message).`;
+      } else if (isUsageLimitError) {
+        const resetMatch = event.error?.match(/Resets? in (\d+) days?/i);
+        const resetInfo = resetMatch ? `\n\nResets in **${resetMatch[1]} days**.` : '';
+        const balanceUrl = (event.error?.match(/https:\/\/opencode\.ai[^\s"']+/)?.[0]) ?? 'https://opencode.ai/workspace';
+        responseText = `**Monthly usage limit reached (429).**${resetInfo}\n\n**Fix now:**\n• Enable from balance: ${balanceUrl}\n• Or switch model: **Settings → AI Provider** → pick **nvidia / meta/llama-3.3-70b-instruct** (free), **Groq**, **Gemini**, or any provider with available quota — then retry.\n• The **Infinite AI Brain** (local model) is always available and has no usage limits.`;
       } else if (isVerifiedFail) {
         responseText = `**${context.agentName} had trouble verifying the task.**\n\n${event.error}\n\nThe task needed a tool call, but the model returned text only. Infinite OS will still help — see the Brain's answer next. If this repeats, try **Model: nvidia / meta/llama-3.3-70b-instruct** (best tool use) or rephrase to be more explicit (e.g. "Use Bash to...").`;
       }
@@ -796,6 +802,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   sendMessage: async (visibleText, images, mode = 'chat', agentId) => {
+    // Show thinking indicator IMMEDIATELY — before any async work.
+    // This makes the UI feel instant when the user presses Enter.
+    set({ streaming: true });
+
     const text = promptForExecutionMode(visibleText, mode);
     const { currentSessionId } = get();
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
@@ -970,7 +980,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         sessionId = session.id;
         set((state) => ({ sessions: [session, ...state.sessions], currentSessionId: session.id, messages: [] }));
       }
-      if (!sessionId) return;
+    if (!sessionId) { set({ streaming: false }); return; }
       const selectedSessionId = sessionId;
 
       const agentInfo = useAgentsStore.getState().types.find((item) => item.id === agentId);
@@ -1181,8 +1191,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    console.log(`[chat] sendMessage: provider=${provider} model=${model}`);
-
     // Fast path: real API providers skip all local checks — send immediately.
     // The backend failover system handles key validation and model routing.
     const isRealProvider = provider !== 'local' && provider !== 'ollama';
@@ -1203,10 +1211,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch { /* ignore */ }
     }
 
-    console.log(
-      `[chat] provider=${provider} model=${model} brainMode=${brainMode} hasApiKey=${hasApiKey} isRealProvider=${isRealProvider}`,
-    );
-
     // Skip engine bootstrap for real providers — the backend handles it
     const brainStore = useBrainStore.getState();
     if (!isRealProvider) {
@@ -1216,11 +1220,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // If engine is dormant but we have credentials, bootstrap it
       if (brainStore.enginePhase === 'dormant' && (hasApiKey || ollamaAvailable)) {
-        console.log('[chat] Engine dormant — bootstrapping...');
+
         try {
           await window.api.engineBootstrap();
           await brainStore.refreshEngineStatus();
-          console.log(`[chat] Engine now: phase=${brainStore.enginePhase}, progress=${brainStore.engineProgress}%`);
         } catch {
           /* ignore */
         }
@@ -1232,11 +1235,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     let prestartedTaskId: string | null = null;
 
-    // Full-system mode has a local deterministic action router. It runs before
-    // the selected language model so PC/browser actions do not depend on a
-    // provider's native function-calling implementation.
+    // Full-system mode has a local deterministic action router. It handles
+    // PC/browser shortcuts instantly (same fast path the Power Center buttons use).
+    // Cache the permission profile locally so this doesn't block typing.
+    const localProfileHint = (() => {
+      try {
+        const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as { permissionProfile?: string };
+        return cur.permissionProfile ?? '';
+      } catch { return ''; }
+    })();
     try {
-      const permissionProfile = await window.api.getSetting({ key: 'permissionProfile' });
+      const permissionProfile = localProfileHint || await window.api.getSetting({ key: 'permissionProfile' });
       if ([':full-system-access', 'fullSystemAccess', 'full-system-access', 'full_system_access'].includes(String(permissionProfile))) {
         const localActionIntent = /\b(open|launch|start|search|find|navigate|browse|click|type|press|send|run|execute|create|write|move|rename|delete|capture|screenshot)\b/i.test(text);
         if (localActionIntent) {
@@ -1301,20 +1310,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
       }
-    } catch (error) {
-      console.warn('[chat] Local action router unavailable; continuing through the agent loop.', error);
+      } catch (error) {
+        console.warn('[chat] Local action router unavailable; continuing through the agent loop.', error);
+      }
     }
-
     // Always enter the credential-aware recovery router. If the selected model
     // or provider is unavailable it can use any other saved key automatically.
     if (provider === 'ollama') {
-      console.log(`[chat] Routing directly to local Ollama model: ${model}`);
       // Continue to the shared streaming agent path below so local models can use tools.
     } else if (isRealProvider) {
-      console.log('[chat] Real API provider ΓÇö routing directly to API');
+
       // Fall through to API path below (the code after this brainMode block)
     } else if (brainMode) {
-      console.log('[chat] Brain mode ΓÇö local provider, using Brain patterns');
+
 
       // Step 1: Try Brain patterns FIRST ΓÇö these execute real actions (build, open, email, terminal, etc.)
       let brainResponse: string | null = null;
@@ -1352,11 +1360,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         // If it's an ACTION, use the Brain response directly
         if (isActionResponse) {
-          console.log('[chat] Brain matched an action pattern ΓÇö using Brain response');
+
         }
         // If it's conversational and user has an API key, skip Brain ΓÇö go to API
         else if (hasApiKey) {
-          console.log('[chat] Brain gave conversational response ΓÇö routing to API instead');
+
           brainResponse = null; // Don't use Brain response
         }
       } catch (brainErr: unknown) {
@@ -1404,7 +1412,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // If Brain gave conversational response but user has API key, fall through to API path
       if (!isActionResponse && hasApiKey) {
-        console.log('[chat] Falling through to API path...');
+
         // Don't add user message yet ΓÇö the API path will add it
         // Fall through to the API code below (past the brainMode block)
       }
@@ -1471,7 +1479,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
-    console.log('[chat] Brain mode OFF ΓÇö proceeding with API call');
+
 
     let sessionId = currentSessionId;
 
@@ -1492,6 +1500,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
       } catch (e) {
         console.error('[chat] Failed to create session:', e);
+        set({ streaming: false });
         return;
       }
     }
@@ -1504,7 +1513,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: withImages(visibleText, images),
       timestamp: Date.now(),
     };
-    set({ messages: [...get().messages, userMessage], streaming: true, activity: [] });
+    // Show streaming + a provider hint immediately, before the first real
+    // provider event arrives — matches the instant feedback you see from
+    // the Power Center one-click buttons.
+    set({
+      messages: [...get().messages, userMessage],
+      streaming: true,
+      activity: [],
+      providerStatus: { label: `Contacting ${provider}`, detail: 'Preparing request…', receivedAt: Date.now() },
+    });
 
     // Create a chat task for the right panel
     const taskTitle = visibleText.length > 60 ? visibleText.slice(0, 60) + '...' : visibleText;
@@ -1547,11 +1564,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeChatTaskBySession.delete(sessionId!);
     });
 
-    // Detect complex tasks that need orchestration
+    // Only orchestrate truly complex multi-part requests. Short single-build
+    // requests like "create a website" go to a single agent to avoid 2× overhead.
     const isComplexTask =
-      text.length > 200 ||
-      (/\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
-        /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text));
+      (text.length > 300 &&
+        /\b(build|create|make|develop|deploy|full|complete|entire|whole)\b/i.test(text) &&
+        /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text)) ||
+      (/\b(build|create|make|develop)\b/i.test(text) &&
+        /\b(website|app|application|dashboard|saas|project|system)\b/i.test(text) &&
+        /(?:\band\b|\bthen\b|,|;)/i.test(text)); // multi-part: "create X and Y"
 
     try {
       if (isComplexTask) {
@@ -1861,7 +1882,6 @@ async function extractAndCreateFilesFromText(text: string, requestText = ''): Pr
           .getState()
           .openInEditor(filename, content, undefined, shouldLaunchArtifact(requestText, filename));
         createdFiles.push(filename);
-        console.log(`[chat] Created file: ${filename} (${content.length} chars)`);
       } catch (e) {
         console.error('[chat] Failed to create file:', filename, e);
       }
@@ -1872,7 +1892,6 @@ async function extractAndCreateFilesFromText(text: string, requestText = ''): Pr
 }
 
 async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
-  console.log(`[chat] handleStreamEvent type=${ev.type} sessionId=${ev.sessionId}`);
   const { setState, getState } = useChatStore;
   switch (ev.type) {
     case 'message_start': {
@@ -2148,7 +2167,6 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       if (lastAssistant) {
         const files = await extractAndCreateFiles(lastAssistant, lastUser ? textFromMessage(lastUser) : '');
         if (files.length > 0) {
-          console.log(`[chat] Auto-created ${files.length} files:`, files);
           const chatTaskId = activeChatTaskBySession.get(ev.sessionId);
           if (chatTaskId) {
             filesByChatTask.set(chatTaskId, [...(filesByChatTask.get(chatTaskId) ?? []), ...files]);

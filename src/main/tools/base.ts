@@ -130,6 +130,12 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   batch: 'Batch', batchexecute: 'Batch', batch_execute: 'Batch', parallel: 'Batch', fanout: 'Batch',
   ultimateplanner: 'UltimatePlanner', ultimate_planner: 'UltimatePlanner', taskplanner: 'UltimatePlanner', task_planner: 'UltimatePlanner',
   compute: 'Compute', hardware: 'Compute', computemanager: 'Compute', compute_manager: 'Compute', intelligentcompute: 'Compute', intelligent_compute: 'Compute',
+  // New tools
+  codereview: 'CodeReview', code_review: 'CodeReview', reviewcode: 'CodeReview', review_code: 'CodeReview', lint: 'CodeReview', analyze: 'CodeReview',
+  regex: 'Regex', regexp: 'Regex', regextest: 'Regex', regex_test: 'Regex', pattern: 'Regex',
+  csv: 'CSV', csvtool: 'CSV', csv_tool: 'CSV', parsecsv: 'CSV', parse_csv: 'CSV', dataframe: 'CSV',
+  translate: 'Translate', translation: 'Translate', translator: 'Translate', localize: 'Translate', i18n: 'Translate',
+  color: 'Color', colours: 'Color', palette: 'Color', hexcolor: 'Color', hex_color: 'Color', rgbcolor: 'Color', rgb_color: 'Color', hslcolor: 'Color', hsl_color: 'Color', contrast: 'Color',
 };
 
 class ToolRegistry {

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
+import { AppIcon } from '../brand/AppIcon';
+import { useNotificationStore } from '../../stores/notifications';
 
 interface ToolInfo {
   name: string;
@@ -18,13 +20,13 @@ interface SkillInfo {
 }
 
 const POWER_CATEGORIES = [
-  { id: 'all', label: 'All', color: '#818cf8' },
-  { id: 'core', label: 'Core', color: '#22d3ee' },
-  { id: 'computer', label: 'PC Control', color: '#f59e0b' },
-  { id: 'web', label: 'Web', color: '#38bdf8' },
-  { id: 'create', label: 'Create', color: '#ec4899' },
-  { id: 'data', label: 'Data & APIs', color: '#34d399' },
-  { id: 'selfhelp', label: 'Self-Help', color: '#a78bfa' },
+  { id: 'all', label: 'All' },
+  { id: 'core', label: 'Core' },
+  { id: 'computer', label: 'PC Control' },
+  { id: 'web', label: 'Web' },
+  { id: 'create', label: 'Create' },
+  { id: 'data', label: 'Data & APIs' },
+  { id: 'selfhelp', label: 'Self-Help' },
 ];
 
 const TOOL_META: Record<string, { category: string; icon: string; keywords: string[] }> = {
@@ -97,57 +99,6 @@ const TOOL_META: Record<string, { category: string; icon: string; keywords: stri
   Teach: { category: 'core', icon: '🎓', keywords: ['teach', 'quiz', 'lesson', 'study'] },
 };
 
-const QUICK_ACTIONS: Array<{ label: string; icon: string; prompt: string; accent: string }> = [
-  {
-    label: 'Recover my Wi-Fi password',
-    icon: '📶',
-    prompt: 'I forgot my Wi-Fi password. List the saved Wi-Fi profiles on this PC, then recover the stored password for my current network using the Network tool.',
-    accent: '#a78bfa',
-  },
-  {
-    label: 'Diagnose my internet',
-    icon: '🩺',
-    prompt: 'Run network diagnostics on this PC: show my connection status and gateway, ping the gateway, and test DNS resolution. Summarize what you find and what to fix.',
-    accent: '#38bdf8',
-  },
-  {
-    label: 'Show my PC health',
-    icon: '⚙️',
-    prompt: 'Show me a health snapshot of this PC: CPU, RAM, disk, battery, and top processes. Flag anything that looks wrong.',
-    accent: '#f59e0b',
-  },
-  {
-    label: 'Build a quick app',
-    icon: '⚡',
-    prompt: 'Scaffold a small React app with the App Builder and tell me how to run it.',
-    accent: '#ec4899',
-  },
-  {
-    label: 'Summarize a document',
-    icon: '📄',
-    prompt: 'Pick a document from my workspace, read it, and give me a concise summary with key takeaways.',
-    accent: '#22d3ee',
-  },
-  {
-    label: 'Make a chart',
-    icon: '📊',
-    prompt: 'Generate a chart visualizing something useful from my recent data and open it in a side tab.',
-    accent: '#34d399',
-  },
-  {
-    label: 'Create an automation',
-    icon: '⏰',
-    prompt: 'Show me automation templates and set up one useful recurring workflow for me.',
-    accent: '#fbbf24',
-  },
-  {
-    label: 'Check my security',
-    icon: '🛡️',
-    prompt: 'Run a defensive security check on this machine: scan for exposed secrets in my workspace and check dependency vulnerabilities. Report findings only.',
-    accent: '#ef4444',
-  },
-];
-
 function toolCategory(name: string): string {
   return TOOL_META[name]?.category ?? 'core';
 }
@@ -156,31 +107,11 @@ function toolIcon(name: string): string {
   return TOOL_META[name]?.icon ?? '🛠️';
 }
 
-function badgeClass(category: string): string {
-  switch (category) {
-    case 'core': return 'bg-cyan-400/10 text-cyan-300 border-cyan-400/20';
-    case 'computer': return 'bg-amber-400/10 text-amber-300 border-amber-400/20';
-    case 'web': return 'bg-sky-400/10 text-sky-300 border-sky-400/20';
-    case 'create': return 'bg-pink-400/10 text-pink-300 border-pink-400/20';
-    case 'data': return 'bg-emerald-400/10 text-emerald-300 border-emerald-400/20';
-    case 'selfhelp': return 'bg-violet-400/10 text-violet-300 border-violet-400/20';
-    default: return 'bg-white/[0.05] text-zinc-400 border-white/[0.08]';
-  }
-}
-
-const CATEGORY_LABEL: Record<string, string> = {
-  core: 'Core',
-  computer: 'PC Control',
-  web: 'Web',
-  create: 'Create',
-  data: 'Data & APIs',
-  selfhelp: 'Self-Help',
-};
-
 export function CapabilitiesView() {
   const sendMessage = useChatStore((state) => state.sendMessage);
   const selectSession = useChatStore((state) => state.selectSession);
   const createSession = useChatStore((state) => state.createSession);
+  const addToast = useNotificationStore((s) => s.addToast);
 
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -188,6 +119,11 @@ export function CapabilitiesView() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  // Create tool / skill dialogs
+  const [showCreateTool, setShowCreateTool] = useState(false);
+  const [showCreateSkill, setShowCreateSkill] = useState(false);
+  const [newSkill, setNewSkill] = useState({ name: '', description: '', category: 'general', instructions: '' });
 
   useEffect(() => {
     let cancelled = false;
@@ -237,87 +173,225 @@ export function CapabilitiesView() {
     void sendMessage(prompt);
   };
 
+  const handleCreateSkill = async () => {
+    if (!newSkill.name.trim()) return;
+    try {
+      // Ask the AI to author the skill via chat
+      const prompt = `Create a new skill called "${newSkill.name}" in category "${newSkill.category}". Description: ${newSkill.description}. Instructions: ${newSkill.instructions || 'No extra instructions.'}`;
+      const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+      const session = await createSession(
+        settings.cwd ?? '.',
+        settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+        settings.provider ?? 'openrouter',
+      );
+      selectSession(session.id);
+      window.dispatchEvent(new CustomEvent('infinite:navigate', { detail: 'chats' }));
+      void sendMessage(prompt);
+      setShowCreateSkill(false);
+      setNewSkill({ name: '', description: '', category: 'general', instructions: '' });
+    } catch (e) {
+      addToast({ type: 'error', title: 'Could not create skill', message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const handleToggleSkill = async (skill: SkillInfo) => {
+    try {
+      if (skill.enabled) {
+        await window.api.skillsDisable(skill.id);
+      } else {
+        await window.api.skillsEnable(skill.id);
+      }
+      // Refresh
+      const updated = await window.api.skillsList().catch(() => [] as SkillInfo[]);
+      setSkills(updated);
+    } catch (e) {
+      addToast({ type: 'error', title: 'Could not update skill', message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   return (
-    <div className="h-full min-h-0 overflow-y-auto chat-scrollbar bg-[#080a10]">
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="text-[10px] uppercase tracking-[0.18em] text-cyan-400/70">Power Center</div>
-          <h1 className="mt-2 text-2xl font-semibold text-zinc-100 tracking-[-0.02em]">Everything I can do</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-            Full toolset, reusable skills, and one-tap actions. Ask for anything in chat — recovering your own
-            Wi-Fi password, controlling this PC, browsing the web, generating documents, building apps, or
-            automating workflows. Your PC, your data, your call.
-          </p>
+    <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
+      {/* Header — matches AutomationView */}
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div>
+          <h1 className="text-xl font-semibold text-textMain">Tools &amp; Skills</h1>
+          <p className="text-textMuted text-sm mt-1">Power center — every tool, every skill, every one-tap action. Ask for anything in chat.</p>
         </div>
-
-        {status === 'error' && (
-          <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/[0.05] px-4 py-3 text-sm text-red-300">
-            Could not reach the tool registry. Restart Infinite OS and try again.
-          </div>
-        )}
-
-        {/* Stat cards */}
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Tools installed" value={tools.length} accent="#818cf8" icon="🛠️" />
-          <StatCard label="Skills ready" value={skills.filter((s) => s.enabled).length} accent="#38bdf8" icon="📚" />
-          <StatCard label="Categories" value={POWER_CATEGORIES.length - 1} accent="#22d3ee" icon="🗂️" />
-          <StatCard label="Quick actions" value={QUICK_ACTIONS.length} accent="#34d399" icon="⚡" />
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setShowCreateSkill(true)}
+            className="px-3.5 py-2 bg-white/[0.04] border border-white/[0.08] text-zinc-300 rounded-lg text-xs font-medium hover:bg-white/[0.07] transition-colors"
+          >
+            New skill
+          </button>
+          <button
+            onClick={() => setShowCreateTool(true)}
+            className="btn-premium px-3.5 py-2 text-xs flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            New tool
+          </button>
         </div>
+      </div>
 
-        {/* Quick actions */}
-        <section className="mb-10">
-          <SectionTitle title="Try it now" subtitle="One click sends the request straight to chat" />
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-            {QUICK_ACTIONS.map((action) => (
-              <button
-                key={action.label}
-                onClick={() => void runAction(action.prompt)}
-                className="group relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.025] px-4 py-3.5 text-left transition-all duration-150 hover:bg-white/[0.045]"
-                style={{ boxShadow: 'none' }}
-              >
-                <div
-                  className="absolute inset-x-0 top-0 h-px opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                  style={{ background: `linear-gradient(90deg, transparent, ${action.accent}, transparent)` }}
-                />
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-base">
-                    {action.icon}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-medium text-zinc-200 group-hover:text-white">{action.label}</div>
-                    <div className="mt-0.5 text-[10px] text-zinc-600">Ask in chat →</div>
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
+      {/* Status strip — matches AutomationView */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-6 text-[11px] text-textMuted">
+        <span className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          {tools.length} tools installed
+        </span>
+        <span>{skills.filter((s) => s.enabled).length} skills active</span>
+        <span>{skills.length} total skills</span>
+        <span>{POWER_CATEGORIES.length - 1} categories</span>
+        {status === 'loading' && <span className="text-zinc-500">Loading…</span>}
+      </div>
 
-        {/* Skills */}
-        <section className="mb-10">
-          <SectionTitle title="Skills" subtitle="Reusable procedures that make me faster and safer" />
-          {skills.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] px-4 py-6 text-center text-xs text-zinc-600">
-              No skills installed yet. Ask me to create one — I can teach myself any repeatable workflow.
+      {status === 'error' && (
+        <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/[0.05] px-4 py-3 text-sm text-red-300">
+          Could not reach the tool registry. Restart Infinite OS and try again.
+        </div>
+      )}
+
+      {/* Create skill dialog */}
+      {showCreateSkill && (
+        <div className="bg-bgPanel border border-white/[0.09] rounded-xl p-5 mb-6 shadow-xl animate-scale-in">
+          <h3 className="text-sm font-semibold text-textMain mb-4">New skill</h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="text-xs text-textMuted mb-1.5 block">Name *</label>
+              <input
+                value={newSkill.name}
+                onChange={(e) => setNewSkill((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g. Weekly report"
+                className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder-textMuted focus:outline-none focus:border-white/[0.25]"
+              />
             </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {skills.map((skill) => (
-                <div
-                  key={skill.id}
-                  className="flex flex-col rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3.5"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">📚</span>
-                    <span className="truncate text-xs font-medium text-zinc-200">{skill.name}</span>
-                    <span className="ml-auto flex-shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-zinc-500">
-                      {skill.category || 'general'}
-                    </span>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-zinc-500">{skill.description}</p>
+            <div>
+              <label className="text-xs text-textMuted mb-1.5 block">Category</label>
+              <input
+                value={newSkill.category}
+                onChange={(e) => setNewSkill((p) => ({ ...p, category: e.target.value }))}
+                placeholder="general"
+                className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder-textMuted focus:outline-none focus:border-white/[0.25]"
+              />
+            </div>
+          </div>
+          <div className="mb-4">
+            <label className="text-xs text-textMuted mb-1.5 block">Description</label>
+            <input
+              value={newSkill.description}
+              onChange={(e) => setNewSkill((p) => ({ ...p, description: e.target.value }))}
+              placeholder="What does this skill do?"
+              className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder-textMuted focus:outline-none focus:border-white/[0.25]"
+            />
+          </div>
+          <div className="mb-5">
+            <label className="text-xs text-textMuted mb-1.5 block">Instructions</label>
+            <textarea
+              value={newSkill.instructions}
+              onChange={(e) => setNewSkill((p) => ({ ...p, instructions: e.target.value }))}
+              placeholder="Step-by-step instructions for the skill…"
+              className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder-textMuted h-20 resize-none focus:outline-none focus:border-white/[0.25]"
+            />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowCreateSkill(false)} className="px-4 py-2 text-textMuted hover:text-textMain text-sm rounded-lg transition-colors">Cancel</button>
+            <button
+              onClick={() => void handleCreateSkill()}
+              disabled={!newSkill.name.trim()}
+              className="btn-premium px-5 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Create Skill
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create tool dialog */}
+      {showCreateTool && (
+        <div className="bg-bgPanel border border-white/[0.09] rounded-xl p-5 mb-6 shadow-xl animate-scale-in">
+          <h3 className="text-sm font-semibold text-textMain mb-4">New tool</h3>
+          <p className="text-xs text-textMuted mb-4 leading-relaxed">
+            Tools are code. Describe what you want the tool to do and Infinite AI will build it for you.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowCreateTool(false)} className="px-4 py-2 text-textMuted hover:text-textMain text-sm rounded-lg transition-colors">Cancel</button>
+            <button
+              onClick={() => {
+                setShowCreateTool(false);
+                const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+                createSession(
+                  settings.cwd ?? '.',
+                  settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+                  settings.provider ?? 'openrouter',
+                ).then((session) => {
+                  selectSession(session.id);
+                  window.dispatchEvent(new CustomEvent('infinite:navigate', { detail: 'chats' }));
+                  void sendMessage('Create a new tool for me. Ask me what it should do, what inputs it takes, and what it should return.');
+                });
+              }}
+              className="btn-premium px-5 py-2 text-sm"
+            >
+              Ask Infinite AI
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick actions */}
+      <section className="mb-6">
+        <h2 className="text-sm font-semibold text-textMain mb-3">Try it now</h2>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {QUICK_ACTIONS.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => void runAction(action.prompt)}
+              className="group relative flex items-center gap-3 rounded-xl border border-white/[0.07] bg-bgPanel px-4 py-3.5 text-left hover:border-white/[0.13] transition-colors"
+            >
+              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm">
+                {action.icon}
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-medium text-zinc-200 group-hover:text-white">{action.label}</div>
+                <div className="mt-0.5 text-[10px] text-textMuted">Ask in chat →</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Skills */}
+      <section className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-textMain">Skills</h2>
+          {skills.length > 0 && (
+            <span className="text-[11px] text-textMuted">{skills.length} skills · {skills.filter((s) => s.enabled).length} active</span>
+          )}
+        </div>
+        {skills.length === 0 ? (
+          <div className="text-center py-8 text-textMuted border border-dashed border-white/[0.08] rounded-xl">
+            <AppIcon name="home.memory" className="w-6 h-6 text-zinc-600 mx-auto mb-2" strokeWidth={1.6} />
+            <p className="text-xs">No skills yet. Create your first skill above or ask Infinite AI to teach itself a workflow.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {skills.map((skill) => (
+              <div
+                key={skill.id}
+                className="group bg-bgPanel border border-white/[0.07] rounded-xl px-4 py-3 hover:border-white/[0.13] transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">📚</span>
+                  <span className="truncate text-xs font-medium text-zinc-200">{skill.name}</span>
+                  <span className="ml-auto flex-shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-zinc-500">
+                    {skill.category || 'general'}
+                  </span>
+                  <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-emerald-400' : 'bg-zinc-700'}`} title={skill.enabled ? 'Active' : 'Disabled'} />
+                </div>
+                <p className="mt-2 line-clamp-2 text-[11px] leading-5 text-textMuted">{skill.description}</p>
+                <div className="mt-2.5 flex items-center gap-2">
                   {skill.triggers && skill.triggers.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1 flex-1">
                       {skill.triggers.slice(0, 3).map((trigger) => (
                         <span key={trigger} className="rounded-md bg-cyan-400/[0.06] px-1.5 py-0.5 text-[9px] text-cyan-300/70">
                           {trigger}
@@ -325,145 +399,136 @@ export function CapabilitiesView() {
                       ))}
                     </div>
                   )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Tool browser */}
-        <section className="mb-6">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <SectionTitle title="Tool browser" subtitle={`${tools.length} registered tools · every one callable from chat`} compact />
-            <label className="relative flex h-9 w-full max-w-xs items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 focus-within:border-indigo-500/40">
-              <svg className="h-3.5 w-3.5 flex-shrink-0 text-zinc-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" d="m21 21-4.35-4.35M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
-              </svg>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search tools…"
-                className="min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-700 outline-none"
-              />
-            </label>
-          </div>
-
-          <div className="mb-4 flex flex-wrap gap-1.5">
-            {POWER_CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setCategory(cat.id)}
-                className={`rounded-lg border px-2.5 py-1.5 text-[11px] transition-all duration-150 ${
-                  category === cat.id
-                    ? 'border-white/[0.14] bg-white/[0.07] text-white'
-                    : 'border-white/[0.06] bg-white/[0.015] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]'
-                }`}
-              >
-                {cat.label}
-                {cat.id !== 'all' && (
-                  <span className="ml-1.5 text-[9px] text-zinc-600">{grouped[cat.id] ?? 0}</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          {visibleTools.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] px-4 py-8 text-center text-xs text-zinc-600">
-              No tools match your search. Try a different term or category.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {visibleTools.map((tool) => {
-                const isExpanded = expanded === tool.name;
-                const cat = toolCategory(tool.name);
-                const props = Object.keys(tool.inputSchema?.properties ?? {});
-                return (
-                  <div
-                    key={tool.name}
-                    className={`rounded-xl border transition-colors duration-150 ${
-                      isExpanded ? 'border-cyan-400/25 bg-cyan-400/[0.025]' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.12]'
+                  <button
+                    role="switch"
+                    aria-checked={skill.enabled}
+                    onClick={() => void handleToggleSkill(skill)}
+                    className={`relative ml-auto w-8 h-4 rounded-full border transition-colors duration-150 flex-shrink-0 ${
+                      skill.enabled ? 'bg-emerald-500/70 border-emerald-400/30' : 'bg-white/[0.06] border-white/[0.12]'
                     }`}
                   >
-                    <button
-                      onClick={() => setExpanded(isExpanded ? null : tool.name)}
-                      className="flex w-full items-start gap-3 px-4 py-3.5 text-left"
-                    >
-                      <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm">
-                        {toolIcon(tool.name)}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate font-mono text-xs font-medium text-zinc-100">{tool.name}</span>
-                          <span className={`flex-shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] ${badgeClass(cat)}`}>
-                            {CATEGORY_LABEL[cat] ?? cat}
-                          </span>
-                        </div>
-                        <p className={`mt-1 text-[11px] leading-5 text-zinc-500 ${isExpanded ? '' : 'line-clamp-2'}`}>
-                          {tool.description}
-                        </p>
-                        {isExpanded && (
-                          <div className="mt-3 border-t border-white/[0.06] pt-2.5">
-                            {props.length > 0 ? (
-                              <div className="flex flex-wrap gap-1.5">
-                                {props.map((prop) => (
-                                  <code key={prop} className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[9px] text-cyan-300/80">
-                                    {prop}
-                                  </code>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-[9px] text-zinc-700">No parameters</span>
-                            )}
-                          </div>
-                        )}
+                    <span className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full transition-all duration-150 ${skill.enabled ? 'left-[14px] bg-white' : 'left-[2px] bg-zinc-500'}`} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Tool browser */}
+      <section className="mb-6">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold text-textMain">Tool browser <span className="font-normal text-textMuted">· {tools.length} registered · every one callable from chat</span></h2>
+          <label className="relative flex h-8 w-full max-w-xs items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 focus-within:border-white/[0.2]">
+            <svg className="h-3.5 w-3.5 flex-shrink-0 text-zinc-600" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path strokeLinecap="round" d="m21 21-4.35-4.35M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tools…"
+              className="min-w-0 flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-700 outline-none"
+            />
+          </label>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {POWER_CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setCategory(cat.id)}
+              className={`rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors duration-150 ${
+                category === cat.id
+                  ? 'border-white/[0.14] bg-white/[0.07] text-white'
+                  : 'border-white/[0.06] bg-white/[0.015] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.04]'
+              }`}
+            >
+              {cat.label}
+              {cat.id !== 'all' && (
+                <span className="ml-1.5 text-[9px] text-zinc-600">{grouped[cat.id] ?? 0}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {visibleTools.length === 0 ? (
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.015] px-4 py-8 text-center text-xs text-zinc-600">
+            No tools match your search. Try a different term or category.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {visibleTools.map((tool) => {
+              const isExpanded = expanded === tool.name;
+              const props = Object.keys((tool.inputSchema as Record<string, unknown>)?.properties as Record<string, unknown> ?? {});
+              return (
+                <div
+                  key={tool.name}
+                  className={`rounded-xl border transition-colors duration-150 ${
+                    isExpanded ? 'border-white/[0.14] bg-white/[0.03]' : 'border-white/[0.07] bg-bgPanel hover:border-white/[0.13]'
+                  }`}
+                >
+                  <button
+                    onClick={() => setExpanded(isExpanded ? null : tool.name)}
+                    className="flex w-full items-start gap-3 px-4 py-3.5 text-left"
+                  >
+                    <span className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-sm">
+                      {toolIcon(tool.name)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-mono text-xs font-medium text-zinc-100">{tool.name}</span>
+                        <span className="flex-shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9px] text-zinc-500">
+                          {toolCategory(tool.name)}
+                        </span>
                       </div>
-                      <svg
-                        className={`mt-1 h-3.5 w-3.5 flex-shrink-0 text-zinc-700 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                        fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                      </svg>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                      <p className={`mt-1 text-[11px] leading-5 text-textMuted ${isExpanded ? '' : 'line-clamp-2'}`}>
+                        {tool.description}
+                      </p>
+                      {isExpanded && (
+                        <div className="mt-3 border-t border-white/[0.06] pt-2.5">
+                          {props.length > 0 ? (
+                            <div className="flex flex-wrap gap-1.5">
+                              {props.map((prop) => (
+                                <code key={prop} className="rounded bg-white/[0.05] px-1.5 py-0.5 font-mono text-[9px] text-zinc-400">
+                                  {prop}
+                                </code>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[9px] text-zinc-700">No parameters</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <svg
+                      className={`mt-1 h-3.5 w-3.5 flex-shrink-0 text-zinc-600 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
-        <footer className="pb-6 text-center text-[10px] text-zinc-700">
-          Capabilities are surfaced automatically from the live tool registry — no restart needed.
-        </footer>
-      </div>
+      <footer className="pb-6 text-center text-[10px] text-zinc-700">
+        Capabilities are surfaced automatically from the live tool registry — no restart needed.
+      </footer>
     </div>
   );
 }
 
-function StatCard({ label, value, icon, accent }: { label: string; value: number; icon: string; accent: string }) {
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-4">
-      <div
-        className="pointer-events-none absolute -right-4 -top-4 h-16 w-16 rounded-full opacity-[0.12] blur-2xl"
-        style={{ background: accent }}
-      />
-      <div className="flex items-center justify-between">
-        <span className="text-lg">{icon}</span>
-        <span
-          className="h-1.5 w-1.5 rounded-full"
-          style={{ background: accent, boxShadow: `0 0 8px ${accent}` }}
-        />
-      </div>
-      <div className="mt-3 text-2xl font-semibold tracking-[-0.02em] text-zinc-100">{value}</div>
-      <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">{label}</div>
-    </div>
-  );
-}
-
-function SectionTitle({ title, subtitle, compact }: { title: string; subtitle: string; compact?: boolean }) {
-  return (
-    <div className={compact ? '' : 'mb-4'}>
-      <h2 className="text-sm font-semibold text-zinc-100 tracking-[-0.01em]">{title}</h2>
-      <p className={`text-[11px] text-zinc-600 ${compact ? 'mt-0.5' : 'mt-1'}`}>{subtitle}</p>
-    </div>
-  );
-}
+const QUICK_ACTIONS: Array<{ label: string; icon: string; prompt: string }> = [
+  { label: 'Recover my Wi-Fi password', icon: '📶', prompt: 'I forgot my Wi-Fi password. List the saved Wi-Fi profiles on this PC, then recover the stored password for my current network using the Network tool.' },
+  { label: 'Diagnose my internet', icon: '🩺', prompt: 'Run network diagnostics on this PC: show my connection status and gateway, ping the gateway, and test DNS resolution. Summarize what you find and what to fix.' },
+  { label: 'Show my PC health', icon: '⚙️', prompt: 'Show me a health snapshot of this PC: CPU, RAM, disk, battery, and top processes. Flag anything that looks wrong.' },
+  { label: 'Build a quick app', icon: '⚡', prompt: 'Scaffold a small React app with the App Builder and tell me how to run it.' },
+  { label: 'Summarize a document', icon: '📄', prompt: 'Pick a document from my workspace, read it, and give me a concise summary with key takeaways.' },
+  { label: 'Make a chart', icon: '📊', prompt: 'Generate a chart visualizing something useful from my recent data and open it in a side tab.' },
+  { label: 'Create an automation', icon: '⏰', prompt: 'Show me automation templates and set up one useful recurring workflow for me.' },
+  { label: 'Check my security', icon: '🛡️', prompt: 'Run a defensive security check on this machine: scan for exposed secrets in my workspace and check dependency vulnerabilities. Report findings only.' },
+];

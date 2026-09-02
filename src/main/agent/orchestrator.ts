@@ -362,62 +362,21 @@ export class TaskOrchestrator {
     const bestAgent = this.pickBestAgent(prompt);
 
     if (isBuildTask && (isWebsite || isApp)) {
-      // Genuinely complex: decompose into phases — research and planning can run in parallel
-
-      // Phase 1: Research & Planning (can start immediately)
-      const researchId = uuid();
+      // Two-phase: Build + Audit. Research/code/design/SEO are done by the
+      // single build agent to avoid 5× serial overhead. Only the audit is separate.
+      const buildId = uuid();
       subTasks.push({
-        id: researchId,
-        agentType: 'research',
-        description: 'Research best practices, tech stack, and architecture for the project',
+        id: buildId,
+        agentType: 'code',
+        description: `Build the complete project: implement core code, file structure, UI/styling, responsive layout${isWebsite ? ', and SEO/accessibility' : ''}. Research best practices as needed.`,
         dependencies: [],
         status: 'pending',
       });
-
-      // Phase 2: Core implementation (depends on research)
-      const codeId = uuid();
-      subTasks.push({
-        id: codeId,
-        agentType: 'code',
-        description: 'Implement the core code, file structure, and functionality',
-        dependencies: [researchId],
-        status: 'pending',
-      });
-
-      // Phase 3: Design polish runs after the core implementation. Serialising
-      // workspace edits prevents two agents from overwriting the same files.
-      const designId = uuid();
-      subTasks.push({
-        id: designId,
-        agentType: 'design',
-        description: 'Create UI components, styling, and responsive layout',
-        dependencies: [codeId],
-        status: 'pending',
-      });
-
-      let finalImplementationId = designId;
-
-      // Phase 4: implement website-specific accessibility, metadata and
-      // performance work with an agent that can actually edit the project.
-      if (isWebsite) {
-        const seoId = uuid();
-        subTasks.push({
-          id: seoId,
-          agentType: 'code',
-          description: 'Implement accessibility, metadata, SEO, and performance improvements in the project',
-          dependencies: [designId],
-          status: 'pending',
-        });
-        finalImplementationId = seoId;
-      }
-
-      // The last phase must run the real validation commands, inspect the
-      // completed artifact, and fix clear defects before the task can pass.
       subTasks.push({
         id: uuid(),
         agentType: 'code',
-        description: 'Audit the complete implementation against the original request, run the relevant tests/build/lint, fix failures, and verify the final artifact',
-        dependencies: [finalImplementationId],
+        description: 'Audit the implementation against the original request, run tests/build/lint, fix failures, and verify the final artifact',
+        dependencies: [buildId],
         status: 'pending',
       });
     } else if (bestAgent) {

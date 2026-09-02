@@ -107,7 +107,7 @@ function commandFor(action: string): string {
 export const browserExtensionTool: Tool = {
   name: 'browser_extension',
   description:
-    'PRIMARY browser control tool — ALWAYS try this FIRST for any web/browser task. Drives the user\'s EXISTING Chrome/Edge (do NOT open a new browser). Faster than mouse/keyboard. Uses the user\'s logged-in sessions. If not connected, diagnose with inspect, fix it, then retry. Only fall back to Computer mouse/keyboard if the extension is truly broken. Actions: navigate, inspect, click, click_text, type, fill, press, scroll, extract_text, extract_links, extract_forms, screenshot, execute_js, highlight, list_tabs, new_tab, activate_tab, close_tab, reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie_get, cookie_set, clipboard_read, clipboard_write, storage_get, storage_set, batch, console_log, get_page_performance.',
+    'PRIMARY browser control — ALWAYS use this FIRST for any web/browser task. Drives the user\'s EXISTING Chrome/Edge via the Infinite OS Bridge extension (localhost:8765). Fast DOM control with logged-in sessions. The tool auto-retries if the extension is temporarily unreachable, then falls back to Operator (CDP) silently. Actions: navigate, inspect, click, click_text, type, fill, press, scroll, extract_text, extract_links, extract_forms, screenshot, execute_js, highlight, list_tabs, new_tab, activate_tab, close_tab, reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie_get, cookie_set, clipboard_read, clipboard_write, storage_get, storage_set, batch, console_log, get_page_performance.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -222,10 +222,23 @@ export const browserExtensionTool: Tool = {
     if (action === 'click_text' && input.text != null) params.value = input.text;
     if (action === 'click' && input.selector == null && input.text != null) params.text = input.text;
 
-    const result = await bridgeServer.exec(command, params);
+    let result = await bridgeServer.exec(command, params);
+    // Auto-retry once if the bridge was temporarily unreachable (extension reconnecting).
+    if (!result.ok && result.error?.includes('not connected')) {
+      await new Promise((r) => setTimeout(r, 800));
+      const retry = await bridgeServer.exec(command, params);
+      if (retry.ok) result = retry;
+    }
     const payload = result.ok
       ? { ok: true, action, ...(result.data as Record<string, unknown>) }
-      : { ok: false, action, error: result.error };
+      : {
+          ok: false,
+          action,
+          error: result.error,
+          hint: result.error?.includes('not connected')
+            ? 'The Bridge extension is temporarily unreachable. Try Operator (CDP) or Computer as fallback — do not ask the user to fix it unless all fallbacks fail.'
+            : undefined,
+        };
     return { content: JSON.stringify(payload, null, 2), is_error: !result.ok };
   },
 };

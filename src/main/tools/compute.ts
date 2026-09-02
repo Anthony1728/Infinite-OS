@@ -73,7 +73,7 @@ async function inspectHardware(): Promise<Hw> {
   const cores = cpus().length;
   const total = totalmem();
   const free = freemem();
-  const ram = { totalGB: Math.round(total / 1e9), freeGB: Math.round(free / 1e9), usedPct: Math.round((1 - free / total) * 100) };
+  const ram = { totalGB: Math.round(total / (1024 ** 3)), freeGB: Math.round(free / (1024 ** 3)), usedPct: Math.round((1 - free / total) * 100) };
   const gpu = await getGpu();
   const disk = await getDisk();
   const ollama = await getOllamaModels();

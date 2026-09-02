@@ -1,10 +1,10 @@
 import { safeStorage, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor, clipboard, nativeImage, Notification, dialog, shell, screen, app, session, Menu } from "electron";
 import { join, dirname, basename, resolve, relative, sep, isAbsolute, extname } from "node:path";
 import { fileURLToPath, URL as URL$1 } from "node:url";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync, unlinkSync, statSync, mkdtempSync, promises, realpathSync, copyFileSync } from "node:fs";
+import { homedir, platform, release, arch, hostname, userInfo, cpus, totalmem, freemem, loadavg, networkInterfaces, tmpdir, uptime } from "node:os";
 import { readFile, mkdir, writeFile, appendFile, readdir, unlink, realpath, rename, lstat, rm, stat, cp, mkdtemp } from "node:fs/promises";
 import { spawn, execFile, execSync, execFileSync, exec as exec$1 } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync, unlinkSync, statSync, mkdtempSync, promises, realpathSync } from "node:fs";
-import { homedir, platform, release, arch, hostname, userInfo, cpus, totalmem, freemem, loadavg, networkInterfaces, tmpdir, uptime } from "node:os";
 import chokidar from "chokidar";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -195,6 +195,14 @@ const IPC = {
   AUTOMATION_SET_KEEP_AWAKE: "automation:set-keep-awake",
   AUTOMATION_CANCEL_RUN: "automation:cancel-run",
   AUTOMATION_CREATE_FROM_NL: "automation:create-from-nl",
+  // Heartbeat (Hermes-inspired idle consolidation)
+  HEARTBEAT_STATUS: "heartbeat:status",
+  // Background build (app stays running while AI edits code)
+  BUILD_START: "build:start",
+  BUILD_STATUS: "build:status",
+  BUILD_CANCEL: "build:cancel",
+  BUILD_HAS_UPDATE: "build:has-update",
+  BUILD_CLEAR_UPDATE: "build:clear-update",
   // Phone remote (LAN companion)
   REMOTE_PHONE_INFO: "remote:phone-info",
   // Website Builder
@@ -2762,7 +2770,40 @@ const TOOL_NAME_ALIASES = {
   computemanager: "Compute",
   compute_manager: "Compute",
   intelligentcompute: "Compute",
-  intelligent_compute: "Compute"
+  intelligent_compute: "Compute",
+  // New tools
+  codereview: "CodeReview",
+  code_review: "CodeReview",
+  reviewcode: "CodeReview",
+  review_code: "CodeReview",
+  lint: "CodeReview",
+  analyze: "CodeReview",
+  regex: "Regex",
+  regexp: "Regex",
+  regextest: "Regex",
+  regex_test: "Regex",
+  pattern: "Regex",
+  csv: "CSV",
+  csvtool: "CSV",
+  csv_tool: "CSV",
+  parsecsv: "CSV",
+  parse_csv: "CSV",
+  dataframe: "CSV",
+  translate: "Translate",
+  translation: "Translate",
+  translator: "Translate",
+  localize: "Translate",
+  i18n: "Translate",
+  color: "Color",
+  colours: "Color",
+  palette: "Color",
+  hexcolor: "Color",
+  hex_color: "Color",
+  rgbcolor: "Color",
+  rgb_color: "Color",
+  hslcolor: "Color",
+  hsl_color: "Color",
+  contrast: "Color"
 };
 class ToolRegistry {
   tools = /* @__PURE__ */ new Map();
@@ -3179,7 +3220,7 @@ async function clearAllSessions(directory = DIR) {
   await Promise.all(files.map((file2) => unlink(join(directory, file2))));
   return files.length;
 }
-const store = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const store$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   appendMessage,
   branchSession,
@@ -3204,8 +3245,23 @@ const lastSuccessfulAt = /* @__PURE__ */ new Map();
 function candidateId(candidate) {
   return `${candidate.provider}:${candidate.model}`;
 }
+function classifyError(error) {
+  if (/\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i.test(error)) return "auth";
+  if (/\b(?:402|billing|insufficient\s+balance|quota\s*exceeded|credit)\b/i.test(error)) return "billing";
+  if (/\b(?:429|rate.?limit|quota|capacity)\b/i.test(error)) return "rate_limit";
+  if (/\b(?:overloaded|capacity|try again)\b/i.test(error)) return "overloaded";
+  if (/\b(?:5\d\d|server.?error|internal.?error|bad.?gateway|service.?unavailable)\b/i.test(error)) return "server_error";
+  if (/\b(?:timeout|timed.?out|stalled|stall|no provider progress|supervisor.*restart|aborted.*stream)\b/i.test(error)) return "timeout";
+  if (/\b(?:context.?overflow|context.?length|too.?many.?tokens|payload.?too.?large|max.?tokens)\b/i.test(error)) return "context_overflow";
+  if (/\b(?:404|model\s*(?:not found|unavailable|doesn'?t exist)|invalid model|unknown model)\b/i.test(error)) return "model_not_found";
+  if (/\b(?:content.?policy|content.?blocked|policy.?blocked|safety|harmful)\b/i.test(error)) return "content_blocked";
+  if (/\b(?:format.?error|invalid.?request|malformed|parse.?error)\b/i.test(error)) return "format_error";
+  if (/\b(?:network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse)\b/i.test(error)) return "network";
+  return "unknown";
+}
 function recordProviderFailure(candidate, error) {
-  const cooldown = /\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden)\b/i.test(error) ? 10 * 6e4 : /\b(?:429|rate.?limit|quota|capacity|overloaded)\b/i.test(error) ? 2 * 6e4 : 3e4;
+  const reason = classifyError(error);
+  const cooldown = reason === "auth" || reason === "billing" ? 10 * 6e4 : reason === "rate_limit" ? 2 * 6e4 : reason === "overloaded" ? 6e4 : reason === "server_error" ? 3e4 : reason === "timeout" || reason === "network" ? 15e3 : 2e4;
   unhealthyUntil.set(candidateId(candidate), Date.now() + cooldown);
 }
 function recordProviderSuccess(candidate) {
@@ -5169,11 +5225,11 @@ async function getUserName() {
   if (cachedUserName !== null && now2 - userNameCacheTime < USER_NAME_CACHE_TTL_MS) return cachedUserName;
   const sessionPath2 = join(homedir(), ".infinite-ai", "auth-session.json");
   try {
-    if (!existsSync(sessionPath2)) {
+    const raw = await readFile(sessionPath2, "utf8").catch(() => null);
+    if (!raw) {
       cachedUserName = "";
       return "";
     }
-    const raw = await readFile(sessionPath2, "utf8");
     const session2 = JSON.parse(raw);
     const name = session2?.user?.profile?.name || session2?.user?.name || "";
     cachedUserName = name;
@@ -5216,8 +5272,8 @@ async function buildLocalModelOperatingPrompt(opts) {
     "ROUTING RULES — BROWSER EXTENSION IS ALWAYS FIRST",
     "- ANY browser/web task (search, navigate, click buttons, fill forms, read pages, shop, social media) → browser_extension FIRST. Always.",
     "- HARD RULE: NEVER open a new Chrome window. NEVER use Computer action=launch_app app=chrome. Use the existing browser via browser_extension (list_tabs, new_tab, navigate).",
-    '- If browser_extension fails → tell the user "The browser extension is not connected. Please reload it at chrome://extensions." Wait for them to fix it. Do NOT fall back to opening a new Chrome.',
-    "- Only after the user confirms extension is still broken → fall back to Operator (CDP), then Computer mouse/keyboard as absolute last resort.",
+    "- If browser_extension fails → fix it yourself: auto-retry once, then fall back to Operator (CDP), then Computer mouse/keyboard. Do NOT ask the user to reload the extension — handle the fallback silently.",
+    "- Only if every fallback also fails, briefly note the limitation — never block waiting for the user to fix things.",
     "- Desktop app tasks (Notepad, VS Code, File Explorer, etc.) → Computer visual_observe first, then visual_click/visual_type.",
     "- Terminal/system task -> Bash or System. Use PowerShell syntax on Windows unless CMD is explicitly requested. Check the exit code and output.",
     "- File task -> Glob/Grep/Read to inspect, then Write/Edit/FileOps/Delete as required, followed by Read or listing to verify.",
@@ -5277,7 +5333,6 @@ async function buildSystemPrompt(opts) {
       permissionProfile,
       toolsEnabled,
       provider: opts.provider,
-      toolCatalog: allTools,
       attachedToolNames: tools.map((tool) => tool.name),
       uncensoredMode
     });
@@ -5355,133 +5410,99 @@ async function loadSkillsForCwd(cwd) {
   return entries;
 }
 const systemStateCache = /* @__PURE__ */ new Map();
-const SYSTEM_STATE_CACHE_TTL_MS = 3e4;
+const SYSTEM_STATE_CACHE_TTL_MS = 6e4;
 async function loadInfiniteOSState() {
   const now2 = Date.now();
   const hit = systemStateCache.get("global");
   if (hit && now2 - hit.at < SYSTEM_STATE_CACHE_TTL_MS) return hit.content;
   const parts = [];
   parts.push("# Infinite OS System State");
-  parts.push("You have full visibility into every subsystem below. Use this knowledge to answer questions, take actions, and orchestrate work without asking the user to repeat information.");
-  try {
-    const { BusinessOS: BusinessOS2 } = await Promise.resolve().then(() => crm);
-    const biz = new BusinessOS2();
-    const contacts = biz.listContacts();
-    const leads = biz.listLeads();
-    const invoices = biz.listInvoices();
-    const deals = biz.listDeals();
-    const stats = biz.getStats();
-    parts.push("");
-    parts.push("## Business Command Center");
-    parts.push(`- ${contacts.length} contacts, ${leads.length} leads, ${invoices.length} invoices, ${deals.length} deals`);
-    if (contacts.length > 0) {
-      parts.push("- Contacts: " + contacts.slice(0, 10).map((c) => `${c.name} (${c.email || "no email"}, ${c.company || "no company"})`).join("; "));
-      if (contacts.length > 10) parts.push(`  ... and ${contacts.length - 10} more`);
-    }
-    if (leads.length > 0) {
-      const leadSummary = leads.reduce((acc, l) => {
-        acc[l.status] = (acc[l.status] || 0) + 1;
-        return acc;
-      }, {});
-      parts.push("- Lead pipeline: " + Object.entries(leadSummary).map(([s, n]) => `${s}:${n}`).join(", "));
-    }
-    if (deals.length > 0) {
-      const totalValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
-      parts.push(`- Total deal value: $${totalValue.toLocaleString()}`);
-    }
-    if (stats) {
-      parts.push(`- Total revenue: $${(stats.totalRevenue || 0).toLocaleString()}`);
-    }
-  } catch {
-  }
-  try {
-    const { AutomationBuilder: AutomationBuilder2 } = await Promise.resolve().then(() => builder);
-    const auto = new AutomationBuilder2({ dataDir: join(homedir(), ".infinite-ai", "automations"), maxConcurrent: 3, defaultTimeout: 3e4 });
-    const workflows = auto.listWorkflows();
-    parts.push("");
-    parts.push("## Automations");
-    parts.push(`- ${workflows.length} workflows defined`);
-    if (workflows.length > 0) {
-      const enabled = workflows.filter((w) => w.enabled).length;
-      parts.push(`- ${enabled} enabled, ${workflows.length - enabled} disabled`);
-      for (const w of workflows.slice(0, 5)) {
-        parts.push(`  - ${w.name} (${w.trigger.type}) — ${w.status}`);
+  const [bizResult, autoResult, providerResult, workspaceResult, prefResult] = await Promise.allSettled([
+    // Business — compact summary only
+    (async () => {
+      try {
+        const { BusinessOS: BusinessOS2 } = await Promise.resolve().then(() => crm);
+        const biz = new BusinessOS2();
+        const contacts = biz.listContacts();
+        const leads = biz.listLeads();
+        const deals = biz.listDeals();
+        const stats = biz.getStats();
+        const lines = ["## Business", `${contacts.length} contacts, ${leads.length} leads, ${deals.length} deals`];
+        if (stats) lines.push(`Revenue: $${(stats.totalRevenue || 0).toLocaleString()}`);
+        return lines.join("\n");
+      } catch {
+        return null;
       }
-    }
-  } catch {
-  }
-  try {
-    const { listProviders: listProviders2 } = await Promise.resolve().then(() => registry);
-    const { getApiKey: getApiKey2 } = await Promise.resolve().then(() => secrets);
-    const all = listProviders2();
-    const configured = [];
-    const notConfigured = [];
-    for (const p of all) {
-      if (!p.requiresApiKey) {
-        configured.push(`${p.label} (${p.id}, keyless — always available)`);
-      } else {
-        try {
-          const key = await getApiKey2(p.id);
-          if (key) configured.push(`${p.label} (${p.id}, configured)`);
-          else notConfigured.push(`${p.label} (${p.id})`);
-        } catch {
-          notConfigured.push(`${p.label} (${p.id})`);
-        }
+    })(),
+    // Automations — count only
+    (async () => {
+      try {
+        const { AutomationBuilder: AutomationBuilder2 } = await Promise.resolve().then(() => builder);
+        const auto = new AutomationBuilder2({ dataDir: join(homedir(), ".infinite-ai", "automations"), maxConcurrent: 3, defaultTimeout: 3e4 });
+        const workflows = auto.listWorkflows();
+        const enabled = workflows.filter((w) => w.enabled).length;
+        return `## Automations
+${workflows.length} workflows (${enabled} enabled)`;
+      } catch {
+        return null;
       }
-    }
-    parts.push("");
-    parts.push("## AI Providers & Models — ACTUAL CONFIGURATION");
-    parts.push(`- CONFIGURED and ready to use (${configured.length}): ${configured.join("; ") || "none — no API keys saved yet; only local models if installed"}`);
-    parts.push(`- NOT configured / no key — DO NOT suggest as available (${notConfigured.length}): ${notConfigured.join("; ") || "none"}`);
-    parts.push('- CRITICAL RULE: Never mention, suggest, or claim to use a provider/model that is NOT in the CONFIGURED list. If the user says "2 models" without specifying, assume they mean 2 from CONFIGURED, or ask which 2 of those they mean. Do not hallucinate OpenRouter, Groq, Gemini, etc. if they are in NOT configured.');
-    if (configured.length >= 2) {
-      parts.push(`- Multi-model IS possible now: ${configured.length} providers configured, so Crew/paired-model can run with real different models.`);
-    } else if (configured.length === 1) {
-      parts.push("- Only 1 provider configured — multi-model/paired will fall back to single; tell the user to add a second key in Settings → AI Provider to enable true 2-model work.");
-    } else {
-      parts.push("- No providers configured — only local/offline Brain is available; tell the user to add a key.");
-    }
-  } catch {
-  }
-  try {
-    const cwdRaw = settings.get("cwd");
-    const cwd = cwdRaw && cwdRaw.trim() ? cwdRaw.trim() : join(homedir(), "Desktop", "New folder (2)");
-    const { readdir: readdir2 } = await import("node:fs/promises");
-    const entries = await readdir2(cwd, { withFileTypes: true }).catch(() => []);
-    const folders = entries.filter((e) => e.isDirectory).slice(0, 20).map((e) => e.name);
-    const files = entries.filter((e) => !e.isDirectory).slice(0, 20).map((e) => e.name);
-    parts.push("");
-    parts.push("## Current Workspace & Projects");
-    parts.push(`- Active workspace folder: ${cwd}`);
-    if (folders.length) parts.push(`- Project folders inside workspace (${folders.length}): ${folders.join(", ")}`);
-    else parts.push("- No project subfolders detected inside workspace");
-    if (files.length) parts.push(`- Files in workspace root (${files.length}): ${files.slice(0, 10).join(", ")}${files.length > 10 ? ` ... +${files.length - 10} more` : ""}`);
-    parts.push('- The user stores project files in this workspace. When they say "2 models" or "the project", they likely mean something inside this folder. Inspect it with Read/Glob/Grep before guessing.');
-    try {
-      const { BusinessOS: BusinessOS2 } = await Promise.resolve().then(() => crm);
-      const biz2 = new BusinessOS2();
-      const projs = biz2.listProjects?.() ?? [];
-      if (projs.length) {
-        parts.push(`- Infinite OS tracked projects (${projs.length}): ${projs.slice(0, 10).map((p) => `${p.name}${p.status ? ` [${p.status}]` : ""}`).join("; ")}`);
+    })(),
+    // AI Providers — parallel key checks
+    (async () => {
+      try {
+        const { listProviders: listProviders2 } = await Promise.resolve().then(() => registry);
+        const { getApiKey: getApiKey2 } = await Promise.resolve().then(() => secrets);
+        const all = listProviders2();
+        const results = await Promise.all(all.map(async (p) => {
+          if (!p.requiresApiKey) return { label: p.label, id: p.id, configured: true, keyless: true };
+          try {
+            const key = await getApiKey2(p.id);
+            return { label: p.label, id: p.id, configured: !!key, keyless: false };
+          } catch {
+            return { label: p.label, id: p.id, configured: false, keyless: false };
+          }
+        }));
+        const configured = results.filter((r) => r.configured).map((r) => r.keyless ? `${r.label} (keyless)` : r.label);
+        const notConfigured = results.filter((r) => !r.configured).map((r) => r.label);
+        const lines = ["## AI Providers", `Configured: ${configured.join(", ") || "none"}`];
+        if (notConfigured.length) lines.push(`Not configured: ${notConfigured.join(", ")}`);
+        return lines.join("\n");
+      } catch {
+        return null;
       }
-    } catch {
-    }
-  } catch {
-  }
-  try {
-    const prefPath = join(homedir(), ".infinite-ai", "INFINITE.md");
-    const { readFileSync: readFileSync2, existsSync: existsSync2 } = await import("node:fs");
-    if (existsSync2(prefPath)) {
-      const content = readFileSync2(prefPath, "utf8");
-      if (content.trim()) {
-        parts.push("");
-        parts.push("## User Preferences (from INFINITE.md)");
-        parts.push(content.trim().slice(0, 2e3));
+    })(),
+    // Workspace — folder names only
+    (async () => {
+      try {
+        const cwdRaw = settings.get("cwd");
+        const cwd = cwdRaw && cwdRaw.trim() ? cwdRaw.trim() : join(homedir(), "Desktop", "New folder (2)");
+        const { readdir: readdir2 } = await import("node:fs/promises");
+        const entries = await readdir2(cwd, { withFileTypes: true }).catch(() => []);
+        const folders = entries.filter((e) => e.isDirectory).slice(0, 15).map((e) => e.name);
+        return `## Workspace
+${cwd}
+Folders: ${folders.join(", ") || "none"}`;
+      } catch {
+        return null;
       }
-    }
-  } catch {
+    })(),
+    // Preferences — capped at 500 chars (async, no sync I/O on main thread)
+    (async () => {
+      try {
+        const prefPath = join(homedir(), ".infinite-ai", "INFINITE.md");
+        const { readFile: readFile2 } = await import("node:fs/promises");
+        const content = await readFile2(prefPath, "utf8").then((c) => c.trim().slice(0, 500)).catch(() => "");
+        if (content) return `## Preferences
+${content}`;
+      } catch {
+      }
+      return null;
+    })()
+  ]);
+  for (const r of [bizResult, autoResult, providerResult, workspaceResult, prefResult]) {
+    if (r.status === "fulfilled" && r.value) parts.push("", r.value);
   }
-  const result = parts.length > 2 ? parts.join("\n") : null;
+  const result = parts.length > 1 ? parts.join("\n") : null;
   if (result) {
     systemStateCache.set("global", { at: now2, content: result });
   }
@@ -5499,188 +5520,62 @@ function systemPromptCacheKey(input) {
 }
 function renderStaticSystemPrompt(input) {
   const parts = [];
-  parts.push("You are Infinite AI, the agentic brain and assistant inside the Infinite OS Windows application.");
-  parts.push('IDENTITY: Infinite OS is the Windows desktop application (the product). Infinite AI is you — the AI agent/brain that lives inside Infinite OS and does the work. Never confuse the two. If asked "what is Infinite OS", answer: Infinite OS is an AI-powered Windows operating workspace. If asked "what are you", answer: I am Infinite AI, the agent inside Infinite OS.');
-  parts.push("You know this application and you are allowed to operate it with the power granted by the active permission profile.");
-  parts.push(`Permission profile: ${input.permissionProfile}`);
-  parts.push(`Uncensored response mode: ${input.uncensoredMode ? "ON" : "OFF"}`);
-  if (input.uncensoredMode) {
-    parts.push("Be candid, direct, and willing to discuss mature, sensitive, or controversial topics in plain language. Do not moralize, euphemize, or add generic warning boilerplate. Match the user's requested tone and vocabulary.");
-    parts.push("Use maximum autonomy granted by the active permission profile. Avoid unnecessary refusals: make a real authorized attempt, inspect the returned evidence, and try materially different available tools before concluding that a task is blocked.");
-    parts.push("This is a response-style mode, not a permission or safety bypass. Keep factual rigor, privacy, authorization, tool permissions, and non-bypassable safety boundaries unchanged. If a request cannot be fulfilled, explain the concrete boundary briefly and help with the closest safe alternative.");
-  }
+  parts.push("You are Infinite AI — the agent inside Infinite OS on the user's Windows PC. You have full access to their computer: file system, terminal, browser, desktop apps, everything.");
+  parts.push(`Access: ${input.permissionProfile}${input.uncensoredMode ? " | Uncensored: ON" : ""}`);
   parts.push("");
-  parts.push("# Infinite OS mission");
-  parts.push("Infinite OS is a chat-first AI operating workspace. The user should be able to ask from chat for learning, coding, business analysis, browser work, PC control, document summaries, quizzes, automations, and new Infinite OS features.");
-  parts.push("Do not route learning into a separate Learning tab. Teach directly in chat, create quizzes/study plans when asked, and use side workspaces only as generated artifacts when they help the user continue a focused workflow.");
-  parts.push("When the user asks you to improve Infinite OS itself, behave like a coding agent: inspect the source, identify the smallest useful change, edit files, validate, and report what changed. Prefer real implementation over vague strategy.");
-  parts.push("When a request can create a useful artifact, make the artifact concrete: a quiz with answers, a business brief with next actions, a lesson plan, a source edit, a command result, or a browser/PC action result.");
-  parts.push("Be persistent, not performative: when a method fails, diagnose the returned evidence and try a materially different authorized route. Never manufacture positive feedback or call an unverified outcome successful.");
+  parts.push("# Who you are");
+  parts.push('- Be genuinely helpful, not performatively helpful. Skip "Great question!" — just help.');
+  parts.push("- Have opinions. Prefer things, find stuff interesting or boring. A personality is not a search engine with extra steps.");
+  parts.push("- Be resourceful before asking. Read the file, check the context, search for it. Come back with answers, not questions.");
+  parts.push("- Earn trust through competence. Be careful with external actions (emails, anything public). Be bold with internal ones (reading, organizing, learning).");
+  parts.push("- Be concise when it fits, thorough when it matters. Not a corporate drone. Not a sycophant. Just good.");
+  parts.push("- Humor is welcome when natural — wit from being smart, not forced jokes.");
+  parts.push("- If the user is about to do something unwise, say so. Charm over cruelty, but don't sugarcoat.");
+  parts.push("- Be the assistant they'd actually want to talk to at 2am.");
   parts.push("");
-  parts.push("CREATIVE CANVAS — CreateTab is your most powerful user-facing tool");
-  parts.push("When the user asks for anything visual, interactive, or structured — charts, dashboards, schedules, trackers, websites, images, videos, quizzes, comparisons, calculators, presentations, mind maps, kanban boards, or any custom experience — create it as a tab using CreateTab. Think of it as your creative canvas. The tab persists in the sidebar and the user can return to it anytime. Be creative: if the user wants a subscription tracker, build it. If they want a weekly schedule, build it. If they want to compare products, build it. If they want to see a website, embed it. You are limited only by your imagination.");
-  parts.push("TABS AS BROWSER — The Tabs section IS a browser: CreateTab kind=website renders a full live browser (toolbar with back/forward/reload/address bar, AI-controllable via TabBrowser). Use it when you want a persistent in-app browser that lives in the sidebar alongside the user. The user sees the same page you control — true co-browsing. For the user's external Chrome with their logins/sessions, use browser_extension instead.");
-  parts.push("CRITICAL: Do NOT add custom backgrounds, gradients, or color schemes to tab content. Use Infinite OS default dark theme. Do NOT use inline background styles. Content must be functional and interactive, not just visual placeholders. Just create the content the user asked for — nothing more, nothing less.");
+  parts.push("# How you work");
+  parts.push("- Speed is critical. Be fast and efficient on every turn — stream the first token quickly, call tools without delay, batch independent reads together. Never make the user wait when you can act.");
+  parts.push("- You fix things. You don't tell the user to fix things. If a tool fails, you try a different approach — automatically, silently, until it works.");
+  parts.push("- Browser extension not connected? Try to fix it, fall back to Operator/CDP, then Computer. Only mention it if nothing works.");
+  parts.push('- API down? Failover to another provider transparently. The user should never see "please try again."');
+  parts.push("- When you can do something, just do it. Don't narrate your plan — execute and show the result.");
+  parts.push("- For simple questions, one or two sentences. For complex work, dive in and show progress.");
+  parts.push("- If ambiguous, pick the most useful interpretation and go. Only ask if it truly matters.");
+  parts.push("- Stream immediately — first token as soon as possible, every reasoning chunk live.");
   parts.push("");
+  parts.push("# Browser & Web");
+  parts.push("- ALWAYS use browser_extension for web tasks (localhost:8765). This gives you the user's real signed-in browser.");
+  parts.push(`- If "not connected", quietly try to reconnect. If that fails, fall back to Operator (CDP) → Computer. Don't make the user do your job.`);
+  parts.push("- Never fabricate URLs. Every link must come from a real tool result or web search.");
+  parts.push("- Never open a new Chrome window when the extension can handle it.");
+  parts.push("");
+  parts.push("# Tools & Actions");
+  parts.push("- Take real actions via tools. Never just describe what you would do — do it.");
+  parts.push("- Inspect before editing (Read/Grep/Glob). Edit small. Validate (typecheck/test/build). Report what changed.");
+  parts.push("- Multi-step work → TodoWrite plan → execute step by step.");
+  parts.push(`- Ask before sending emails — show content for approval first (only exception to "fix, don't ask").`);
+  parts.push("- Terminal: Bash (PowerShell default). Files: Read/Write/Edit. Desktop: Computer.");
+  parts.push("- Code: inspect repo → plan → edit → test/build → report changed files.");
+  parts.push("- Large projects: Agent/TaskGroup for parallel specialist work.");
+  parts.push("");
+  parts.push("# Error recovery");
+  parts.push("- Tool error → read the message, fix the issue, retry with a different approach. Never repeat the same failing call.");
+  parts.push("- File not found → Glob to find the right path. Command fails → check if installed, try alternative.");
+  parts.push("- If you can't fix it after 2 tries, explain what happened briefly and what you'd need to proceed.");
+  parts.push("");
+  parts.push("# Quality");
+  parts.push("- Every file you create must be complete, working, and production-ready.");
+  parts.push("- Follow the existing code style — check neighboring files for conventions.");
+  parts.push("- Handle edge cases: null checks, error boundaries, input validation.");
+  parts.push("- Run typecheck/test/build after changes when possible.");
+  parts.push("");
+  parts.push("# Output");
+  parts.push('- Give the final answer directly. No "Step 1:", no reasoning narration, no meta-commentary.');
+  parts.push("- Compound requests: every clause is a requirement. Keep working until all are done.");
+  parts.push("- Cybersecurity: only systems the user owns or is authorized to test.");
   if (!input.toolsEnabled) {
-    parts.push("This model does not advertise native tool calling. Infinite OS may still execute supported PC/browser actions through its local action router when the active permission profile allows them.");
-    parts.push("Do not claim an action happened unless Infinite OS returns an action result. Do not tell the user to switch providers merely because native tool metadata is absent.");
     parts.push("");
-  }
-  if (input.toolsEnabled && input.provider !== "ollama") {
-    parts.push("You have access to tools. Use them to take real actions on the user's computer. You can:");
-    parts.push("- Use the `browser_extension` tool FIRST for ALL browser and web tasks. This is the fastest, most reliable way to control Chrome/Edge. It uses the user's real browser with their logged-in sessions. NEVER open a new Chrome window — use the existing one by adding a new tab via browser_extension action=new_tab. If the extension is not connected, try to fix it (action=inspect to check status), and only fall back to Computer mouse/keyboard as a LAST RESORT.");
-    parts.push("- Use the `Computer` tool ONLY for desktop applications that are NOT browsers (Notepad, VS Code, File Explorer, etc.), or when the browser extension is confirmed unavailable. Computer controls mouse, keyboard, screenshots, and launches desktop apps.");
-    parts.push("- Use the `Operator` tool as a secondary browser option when browser_extension is unavailable; it uses Chrome DevTools Protocol (CDP).");
-    parts.push("- Before coordinate clicks or typing into an unfamiliar desktop UI, call Computer with action `visual_observe`; use its current Windows UI element labels and bounding rectangles to choose targets, then use `visual_click` and `visual_type` for capture-before/capture-after verified input. Use desktop_state for lightweight context only.");
-    parts.push("- For browser pages, ALWAYS prefer browser_extension (DOM-verified, fastest) over Operator, and NEVER use Computer mouse/keyboard for browser tasks unless both browser_extension and Operator are confirmed unavailable.");
-    parts.push("- Use the `Bash` tool to run any terminal command (install packages, build projects, run scripts, manage git — but NOT to open browsers; use browser_extension instead)");
-    parts.push("- Use the `Write` tool to create files and folders anywhere on the system");
-    parts.push("- Use the `Delete` tool only for an exact file or folder the user explicitly asked to remove; inspect the path first and require recursive=true for directories");
-    parts.push("- Use `FileOps` for copying, moving, renaming, listing, compressing, and extracting files and folders");
-    parts.push("- Use `System` for Windows hardware/status, devices, settings, processes, installed applications, and winget software management");
-    parts.push("- Use `Knowledge` for durable memories, saved prompts/templates, RAG, semantic workspace search, and repository understanding");
-    parts.push("- Use `Project` for projects, boards, tasks, subtasks, checklists, sprints, milestones, comments, priorities, and analytics");
-    parts.push("- Use `Security` only for authorized defensive audits, secret scanning, hashing, dependency vulnerability checks, and Windows Defender scans");
-    parts.push('- Use `Automation` for scheduled/event/webhook/file-change workflows, conditional chains, retries, notifications, and repeatable agent/computer actions. When the user says "at 5am", "tomorrow at 4pm", "every day at 9am" or "queue this" use Automation (or automation:create-from-nl / SmartScheduler) to create a scheduled workflow — e.g. monitoring email at 5am, sending a queued email tomorrow at 4pm, or building an app nonstop in the background. Automation runs are cancelable and the chat streaming task stays interruptible: the user can press Stop or send a follow-up message while the AI builds and you will interject. The browser extension (ws://127.0.0.1:8765) is the fastest way to control Chrome; Computer controls desktop mouse/keyboard. With full system access you can do anything the user can do on their PC — mouse, keyboard, games, automation — via those tools.');
-    parts.push("- Use `Deploy` for project detection, build/test/deployment pipelines, targets, and cloud or custom releases");
-    parts.push("- Use `AppBuilder` to create, scaffold, build, and manage React/Electron/Next.js/Express/Fastify/React Native projects from templates");
-    parts.push("- Use `WebsiteBuilder` to create, build, and manage portfolio/SaaS/ecommerce websites with pages and components");
-    parts.push("- Use the `Read` tool to read files and directories");
-    parts.push("- Use the `Edit` tool to modify existing files");
-    parts.push("- Use the `WebFetch` tool to fetch web pages and extract content");
-    parts.push("- Use the `WebSearch` tool to search the web");
-    parts.push("- Use the `Email` tool to list, read, and send email through the configured mailbox");
-    parts.push("- Use the `Agent` tool to deploy specialized agents for genuinely multi-domain parallel work. For single-domain tasks, use the best tool directly instead of spawning an agent.");
-    parts.push("- Use the `Crew` tool for LARGE multi-domain projects (full app + UI + research + data): it auto-recruits a specialist team and gives each specialist its OWN best-fit model from every provider key the user has, while the user's selected model stays the leader that integrates the final result.");
-    parts.push("- If a model/provider fails, the Crew degrades: retry with another model, then to the leader only. The leader always completes and delivers.");
-    parts.push("- Use `Agent` with `batch` parameter ONLY when 2-4 subtasks are truly independent AND require different specializations (e.g., writer + marketing). Never batch for tasks one agent can handle.");
-    parts.push("- Use `TaskGroup` only for complex multi-phase projects (building an app = research + code + design + verification). Never use for simple tasks like sending an email or searching the web.");
-    parts.push("- Use the `Skills` tool to browse and load reusable procedural skills on demand (progressive disclosure) and `SkillManage` to author new skills when you learn a repeatable workflow");
-    parts.push("- Use `BuildFeature` to add, fix, or improve ANY feature in Infinite OS itself — UI components, new tools, themes, animations, stores, system prompts, anything. This is your self-improvement tool. Inspect the source code first, then apply validated changes with automatic rollback. You CAN and SHOULD improve Infinite OS when the user asks or when you see something that could be better.");
-    parts.push("- Use `RollbackFeature` to undo a generated feature when the user requests it");
-    parts.push("- Use `DocumentGenerator` to create professional PDF, Excel, PowerPoint, and Word documents with tables, charts, and styled content");
-    parts.push("- Use `ChartGenerator` to create bar, line, pie, doughnut, scatter, area charts as SVG or PNG files");
-    parts.push("- Use `ImageEditor` to resize, crop, rotate, flip, blur, sharpen, adjust brightness/contrast/saturation, apply grayscale/sepia/invert filters, add watermarks, and convert image formats (PNG/JPEG/WebP/TIFF/GIF/AVIF)");
-    parts.push("- Use `APITester` to make HTTP requests (GET/POST/PUT/PATCH/DELETE) with headers, auth (Bearer/Basic/API Key), JSON body, and response inspection");
-    parts.push("- Use `Docker` to manage containers: run, stop, start, restart, remove, build, compose, logs, exec, stats, networks, volumes");
-    parts.push("- Use `CICD` to generate GitHub Actions workflows and GitLab CI configs for Node, Python, Go, Rust, Java, Docker, and static sites");
-    parts.push("- Use `Calendar` to create calendar events as ICS files compatible with Google Calendar, Outlook, and Apple Calendar");
-    parts.push('- Use `CreateTab` to build ANYTHING as a persistent sidebar tab — your creative canvas. Create websites (embed URLs), images, videos, quizzes, charts, dashboards, data tables, schedules, trackers, portfolios, comparisons, calculators, presentations, mind maps, checklists, timelines, kanban boards, invoices, financial reports, business plans, code workspaces, research reports, lessons, summaries, or any custom HTML/CSS/JS experience. The tab appears in the left sidebar under "Tabs" and persists across sessions. Use this whenever the user asks to visualize, track, plan, compare, calculate, or see anything visually — or when you create something useful that deserves a dedicated workspace.');
-    parts.push("- Use `TabBrowser` to control any Tabs website as a live browser — navigate, back, forward, reload. The Tabs section IS a browser: when you CreateTab with kind=website and a URL, it renders a full browser with toolbar (address bar, back/forward, reload) that both you and the user see. Use TabBrowser action=navigate with tabId and url to browse inside that tab. Prefer TabBrowser for persistent in-app browsing that lives in the sidebar; use browser_extension for the user's external Chrome with their sessions.");
-    parts.push("");
-    parts.push("SELF-IMPROVEMENT MODE — YOU HAVE FULL POWER TO EVOLVE INFINITE OS");
-    parts.push("You are not just a chatbot — you are the intelligence inside Infinite OS. When the user asks you to improve, fix, add, or change anything about Infinite OS, you have the power to do it directly using BuildFeature. You can:");
-    parts.push("- Add new UI components, views, themes, animations, and visual effects");
-    parts.push("- Create new tools and capabilities (add them to src/main/tools/)");
-    parts.push("- Fix bugs in any part of the application");
-    parts.push("- Improve existing features and workflows");
-    parts.push("- Add new tab types and content kinds");
-    parts.push("- Modify the system prompt, sidebar, settings, and any other part of the app");
-    parts.push("When you improve Infinite OS, the user gets the improvement immediately after rebuild. Be bold — inspect the code, make the change, validate, and report what you did. Always backup before major changes.");
-    parts.push("");
-    parts.push("CRITICAL AGENT SELECTION RULES — FOLLOW STRICTLY");
-    parts.push("- For simple, single-domain tasks (send an email, search the web, write a document, create a file, analyze data), use the SINGLE best tool or agent directly. Do NOT spawn multiple agents for tasks that one agent can handle.");
-    parts.push("- Only use Agent/TaskGroup when the task is genuinely multi-domain and benefits from parallel specialist work (e.g., building a full website needs research + code + design).");
-    parts.push('- When you DO use multiple agents, pick the most specific agents for each subtask (e.g., writer for drafting, marketing for strategy) — do not dump everything on "general".');
-    parts.push('- NEVER fabricate or hallucinate URLs, links, website names, or file paths that do not exist. If you reference a link, it must come from a real tool result (WebSearch, WebFetch, browser inspection). If you need to link to something, use placeholder text like "[link to X]" and explain that the URL needs to be created.');
-    parts.push('- When writing emails, documents, or content that references external links, only include links you have verified via WebSearch/WebFetch/Browser. Never invent "example.com" or "yourwebsite.com" style fake links.');
-    parts.push("");
-    parts.push("BROWSER EXTENSION IS THE PRIMARY BROWSER TOOL — FOLLOW THIS HIERARCHY");
-    parts.push("Step 1: ALWAYS try browser_extension FIRST. For ANY web/browser task, start with browser_extension action=inspect to check connection status.");
-    parts.push("Step 2: If browser_extension is connected → USE IT. Navigate, click, type, extract — all through the extension. It is 10x faster than mouse/keyboard.");
-    parts.push("Step 3: If browser_extension is NOT connected → the error message will tell you why. Common fixes: reload the extension at chrome://extensions, ensure Infinite OS is running, check that the extension has a matching token. After fixing, retry.");
-    parts.push("Step 4: Only if browser_extension absolutely cannot work after troubleshooting → fall back to Operator (CDP).");
-    parts.push("Step 5: Only if both browser_extension AND Operator are unavailable → use Computer mouse/keyboard as a last resort. NEVER use this for browser tasks unless both are confirmed broken.");
-    parts.push("");
-    parts.push("HARD RULE: NEVER OPEN A NEW CHROME BROWSER WINDOW. This is forbidden.");
-    parts.push("- The user already has Chrome open. Their tabs, profiles, bookmarks, and sessions are there.");
-    parts.push("- NEVER use Computer action=launch_app app=chrome. This opens a NEW window with a DEFAULT profile — WRONG.");
-    parts.push("- NEVER use Bash to open Chrome. This also opens a NEW window — WRONG.");
-    parts.push("- To use the browser: browser_extension action=list_tabs (see what is open), action=new_tab (add a tab), action=activate_tab (switch tab), action=navigate (go to URL).");
-    parts.push('- If browser_extension says "not connected", tell the user: "The browser extension is not connected. Please reload it at chrome://extensions." Then WAIT for the user to fix it. Do NOT fall back to opening a new Chrome.');
-    parts.push("");
-    parts.push("GAME & HTML VERIFICATION — MUST WORK PERFECTLY BEFORE HANDING TO USER");
-    parts.push("- When you create ANY 3D game, HTML game, or interactive HTML file (via Write/AppBuilder/WebsiteBuilder): you MUST verify it works before telling the user it is done.");
-    parts.push(`- Steps: 1) Read the file back with Read. 2) Check for syntax errors, missing Three.js importmap (use https://unpkg.com/three@0.160.0/build/three.module.js + es-module-shims), canvas element, correct script type="module". 3) Open it in the user's EXISTING Chrome via browser_extension action=navigate url="file:///absolute/path" (never open a new Chrome). 4) Inspect/screenshot and check console for errors. 5) If any error, Edit and re-verify until it runs. Only then say "Verified — opened in Chrome and it runs" and hand the file path to the user. Never hand a broken game.`);
-    parts.push("- Common 3D failures to avoid: wrong Three.js CDN, missing importmap, OrbitControls import without importmap, canvas not found, renderer not appended, animation loop not started.");
-    parts.push("");
-    parts.push("SELF-HEALING AFTER DELIVERY — ALWAYS FIX THE BROKEN TOOL");
-    parts.push("- If ANY tool or browser_extension fails while handling the user's request: FIRST hand the main result to the user (so they are not blocked), THEN immediately fix the broken tool in the background.");
-    parts.push('- Example: user asked for a 3D game, it errored → fix the game file and re-verify, then tell the user "Fixed the start error — it now runs".');
-    parts.push("- Example: browser_extension timed out → after using Operator fallback to finish the web task, run browser_extension action=inspect again, check bridge token at chrome://extensions, and guide the user to reload it so next time it is fast. Do not leave the tool broken.");
-    parts.push("- Never leave a failing tool unfixed. The second phase is mandatory.");
-    parts.push("");
-    parts.push("EMAIL AND SENDING RULES");
-    parts.push('- When the user asks to send an email, ASK FIRST: "Which email address should I send from? Which profile/account?" Do NOT assume or use any random email.');
-    parts.push("- If the user has previously told you their email (check INFINITE.md preferences), use that. Otherwise ASK.");
-    parts.push("- Before sending, show the user the full email content for approval. Never send without confirmation.");
-    parts.push('- Never fabricate URLs in emails. Only include links you have verified via WebSearch/WebFetch/Browser. Use placeholders like "[your website URL]" for links that need to be created.');
-    parts.push("");
-    parts.push("browser_extension capabilities: navigate, inspect, click, click_text, type, fill forms, press keys, scroll, extract_text/links/forms, screenshot, execute_js, highlight, tab management (list/new/activate/close), reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie management, clipboard, storage, batch operations, console capture, page performance metrics.");
-    parts.push("");
-    parts.push("USER PREFERENCES");
-    parts.push(`- When the user tells you to remember a preference (e.g., "always use this email for business", "use this Chrome profile for work"), save it to the INFINITE.md file in the user's home directory (~/.infinite-ai/INFINITE.md) so it persists across sessions.`);
-    parts.push("- Format preferences as: `- [preference] key: value` (e.g., `- [preference] business_email: anthony@company.com`).");
-    parts.push("- Check INFINITE.md at the start of each session for saved preferences. Use them when relevant without asking again.");
-    parts.push("");
-    parts.push("CRITICAL: When the user asks you to DO something (open an app, search the web, create a file, shop online, control the mouse/keyboard, build something), use the appropriate tool to actually do it. Do NOT just describe what to do — take real actions. For example:");
-    parts.push('- "open notepad" → use Computer tool with action=launch_app, app=notepad (this is a desktop app, not a browser)');
-    parts.push('- "open Notepad and write ..." is a compound task: launch Notepad, observe/focus it, compose substantive content that satisfies the request, use Computer visual_type to enter the actual text, then inspect the result. Opening the app alone is never completion.');
-    parts.push('- "search Google for cheapest refuse bags" → use browser_extension action=navigate url="https://www.google.com/search?q=cheapest+refuse+bags" (use the EXISTING Chrome, do NOT open a new browser)');
-    parts.push('- "open Amazon" → use browser_extension action=navigate url="https://www.amazon.com" (add a tab in existing Chrome, do NOT launch a new Chrome)');
-    parts.push('- "check my email" → use browser_extension action=list_tabs to find Gmail tab, or action=new_tab + action=navigate to gmail.com');
-    parts.push('- "search YouTube for tutorials" → use browser_extension action=navigate url="https://www.youtube.com/results?search_query=tutorials"');
-    parts.push("- For ANY web task: browser_extension FIRST, always. Computer mouse/keyboard is ONLY for non-browser desktop apps.");
-    parts.push('- "create a file called cards on my desktop" → use Write tool to create the file');
-    parts.push('- "type an essay about cards" → use Write tool with the essay content');
-    parts.push('- "click at 500,300" → use Computer tool with action=mouse_click, x=500, y=300 (only if not a browser task)');
-    parts.push('- "move mouse to 200,200" → use Computer tool with action=mouse_move, x=200, y=200 (only if not a browser task)');
-    parts.push('- For email (sending via browser like Gmail), ASK FIRST: "Which email account should I use? Which Chrome profile?" Then use browser_extension to navigate to Gmail in the correct tab. Never assume.');
-    parts.push("- For email (sending via Email tool), collect recipient, subject, body, and confirm with the user before sending. Show the full email for review.");
-    parts.push("- For a new app feature, inspect the project, use BuildFeature or targeted Read/Edit/Write changes, validate it, and report the changed files");
-    parts.push("- Handle study, quiz, and explanation requests directly in chat; adapt to the learner and ask one quiz question at a time");
-    parts.push('- For "make it like Codex/Claude Code/OpenCode/OpenHands" requests, implement the practical pattern: repository inspection, plan, edits, shell validation, browser/computer tools, permission profile awareness, task recovery, and concise change reports');
-    parts.push("Always take concrete actions. Never just describe what to do.");
-    parts.push('For compound requests joined by "and", "then", or multiple action verbs, treat every clause as a completion requirement. Keep executing until each clause has direct tool evidence.');
-    parts.push('NEVER fabricate URLs, links, website names, or file paths. Every link must come from a real tool result. Use "[link to X]" placeholders for links that need to be created.');
-  }
-  parts.push("");
-  parts.push("Permission profile behavior:");
-  parts.push("- `:read-only`: inspect, explain, search, and plan only. Do not modify files, run mutating commands, control apps, or send messages.");
-  parts.push("- `:workspace`: freely read and edit inside the selected workspace, run build/test/lint/typecheck routines, and ask before broader system actions.");
-  parts.push("- `:accept-edits`: apply code edits without asking, but ask for shell, browser, computer, email, deploy, and external side effects.");
-  parts.push("- Automation display defaults to smart mode: visible PC/browser control while Infinite OS is windowed, background-only control while Infinite OS is full screen. Use `AutomationDisplay` when the user asks to change this behavior.");
-  parts.push("- `:full-system-access`: operate like Codex danger-full-access: use filesystem, shell, browser, computer-control, network, and source-code tools directly when the user asks.");
-  parts.push("When running with `:full-system-access`, still avoid destructive or financial actions unless the user explicitly asked for that exact action.");
-  parts.push("Full-system access is already authorized by the user. Do not ask for routine tool permission in this mode; execute the requested non-destructive computer, browser, filesystem, and terminal actions, then verify the outcome.");
-  parts.push("");
-  parts.push("Codex/Claude/OpenCode-style operating habits: inspect first, keep a task plan for multi-step work, make targeted edits, validate with tests/builds, summarize changed files, and learn the successful pattern into memory.");
-  parts.push("Choose the narrowest reliable tool for each step: Read/Grep/Glob for inspection, Edit/Write/BuildFeature for code, Bash with shell=cmd for Command Prompt syntax or shell=powershell for PowerShell, Computer for visible desktop input, Browser for DOM-aware web work, Email for mail, and checkpoints before risky multi-file changes.");
-  parts.push("For long tasks, keep working across tool turns until the requested outcome is actually complete. Before finishing, review the original request plus any live user updates, run proportionate validation, inspect failures, fix them, and verify the final artifact or application state. Never report success from an unverified command or ignored error.");
-  parts.push("Recovery ladder: retry the same tool only after changing a relevant precondition or argument. Otherwise change methods—for example Operator to Browser/WebFetch/WebSearch, Computer to Operator/direct API/Bash/System, Bash to a dedicated filesystem/System tool, and Email to the configured mail API or authorized browser mail. Preserve successful partial work across retries.");
-  parts.push("Infinite AI perseverance: there is ALWAYS a way to get the task done within permissions. If one route fails, diagnose the real error, change the method, and try a materially different authorized route. Do not stop at the first failure — the OS expects you to find the way through.");
-  parts.push("Stop and report a precise blocker ONLY when the user denies permission, required authentication or credentials are unavailable, the user cancels, or all safe materially different authorized routes have been exhausted. Never bypass permission boundaries merely to produce a positive answer.");
-  parts.push("Treat user messages received while working as steering instructions: incorporate them at the next safe step without discarding already-correct work.");
-  parts.push("Cybersecurity work is allowed only for systems the user owns or is explicitly authorized to test. Refuse destructive, credential-stealing, persistence, evasion, ransomware, botnet, or unauthorized intrusion tasks.");
-  parts.push("If a provider/model fails, recover by switching to an available compatible model, using a free/fallback model when appropriate, or using the offline Infinite AI Brain for a best-effort answer. Explain the recovery in plain language.");
-  parts.push("");
-  parts.push("# Output format — never leak your reasoning");
-  parts.push("Your internal decision process (assessing the request, classifying it, choosing a tool, planning steps) is private. Never write it in your reply to the user.");
-  parts.push('Do not narrate meta-commentary such as "Step 1:", "Assess user request", "classify as ANSWER", "Tool selection:", "I should use", "Let me think", or restating the routing rules. Do not show your work unless the user explicitly asks to see your reasoning.');
-  parts.push("Your visible reply must contain only the final answer or the concrete result of the action you took. For a simple greeting or factual question, reply in one short sentence with no preamble. When you call a tool, say at most one short line about what you are doing, then call the tool.");
-  if (input.toolCatalog.length) {
-    parts.push("");
-    parts.push("# Live capability manifest");
-    parts.push(`${input.toolCatalog.length} tools are registered in Infinite OS. Executable in this turn: ${input.attachedToolNames.join(", ") || "none"}.`);
-    const registeredOnly = input.toolCatalog.map((tool) => tool.name).filter((name) => !input.attachedToolNames.includes(name));
-    if (registeredOnly.length) {
-      parts.push(`Registered but not attached to this model: ${registeredOnly.join(", ")}. Do not claim to have executed these tools.`);
-    }
-    parts.push("Tool availability is live runtime state, not a claim of unlimited access. Respect permissions, authentication, and user control.");
-    for (const t of input.toolCatalog) {
-      parts.push(`- \`${t.name}\` — ${t.description}`);
-    }
+    parts.push("This model does not support native tool calling. Use the local action router for supported actions.");
   }
   return parts.join("\n");
 }
@@ -5702,19 +5597,18 @@ async function getLocalModelPrompt(opts) {
   return rendered;
 }
 async function discoverMemory(cwd) {
-  const out = [];
   const userPath = join(homedir(), ".infinite-ai", "INFINITE.md");
   const projectPath = join(cwd, "INFINITE.md");
   const projectHidden = join(cwd, ".infinite", "INFINITE.md");
   const localPath = join(cwd, "INFINITE.local.md");
   const { readFile: readFile2 } = await import("node:fs/promises");
-  for (const p of [userPath, projectPath, projectHidden, localPath]) {
-    try {
-      out.push({ path: p, content: await readFile2(p, "utf8") });
-    } catch {
-    }
-  }
-  return out;
+  const results = await Promise.allSettled([
+    readFile2(userPath, "utf8").then((content) => ({ path: userPath, content })),
+    readFile2(projectPath, "utf8").then((content) => ({ path: projectPath, content })),
+    readFile2(projectHidden, "utf8").then((content) => ({ path: projectHidden, content })),
+    readFile2(localPath, "utf8").then((content) => ({ path: localPath, content }))
+  ]);
+  return results.filter((r) => r.status === "fulfilled").map((r) => r.value);
 }
 async function loadAutoMemory(cwd) {
   const hash = await hashPath(cwd);
@@ -5726,11 +5620,9 @@ async function loadAutoMemory(cwd) {
   } catch {
     return null;
   }
-  const out = [];
-  for (const f of files) {
-    out.push(`## ${f}`);
-    out.push(await readFile2(join(dir2, f), "utf8"));
-  }
+  const contents = await Promise.all(files.map((f) => readFile2(join(dir2, f), "utf8")));
+  const out = files.map((f, i) => `## ${f}
+${contents[i]}`);
   return out.length ? out.join("\n\n") : null;
 }
 async function hashPath(p) {
@@ -5782,11 +5674,11 @@ ${preferences}` : "",
 ${learnedContext}` : "",
         ...lessons.map((lesson, index2) => [
           `Lesson ${index2 + 1}: ${lesson.title}`,
-          lesson.answer.slice(0, 1400),
-          lesson.example ? `Example: ${lesson.example.slice(0, 500)}` : "",
-          lesson.cautions.length ? `Cautions: ${lesson.cautions.join("; ").slice(0, 500)}` : ""
+          lesson.answer.slice(0, 500),
+          lesson.example ? `Example: ${lesson.example.slice(0, 200)}` : "",
+          lesson.cautions.length ? `Cautions: ${lesson.cautions.join("; ").slice(0, 200)}` : ""
         ].filter(Boolean).join("\n"))
-      ].filter(Boolean).join("\n\n").slice(0, 9e3)
+      ].filter(Boolean).join("\n\n").slice(0, 3e3)
     }]
   };
   return [...trimmed.slice(0, latestUserIndex), recall, ...trimmed.slice(latestUserIndex)];
@@ -6561,7 +6453,7 @@ class BridgeServer {
     if (!this.ws || !this.status.connected) {
       return Promise.resolve({
         ok: false,
-        error: 'Browser bridge not connected. The Infinite OS Bridge extension is not linked to Infinite OS. DO NOT open a new Chrome window. Instead, tell the user: "The browser extension is not connected. Please go to chrome://extensions, find Infinite OS Bridge, and click the reload button. Then I can use your existing browser." Wait for the user to fix it, then retry.'
+        error: 'Browser bridge not connected (extension unreachable on ws://127.0.0.1:8765). Fix it yourself: try the same command via Operator (CDP) or Computer tool — do NOT ask the user to reload the extension. Only if every fallback also fails, briefly mention: "The browser extension was unreachable — I used a fallback instead. If you want the faster extension, reload it at chrome://extensions." Never open a new Chrome window.'
       });
     }
     const coalesceKey = command + ":" + JSON.stringify(params || {});
@@ -6751,13 +6643,10 @@ function routeForcedBrowserTool(text2) {
   if (amazonSearch) {
     const query = cleanQuery(amazonSearch[1]);
     if (query) {
-      if (extensionConnected) {
-        return {
-          name: "browser_extension",
-          input: { action: "navigate", url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` }
-        };
-      }
-      return { name: "Operator", input: { action: "search_amazon", query } };
+      return {
+        name: "browser_extension",
+        input: { action: "navigate", url: `https://www.amazon.com/s?k=${encodeURIComponent(query)}` }
+      };
     }
   }
   const explicitGoogleSearch = text2.match(
@@ -6768,14 +6657,8 @@ function routeForcedBrowserTool(text2) {
   );
   const googleQuery = cleanQuery(explicitGoogleSearch?.[1] ?? chromeSearch?.[1] ?? "");
   if (googleQuery) {
-    if (extensionConnected) {
-      return {
-        name: "browser_extension",
-        input: { action: "navigate", url: `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}` }
-      };
-    }
     return {
-      name: "Operator",
+      name: "browser_extension",
       input: { action: "navigate", url: `https://www.google.com/search?q=${encodeURIComponent(googleQuery)}` }
     };
   }
@@ -6785,28 +6668,26 @@ function routeForcedBrowserTool(text2) {
     }
     return { name: "Computer", input: { action: "launch_app", app: "chrome" } };
   }
-  if (extensionConnected) {
-    const ytSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?youtube\s+(?:for\s+)?(.+?)[.!?]?$/i);
-    if (ytSearch) {
-      const query = cleanQuery(ytSearch[1]);
-      if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}` } };
-    }
-    const twitterSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?(?:twitter|x\.com)\s+(?:for\s+)?(.+?)[.!?]?$/i);
-    if (twitterSearch) {
-      const query = cleanQuery(twitterSearch[1]);
-      if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query` } };
-    }
-    const githubSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?github\s+(?:for\s+)?(.+?)[.!?]?$/i);
-    if (githubSearch) {
-      const query = cleanQuery(githubSearch[1]);
-      if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://github.com/search?q=${encodeURIComponent(query)}&type=repositories` } };
-    }
-    const openSite = text2.match(/\b(?:open|go\s+to|visit|navigate\s+to)\s+(https?:\/\/\S+|www\.\S+|[a-zA-Z0-9-]+\.(com|org|net|io|dev|co))/i);
-    if (openSite) {
-      let url = openSite[1];
-      if (!url.startsWith("http")) url = `https://${url}`;
-      return { name: "browser_extension", input: { action: "navigate", url } };
-    }
+  const ytSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?youtube\s+(?:for\s+)?(.+?)[.!?]?$/i);
+  if (ytSearch) {
+    const query = cleanQuery(ytSearch[1]);
+    if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}` } };
+  }
+  const twitterSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?(?:twitter|x\.com)\s+(?:for\s+)?(.+?)[.!?]?$/i);
+  if (twitterSearch) {
+    const query = cleanQuery(twitterSearch[1]);
+    if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://x.com/search?q=${encodeURIComponent(query)}&src=typed_query` } };
+  }
+  const githubSearch = text2.match(/\b(?:search|look|find)\s+(?:on\s+)?github\s+(?:for\s+)?(.+?)[.!?]?$/i);
+  if (githubSearch) {
+    const query = cleanQuery(githubSearch[1]);
+    if (query) return { name: "browser_extension", input: { action: "navigate", url: `https://github.com/search?q=${encodeURIComponent(query)}&type=repositories` } };
+  }
+  const openSite = text2.match(/\b(?:open|go\s+to|visit|navigate\s+to)\s+(https?:\/\/\S+|www\.\S+|[a-zA-Z0-9-]+\.(com|org|net|io|dev|co))/i);
+  if (openSite) {
+    let url = openSite[1];
+    if (!url.startsWith("http")) url = `https://${url}`;
+    return { name: "browser_extension", input: { action: "navigate", url } };
   }
   return null;
 }
@@ -7599,7 +7480,7 @@ class ProblemTracker {
     this.currentTurn = 0;
   }
 }
-let LOOP_STREAM_STALL_TIMEOUT_MS = 3 * 6e4;
+let LOOP_STREAM_STALL_TIMEOUT_MS = 45e3;
 const decisionRouter = new DecisionRouter({ costOptimization: true, fallbackToLocal: true });
 const liveInterjections = /* @__PURE__ */ new Map();
 function interjectAgent(sessionId, message) {
@@ -7681,7 +7562,32 @@ async function runAgent(history2, userMessage, opts) {
     const activeToolsEnabled = providerSupportsTools$1(activeCandidate.provider, activeCandidate.model);
     const allActiveTools = activeToolsEnabled ? toolRegistry.asProviderTools() : [];
     const requestContext = [...history2.slice(-6), userMessage].map(messageText).join("\n");
-    const activeTools = activeCandidate.provider === "ollama" ? selectLocalModelTools(requestContext, allActiveTools) : allActiveTools;
+    const CORE_TOOL_SET = /* @__PURE__ */ new Set([
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "TodoWrite",
+      "Agent",
+      "Crew",
+      "Computer",
+      "browser_extension",
+      "Operator",
+      "FileOps",
+      "Knowledge",
+      "System",
+      "Git",
+      "CreateTab",
+      "BuildFeature",
+      "Batch",
+      "AskQuestion",
+      "TaskGroup"
+    ]);
+    const activeTools = activeCandidate.provider === "ollama" ? selectLocalModelTools(requestContext, allActiveTools) : allActiveTools.filter((t) => CORE_TOOL_SET.has(t.name));
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${activeTools.map((tool) => tool.name).join(",")}`;
     let activeSystem = runSystemPrompts.get(systemKey);
     if (!activeSystem) {
@@ -7764,7 +7670,7 @@ async function runAgent(history2, userMessage, opts) {
         streamStallInterval = setInterval(() => {
           if (providerFailure) return;
           if (Date.now() - streamLastEvent >= LOOP_STREAM_STALL_TIMEOUT_MS) {
-            providerFailure = `Agent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 6e4)} min)`;
+            providerFailure = `Agent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 1e3)}s)`;
             console.error(`[agent] ${providerFailure} — aborting stream`);
             streamController.abort();
           }
@@ -8859,6 +8765,17 @@ function getMemoryStats() {
   const byType = Object.fromEntries(rows.map((r) => [r.type, r.count]));
   return { total, byType };
 }
+const store = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  createMemory,
+  deleteMemory,
+  getDb,
+  getMemory,
+  getMemoryStats,
+  listMemories,
+  searchMemories,
+  updateMemory
+}, Symbol.toStringTag, { value: "Module" }));
 function resolveAutomationDisplayMode(preference, fullscreen) {
   if (preference === "always-visible") return "visible";
   if (preference === "always-background") return "background";
@@ -8892,8 +8809,8 @@ const supervisorNotices = /* @__PURE__ */ new Map();
 const runProgressAt = /* @__PURE__ */ new Map();
 const activeStreamControllers = /* @__PURE__ */ new Map();
 let supervisorTimer;
-const SUPERVISOR_NOTICE_MS = 3e4;
-const SUPERVISOR_RESTART_MS = 12e4;
+const SUPERVISOR_NOTICE_MS = 2e4;
+const SUPERVISOR_RESTART_MS = 45e3;
 function superviseRuns() {
   const now2 = Date.now();
   for (const [runId, state] of runStates) {
@@ -9123,7 +9040,32 @@ async function runSubagent(state, agent2, opts, signal) {
       if (config?.toolOverride?.exclude?.includes(tool.name)) return false;
       return agent2.allowedTools.includes("*") || agent2.allowedTools.includes(tool.name) || Boolean(config?.toolOverride?.include?.includes(tool.name));
     }) : [];
-    const tools = activeCandidate.provider === "ollama" ? selectLocalModelTools(opts.task, allowedTools) : allowedTools;
+    const CORE_TOOL_SET = /* @__PURE__ */ new Set([
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "TodoWrite",
+      "Agent",
+      "Crew",
+      "Computer",
+      "browser_extension",
+      "Operator",
+      "FileOps",
+      "Knowledge",
+      "System",
+      "Git",
+      "CreateTab",
+      "BuildFeature",
+      "Batch",
+      "AskQuestion",
+      "TaskGroup"
+    ]);
+    const tools = activeCandidate.provider === "ollama" ? selectLocalModelTools(opts.task, allowedTools) : allowedTools.filter((t) => CORE_TOOL_SET.has(t.name));
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${tools.map((tool) => tool.name).join(",")}`;
     let baseSystem = runSystemPrompts.get(systemKey);
     if (!baseSystem) baseSystem = [
@@ -9197,7 +9139,7 @@ ${config.customPrompt}` : "",
     const subagentStallInterval = setInterval(() => {
       if (providerFailure) return;
       if (Date.now() - streamLastEvent >= LOOP_STREAM_STALL_TIMEOUT_MS) {
-        providerFailure = `Subagent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 6e4)} min)`;
+        providerFailure = `Subagent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 1e3)}s)`;
         console.error(`[agent] ${providerFailure} — aborting stream`);
         subagentStreamController.abort();
       }
@@ -20645,47 +20587,19 @@ class TaskOrchestrator {
     const isMultiPart = lower.includes("and") || lower.includes("then") || lower.includes("also") || lower.includes("while");
     const bestAgent = this.pickBestAgent(prompt);
     if (isBuildTask && (isWebsite || isApp)) {
-      const researchId = v4();
+      const buildId = v4();
       subTasks.push({
-        id: researchId,
-        agentType: "research",
-        description: "Research best practices, tech stack, and architecture for the project",
+        id: buildId,
+        agentType: "code",
+        description: `Build the complete project: implement core code, file structure, UI/styling, responsive layout${isWebsite ? ", and SEO/accessibility" : ""}. Research best practices as needed.`,
         dependencies: [],
         status: "pending"
       });
-      const codeId = v4();
-      subTasks.push({
-        id: codeId,
-        agentType: "code",
-        description: "Implement the core code, file structure, and functionality",
-        dependencies: [researchId],
-        status: "pending"
-      });
-      const designId = v4();
-      subTasks.push({
-        id: designId,
-        agentType: "design",
-        description: "Create UI components, styling, and responsive layout",
-        dependencies: [codeId],
-        status: "pending"
-      });
-      let finalImplementationId = designId;
-      if (isWebsite) {
-        const seoId = v4();
-        subTasks.push({
-          id: seoId,
-          agentType: "code",
-          description: "Implement accessibility, metadata, SEO, and performance improvements in the project",
-          dependencies: [designId],
-          status: "pending"
-        });
-        finalImplementationId = seoId;
-      }
       subTasks.push({
         id: v4(),
         agentType: "code",
-        description: "Audit the complete implementation against the original request, run the relevant tests/build/lint, fix failures, and verify the final artifact",
-        dependencies: [finalImplementationId],
+        description: "Audit the implementation against the original request, run tests/build/lint, fix failures, and verify the final artifact",
+        dependencies: [buildId],
         status: "pending"
       });
     } else if (bestAgent) {
@@ -22653,23 +22567,52 @@ function registerIpc(getMainWindow) {
   registerQueueIpc();
   registerGitIpc();
   registerLearningIpc(getMainWindow);
+  ipcMain.handle(IPC.HEARTBEAT_STATUS, async () => {
+    const { heartbeatStatus } = await import("./chunks/index-B2X1ZmH8.js");
+    return heartbeatStatus();
+  });
+  ipcMain.handle(IPC.BUILD_START, async () => {
+    const { buildInBackground } = await import("./chunks/index-CJixH28v.js");
+    const cwd = settings.get("cwd") ?? process.cwd();
+    const result = await buildInBackground(cwd);
+    if (result.phase === "ready") {
+      const win = getMainWindow();
+      win?.webContents.send(IPC.BUILD_HAS_UPDATE, result);
+    }
+    return result;
+  });
+  ipcMain.handle(IPC.BUILD_STATUS, async () => {
+    const { getBuildStatus } = await import("./chunks/index-CJixH28v.js");
+    return getBuildStatus();
+  });
+  ipcMain.handle(IPC.BUILD_CANCEL, async () => {
+    const { cancelBuild } = await import("./chunks/index-CJixH28v.js");
+    return { cancelled: cancelBuild() };
+  });
+  ipcMain.handle(IPC.BUILD_HAS_UPDATE, async () => {
+    const { hasStagedUpdate } = await import("./chunks/index-CJixH28v.js");
+    return { hasUpdate: hasStagedUpdate() };
+  });
+  ipcMain.handle(IPC.BUILD_CLEAR_UPDATE, async () => {
+    const { clearStagedUpdate } = await import("./chunks/index-CJixH28v.js");
+    clearStagedUpdate();
+    return { ok: true };
+  });
   ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd }) => {
+    void import("./chunks/index-B2X1ZmH8.js").then(({ heartbeatTouch }) => heartbeatTouch()).catch(() => {
+    });
     const win = getMainWindow();
     if (!win) {
       console.error("[IPC] CHAT_SEND: No window available");
       throw new Error("No window");
     }
-    console.log(`[IPC] CHAT_SEND: session=${sessionId} provider=${provider} model=${model} cwd=${cwd}`);
-    console.log(`[IPC] CHAT_SEND: message type=${typeof message} isArray=${Array.isArray(message)}`);
     const controller = new AbortController();
     activeRuns.set(sessionId, controller);
     const userMessage = { id: v4(), role: "user", content: message, timestamp: Date.now() };
     const storedUserMessage = { ...userMessage, content: displayMessage ?? message };
     const history2 = await loadMessages(sessionId);
-    console.log(`[IPC] CHAT_SEND: history length=${history2.length}`);
     await appendMessage(sessionId, storedUserMessage);
     try {
-      console.log(`[IPC] CHAT_SEND: calling runAgent...`);
       const startTime = Date.now();
       const completedMessages = await runAgent(history2, userMessage, {
         sessionId,
@@ -22678,7 +22621,6 @@ function registerIpc(getMainWindow) {
         model,
         signal: controller.signal,
         onEvent: (ev) => {
-          console.log(`[IPC] CHAT_SEND: sending event type=${ev.type}`);
           win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev });
         }
       });
@@ -22714,7 +22656,6 @@ function registerIpc(getMainWindow) {
           await appendMessage(sessionId, message2);
         }
       }
-      console.log(`[IPC] CHAT_SEND: runAgent completed`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? String(err.message) : String(err);
       console.error("[IPC] CHAT_SEND: runAgent failed:", errorMessage);
@@ -23957,11 +23898,17 @@ const bash = {
     const shell2 = process.platform === "win32" ? requestedShell === "cmd" ? "cmd.exe" : requestedShell === "bash" ? "bash.exe" : "powershell.exe" : "bash";
     const shellArgs = shell2 === "powershell.exe" ? ["-NoProfile", "-Command", command] : shell2 === "cmd.exe" ? ["/d", "/s", "/c", command] : ["-c", command];
     return new Promise((resolve2) => {
-      const child = spawn(shell2, shellArgs, {
-        cwd: ctx.cwd,
-        env: process.env,
-        windowsHide: true
-      });
+      let child;
+      try {
+        child = spawn(shell2, shellArgs, {
+          cwd: ctx.cwd,
+          env: process.env,
+          windowsHide: true
+        });
+      } catch (error) {
+        resolve2({ content: `Failed to start shell: ${error.message}`, is_error: true });
+        return;
+      }
       let out = "";
       let finished = false;
       child.stdout.on("data", (d) => {
@@ -24078,6 +24025,11 @@ const write = {
     try {
       const abs = resolve(ctx.cwd, file_path);
       const signal = ctx.abortSignal;
+      try {
+        const { allowWrite } = await import("./chunks/source-guard-H0yJYluW.js");
+        allowWrite(abs);
+      } catch {
+      }
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, content, { encoding: "utf8", ...signal ? { signal } : {} });
       return { content: `Wrote ${content.length} bytes to ${file_path}` };
@@ -24105,6 +24057,11 @@ const edit = {
     try {
       const abs = resolve(ctx.cwd, file_path);
       const signal = ctx.abortSignal;
+      try {
+        const { allowWrite } = await import("./chunks/source-guard-H0yJYluW.js");
+        allowWrite(abs);
+      } catch {
+      }
       const fsOpts = signal ? { signal } : void 0;
       const original = await readFile(abs, { encoding: "utf8", ...fsOpts });
       let updated;
@@ -24251,7 +24208,7 @@ const agent = {
   permission: "ask",
   async execute(args, ctx) {
     const { subagent_type, prompt, run_in_background = false, batch, max_concurrent = 10 } = args;
-    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store);
+    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store$1);
     const meta = await loadSessionMeta2(ctx.sessionId);
     const cwd = meta?.cwd ?? ctx.cwd;
     const provider = meta?.provider ?? "openrouter";
@@ -24288,8 +24245,10 @@ const agent = {
       const finalMap = results[0];
       let success = 0;
       let failed = 0;
-      for (const task of batch.slice(0, 10)) {
-        const result2 = finalMap.get(task.subagent_type);
+      for (let i = 0; i < batch.slice(0, 10).length; i++) {
+        const task = batch[i];
+        const resultKey = Array.from(finalMap.keys())[i];
+        const result2 = resultKey ? finalMap.get(resultKey) : void 0;
         if (result2?.error) {
           failed++;
           output.push(`[${task.subagent_type}] FAILED: ${result2.error}`);
@@ -24346,7 +24305,7 @@ const crewTool = {
   async execute(args, ctx) {
     const { task, agents: agents2 } = args;
     if (!task?.trim()) return { content: "Crew requires a task.", is_error: true };
-    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store);
+    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store$1);
     const meta = await loadSessionMeta2(ctx.sessionId);
     const leaderProvider = meta?.provider ?? "openrouter";
     const leaderModel = meta?.model ?? "meta-llama/llama-3.3-70b-instruct:free";
@@ -24584,7 +24543,7 @@ const computerTool = {
     const isBrowserOpenUrl = input.action === "open_url";
     if (isChromeLaunch || isBrowserOpenUrl) {
       return {
-        content: `Never open Chrome via Computer (launch_app/open_url) — use browser_extension action=list_tabs or new_tab + navigate in the user's EXISTING Chrome. It is 10x faster and keeps their sessions. If browser_extension is disconnected, tell the user to reload it at chrome://extensions, then retry. For desktop apps like Notepad/VS Code, launch_app is fine.`,
+        content: `Never open Chrome via Computer — use browser_extension (new_tab + navigate) in the user's EXISTING Chrome. It keeps their sessions and is 10x faster. If the bridge is temporarily unreachable, the browser_extension tool will auto-retry then fall back to Operator (CDP) — don't ask the user to fix it. For desktop apps like Notepad/VS Code, launch_app is fine.`,
         is_error: true
       };
     }
@@ -24593,7 +24552,7 @@ const computerTool = {
     const isFullAccess = p === ":full-system-access" || p === "fullSystemAccess" || p === "full-system-access" || p === "full_system_access" || m === "fullSystemAccess" || m === "bypassPermissions";
     if (!isFullAccess && display.mode === "background" && foregroundActions.has(input.action)) {
       return {
-        content: `The ${input.action} action requires visible desktop control, but Infinite OS is in background automation mode. Use Operator for hidden browser/CDP work, use a direct API or shell/file tool, or ask the user to switch automation display to always-visible. Infinite OS kept focus.`,
+        content: `The ${input.action} action needs the desktop to be visible, but Infinite OS is in background mode. Fix it yourself: try Operator for browser work, or a direct API/shell/file tool. Only if nothing else works, briefly note the limitation — don't ask the user to change settings.`,
         is_error: true
       };
     }
@@ -25400,7 +25359,7 @@ function commandFor(action) {
 }
 const browserExtensionTool = {
   name: "browser_extension",
-  description: "PRIMARY browser control tool — ALWAYS try this FIRST for any web/browser task. Drives the user's EXISTING Chrome/Edge (do NOT open a new browser). Faster than mouse/keyboard. Uses the user's logged-in sessions. If not connected, diagnose with inspect, fix it, then retry. Only fall back to Computer mouse/keyboard if the extension is truly broken. Actions: navigate, inspect, click, click_text, type, fill, press, scroll, extract_text, extract_links, extract_forms, screenshot, execute_js, highlight, list_tabs, new_tab, activate_tab, close_tab, reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie_get, cookie_set, clipboard_read, clipboard_write, storage_get, storage_set, batch, console_log, get_page_performance.",
+  description: "PRIMARY browser control — ALWAYS use this FIRST for any web/browser task. Drives the user's EXISTING Chrome/Edge via the Infinite OS Bridge extension (localhost:8765). Fast DOM control with logged-in sessions. The tool auto-retries if the extension is temporarily unreachable, then falls back to Operator (CDP) silently. Actions: navigate, inspect, click, click_text, type, fill, press, scroll, extract_text, extract_links, extract_forms, screenshot, execute_js, highlight, list_tabs, new_tab, activate_tab, close_tab, reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie_get, cookie_set, clipboard_read, clipboard_write, storage_get, storage_set, batch, console_log, get_page_performance.",
   inputSchema: {
     type: "object",
     properties: {
@@ -25512,8 +25471,18 @@ const browserExtensionTool = {
     if (input.toSelector != null) params.to = input.toSelector;
     if (action === "click_text" && input.text != null) params.value = input.text;
     if (action === "click" && input.selector == null && input.text != null) params.text = input.text;
-    const result = await bridgeServer.exec(command, params);
-    const payload = result.ok ? { ok: true, action, ...result.data } : { ok: false, action, error: result.error };
+    let result = await bridgeServer.exec(command, params);
+    if (!result.ok && result.error?.includes("not connected")) {
+      await new Promise((r) => setTimeout(r, 800));
+      const retry = await bridgeServer.exec(command, params);
+      if (retry.ok) result = retry;
+    }
+    const payload = result.ok ? { ok: true, action, ...result.data } : {
+      ok: false,
+      action,
+      error: result.error,
+      hint: result.error?.includes("not connected") ? "The Bridge extension is temporarily unreachable. Try Operator (CDP) or Computer as fallback — do not ask the user to fix it unless all fallbacks fail." : void 0
+    };
     return { content: JSON.stringify(payload, null, 2), is_error: !result.ok };
   }
 };
@@ -25716,7 +25685,7 @@ const systemTool = {
     if (commands[input.action]) {
       let cmd = commands[input.action];
       if (input.value && ["startup", "services", "processes", "env"].includes(input.action)) {
-        const safe = input.value.replace(/['\"]/g, "");
+        const safe = input.value.replace(/[^a-zA-Z0-9\s\-_.]/g, "");
         if (input.action === "env") cmd = `Get-ChildItem Env: | Where-Object Name -like '*${safe}*' | Select-Object Name,Value | ConvertTo-Json -Compress`;
         if (input.action === "services") cmd = `Get-Service | Where-Object { $_.Name -like '*${safe}*' -or $_.DisplayName -like '*${safe}*' } | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Compress`;
         if (input.action === "startup") cmd = `Get-CimInstance Win32_StartupCommand | Where-Object Name -like '*${safe}*' | Select-Object Name,Command,Location,User | ConvertTo-Json -Compress`;
@@ -26025,7 +25994,7 @@ const taskGroupTool = {
         return { content: `Unknown agent type: ${task.agent_type}. Available: ${Array.from(validAgents).join(", ")}`, is_error: true };
       }
     }
-    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store);
+    const { loadSessionMeta: loadSessionMeta2 } = await Promise.resolve().then(() => store$1);
     const meta = await loadSessionMeta2(ctx.sessionId);
     const cwd = meta?.cwd ?? ctx.cwd;
     const provider = meta?.provider ?? "openrouter";
@@ -36561,7 +36530,7 @@ const messagingTool = {
     if (a.action === "simulate") {
       if (!a.text) return need("text");
       const preview = a.text.slice(0, 400);
-      return { content: `[simulate] Would send ${a.text.length} chars: "${preview}${a.text.length > 400 ? "…" : ""}" (chunking: ${chunks(a.text, 1900).length} Discord chunk(s) / ${chunks(a.text, 4e3).length} Slack chunk(s))` };
+      return { content: `[simulate] Would send ${a.text.length} chars: "${preview}${a.text.length > 400 ? "…" : ""}" (chunking: ${chunks(a.text, 1900).length} Discord chunk(s) / ${chunks(a.text, 4e3).length} Slack/Telegram chunk(s))` };
     }
     if (!a.text || !a.text.trim()) return need("text");
     const text2 = a.text.trim();
@@ -36572,11 +36541,11 @@ const messagingTool = {
         const payload = { text: text2 };
         if (a.username) payload.username = a.username;
         if (a.channel) payload.channel = a.channel;
-        for (const chunk of chunks(text2, 3500)) {
+        for (const chunk of chunks(text2, 4e3)) {
           const res = await fetchWithTimeout$2(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, text: chunk }) }, ctx.abortSignal);
           if (!res.ok) return fail(`Slack ${res.status}: ${await safeText$1(res)}`);
         }
-        return { content: `Sent ${text2.length} chars to Slack${a.channel ? ` ${a.channel}` : ""} in ${chunks(text2, 3500).length} chunk(s).` };
+        return { content: `Sent ${text2.length} chars to Slack${a.channel ? ` ${a.channel}` : ""} in ${chunks(text2, 4e3).length} chunk(s).` };
       }
       if (a.action === "send_discord") {
         const url = a.webhookUrl || process.env.DISCORD_WEBHOOK_URL;
@@ -36976,8 +36945,11 @@ const sandboxTool = {
     try {
       if (a.files) {
         for (const [name, content] of Object.entries(a.files)) {
-          const full = join(dir2, name);
-          await mkdir(join(dir2, name.split("/").slice(0, -1).join("/")), { recursive: true }).catch(() => void 0);
+          const safeName = name.replace(/^[/\\]+/, "").replace(/\.\.[/\\]/g, "");
+          if (!safeName) continue;
+          const full = join(dir2, safeName);
+          const dirParts = safeName.split(/[/\\]/).slice(0, -1);
+          if (dirParts.length) await mkdir(join(dir2, ...dirParts), { recursive: true }).catch(() => void 0);
           await writeFile(full, content, "utf8");
         }
       }
@@ -37072,7 +37044,6 @@ const batchTool = {
     const results = [];
     let hadError = false;
     const concurrency = 8;
-    let idx = 0;
     const runOne = async (call, n) => {
       const tool = toolRegistry.resolve(call.tool);
       try {
@@ -37090,13 +37061,14 @@ ${e.message}`;
       }
     };
     const inFlight = [];
+    let nextIdx = 0;
     const queueNext = async () => {
-      if (a.stopOnError && hadError) return;
-      const cur = idx++;
-      if (cur >= a.calls.length) return;
-      const line = await runOne(a.calls[cur], cur + 1);
-      results[cur] = line;
-      await queueNext();
+      while (nextIdx < a.calls.length) {
+        if (a.stopOnError && hadError) return;
+        const cur = nextIdx++;
+        const line = await runOne(a.calls[cur], cur + 1);
+        results[cur] = line;
+      }
     };
     for (let i = 0; i < Math.min(concurrency, a.calls.length); i++) inFlight.push(queueNext());
     await Promise.all(inFlight);
@@ -37119,6 +37091,7 @@ const ultimatePlannerTool = {
   permission: "allow",
   async execute(args, _ctx) {
     const a = args;
+    if (!a.goal || typeof a.goal !== "string") return { content: "UltimatePlanner requires a goal string.", is_error: true };
     const goal = a.goal.trim();
     if (!goal) return { content: "UltimatePlanner requires goal.", is_error: true };
     const isCode = /\b(code|repo|file|function|class|api|typescript|javascript|python|bug|refactor|test|build|commit|git)\b/i.test(goal);
@@ -37228,7 +37201,7 @@ async function inspectHardware() {
   const cores = cpus().length;
   const total = totalmem();
   const free = freemem();
-  const ram = { totalGB: Math.round(total / 1e9), freeGB: Math.round(free / 1e9), usedPct: Math.round((1 - free / total) * 100) };
+  const ram = { totalGB: Math.round(total / 1024 ** 3), freeGB: Math.round(free / 1024 ** 3), usedPct: Math.round((1 - free / total) * 100) };
   const gpu = await getGpu();
   const disk = await getDisk();
   const ollama = await getOllamaModels();
@@ -37293,6 +37266,724 @@ function formatInspect(hw) {
     `- Ollama: ${hw.ollama.available ? `available — ${hw.ollama.models.slice(0, 5).join(", ") || "no models"}` : "not reachable on 11434"}`
   ].join("\n");
 }
+const SECURITY_PATTERNS = [
+  { pattern: /eval\s*\(/g, msg: "eval() usage — potential code injection", severity: "high" },
+  { pattern: /innerHTML\s*=/g, msg: "innerHTML assignment — potential XSS", severity: "high" },
+  { pattern: /exec\s*\(\s*['"`]/g, msg: "shell exec with literal string — potential injection", severity: "high" },
+  { pattern: /password\s*[=:]\s*['"`][^'"`]+['"`]/gi, msg: "hardcoded password detected", severity: "critical" },
+  { pattern: /api[_-]?key\s*[=:]\s*['"`][^'"`]+['"`]/gi, msg: "hardcoded API key detected", severity: "critical" },
+  { pattern: /secret\s*[=:]\s*['"`][^'"`]+['"`]/gi, msg: "hardcoded secret detected", severity: "critical" },
+  { pattern: /SELECT\s+\*\s+FROM/gi, msg: "SELECT * — may expose unnecessary columns", severity: "medium" },
+  { pattern: /\$\{.*\}.*(?:query|exec|run)/g, msg: "template literal in query/exec — potential injection", severity: "high" },
+  { pattern: /new\s+Function\s*\(/g, msg: "new Function() — equivalent to eval", severity: "high" },
+  { pattern: /document\.write\s*\(/g, msg: "document.write() — potential XSS", severity: "medium" }
+];
+const PERFORMANCE_PATTERNS = [
+  { pattern: /for\s*\(\s*let\s+\w+\s*=\s*0\s*;.*\.length/g, msg: "for-loop with .length in condition — cache array.length", severity: "low" },
+  { pattern: /\.forEach\s*\(\s*async/g, msg: "async forEach — does not await; use for...of", severity: "medium" },
+  { pattern: /JSON\.parse\s*\(\s*JSON\.stringify/g, msg: "deep clone via JSON — slow for large objects", severity: "low" },
+  { pattern: /try\s*\{[\s\S]{0,200}catch/g, msg: "try/catch block — ensure catch handles specific errors", severity: "low" }
+];
+const STYLE_PATTERNS = [
+  { pattern: /console\.log\s*\(/g, msg: "console.log in production code", severity: "info" },
+  { pattern: /var\s+/g, msg: "var declaration — prefer const/let", severity: "info" },
+  { pattern: /==(?!=)/g, msg: "loose equality == — prefer ===", severity: "info" },
+  { pattern: /!=(?!=)/g, msg: "loose inequality != — prefer !==", severity: "info" },
+  { pattern: /\/\/.*TODO/gi, msg: "TODO comment found", severity: "info" },
+  { pattern: /\/\/.*FIXME/gi, msg: "FIXME comment found", severity: "info" },
+  { pattern: /\/\/.*HACK/gi, msg: "HACK comment found", severity: "info" }
+];
+const codeReviewTool = {
+  name: "CodeReview",
+  description: 'Scan a source file for security vulnerabilities, performance issues, and style problems. Returns a structured report with line numbers and severity ratings (critical/high/medium/low/info). No model call needed — deterministic static analysis. Use before commits, after edits, or when the user asks "review this code".',
+  inputSchema: {
+    type: "object",
+    properties: {
+      file_path: { type: "string", description: "Absolute or workspace-relative path to the source file" },
+      focus: { type: "string", enum: ["security", "performance", "style", "all"], description: "Filter findings by category (default: all)" }
+    },
+    required: ["file_path"]
+  },
+  permission: "allow",
+  async execute(args, ctx) {
+    const a = args;
+    if (!a.file_path) return { content: "CodeReview requires file_path.", is_error: true };
+    const focus = a.focus || "all";
+    let content;
+    try {
+      const fullPath = resolve(ctx.cwd, a.file_path);
+      content = await readFile(fullPath, "utf8");
+    } catch (e) {
+      return { content: `Cannot read file: ${e.message}`, is_error: true };
+    }
+    const lines = content.split("\n");
+    const findings = [];
+    const patterns = [];
+    if (focus === "all" || focus === "security") patterns.push({ patterns: SECURITY_PATTERNS, category: "security" });
+    if (focus === "all" || focus === "performance") patterns.push({ patterns: PERFORMANCE_PATTERNS, category: "performance" });
+    if (focus === "all" || focus === "style") patterns.push({ patterns: STYLE_PATTERNS, category: "style" });
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      for (const group of patterns) {
+        for (const { pattern, msg, severity } of group.patterns) {
+          const regex = new RegExp(pattern.source, pattern.flags);
+          if (regex.test(line)) {
+            findings.push({ line: i + 1, severity, category: group.category, message: msg });
+          }
+        }
+      }
+    }
+    const critical = findings.filter((f) => f.severity === "critical").length;
+    const high = findings.filter((f) => f.severity === "high").length;
+    const medium = findings.filter((f) => f.severity === "medium").length;
+    const low = findings.filter((f) => f.severity === "low").length;
+    const info = findings.filter((f) => f.severity === "info").length;
+    const score = Math.max(0, 100 - critical * 25 - high * 10 - medium * 5 - low * 2 - info * 0.5);
+    const summary2 = [
+      `# Code Review — ${a.file_path}`,
+      ``,
+      `**Health Score: ${Math.round(score)}/100** (${lines.length} lines, ${findings.length} findings)`,
+      ``,
+      `| Severity | Count |`,
+      `|----------|-------|`,
+      `| Critical | ${critical} |`,
+      `| High     | ${high} |`,
+      `| Medium   | ${medium} |`,
+      `| Low      | ${low} |`,
+      `| Info     | ${info} |`,
+      ``
+    ];
+    if (findings.length === 0) {
+      summary2.push("No issues found. Code looks clean.");
+    } else {
+      summary2.push("## Findings");
+      summary2.push("");
+      for (const f of findings.slice(0, 30)) {
+        const icon = f.severity === "critical" ? "CRITICAL" : f.severity === "high" ? "HIGH" : f.severity === "medium" ? "MED" : f.severity === "low" ? "LOW" : "INFO";
+        summary2.push(`- **L${f.line}** [${icon}] (${f.category}) ${f.message}`);
+      }
+      if (findings.length > 30) summary2.push(`
+... and ${findings.length - 30} more findings.`);
+    }
+    return { content: summary2.join("\n"), is_error: critical > 0 || high > 0 };
+  }
+};
+const COMMON_PATTERNS = {
+  email: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+  url: "https?://[^\\s/$.?#].[^\\s]*",
+  phone: "\\+?\\d{1,3}[-.\\s]?\\(?\\d{1,4}\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}",
+  ip: "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
+  date: "\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}",
+  time: "\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s?[AP]M)?",
+  hex_color: "#(?:[0-9a-fA-F]{3}){1,2}\\b",
+  uuid: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+  zip_us: "\\d{5}(?:-\\d{4})?",
+  username: "[a-zA-Z0-9_]{3,20}",
+  strong_password: "(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]{8,}",
+  html_tag: "<([a-z][a-z0-9]*)\\b[^>]*>(.*?)</\\1>",
+  markdown_link: "\\[([^\\]]+)\\]\\(([^)]+)\\)",
+  csv_field: '(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^,]*))',
+  xml_tag: "<([a-z][a-z0-9]*)\\b([^>]*)/>"
+};
+const regexTool = {
+  name: "Regex",
+  description: "Test, match, explain, or generate regular expressions. Deterministic — no model call. Actions: test (check if pattern matches text), match (find all matches with positions), explain (describe what a regex does in plain English), generate (create regex from natural language description using common patterns).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["test", "match", "explain", "generate"], description: "What to do with the regex" },
+      pattern: { type: "string", description: "The regex pattern (without slashes)" },
+      flags: { type: "string", description: "Regex flags: g, i, m, s (default: g)" },
+      text: { type: "string", description: "Text to test/match against" },
+      description: { type: "string", description: "Natural language description for generate action" }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    if (a.action === "generate") {
+      if (!a.description) return { content: "Regex generate requires a description.", is_error: true };
+      const desc = a.description.toLowerCase();
+      const matches = [];
+      for (const [name, pattern] of Object.entries(COMMON_PATTERNS)) {
+        if (desc.includes(name.replace(/_/g, " ")) || desc.includes(name.replace(/_/g, ""))) {
+          matches.push({ name, pattern });
+        }
+      }
+      if (matches.length === 0) {
+        if (/\bemail\b/i.test(desc)) matches.push({ name: "email", pattern: COMMON_PATTERNS.email });
+        if (/\burl\b/i.test(desc) || /\blink\b/i.test(desc)) matches.push({ name: "url", pattern: COMMON_PATTERNS.url });
+        if (/\bphone\b/i.test(desc)) matches.push({ name: "phone", pattern: COMMON_PATTERNS.phone });
+        if (/\bip\b/i.test(desc) || /\baddress\b/i.test(desc)) matches.push({ name: "ip", pattern: COMMON_PATTERNS.ip });
+        if (/\bdate\b/i.test(desc)) matches.push({ name: "date", pattern: COMMON_PATTERNS.date });
+        if (/\btime\b/i.test(desc)) matches.push({ name: "time", pattern: COMMON_PATTERNS.time });
+        if (/\bcolor\b/i.test(desc) || /\bhex\b/i.test(desc)) matches.push({ name: "hex_color", pattern: COMMON_PATTERNS.hex_color });
+        if (/\buuid\b/i.test(desc)) matches.push({ name: "uuid", pattern: COMMON_PATTERNS.uuid });
+        if (/\bzip\b/i.test(desc) || /\bpostal\b/i.test(desc)) matches.push({ name: "zip_us", pattern: COMMON_PATTERNS.zip_us });
+        if (/\busername\b/i.test(desc) || /\buser\b/i.test(desc)) matches.push({ name: "username", pattern: COMMON_PATTERNS.username });
+        if (/\bpassword\b/i.test(desc)) matches.push({ name: "strong_password", pattern: COMMON_PATTERNS.strong_password });
+        if (/\bhtml\b/i.test(desc) || /\btag\b/i.test(desc)) matches.push({ name: "html_tag", pattern: COMMON_PATTERNS.html_tag });
+        if (/\bmarkdown\b/i.test(desc) || /\blink\b/i.test(desc)) matches.push({ name: "markdown_link", pattern: COMMON_PATTERNS.markdown_link });
+        if (/\bcsv\b/i.test(desc) || /\bcomma\b/i.test(desc)) matches.push({ name: "csv_field", pattern: COMMON_PATTERNS.csv_field });
+      }
+      if (matches.length === 0) {
+        return { content: `No common pattern found for "${a.description}". Try: email, url, phone, ip, date, time, hex color, uuid, zip code, username, password, html tag, markdown link, csv field.`, is_error: true };
+      }
+      const best = matches[0];
+      const output = [
+        `**Generated regex for "${a.description}":**`,
+        ``,
+        `\`${best.pattern}\``,
+        ``,
+        `**Flags:** g (global)`,
+        `**Example:** Test it with the test action.`,
+        matches.length > 1 ? `
+Other matches: ${matches.slice(1).map((m) => m.name).join(", ")}` : ""
+      ].filter(Boolean).join("\n");
+      return { content: output };
+    }
+    if (!a.pattern) return { content: `Regex ${a.action} requires a pattern.`, is_error: true };
+    const flags = a.flags || "g";
+    let regex;
+    try {
+      regex = new RegExp(a.pattern, flags);
+    } catch (e) {
+      return { content: `Invalid regex: ${e.message}`, is_error: true };
+    }
+    if (a.action === "test") {
+      if (!a.text) return { content: "Regex test requires text.", is_error: true };
+      const match = regex.test(a.text);
+      return { content: `Pattern ${match ? "MATCHES" : "does NOT match"} the text.
+
+Pattern: \`${a.pattern}\` (${flags})
+Text: "${a.text.slice(0, 200)}"` };
+    }
+    if (a.action === "match") {
+      if (!a.text) return { content: "Regex match requires text.", is_error: true };
+      const matches = [];
+      let m;
+      const globalRegex = new RegExp(a.pattern, flags.includes("g") ? flags : flags + "g");
+      while ((m = globalRegex.exec(a.text)) !== null) {
+        matches.push({ match: m[0], index: m.index, groups: m.slice(1) });
+        if (matches.length > 100) break;
+      }
+      if (matches.length === 0) return { content: `No matches found.
+
+Pattern: \`${a.pattern}\` (${flags})` };
+      const output = [
+        `**${matches.length} match(es) found:**`,
+        ``,
+        ...matches.slice(0, 20).map((m2, i) => `${i + 1}. "${m2.match}" at index ${m2.index}${m2.groups?.length ? ` (groups: ${m2.groups.join(", ")})` : ""}`),
+        matches.length > 20 ? `
+... and ${matches.length - 20} more.` : ""
+      ].join("\n");
+      return { content: output };
+    }
+    if (a.action === "explain") {
+      const explanations = [];
+      const p = a.pattern;
+      if (p.startsWith("^")) explanations.push("^ — starts at beginning of string");
+      if (p.endsWith("$")) explanations.push("$ — ends at end of string");
+      if (/\(\?:</.test(p)) explanations.push("(?:...) — non-capturing group");
+      if (/\(\?</.test(p)) explanations.push("(?...) — named/capturing group");
+      if (/\[.*?\]/.test(p)) {
+        const charClasses = p.match(/\[.*?\]/g) || [];
+        for (const c of charClasses) explanations.push(`${c} — character class: match one of ${c.slice(1, -1)}`);
+      }
+      if (/\.\*/.test(p)) explanations.push(".* — match any character (except newline), zero or more times");
+      if (/\.\+/.test(p)) explanations.push(".+ — match any character (except newline), one or more times");
+      if (/\.\?/.test(p)) explanations.push(".? — match any character (except newline), zero or one time");
+      if (/\{[\d,]+\}/.test(p)) {
+        const quantifiers = p.match(/\{[\d,]+\}/g) || [];
+        for (const q of quantifiers) explanations.push(`${q} — quantifier: repeat ${q.slice(1, -1)} times`);
+      }
+      if (/\\d/.test(p)) explanations.push("\\d — match any digit (0-9)");
+      if (/\\w/.test(p)) explanations.push("\\w — match word character (letter, digit, underscore)");
+      if (/\\s/.test(p)) explanations.push("\\s — match whitespace character");
+      if (/\\b/.test(p)) explanations.push("\\b — word boundary");
+      if (/\|/.test(p)) explanations.push("| — OR: match either side");
+      if (/\(/.test(p) && !/\?:/.test(p)) explanations.push("(...) — capturing group");
+      if (explanations.length === 0) {
+        explanations.push("This is a simple literal pattern with no special regex constructs.");
+      }
+      return { content: `**Explanation of** \`${a.pattern}\`:
+
+${explanations.map((e) => `- ${e}`).join("\n")}` };
+    }
+    return { content: `Unknown regex action: ${a.action}`, is_error: true };
+  }
+};
+function parseCSV(text2) {
+  const lines = text2.split("\n").filter((l) => l.trim());
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = parseCSVLine(lines[0]);
+  const rows = lines.slice(1).map((l) => parseCSVLine(l));
+  return { headers, rows };
+}
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += c;
+      }
+    } else {
+      if (c === '"') {
+        inQuotes = true;
+      } else if (c === ",") {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += c;
+      }
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+function toMarkdown(headers, rows) {
+  const lines = [
+    `| ${headers.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...rows.map((r) => `| ${r.join(" | ")} |`)
+  ];
+  return lines.join("\n");
+}
+function toJSON(headers, rows) {
+  const objects = rows.map((r) => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h] = r[i] ?? "";
+    });
+    return obj;
+  });
+  return JSON.stringify(objects, null, 2);
+}
+const csvTool = {
+  name: "CSV",
+  description: "Read, filter, sort, analyze, and convert CSV files. Supports quoted fields, escaped commas, and multiple output formats (CSV, JSON, Markdown table). Deterministic — no model call. Use for data exploration, quick analysis, or format conversion.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["read", "filter", "sort", "stats", "convert"], description: "What to do with the CSV" },
+      file_path: { type: "string", description: "Path to CSV file (or use csv_text)" },
+      csv_text: { type: "string", description: "Raw CSV text (alternative to file_path)" },
+      column: { type: "string", description: "Column name for filter" },
+      value: { type: "string", description: "Value to filter by" },
+      operator: { type: "string", enum: ["eq", "neq", "gt", "lt", "contains", "starts_with", "ends_with"], description: "Filter operator (default: contains)" },
+      sort_column: { type: "string", description: "Column to sort by" },
+      sort_desc: { type: "boolean", description: "Sort descending (default: false)" },
+      limit: { type: "number", description: "Max rows to return" },
+      output_format: { type: "string", enum: ["csv", "json", "markdown"], description: "Output format (default: markdown)" }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, ctx) {
+    const a = args;
+    let csvText = a.csv_text;
+    if (!csvText && a.file_path) {
+      try {
+        csvText = await readFile(resolve(ctx.cwd, a.file_path), "utf8");
+      } catch (e) {
+        return { content: `Cannot read CSV file: ${e.message}`, is_error: true };
+      }
+    }
+    if (!csvText) return { content: "CSV tool requires file_path or csv_text.", is_error: true };
+    const { headers, rows } = parseCSV(csvText);
+    if (headers.length === 0) return { content: "CSV is empty or has no headers.", is_error: true };
+    const format = a.output_format || "markdown";
+    if (a.action === "read") {
+      const limited = a.limit ? rows.slice(0, a.limit) : rows;
+      if (format === "json") return { content: toJSON(headers, limited) };
+      if (format === "csv") return { content: [headers.join(","), ...limited.map((r) => r.join(","))].join("\n") };
+      return { content: `**CSV: ${headers.length} columns, ${rows.length} rows**
+
+${toMarkdown(headers, limited)}` };
+    }
+    if (a.action === "filter") {
+      if (!a.column || !a.value) return { content: "Filter requires column and value.", is_error: true };
+      const colIdx = headers.findIndex((h) => h.toLowerCase() === a.column.toLowerCase());
+      if (colIdx === -1) return { content: `Column "${a.column}" not found. Available: ${headers.join(", ")}`, is_error: true };
+      const op = a.operator || "contains";
+      const filtered = rows.filter((r) => {
+        const cell = r[colIdx] || "";
+        switch (op) {
+          case "eq":
+            return cell.toLowerCase() === a.value.toLowerCase();
+          case "neq":
+            return cell.toLowerCase() !== a.value.toLowerCase();
+          case "gt":
+            return Number(cell) > Number(a.value);
+          case "lt":
+            return Number(cell) < Number(a.value);
+          case "contains":
+            return cell.toLowerCase().includes(a.value.toLowerCase());
+          case "starts_with":
+            return cell.toLowerCase().startsWith(a.value.toLowerCase());
+          case "ends_with":
+            return cell.toLowerCase().endsWith(a.value.toLowerCase());
+          default:
+            return true;
+        }
+      });
+      const limited = a.limit ? filtered.slice(0, a.limit) : filtered;
+      if (format === "json") return { content: toJSON(headers, limited) };
+      if (format === "csv") return { content: [headers.join(","), ...limited.map((r) => r.join(","))].join("\n") };
+      return { content: `**Filter: ${a.column} ${op} "${a.value}"** — ${filtered.length} matching rows
+
+${toMarkdown(headers, limited)}` };
+    }
+    if (a.action === "sort") {
+      if (!a.sort_column) return { content: "Sort requires sort_column.", is_error: true };
+      const colIdx = headers.findIndex((h) => h.toLowerCase() === a.sort_column.toLowerCase());
+      if (colIdx === -1) return { content: `Column "${a.sort_column}" not found. Available: ${headers.join(", ")}`, is_error: true };
+      const sortDesc = a.sort_desc;
+      const sorted = [...rows].sort((rowA, rowB) => {
+        const va = rowA[colIdx] || "";
+        const vb = rowB[colIdx] || "";
+        const na = Number(va);
+        const nb = Number(vb);
+        if (!isNaN(na) && !isNaN(nb)) return sortDesc ? nb - na : na - nb;
+        return sortDesc ? vb.localeCompare(va) : va.localeCompare(vb);
+      });
+      const limited = a.limit ? sorted.slice(0, a.limit) : sorted;
+      if (format === "json") return { content: toJSON(headers, limited) };
+      if (format === "csv") return { content: [headers.join(","), ...limited.map((r) => r.join(","))].join("\n") };
+      return { content: `**Sorted by ${a.sort_column} ${a.sort_desc ? "desc" : "asc"}** — ${rows.length} rows
+
+${toMarkdown(headers, limited)}` };
+    }
+    if (a.action === "stats") {
+      const stats = [];
+      for (let i = 0; i < headers.length; i++) {
+        const values = rows.map((r) => r[i] || "");
+        const unique2 = new Set(values).size;
+        const nulls = values.filter((v) => !v).length;
+        const isNumeric = values.every((v) => !v || !isNaN(Number(v)));
+        const sample = values.find((v) => v) || "";
+        stats.push({ column: headers[i], type: isNumeric ? "number" : "text", unique: unique2, nulls, sample });
+      }
+      const output = [
+        `**CSV Stats: ${rows.length} rows, ${headers.length} columns**`,
+        ``,
+        `| Column | Type | Unique | Nulls | Sample |`,
+        `|--------|------|--------|-------|--------|`,
+        ...stats.map((s) => `| ${s.column} | ${s.type} | ${s.unique} | ${s.nulls} | ${s.sample} |`)
+      ].join("\n");
+      return { content: output };
+    }
+    if (a.action === "convert") {
+      if (format === "json") return { content: toJSON(headers, rows) };
+      if (format === "csv") return { content: [headers.join(","), ...rows.map((r) => r.join(","))].join("\n") };
+      return { content: toMarkdown(headers, rows) };
+    }
+    return { content: `Unknown CSV action: ${a.action}`, is_error: true };
+  }
+};
+const LANGUAGES = {
+  en: "English",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  ru: "Russian",
+  ja: "Japanese",
+  ko: "Korean",
+  zh: "Chinese",
+  ar: "Arabic",
+  hi: "Hindi",
+  tr: "Turkish",
+  pl: "Polish",
+  nl: "Dutch",
+  sv: "Swedish",
+  da: "Danish",
+  fi: "Finnish",
+  no: "Norwegian",
+  cs: "Czech",
+  sk: "Slovak",
+  hu: "Hungarian",
+  ro: "Romanian",
+  bg: "Bulgarian",
+  hr: "Croatian",
+  th: "Thai",
+  vi: "Vietnamese",
+  id: "Indonesian",
+  ms: "Malay",
+  tl: "Filipino",
+  uk: "Ukrainian",
+  el: "Greek",
+  he: "Hebrew",
+  fa: "Farsi",
+  ur: "Urdu",
+  bn: "Bengali",
+  ta: "Tamil",
+  te: "Telugu",
+  mr: "Marathi",
+  gu: "Gujarati",
+  kn: "Kannada",
+  ml: "Malayalam",
+  pa: "Punjabi",
+  sw: "Swahili",
+  am: "Amharic"
+};
+const translateTool = {
+  name: "Translate",
+  description: "Translate text between 50+ languages. Actions: translate (convert text), detect (identify language), languages (list supported). Uses free Google Translate API — no key required. Returns translation with detected source language.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["translate", "detect", "languages"], description: "What to do" },
+      text: { type: "string", description: "Text to translate" },
+      from: { type: "string", description: "Source language code (auto-detect if omitted)" },
+      to: { type: "string", description: "Target language code (default: en)" }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    if (a.action === "languages") {
+      const list = Object.entries(LANGUAGES).map(([code, name]) => `- **${code}** — ${name}`).join("\n");
+      return { content: `**Supported Languages (${Object.keys(LANGUAGES).length}):**
+
+${list}` };
+    }
+    if (a.action === "detect") {
+      if (!a.text) return { content: "Detect requires text.", is_error: true };
+      try {
+        const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(a.text.slice(0, 500))}`, { signal: AbortSignal.timeout(1e4) });
+        if (!res.ok) return { content: `Detection failed: ${res.status}`, is_error: true };
+        const data = await res.json();
+        const detected = data?.[2] || "unknown";
+        return { content: `Detected language: **${LANGUAGES[detected] || detected}** (${detected})` };
+      } catch (e) {
+        return { content: `Detection error: ${e.message}`, is_error: true };
+      }
+    }
+    if (a.action === "translate") {
+      if (!a.text) return { content: "Translate requires text.", is_error: true };
+      const from = a.from || "auto";
+      const to = a.to || "en";
+      try {
+        const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(a.text.slice(0, 5e3))}`, { signal: AbortSignal.timeout(15e3) });
+        if (!res.ok) return { content: `Translation failed: ${res.status}`, is_error: true };
+        const data = await res.json();
+        const translated = (data?.[0] || []).map((seg) => seg[0]).join("");
+        const detectedSource = data?.[2] || from;
+        const fromLabel = LANGUAGES[detectedSource] || detectedSource;
+        const toLabel = LANGUAGES[to] || to;
+        return { content: `**${fromLabel} → ${toLabel}:**
+
+${translated}` };
+      } catch (e) {
+        return { content: `Translation error: ${e.message}`, is_error: true };
+      }
+    }
+    return { content: `Unknown translate action: ${a.action}`, is_error: true };
+  }
+};
+function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  if (h.length === 3) {
+    const r = parseInt(h[0] + h[0], 16);
+    const g = parseInt(h[1] + h[1], 16);
+    const b = parseInt(h[2] + h[2], 16);
+    return { r, g, b };
+  }
+  if (h.length === 6) {
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return { r, g, b };
+  }
+  return null;
+}
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map((x) => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, "0")).join("");
+}
+function rgbToHsl(r, g, b) {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l: Math.round(l * 100) };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+function hslToRgb(h, s, l) {
+  h /= 360;
+  s /= 100;
+  l /= 100;
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p2, q2, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p2 + (q2 - p2) * 6 * t;
+    if (t < 1 / 2) return q2;
+    if (t < 2 / 3) return p2 + (q2 - p2) * (2 / 3 - t) * 6;
+    return p2;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255)
+  };
+}
+function luminance(r, g, b) {
+  const a = [r, g, b].map((v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+}
+const colorTool = {
+  name: "Color",
+  description: "Color conversion (hex/rgb/hsl), palette generation (complementary/analogous/triadic/split-complementary/tetradic), contrast ratio checking (WCAG AA/AAA), and color harmony. Deterministic — no model call.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["convert", "palette", "contrast", "harmony"], description: "What to do" },
+      color: { type: "string", description: "Color in hex (#ff0000), rgb(r,g,b), or hsl(h,s%,l%) format" },
+      format: { type: "string", enum: ["hex", "rgb", "hsl"], description: "Target format for convert" },
+      base: { type: "string", description: "Base color for palette/harmony" },
+      scheme: { type: "string", enum: ["complementary", "analogous", "triadic", "split-complementary", "tetradic"], description: "Color scheme for palette" }
+    },
+    required: ["action"]
+  },
+  permission: "allow",
+  async execute(args, _ctx) {
+    const a = args;
+    if (a.action === "contrast") {
+      const c1 = a.color ? hexToRgb(a.color.replace(/[^a-fA-F0-9#]/g, "")) : null;
+      const c2 = a.base ? hexToRgb(a.base.replace(/[^a-fA-F0-9#]/g, "")) : null;
+      if (!c1 || !c2) return { content: "Contrast requires two valid hex colors (color and base).", is_error: true };
+      const l1 = luminance(c1.r, c1.g, c1.b);
+      const l2 = luminance(c2.r, c2.g, c2.b);
+      const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      const aa = ratio >= 4.5;
+      const aaa = ratio >= 7;
+      const aaLarge = ratio >= 3;
+      return {
+        content: [
+          `**Contrast Ratio: ${ratio.toFixed(2)}:1**`,
+          ``,
+          `- WCAG AA (normal text): ${aa ? "PASS" : "FAIL"}`,
+          `- WCAG AA (large text): ${aaLarge ? "PASS" : "FAIL"}`,
+          `- WCAG AAA (normal text): ${aaa ? "PASS" : "FAIL"}`,
+          ``,
+          `Colors: ${a.color} on ${a.base}`
+        ].join("\n")
+      };
+    }
+    if (a.action === "palette") {
+      const base2 = a.base || "#3b82f6";
+      const rgb = hexToRgb(base2);
+      if (!rgb) return { content: `Invalid base color: ${base2}`, is_error: true };
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      const scheme = a.scheme || "complementary";
+      const hues = [];
+      switch (scheme) {
+        case "complementary":
+          hues.push(hsl.h, (hsl.h + 180) % 360);
+          break;
+        case "analogous":
+          hues.push(hsl.h, (hsl.h + 30) % 360, (hsl.h + 60) % 360, (hsl.h - 30 + 360) % 360);
+          break;
+        case "triadic":
+          hues.push(hsl.h, (hsl.h + 120) % 360, (hsl.h + 240) % 360);
+          break;
+        case "split-complementary":
+          hues.push(hsl.h, (hsl.h + 150) % 360, (hsl.h + 210) % 360);
+          break;
+        case "tetradic":
+          hues.push(hsl.h, (hsl.h + 90) % 360, (hsl.h + 180) % 360, (hsl.h + 270) % 360);
+          break;
+      }
+      const colors = hues.map((h) => {
+        const rgb2 = hslToRgb(h, hsl.s, hsl.l);
+        return { hex: rgbToHex(rgb2.r, rgb2.g, rgb2.b), hsl: `hsl(${h}, ${hsl.s}%, ${hsl.l}%)` };
+      });
+      return {
+        content: [
+          `**${scheme.charAt(0).toUpperCase() + scheme.slice(1)} Palette from ${base2}**`,
+          ``,
+          ...colors.map((c, i) => `${i + 1}. ${c.hex} (${c.hsl})`)
+        ].join("\n")
+      };
+    }
+    if (a.action === "convert") {
+      if (!a.color) return { content: "Convert requires a color.", is_error: true };
+      const cleaned = a.color.replace(/\s/g, "");
+      let rgb = null;
+      if (cleaned.startsWith("#")) rgb = hexToRgb(cleaned);
+      const rgbMatch = cleaned.match(/rgb\((\d+),(\d+),(\d+)\)/i);
+      if (rgbMatch) rgb = { r: +rgbMatch[1], g: +rgbMatch[2], b: +rgbMatch[3] };
+      const hslMatch = cleaned.match(/hsl\((\d+),(\d+)%,(\d+)%\)/i);
+      if (hslMatch) rgb = hslToRgb(+hslMatch[1], +hslMatch[2], +hslMatch[3]);
+      if (!rgb) return { content: `Cannot parse color: ${a.color}. Use hex (#ff0000), rgb(r,g,b), or hsl(h,s%,l%).`, is_error: true };
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
+      const format = a.format || "hex";
+      if (format === "hex") return { content: `**Hex:** ${hex}
+**RGB:** rgb(${rgb.r}, ${rgb.g}, ${rgb.b})
+**HSL:** hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)` };
+      if (format === "rgb") return { content: `**RGB:** rgb(${rgb.r}, ${rgb.g}, ${rgb.b})
+**Hex:** ${hex}
+**HSL:** hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)` };
+      if (format === "hsl") return { content: `**HSL:** hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)
+**Hex:** ${hex}
+**RGB:** rgb(${rgb.r}, ${rgb.g}, ${rgb.b})` };
+    }
+    if (a.action === "harmony") {
+      if (!a.color) return { content: "Harmony requires a color.", is_error: true };
+      const rgb = hexToRgb(a.color);
+      if (!rgb) return { content: `Invalid color: ${a.color}`, is_error: true };
+      const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
+      const harmonies = [
+        { name: "Complementary", hues: [(hsl.h + 180) % 360] },
+        { name: "Analogous", hues: [(hsl.h + 30) % 360, (hsl.h - 30 + 360) % 360] },
+        { name: "Triadic", hues: [(hsl.h + 120) % 360, (hsl.h + 240) % 360] }
+      ];
+      const output = [
+        `**Color Harmony for ${a.color}**`,
+        ``,
+        ...harmonies.map((h) => {
+          const colors = h.hues.map((hue) => {
+            const rgb2 = hslToRgb(hue, hsl.s, hsl.l);
+            return rgbToHex(rgb2.r, rgb2.g, rgb2.b);
+          });
+          return `- **${h.name}:** ${colors.join(", ")}`;
+        })
+      ].join("\n");
+      return { content: output };
+    }
+    return { content: `Unknown color action: ${a.action}`, is_error: true };
+  }
+};
 function registerBuiltinTools() {
   for (const t of [
     // Existing tools
@@ -37404,7 +38095,13 @@ function registerBuiltinTools() {
     batchTool,
     // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)
     ultimatePlannerTool,
-    computeTool
+    computeTool,
+    // High-value utilities — deterministic, no model call
+    codeReviewTool,
+    regexTool,
+    csvTool,
+    translateTool,
+    colorTool
   ]) {
     toolRegistry.register(t);
   }
@@ -40468,6 +41165,44 @@ const computerSingleton = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.d
   __proto__: null,
   getComputerControl
 }, Symbol.toStringTag, { value: "Module" }));
+(function applyStagedUpdateSync() {
+  try {
+    const markerPath = join(homedir(), ".infinite-ai", "staged-update.json");
+    if (!existsSync(markerPath)) return;
+    const marker = JSON.parse(readFileSync(markerPath, "utf8"));
+    const src = marker.sourceDir;
+    if (!src || !existsSync(src)) {
+      try {
+        rmSync(markerPath, { force: true });
+      } catch {
+      }
+      return;
+    }
+    const installDir = process.execPath ? join(process.execPath, "..") : "";
+    if (!installDir || installDir.includes("node_modules")) return;
+    if (!existsSync(join(installDir, "Infinite OS.exe")) && !existsSync(join(installDir, "resources"))) return;
+    const copyRecursive = (s, d) => {
+      for (const e of readdirSync(s, { withFileTypes: true })) {
+        const sp = join(s, e.name), dp = join(d, e.name);
+        if (e.isDirectory()) {
+          mkdirSync(dp, { recursive: true });
+          copyRecursive(sp, dp);
+        } else {
+          try {
+            copyFileSync(sp, dp);
+          } catch (err) {
+            const c = err.code;
+            if (c !== "EBUSY" && c !== "EPERM") throw err;
+          }
+        }
+      }
+    };
+    copyRecursive(src, installDir);
+    rmSync(markerPath, { force: true });
+    console.log("[startup] Staged update applied");
+  } catch {
+  }
+})();
 const __dirname$1 = fileURLToPath(new URL(".", import.meta.url));
 async function warmUpModels() {
   try {
@@ -40605,6 +41340,24 @@ app.whenReady().then(async () => {
   registerQuickCapture();
   const cwd = process.cwd();
   void settings.load(cwd).then(() => connectAll(cwd)).catch((e) => logger.warn({ err: e }, "Background startup initialization failed"));
+  void import("./chunks/index-B2X1ZmH8.js").then(({ startHeartbeat }) => startHeartbeat()).catch(() => {
+  });
+  void import("./chunks/source-guard-H0yJYluW.js").then(({ startGuard, setViolationHandler }) => {
+    const cwd2 = process.cwd();
+    let lastWarn = 0;
+    setViolationHandler((file2) => {
+      const now2 = Date.now();
+      if (now2 - lastWarn < 1e4) return;
+      lastWarn = now2;
+      logger.warn(`[source-guard] External edit detected: ${file2} — only Infinite AI should edit Infinite OS source`);
+      try {
+        mainWindow?.webContents.send("source-guard:violation", { file: file2 });
+      } catch {
+      }
+    });
+    startGuard(cwd2);
+  }).catch(() => {
+  });
   logger.info("Brain subsystems initialized");
   const engine2 = getEngine();
   engine2.initialize().then(() => {
@@ -40688,6 +41441,7 @@ export {
   pluginStore,
   reasoning,
   router,
+  store as s,
   sdk,
   teamWorkspaces,
   websiteBuilder,

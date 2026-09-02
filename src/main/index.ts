@@ -3,6 +3,32 @@
 import { app, BrowserWindow, shell, Menu, nativeImage, session } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, rmSync, readdirSync, copyFileSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+
+// Apply staged update synchronously BEFORE any other module loads
+(function applyStagedUpdateSync() {
+  try {
+    const markerPath = join(homedir(), '.infinite-ai', 'staged-update.json');
+    if (!existsSync(markerPath)) return;
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as { sourceDir: string };
+    const src = marker.sourceDir;
+    if (!src || !existsSync(src)) { try { rmSync(markerPath, { force: true }); } catch {} return; }
+    const installDir = process.execPath ? join(process.execPath, '..') : '';
+    if (!installDir || installDir.includes('node_modules')) return;
+    if (!existsSync(join(installDir, 'Infinite OS.exe')) && !existsSync(join(installDir, 'resources'))) return;
+    const copyRecursive = (s: string, d: string): void => {
+      for (const e of readdirSync(s, { withFileTypes: true })) {
+        const sp = join(s, e.name), dp = join(d, e.name);
+        if (e.isDirectory()) { mkdirSync(dp, { recursive: true }); copyRecursive(sp, dp); }
+        else { try { copyFileSync(sp, dp); } catch (err) { const c = (err as NodeJS.ErrnoException).code; if (c !== 'EBUSY' && c !== 'EPERM') throw err; } }
+      }
+    };
+    copyRecursive(src, installDir);
+    rmSync(markerPath, { force: true });
+    console.log('[startup] Staged update applied');
+  } catch { /* normal startup */ }
+})();
 import { registerIpc } from './ipc/index.js';
 import { registerMiniMode } from './ipc/mini-mode.js';
 import { registerQuickCapture } from './ipc/quick-capture.js';
@@ -224,6 +250,24 @@ app.whenReady().then(async () => {
   void settings.load(cwd)
     .then(() => mcpConnectAll(cwd))
     .catch((e) => logger.warn({ err: e }, 'Background startup initialization failed'));
+
+  // Heartbeat — periodic idle consolidation (Hermes-inspired)
+  void import('./heartbeat/index.js').then(({ startHeartbeat }) => startHeartbeat()).catch(() => {});
+
+  // Source guard — only Infinite AI may edit Infinite OS source
+  void import('./guard/source-guard.js').then(({ startGuard, setViolationHandler }) => {
+    const cwd = process.cwd();
+    let lastWarn = 0;
+    setViolationHandler((file) => {
+      const now = Date.now();
+      if (now - lastWarn < 10_000) return; // throttle: one warning per 10s
+      lastWarn = now;
+      logger.warn(`[source-guard] External edit detected: ${file} — only Infinite AI should edit Infinite OS source`);
+      // Notify renderer so the UI can show a gentle hint (not a blocking error)
+      try { mainWindow?.webContents.send('source-guard:violation', { file }); } catch { /* ignore */ }
+    });
+    startGuard(cwd);
+  }).catch(() => {});
 
   // Start brain subsystems (instantiated and ready for IPC calls)
   logger.info('Brain subsystems initialized');

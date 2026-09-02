@@ -51,7 +51,6 @@ export const batchTool: Tool = {
     let hadError = false;
     // Simple concurrency of 8
     const concurrency = 8;
-    let idx = 0;
     const runOne = async (call: { tool: string; input: Record<string, unknown> }, n: number): Promise<string> => {
       const tool = toolRegistry.resolve(call.tool)!;
       try {
@@ -68,13 +67,14 @@ export const batchTool: Tool = {
     };
 
     const inFlight: Promise<void>[] = [];
+    let nextIdx = 0;
     const queueNext = async (): Promise<void> => {
-      if (a.stopOnError && hadError) return;
-      const cur = idx++;
-      if (cur >= a.calls.length) return;
-      const line = await runOne(a.calls[cur], cur + 1);
-      results[cur] = line;
-      await queueNext();
+      while (nextIdx < a.calls.length) {
+        if (a.stopOnError && hadError) return;
+        const cur = nextIdx++;
+        const line = await runOne(a.calls[cur], cur + 1);
+        results[cur] = line;
+      }
     };
     for (let i = 0; i < Math.min(concurrency, a.calls.length); i++) inFlight.push(queueNext());
     await Promise.all(inFlight);

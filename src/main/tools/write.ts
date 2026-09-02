@@ -20,6 +20,8 @@ export const write: Tool = {
     try {
       const abs = resolve(ctx.cwd, file_path);
       const signal = ctx.abortSignal;
+      // Mark as agent-authorized so source guard allows it
+      try { const { allowWrite } = await import('../guard/source-guard.js'); allowWrite(abs); } catch { /* guard optional */ }
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });
       return { content: `Wrote ${content.length} bytes to ${file_path}` };

@@ -40,7 +40,8 @@ export const systemTool: Tool = {
       // For filtered queries, append Where-Object clause safely via value
       let cmd = commands[input.action];
       if (input.value && ['startup','services','processes','env'].includes(input.action)) {
-        const safe = input.value.replace(/['\"]/g, '');
+        // Sanitize: only allow alphanumeric, hyphens, underscores, spaces, and dots
+        const safe = input.value.replace(/[^a-zA-Z0-9\s\-_.]/g, '');
         if (input.action === 'env') cmd = `Get-ChildItem Env: | Where-Object Name -like '*${safe}*' | Select-Object Name,Value | ConvertTo-Json -Compress`;
         if (input.action === 'services') cmd = `Get-Service | Where-Object { $_.Name -like '*${safe}*' -or $_.DisplayName -like '*${safe}*' } | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Compress`;
         if (input.action === 'startup') cmd = `Get-CimInstance Win32_StartupCommand | Where-Object Name -like '*${safe}*' | Select-Object Name,Command,Location,User | ConvertTo-Json -Compress`;

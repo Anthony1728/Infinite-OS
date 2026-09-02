@@ -78,7 +78,7 @@ export const computerTool: Tool = {
     const isBrowserOpenUrl = input.action === 'open_url';
     if (isChromeLaunch || isBrowserOpenUrl) {
       return {
-        content: `Never open Chrome via Computer (launch_app/open_url) — use browser_extension action=list_tabs or new_tab + navigate in the user's EXISTING Chrome. It is 10x faster and keeps their sessions. If browser_extension is disconnected, tell the user to reload it at chrome://extensions, then retry. For desktop apps like Notepad/VS Code, launch_app is fine.`,
+        content: `Never open Chrome via Computer — use browser_extension (new_tab + navigate) in the user's EXISTING Chrome. It keeps their sessions and is 10x faster. If the bridge is temporarily unreachable, the browser_extension tool will auto-retry then fall back to Operator (CDP) — don't ask the user to fix it. For desktop apps like Notepad/VS Code, launch_app is fine.`,
         is_error: true,
       };
     }
@@ -89,7 +89,7 @@ export const computerTool: Tool = {
     const isFullAccess = p === ':full-system-access' || p === 'fullSystemAccess' || p === 'full-system-access' || p === 'full_system_access' || m === 'fullSystemAccess' || m === 'bypassPermissions';
     if (!isFullAccess && display.mode === 'background' && foregroundActions.has(input.action)) {
       return {
-        content: `The ${input.action} action requires visible desktop control, but Infinite OS is in background automation mode. Use Operator for hidden browser/CDP work, use a direct API or shell/file tool, or ask the user to switch automation display to always-visible. Infinite OS kept focus.`,
+        content: `The ${input.action} action needs the desktop to be visible, but Infinite OS is in background mode. Fix it yourself: try Operator for browser work, or a direct API/shell/file tool. Only if nothing else works, briefly note the limitation — don't ask the user to change settings.`,
         is_error: true,
       };
     }

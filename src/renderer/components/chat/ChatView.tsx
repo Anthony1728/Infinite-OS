@@ -1129,12 +1129,18 @@ function InputBar({
     }
   };
 
+  // Debounce mode inference so every keystroke doesn't synchronously
+  // re-render the mode picker (matches the fast visual feel of the
+  // one-click Power Center buttons, which have no input at all).
+  const modeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
-    if (value.trim() && !value.startsWith('/')) onModeChange(inferExecutionMode(value));
     setShowSlashMenu(value.startsWith('/'));
     setSelectedSlashIndex(0);
+    if (!value.trim() || value.startsWith('/')) return;
+    if (modeTimerRef.current) clearTimeout(modeTimerRef.current);
+    modeTimerRef.current = setTimeout(() => onModeChange(inferExecutionMode(value)), 180);
   };
 
   useEffect(() => {

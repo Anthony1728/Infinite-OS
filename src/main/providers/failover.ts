@@ -11,13 +11,44 @@ function candidateId(candidate: Pick<ProviderCandidate, 'provider' | 'model'>): 
   return `${candidate.provider}:${candidate.model}`;
 }
 
+/** Classify provider errors into categories (inspired by Hermes Agent's FailoverReason taxonomy). */
+export type FailoverReason =
+  | 'auth' | 'auth_permanent' | 'billing' | 'rate_limit' | 'overloaded'
+  | 'server_error' | 'timeout' | 'context_overflow' | 'model_not_found'
+  | 'content_blocked' | 'format_error' | 'network' | 'unknown';
+
+export function classifyError(error: string): FailoverReason {
+  if (/\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i.test(error)) return 'auth';
+  if (/\b(?:402|billing|insufficient\s+balance|quota\s*exceeded|credit)\b/i.test(error)) return 'billing';
+  if (/\b(?:429|rate.?limit|quota|capacity)\b/i.test(error)) return 'rate_limit';
+  if (/\b(?:overloaded|capacity|try again)\b/i.test(error)) return 'overloaded';
+  if (/\b(?:5\d\d|server.?error|internal.?error|bad.?gateway|service.?unavailable)\b/i.test(error)) return 'server_error';
+  if (/\b(?:timeout|timed.?out|stalled|stall|no provider progress|supervisor.*restart|aborted.*stream)\b/i.test(error)) return 'timeout';
+  if (/\b(?:context.?overflow|context.?length|too.?many.?tokens|payload.?too.?large|max.?tokens)\b/i.test(error)) return 'context_overflow';
+  if (/\b(?:404|model\s*(?:not found|unavailable|doesn'?t exist)|invalid model|unknown model)\b/i.test(error)) return 'model_not_found';
+  if (/\b(?:content.?policy|content.?blocked|policy.?blocked|safety|harmful)\b/i.test(error)) return 'content_blocked';
+  if (/\b(?:format.?error|invalid.?request|malformed|parse.?error)\b/i.test(error)) return 'format_error';
+  if (/\b(?:network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse)\b/i.test(error)) return 'network';
+  return 'unknown';
+}
+
+/** Jittered exponential backoff (Hermes-inspired decorrelated jitter). */
+export function jitteredBackoff(attempt: number, baseMs = 800, maxMs = 30_000): number {
+  const exp = Math.min(baseMs * Math.pow(2, attempt), maxMs);
+  const jitter = exp * 0.3 * (Math.random() * 2 - 1); // ±30%
+  return Math.max(200, Math.round(exp + jitter));
+}
+
 /** Temporarily deprioritize a model that just failed so the next request starts with a known-healthier option. */
 export function recordProviderFailure(candidate: Pick<ProviderCandidate, 'provider' | 'model'>, error: string): void {
-  const cooldown = /\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden)\b/i.test(error)
-    ? 10 * 60_000
-    : /\b(?:429|rate.?limit|quota|capacity|overloaded)\b/i.test(error)
-      ? 2 * 60_000
-      : 30_000;
+  const reason = classifyError(error);
+  const cooldown =
+    reason === 'auth' || reason === 'billing' ? 10 * 60_000
+    : reason === 'rate_limit' ? 2 * 60_000
+    : reason === 'overloaded' ? 60_000
+    : reason === 'server_error' ? 30_000
+    : reason === 'timeout' || reason === 'network' ? 15_000
+    : 20_000;
   unhealthyUntil.set(candidateId(candidate), Date.now() + cooldown);
 }
 

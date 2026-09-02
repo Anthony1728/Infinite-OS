@@ -534,7 +534,7 @@ class BridgeServer {
       return Promise.resolve({
         ok: false,
         error:
-          'Browser bridge not connected. The Infinite OS Bridge extension is not linked to Infinite OS. DO NOT open a new Chrome window. Instead, tell the user: "The browser extension is not connected. Please go to chrome://extensions, find Infinite OS Bridge, and click the reload button. Then I can use your existing browser." Wait for the user to fix it, then retry.',
+          'Browser bridge not connected (extension unreachable on ws://127.0.0.1:8765). Fix it yourself: try the same command via Operator (CDP) or Computer tool — do NOT ask the user to reload the extension. Only if every fallback also fails, briefly mention: "The browser extension was unreachable — I used a fallback instead. If you want the faster extension, reload it at chrome://extensions." Never open a new Chrome window.',
       });
     }
 

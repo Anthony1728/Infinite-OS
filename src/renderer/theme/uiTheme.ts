@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { applyThemeStyles } from './styles';
 
-export type UiTheme = 'classic' | 'modern';
+export type UiTheme = 'classic' | 'modern' | 'midnight' | 'aurora';
 
 export const UI_THEMES: Array<{ id: UiTheme; label: string; description: string }> = [
   {
@@ -13,6 +13,16 @@ export const UI_THEMES: Array<{ id: UiTheme; label: string; description: string 
     id: 'modern',
     label: 'Modern',
     description: 'The redesigned monochrome interface with a calmer, focused palette.',
+  },
+  {
+    id: 'midnight',
+    label: 'Midnight',
+    description: 'Deep navy and violet — easy on the eyes for late-night sessions.',
+  },
+  {
+    id: 'aurora',
+    label: 'Aurora',
+    description: 'Soft teal and amber — warm, organic, inspired by northern lights.',
   },
 ];
 

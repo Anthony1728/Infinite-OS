@@ -14,7 +14,6 @@ const api = {
     ipcRenderer.invoke(IPC.BRIDGE_EXEC, args),
   onStreamEvent: (cb: (e: unknown) => void) => {
     const handler = (_e: unknown, payload: unknown) => {
-      console.log('[preload] onStreamEvent:', JSON.stringify(payload)?.slice(0, 200));
       cb(payload);
     };
     ipcRenderer.on(IPC.CHAT_STREAM_EVENT, handler);

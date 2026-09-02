@@ -27,6 +27,7 @@ export const ultimatePlannerTool: Tool = {
   permission: 'allow',
   async execute(args: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const a = args as PlannerArgs;
+    if (!a.goal || typeof a.goal !== 'string') return { content: 'UltimatePlanner requires a goal string.', is_error: true };
     const goal = a.goal.trim();
     if (!goal) return { content: 'UltimatePlanner requires goal.', is_error: true };
 

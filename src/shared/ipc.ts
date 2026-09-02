@@ -175,6 +175,16 @@ export const IPC = {
   AUTOMATION_CANCEL_RUN: 'automation:cancel-run',
   AUTOMATION_CREATE_FROM_NL: 'automation:create-from-nl',
 
+  // Heartbeat (Hermes-inspired idle consolidation)
+  HEARTBEAT_STATUS: 'heartbeat:status',
+
+  // Background build (app stays running while AI edits code)
+  BUILD_START: 'build:start',
+  BUILD_STATUS: 'build:status',
+  BUILD_CANCEL: 'build:cancel',
+  BUILD_HAS_UPDATE: 'build:has-update',
+  BUILD_CLEAR_UPDATE: 'build:clear-update',
+
   // Phone remote (LAN companion)
   REMOTE_PHONE_INFO: 'remote:phone-info',
 

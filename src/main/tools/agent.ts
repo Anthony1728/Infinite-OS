@@ -98,8 +98,11 @@ export const agent: Tool = {
       let success = 0;
       let failed = 0;
 
-      for (const task of batch.slice(0, 10)) {
-        const result = finalMap.get(task.subagent_type as AgentId);
+      for (let i = 0; i < batch.slice(0, 10).length; i++) {
+        const task = batch[i];
+        // Use index-based lookup since duplicate agent types would overwrite in a Map
+        const resultKey = Array.from(finalMap.keys())[i];
+        const result = resultKey ? finalMap.get(resultKey) : undefined;
         if (result?.error) {
           failed++;
           output.push(`[${task.subagent_type}] FAILED: ${result.error}`);

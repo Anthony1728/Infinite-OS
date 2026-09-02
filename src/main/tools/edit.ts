@@ -24,6 +24,7 @@ export const edit: Tool = {
     try {
       const abs = resolve(ctx.cwd, file_path);
       const signal = ctx.abortSignal;
+      try { const { allowWrite } = await import('../guard/source-guard.js'); allowWrite(abs); } catch { /* guard optional */ }
       const fsOpts = signal ? { signal } as const : undefined;
       const original = await readFile(abs, { encoding: 'utf8', ...fsOpts });
 
