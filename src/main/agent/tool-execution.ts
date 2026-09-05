@@ -3,11 +3,12 @@ import { checkPermission } from './permissions.js';
 import { runHooks } from './hooks.js';
 import type { Tool, ToolResult } from '../tools/base.js';
 
-export const TOOL_EXECUTION_TIMEOUT_MS = 10 * 60_000;
+export const TOOL_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 
 const PARALLEL_SAFE_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Browser', 'Skills',
   'Json', 'Text', 'Crypto', 'Math', 'Time', 'Timer', 'GitStatus', 'GitLog', 'GitDiff',
+  'TodoRead', 'Knowledge', 'System', 'FileOps',
 ]);
 
 /** Read-only/compute-only tools can safely fan out in one model turn. */

@@ -23,6 +23,15 @@ vi.mock('../providers/failover.js', () => ({
   recordProviderFailure: mocks.recordProviderFailure,
   recordProviderSuccess: mocks.recordProviderSuccess,
   selectNextProviderCandidate: mocks.selectNextProviderCandidate,
+  isTransientStreamFailure: () => false,
+  backoffForError: () => 0,
+  classifyError: () => 'unknown',
+  SAME_MODEL_STREAM_RETRIES: 3,
+  FAILOVER_CANDIDATE_RETRIES: 2,
+  createCapabilityTracker: () => ({ failures: new Map(), details: new Map() }),
+  recordCapabilityFailure: () => {},
+  getCapabilityFailureCount: () => 0,
+  CAPABILITY_FAILURE_THRESHOLD: 2,
 }));
 vi.mock('./context.js', () => ({ buildSystemPrompt: mocks.buildSystemPrompt, buildContext: mocks.buildContext }));
 vi.mock('./hooks.js', () => ({ runHooks: mocks.runHooks }));

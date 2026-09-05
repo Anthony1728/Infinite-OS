@@ -29,7 +29,17 @@ const orchestratorBySession = new Map<string, string>();
 const filesByChatTask = new Map<string, string[]>();
 const selectedAgentRuns = new Map<
   string,
-  { sessionId: string; chatTaskId: string; activityId: string; agentName: string; preview: string }
+  {
+    sessionId: string;
+    chatTaskId: string;
+    activityId: string;
+    agentName: string;
+    preview: string;
+    /** Live transcript message ids streamed for this run (unified streaming). */
+    liveMessageIds: string[];
+    /** Tool activity row ids (toolUseId) created for this run. */
+    liveToolUseIds: string[];
+  }
 >();
 let activeTeachingChatSessionId: string | null = null;
 
@@ -375,17 +385,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     window.api.onAgentEvent(async (payload: unknown) => {
       const event = payload as {
-        type: 'start' | 'text_delta' | 'tool_call' | 'complete' | 'fail';
+        type:
+          | 'start'
+          | 'text_delta'
+          | 'tool_call'
+          | 'complete'
+          | 'fail'
+          | 'retrying'
+          | 'message_start'
+          | 'provider_start'
+          | 'tool_use_start'
+          | 'tool_use_end'
+          | 'tool_progress'
+          | 'tool_result'
+          | 'provider_status'
+          | 'message_end'
+          | 'message_discard';
         runId?: string;
         text?: string;
         toolName?: string;
         result?: string;
         error?: string;
+        message_id?: string;
+        provider?: string;
+        model?: string;
+        turn?: number;
+        tool_use_id?: string;
+        name?: string;
+        input?: unknown;
+        status?: string;
+        detail?: string;
+        content?: unknown;
+        is_error?: boolean;
+        partial?: boolean;
+        from?: string;
+        to?: string;
+        reason?: string;
+        stop_reason?: Message['stop_reason'];
+        usage?: unknown;
+        attempt?: number;
       };
       if (!event.runId) return;
       const context = selectedAgentRuns.get(event.runId);
       if (!context) return;
 
+      // Legacy preview updates for activity feed row
       if (event.type === 'text_delta') {
         context.preview = `${context.preview}${event.text ?? ''}`.slice(-500);
         if (context.sessionId === get().currentSessionId) {
@@ -397,7 +441,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ),
           }));
         }
-        return;
+        // Fall through — also render into the transcript via the unified pipeline
       }
 
       if (event.type === 'tool_call') {
@@ -417,7 +461,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
 
-      if (event.type !== 'complete' && event.type !== 'fail') return;
+      if (event.type !== 'complete' && event.type !== 'fail') {
+        // Route EVERY streaming event through the same handleStreamEvent
+        // pipeline that the automatic agent uses — identical transcript,
+        // tool cards, provider status, tab creation, file extraction, etc.
+
+        // Populate live tracking arrays so finalization knows what was streamed
+        if (event.type === 'message_start' && typeof event.message_id === 'string') {
+          if (!context.liveMessageIds.includes(event.message_id)) {
+            context.liveMessageIds.push(event.message_id);
+          }
+        }
+        if ((event.type === 'tool_use_start' || event.type === 'tool_use_end') && typeof event.tool_use_id === 'string') {
+          if (!context.liveToolUseIds.includes(event.tool_use_id)) {
+            context.liveToolUseIds.push(event.tool_use_id);
+          }
+        }
+
+        const liveId = context.liveMessageIds.length
+          ? context.liveMessageIds[context.liveMessageIds.length - 1]
+          : undefined;
+        // Adapt agent-event shape to the stream-event shape handleStreamEvent expects
+        const adapted: Record<string, unknown> = { ...event, sessionId: context.sessionId };
+        if (!adapted.message_id && liveId) adapted.message_id = liveId;
+        void handleStreamEvent(adapted as { sessionId: string } & StreamEvent, {
+          sessionId: context.sessionId,
+        }).catch((err) => console.error('[chat] handleStreamEvent error:', err));
+        return;
+      }
       selectedAgentRuns.delete(event.runId);
       clearSafetyTimer(context.sessionId);
       activeChatTaskBySession.delete(context.sessionId);
@@ -450,23 +521,55 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (successful) useAgentsStore.getState().completeChatTask(context.chatTaskId);
       else useAgentsStore.getState().failChatTask(context.chatTaskId, event.error);
 
+      // The streamed turns ARE the transcript: finalize them in place instead
+      // of appending a duplicate result message. Only runs that never
+      // streamed (background runs, session switches) get the legacy append.
+      const liveIds = [...context.liveMessageIds];
+      const liveToolIds = new Set(context.liveToolUseIds);
+      context.liveMessageIds.length = 0;
+      context.liveToolUseIds.length = 0;
+      const finalizeStatus = successful ? ('done' as const) : ('error' as const);
       if (context.sessionId === get().currentSessionId) {
-        set((state) => ({
-          streaming: false,
-          messages: [...state.messages, assistantMessage],
-          activity: state.activity.map((item) =>
-            item.id === context.activityId
-              ? {
-                  ...item,
-                  status: successful ? ('done' as const) : ('error' as const),
-                  label: successful ? `${context.agentName} completed the task` : `${context.agentName} failed`,
-                  detail: successful ? responseText.slice(0, 500) : event.error || 'Unknown agent error.',
-                }
-              : item,
-          ),
-        }));
+        set((state) => {
+          const liveSet = new Set(liveIds);
+          const hasLive = state.messages.some((m) => liveSet.has(m.id));
+          return {
+            streaming: false,
+            // Success with streamed turns: they ARE the transcript, finalize
+            // in place. Failures always append the error message; runs that
+            // never streamed append the legacy result message.
+            messages: hasLive && successful ? state.messages : [...state.messages, assistantMessage],
+            activity: state.activity.map((item) =>
+              item.id === context.activityId
+                ? {
+                    ...item,
+                    status: finalizeStatus,
+                    label: successful ? `${context.agentName} completed the task` : `${context.agentName} failed`,
+                    detail: successful ? responseText.slice(0, 500) : event.error || 'Unknown agent error.',
+                  }
+                : item.toolUseId && liveToolIds.has(item.toolUseId) && item.status === 'running'
+                  ? { ...item, status: finalizeStatus }
+                  : item,
+            ),
+          };
+        });
       }
-      void window.api.appendSessionMessage({ sessionId: context.sessionId, message: assistantMessage }).catch(() => undefined);
+      // Persist the streamed turns in order. Failures additionally keep the
+      // legacy error message so the reason stays in the transcript.
+      {
+        const st = get();
+        const liveMsgs = liveIds
+          .map((id) => st.messages.find((m) => m.id === id))
+          .filter((m): m is Message => Boolean(m));
+        if (liveMsgs.length) {
+          for (const m of liveMsgs) {
+            void window.api.appendSessionMessage({ sessionId: context.sessionId, message: m }).catch(() => undefined);
+          }
+        }
+        if (!successful || !liveMsgs.length) {
+          void window.api.appendSessionMessage({ sessionId: context.sessionId, message: assistantMessage }).catch(() => undefined);
+        }
+      }
       if (isBillingError || isVerifiedFail) {
         try {
           const curMsgs = get().messages;
@@ -539,6 +642,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const data = ev.data as { subTaskId: string; agentType: string; description: string };
         if (!data.subTaskId || !data.agentType || !data.description) return;
         agentStore.addSubTask(ev.taskId, data.subTaskId, data.agentType, data.description);
+        subtaskProgressById.set(data.subTaskId, { description: data.description, preview: '', toolIds: [] });
         if (isCurrentSession) {
           set((state) => ({
             activity: [
@@ -564,6 +668,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
         };
         if (isCurrentSession) set((s) => ({ messages: [...s.messages, progressMsg] }));
+      } else if (ev.type === 'subtask_progress') {
+        // Live subagent stream (text, tools, retries) — activity feed only,
+        // so parallel phases never interleave tokens into the chat transcript.
+        const data = ev.data as { subTaskId: string; agentType: string; event: unknown };
+        const inner = (data.event ?? {}) as { type?: string; text?: string };
+        const progress = subtaskProgressById.get(data.subTaskId) ?? { description: '', preview: '', toolIds: [] as string[] };
+        subtaskProgressById.set(data.subTaskId, progress);
+        if (inner.type === 'text_delta' && typeof inner.text === 'string' && inner.text) {
+          if (!isCurrentSession) return;
+          progress.preview = `${progress.preview}${inner.text}`.slice(-2000);
+          const detail = progress.preview ? `…${progress.preview.slice(-280)}` : progress.description;
+          set((state) => ({
+            activity: state.activity.map((item) =>
+              item.id === `subtask-${data.subTaskId}` ? { ...item, detail } : item,
+            ),
+          }));
+          return;
+        }
+        if (!isCurrentSession) return;
+        applySubagentLiveEvent(
+          {
+            sessionId: ev.sessionId,
+            agentName: data.agentType || 'Sub-agent',
+            activityRowId: `subtask-${data.subTaskId}`,
+            transcript: false,
+            liveIds: [],
+            toolIds: progress.toolIds,
+          },
+          data.event,
+        );
       } else if (ev.type === 'task_updated') {
         if (!isCurrentSession) return;
         const data = ev.data as { interjection?: string; affectedPendingTasks?: number };
@@ -632,6 +766,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       } else if (ev.type === 'subtask_completed') {
         const data = ev.data as { subTaskId: string; result: string };
+        const toolIds = new Set(subtaskProgressById.get(data.subTaskId)?.toolIds ?? []);
+        subtaskProgressById.delete(data.subTaskId);
         // Create files from sub-agent result
         const files = await extractAndCreateFilesFromText(data.result);
         agentStore.completeSubTask(data.subTaskId, data.result, files);
@@ -640,7 +776,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             activity: state.activity.map((item) =>
               item.id === `subtask-${data.subTaskId}`
                 ? { ...item, status: 'done' as const, label: `${item.name} agent completed`, detail: data.result.slice(0, 500) }
-                : item,
+                : toolIds.has(item.toolUseId) && item.status === 'running'
+                  ? { ...item, status: 'done' as const }
+                  : item,
             ),
           }));
         }
@@ -655,13 +793,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (isCurrentSession) set((s) => ({ messages: [...s.messages, resultMsg] }));
       } else if (ev.type === 'subtask_failed') {
         const data = ev.data as { subTaskId: string; error: string };
+        const toolIds = new Set(subtaskProgressById.get(data.subTaskId)?.toolIds ?? []);
+        subtaskProgressById.delete(data.subTaskId);
         agentStore.failSubTask(data.subTaskId, data.error);
         if (isCurrentSession) {
           set((state) => ({
             activity: state.activity.map((item) =>
               item.id === `subtask-${data.subTaskId}`
                 ? { ...item, status: 'error' as const, label: `${item.name} agent failed`, detail: data.error }
-                : item,
+                : toolIds.has(item.toolUseId) && item.status === 'running'
+                  ? { ...item, status: 'error' as const }
+                  : item,
             ),
           }));
         }
@@ -806,7 +948,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // This makes the UI feel instant when the user presses Enter.
     set({ streaming: true });
 
-    const text = promptForExecutionMode(visibleText, mode);
+    // Only apply mode prefix when user explicitly chose a non-default mode.
+    // The default 'agent' mode should behave identically to the button path
+    // (no prefix, direct streaming via window.api.sendMessage).
+    const text = (mode && mode !== 'chat' && mode !== 'agent')
+      ? promptForExecutionMode(visibleText, mode)
+      : visibleText.trim();
     const { currentSessionId } = get();
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
@@ -968,7 +1115,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    if (agentId) {
+    if (agentId && agentId !== 'auto') {
       let sessionId = currentSessionId;
       if (!sessionId) {
         const session = await window.api.createSession({
@@ -995,21 +1142,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const taskTitle = visibleText.length > 60 ? `${visibleText.slice(0, 60)}...` : visibleText;
       const chatTaskId = useAgentsStore.getState().addChatTask(`${agentName}: ${taskTitle}`);
       activeChatTaskBySession.set(selectedSessionId, chatTaskId);
+      // Start with empty activity[] so ThinkingBubble shows first — identical
+      // to the automatic agent path. Activity rows are created by
+      // handleStreamEvent when tools actually start running.
       set((state) => ({
         messages: [...state.messages, userMessage],
         streaming: true,
-        activity: [
-          {
-            id: activityId,
-            toolUseId: activityId,
-            name: agentId,
-            label: `${agentName} is starting`,
-            detail: visibleText,
-            category: 'agent',
-            status: 'running',
-            timestamp: Date.now(),
-          },
-        ],
+        activity: [],
       }));
       await window.api.appendSessionMessage({ sessionId: selectedSessionId, message: userMessage });
 
@@ -1028,12 +1167,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           activityId,
           agentName,
           preview: '',
+          liveMessageIds: [],
+          liveToolUseIds: [],
         });
-        set((state) => ({
-          activity: state.activity.map((item) =>
-            item.id === activityId ? { ...item, label: `${agentName} is working` } : item,
-          ),
-        }));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         activeChatTaskBySession.delete(selectedSessionId);
@@ -1310,9 +1446,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
       }
-      } catch (error) {
+    } catch (error) {
         console.warn('[chat] Local action router unavailable; continuing through the agent loop.', error);
-      }
     }
     // Always enter the credential-aware recovery router. If the selected model
     // or provider is unavailable it can use any other saved key automatically.
@@ -1891,8 +2026,287 @@ async function extractAndCreateFilesFromText(text: string, requestText = ''): Pr
   return createdFiles;
 }
 
-async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
+// Live progress state for orchestrator subtasks (activity feed only).
+const subtaskProgressById = new Map<string, { description: string; preview: string; toolIds: string[] }>();
+
+// ── Unified subagent live streaming ──────────────────────────────────────
+// Selected agents and orchestrator subtasks emit the same chat-compatible
+// live events as the automatic agent loop (message/tool/provider
+// boundaries). This applier renders them through the identical UI pipeline:
+// live transcript text, tool cards in the activity feed, provider status.
+// transcript=true (chat-spawned agents): stream into a live transcript
+// message, one per model turn — exactly like the automatic agent.
+// transcript=false (orchestrator subtasks): activity feed only, so parallel
+// phases never interleave tokens into the chat transcript.
+interface SubagentLiveTarget {
+  sessionId: string;
+  agentName: string;
+  /** Agent/subtask-level activity row id. */
+  activityRowId: string;
+  transcript: boolean;
+  /** Tracked live transcript message ids (mutated in place, never reassigned). */
+  liveIds: string[];
+  /** Tracked tool activity row ids / toolUseIds (mutated in place). */
+  toolIds: string[];
+}
+
+interface SubagentLiveEvent {
+  type: string;
+  message_id?: string;
+  provider?: string;
+  model?: string;
+  turn?: number;
+  text?: string;
+  tool_use_id?: string;
+  name?: string;
+  input?: unknown;
+  status?: string;
+  detail?: string;
+  content?: unknown;
+  is_error?: boolean;
+  partial?: boolean;
+  from?: string;
+  to?: string;
+  reason?: string;
+  stop_reason?: Message['stop_reason'];
+  usage?: unknown;
+  attempt?: number;
+}
+
+function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void {
+  const ev = raw as SubagentLiveEvent;
+  if (target.sessionId !== useChatStore.getState().currentSessionId) return;
+  const set = useChatStore.setState;
+  const liveId = target.liveIds.length ? target.liveIds[target.liveIds.length - 1] : undefined;
+  switch (ev.type) {
+    case 'message_start': {
+      if (!target.transcript || !ev.message_id) break;
+      const msgId = ev.message_id;
+      const prevId = target.liveIds.length ? target.liveIds[target.liveIds.length - 1] : undefined;
+      const prev = prevId ? useChatStore.getState().messages.find((m) => m.id === prevId) : undefined;
+      const prevHasText = prev?.content.some((c) => c.type === 'text' && c.text.trim());
+      if (prev && !prevHasText && prevId) {
+        const dropIdx = target.liveIds.indexOf(prevId);
+        if (dropIdx >= 0) target.liveIds.splice(dropIdx, 1);
+      }
+      const droppedId = prev && !prevHasText ? prevId : undefined;
+      set((s) => {
+        const messages = droppedId ? s.messages.filter((m) => m.id !== droppedId) : s.messages;
+        if (messages.some((m) => m.id === msgId)) return { streaming: true };
+        const assistant: Message = { id: msgId, role: 'assistant', content: [], timestamp: Date.now() };
+        return { messages: [...messages, assistant], streaming: true };
+      });
+      if (!target.liveIds.includes(msgId)) target.liveIds.push(msgId);
+      break;
+    }
+    case 'provider_start': {
+      const modelLabel = ev.model || 'model';
+      set((s) => ({
+        messages: liveId && target.transcript
+          ? s.messages.map((m) => (m.id === liveId ? { ...m, provider: ev.provider, model: ev.model } : m))
+          : s.messages,
+        providerStatus: {
+          label: `Calling ${ev.provider ?? target.agentName}/${modelLabel}`,
+          detail: typeof ev.turn === 'number' && ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the request…',
+          receivedAt: Date.now(),
+        },
+      }));
+      break;
+    }
+    case 'text_delta': {
+      if (!target.transcript || !liveId || typeof ev.text !== 'string' || !ev.text) break;
+      const text = ev.text;
+      set((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== liveId) return m;
+          const last = m.content[m.content.length - 1];
+          if (last && last.type === 'text') {
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + text }] };
+          }
+          return { ...m, content: [...m.content, { type: 'text', text }] };
+        }),
+      }));
+      break;
+    }
+    case 'tool_use_start': {
+      if (!ev.tool_use_id || !ev.name) break;
+      const toolId = ev.tool_use_id;
+      const toolName = ev.name;
+      if (!target.toolIds.includes(toolId)) target.toolIds.push(toolId);
+      const summary = summarizeTool(toolName, {});
+      set((s) => ({
+        activity: s.activity.some((item) => item.toolUseId === toolId)
+          ? s.activity
+          : [
+              ...s.activity,
+              {
+                id: crypto.randomUUID(),
+                toolUseId: toolId,
+                name: toolName,
+                label: `Starting ${toolName}`,
+                detail: 'Preparing tool input...',
+                category: summary.category,
+                status: 'running' as const,
+                timestamp: Date.now(),
+              },
+            ],
+      }));
+      break;
+    }
+    case 'tool_use_end': {
+      if (!ev.tool_use_id || !ev.name) break;
+      const toolId = ev.tool_use_id;
+      const toolName = ev.name;
+      if (!target.toolIds.includes(toolId)) target.toolIds.push(toolId);
+      const summary = summarizeTool(toolName, ev.input);
+      set((s) => ({
+        messages:
+          liveId && target.transcript
+            ? s.messages.map((m) =>
+                m.id === liveId
+                  ? { ...m, content: [...m.content, { type: 'tool_use', id: toolId, name: toolName, input: ev.input }] }
+                  : m,
+              )
+            : s.messages,
+        activity: s.activity.some((item) => item.toolUseId === toolId)
+          ? s.activity.map((item) =>
+              item.toolUseId === toolId
+                ? { ...item, name: toolName, label: summary.label, detail: summary.detail, category: summary.category }
+                : item,
+            )
+          : [
+              ...s.activity,
+              {
+                id: crypto.randomUUID(),
+                toolUseId: toolId,
+                name: toolName,
+                label: summary.label,
+                detail: summary.detail,
+                category: summary.category,
+                status: 'running' as const,
+                timestamp: Date.now(),
+              },
+            ],
+      }));
+      break;
+    }
+    case 'tool_progress': {
+      if (!ev.tool_use_id || !ev.name) break;
+      const toolId = ev.tool_use_id;
+      const toolName = ev.name;
+      if (!target.toolIds.includes(toolId)) target.toolIds.push(toolId);
+      const summary = summarizeTool(toolName, undefined);
+      const status = ev.status === 'completed' ? 'done' : ev.status === 'error' ? 'error' : 'running';
+      const detail =
+        typeof ev.detail === 'string' && ev.detail ? ev.detail : summary.detail || (status === 'running' ? 'Working…' : 'Completed');
+      set((s) => ({
+        activity: s.activity.some((item) => item.toolUseId === toolId)
+          ? s.activity.map((item) =>
+              item.toolUseId === toolId
+                ? { ...item, name: toolName, label: summary.label, detail, category: summary.category, status }
+                : item,
+            )
+          : [
+              ...s.activity,
+              {
+                id: crypto.randomUUID(),
+                toolUseId: toolId,
+                name: toolName,
+                label: summary.label,
+                detail,
+                category: summary.category,
+                status,
+                timestamp: Date.now(),
+              },
+            ],
+      }));
+      break;
+    }
+    case 'tool_result': {
+      if (!ev.tool_use_id) break;
+      if (ev.partial) {
+        const progressText = typeof ev.content === 'string' ? ev.content : 'Working...';
+        set((s) => ({
+          activity: s.activity.map((item) =>
+            item.toolUseId === ev.tool_use_id ? { ...item, detail: progressText, status: 'running' as const } : item,
+          ),
+        }));
+        break;
+      }
+      set((s) => ({
+        activity: s.activity.map((item) =>
+          item.toolUseId === ev.tool_use_id && item.status === 'running'
+            ? { ...item, status: ev.is_error ? 'error' : 'done' }
+            : item,
+        ),
+      }));
+      break;
+    }
+    case 'provider_status': {
+      if (ev.status === 'failover') {
+        set({
+          providerStatus: {
+            label: 'Switching providers',
+            detail: `${ev.from ?? '?'} → ${ev.to ?? '?'}${typeof ev.reason === 'string' && ev.reason ? ` (${ev.reason.slice(0, 80)})` : ''}`,
+            receivedAt: Date.now(),
+          },
+        });
+      } else if (typeof ev.status === 'string' && ev.status) {
+        set({
+          providerStatus: {
+            label: `${target.agentName}: ${ev.status}`,
+            detail: typeof ev.detail === 'string' ? ev.detail : '',
+            receivedAt: Date.now(),
+          },
+        });
+      }
+      break;
+    }
+    case 'message_end': {
+      set((s) => ({
+        streaming: true,
+        messages:
+          liveId && target.transcript
+            ? s.messages.map((m) =>
+                m.id === liveId ? { ...m, stop_reason: ev.stop_reason, usage: ev.usage as Message['usage'] } : m,
+              )
+            : s.messages,
+        providerStatus: null,
+      }));
+      break;
+    }
+    case 'message_discard': {
+      if (typeof ev.message_id === 'string') {
+        const dropId = ev.message_id;
+        const dropIdx = target.liveIds.indexOf(dropId);
+        if (dropIdx >= 0) target.liveIds.splice(dropIdx, 1);
+        if (target.transcript) set((s) => ({ messages: s.messages.filter((m) => m.id !== dropId) }));
+      }
+      break;
+    }
+    case 'retrying': {
+      const attempt = typeof ev.attempt === 'number' ? ev.attempt : undefined;
+      set((s) => ({
+        activity: s.activity.map((item) =>
+          item.id === target.activityRowId
+            ? {
+                ...item,
+                label: `${target.agentName} is retrying${attempt ? ` (attempt ${attempt})` : ''}`,
+                detail: typeof ev.reason === 'string' && ev.reason ? ev.reason.slice(0, 500) : item.detail,
+              }
+            : item,
+        ),
+      }));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: { sessionId?: string }) {
   const { setState, getState } = useChatStore;
+  const sessionId = ctx?.sessionId ?? ev.sessionId;
   switch (ev.type) {
     case 'message_start': {
       const assistant: Message = {
@@ -2027,7 +2441,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
             timestamp: Date.now(),
           };
           setState((s) => ({ messages: [...s.messages, questionMessage] }));
-          void window.api.appendSessionMessage({ sessionId: ev.sessionId!, message: questionMessage }).catch(() => undefined);
+          void window.api.appendSessionMessage({ sessionId, message: questionMessage }).catch(() => undefined);
           // Mark activity done without adding a raw tool_result bubble
           setState((s) => ({
             activity: s.activity.map((a) => a.toolUseId === ev.tool_use_id && a.status === 'running' ? { ...a, status: 'done' as const } : a),
@@ -2167,7 +2581,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
       if (lastAssistant) {
         const files = await extractAndCreateFiles(lastAssistant, lastUser ? textFromMessage(lastUser) : '');
         if (files.length > 0) {
-          const chatTaskId = activeChatTaskBySession.get(ev.sessionId);
+          const chatTaskId = activeChatTaskBySession.get(sessionId);
           if (chatTaskId) {
             filesByChatTask.set(chatTaskId, [...(filesByChatTask.get(chatTaskId) ?? []), ...files]);
           }
@@ -2201,7 +2615,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
     }
     case 'done':
       // Clear safety timer immediately
-      clearSafetyTimer(ev.sessionId);
+      clearSafetyTimer(sessionId);
       setState((s) => ({
         streaming: false,
         providerStatus: null,
@@ -2210,7 +2624,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
         ),
       }));
       {
-        const chatTaskId = activeChatTaskBySession.get(ev.sessionId);
+        const chatTaskId = activeChatTaskBySession.get(sessionId);
         if (chatTaskId) {
           if (ev.success === false) {
             useAgentsStore.getState().failChatTask(chatTaskId, ev.reason || 'The task ended without verified success.');
@@ -2218,7 +2632,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
             useAgentsStore.getState().completeChatTask(chatTaskId, filesByChatTask.get(chatTaskId));
           }
           filesByChatTask.delete(chatTaskId);
-          activeChatTaskBySession.delete(ev.sessionId);
+          activeChatTaskBySession.delete(sessionId);
         }
       }
       break;
@@ -2226,7 +2640,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
     case 'error': {
       // Provider details stay in logs. If every configured model is exhausted,
       // return a useful local result instead of exposing transport failures.
-      clearSafetyTimer(ev.sessionId);
+      clearSafetyTimer(sessionId);
       if (ev.type === 'error') console.error('[stream] Background recovery exhausted:', ev.error);
       const currentMessages = getState().messages;
       const lastUserMsg = [...currentMessages].reverse().find((message) => message.role === 'user');
@@ -2258,7 +2672,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
           item.status === 'running' ? { ...item, status: 'done' as const } : item,
         ),
       });
-      await window.api.appendSessionMessage({ sessionId: ev.sessionId, message: fallbackMessage }).catch(() => undefined);
+      await window.api.appendSessionMessage({ sessionId, message: fallbackMessage }).catch(() => undefined);
       if (userInput) {
         await distillInteraction(userInput, fallbackText, {
           source: 'system',
@@ -2266,11 +2680,11 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent) {
           model: 'local-recovery',
         });
       }
-      const chatTaskId = activeChatTaskBySession.get(ev.sessionId);
+      const chatTaskId = activeChatTaskBySession.get(sessionId);
       if (chatTaskId) {
         useAgentsStore.getState().completeChatTask(chatTaskId, filesByChatTask.get(chatTaskId));
         filesByChatTask.delete(chatTaskId);
-        activeChatTaskBySession.delete(ev.sessionId);
+        activeChatTaskBySession.delete(sessionId);
       }
       break;
     }

@@ -10,22 +10,104 @@ import { buildSystemPrompt, buildContext } from './context.js';
 import { DecisionRouter } from '../brain/router.js';
 import {
   buildProviderFailoverPlan,
+  selectNextProviderCandidate,
   recordProviderFailure,
   recordProviderSuccess,
-  selectNextProviderCandidate,
+  isTransientStreamFailure,
+  backoffForError,
+  classifyError,
+  SAME_MODEL_STREAM_RETRIES,
+  FAILOVER_CANDIDATE_RETRIES,
+  createCapabilityTracker,
+  recordCapabilityFailure,
+  getCapabilityFailureCount,
+  CAPABILITY_FAILURE_THRESHOLD,
   type ProviderCandidate,
+  type CapabilityTracker,
+  type CapabilityFailureType,
 } from '../providers/failover.js';
 import { routeForcedBrowserTool } from './browser-routing.js';
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
 export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
-// for this long with zero events, abort the fetch and trigger failover. This
-// prevents the agent from hanging indefinitely when the provider goes silent.
-// Reduced from 3min to 45s — users expect instant responses. Slow models get
-// 45s before failover to the next provider. Keeps the chat feeling fast.
-export let LOOP_STREAM_STALL_TIMEOUT_MS = 45_000;
+// for this long with zero events, abort the fetch and retry (same model first)
+// or fail over. 60s because free-tier cold starts and NVIDIA internal retries
+// can legitimately take 30-120s of silence on a healthy request. The UI never
+// goes static during the wait (provider_start/status events keep it live), and
+// a stall no longer abandons the user's selected model on the first slow token.
+export let LOOP_STREAM_STALL_TIMEOUT_MS = 60_000;
 export const setLoopStallTimeout = (ms: number) => { LOOP_STREAM_STALL_TIMEOUT_MS = ms; };
+
+/** Build a user-facing message when all failover candidates are exhausted. */
+function buildExhaustedMessage(plan: ProviderCandidate[], lastError: string, capTracker?: CapabilityTracker): string {
+  const triedModels = [...new Set(plan.map((c) => `${c.provider}/${c.model}`))];
+  const errorType = classifyError(lastError);
+
+  // Check if any model had capability failures
+  const capabilityFailedModels: string[] = [];
+  if (capTracker) {
+    for (const candidate of plan) {
+      const id = `${candidate.provider}:${candidate.model}`;
+      const capFailures = capTracker.failures.get(id) ?? 0;
+      if (capFailures >= CAPABILITY_FAILURE_THRESHOLD) {
+        const types = capTracker.details.get(id) ?? [];
+        const typeSummary = types.map((t) => {
+          if (t === 'promise_only') return 'promised to act but did not';
+          if (t === 'explicit_failure') return 'said it cannot do the task';
+          if (t === 'tool_error') return 'its edits introduced errors';
+          if (t === 'no_execution') return 'did not use required tools';
+          return t;
+        }).join('; ');
+        capabilityFailedModels.push(`${candidate.provider}/${candidate.model} (${typeSummary})`);
+      }
+    }
+  }
+
+  const header = `All ${triedModels.length} model(s) have been tried and none could complete the request.`;
+  const details: string[] = [];
+
+  if (capabilityFailedModels.length > 0) {
+    details.push('');
+    details.push('CAPABILITY ISSUES (model was not strong enough for the task):');
+    for (const m of capabilityFailedModels) {
+      details.push(`  - ${m}`);
+    }
+    details.push('');
+    details.push('What this means: The model tried but lacked the skill to complete your request.');
+    details.push('This is NOT an API error — the model is overmatched for this type of task.');
+    details.push('');
+    details.push('RECOMMENDATION: Try a stronger model for this task:');
+    details.push('  - For coding: Use Claude Sonnet/Opus, GPT-4o, or Gemini 2.5 Pro');
+    details.push('  - For research: Use any model with web search enabled');
+    details.push('  - For desktop automation: Ensure the selected model supports tool calls');
+  }
+
+  if (errorType === 'rate_limit') {
+    details.push('');
+    details.push('API ISSUES:');
+    details.push('Every provider returned rate-limit (429) errors. The APIs need time to reset their quota windows.');
+    details.push('Try again in a few minutes, or add API keys for additional providers to spread the load.');
+  } else if (errorType === 'auth' || errorType === 'billing') {
+    details.push('');
+    details.push('API ISSUES:');
+    details.push('API keys are invalid or accounts have no remaining quota.');
+    details.push('Check your API keys in Settings > API Keys and ensure each account has balance.');
+  } else if (errorType === 'overloaded') {
+    details.push('');
+    details.push('API ISSUES:');
+    details.push('All providers are currently at capacity.');
+    details.push('Try again shortly — demand usually drops within a few minutes.');
+  } else if (capabilityFailedModels.length === 0) {
+    details.push('');
+    details.push(`Last error: ${lastError}`);
+    details.push('Try again, or check your network connection and API key status.');
+  }
+
+  details.push('');
+  details.push(`Models tried: ${triedModels.join(', ')}`);
+  return `${header}\n${details.join('\n')}`;
+}
 
 import { routeForcedResearchTool } from './research-routing.js';
 import { isExplicitActionFailure, isUnfulfilledActionPromise, requiresToolExecution } from './completion-guards.js';
@@ -101,9 +183,18 @@ export async function runAgent(
   const MAX_TURNS = typeof configuredTurns === 'number' && Number.isFinite(configuredTurns) && configuredTurns > 0
     ? Math.trunc(configuredTurns)
     : 60;
-  const WALL_CLOCK_LIMIT_MS = 10 * 60_000;
+  const WALL_CLOCK_LIMIT_MS = 15 * 60_000;
   const MAX_INTENT_ONLY_RETRIES = 2;
   let intentOnlyRetries = 0;
+  // Same-model stream retry budget: transient hiccups retry on the active
+  // candidate before any failover. Reset after every clean turn.
+  let sameModelStreamRetries = 0;
+  // Failover-candidate retry budget: non-selected models get fewer retries.
+  let failoverCandidateRetries = 0;
+  // Empty model output gets one same-model retry — usually a transient glitch.
+  let emptyResponseRetries = 0;
+  // Capability tracker: detects when a model is overmatched for the task.
+  const capTracker = createCapabilityTracker();
   let lastToolBatchHadError = false;
   let successfulToolExecutions = 0;
   let recoveryContext: Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'> | null = null;
@@ -113,11 +204,44 @@ export async function runAgent(
     .map(messageText)
     .join('\n');
   const runStartedAt = Date.now();
+  const performanceMetrics = {
+    totalToolExecutionMs: 0,
+    totalStreamMs: 0,
+    toolCalls: 0,
+    parallelToolCalls: 0,
+    sequentialToolCalls: 0,
+    failovers: 0,
+    retries: 0,
+  };
   const successfulToolNames = new Set<string>();
   const successfulToolActions: SuccessfulToolAction[] = [];
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
   const problemTracker = new ProblemTracker();
+
+  // ── Autonomous Agent Architecture: Prompt Architect → Critic → Execution Brief ──
+  // For non-trivial objectives, derive a compact execution brief once per run.
+  // Trivial greetings skip this to stay fast.
+  let executionBrief: import('./execution-brief.js').ExecutionBrief | null = null;
+  let criticReport: import('./prompt-critic.js').CriticReport | null = null;
+  const isSignificantTask = originalRequest.trim().length >= 24;
+  if (isSignificantTask) {
+    try {
+      const { architectBrief } = await import('./prompt-architect.js');
+      const { critiqueBrief, applyPatch } = await import('./prompt-critic.js');
+      const brief = architectBrief(originalRequest, { cwd: opts.cwd, model: opts.model, provider: opts.provider });
+      const report = critiqueBrief(brief);
+      const patched = report.patch && Object.keys(report.patch).length ? applyPatch(brief, report.patch) : brief;
+      executionBrief = patched;
+      criticReport = report;
+      if (report.issues.length) {
+        const warn = report.issues.filter((i) => i.severity !== 'info').map((i) => `${i.severity}: ${i.message}`).join(' | ');
+        if (warn) console.log(`[architect] Critic: ${report.verdict} — ${warn}`);
+      }
+    } catch (e) {
+      console.warn('[architect] Brief generation failed, using fallback:', (e as Error).message);
+    }
+  }
 
 
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
@@ -144,6 +268,7 @@ export async function runAgent(
       to: next.label,
     });
     console.warn(`[agent] Recovering in background: ${activeCandidate.label} -> ${next.label}: ${failure}`);
+    performanceMetrics.failovers++;
     activeCandidate = next;
     return true;
   };
@@ -178,19 +303,40 @@ export async function runAgent(
       'Git', 'CreateTab', 'BuildFeature',
       'Batch', 'AskQuestion', 'TaskGroup',
     ]);
-    const activeTools = activeCandidate.provider === 'ollama'
-      ? selectLocalModelTools(requestContext, allActiveTools)
-      : allActiveTools.filter((t) => CORE_TOOL_SET.has(t.name));
+    // Dynamic tool selection: on the first turn, prefer the brief's tool hints if present
+    // (already a filtered, task-aware set). Fall back to CORE set after that.
+    let activeTools: ReturnType<typeof toolRegistry.asProviderTools>;
+    if (activeCandidate.provider === 'ollama') {
+      activeTools = selectLocalModelTools(requestContext, allActiveTools);
+    } else if (turn === 0 && executionBrief?.toolHints.length) {
+      const hintSet = new Set(executionBrief.toolHints);
+      const hinted = allActiveTools.filter((t) => hintSet.has(t.name));
+      activeTools = hinted.length >= 6 ? hinted : allActiveTools.filter((t) => CORE_TOOL_SET.has(t.name));
+    } else {
+      activeTools = allActiveTools.filter((t) => CORE_TOOL_SET.has(t.name));
+    }
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${activeTools.map((tool) => tool.name).join(',')}`;
     let activeSystem = runSystemPrompts.get(systemKey);
     if (!activeSystem) {
-      activeSystem = await buildSystemPrompt({
+      let systemText = await buildSystemPrompt({
         ...opts,
         provider: activeCandidate.provider,
         model: activeCandidate.model,
         toolsEnabled: activeToolsEnabled,
         attachedToolNames: activeTools.map((tool) => tool.name),
       });
+      // Inject the execution brief + critic notes as high-priority task context
+      if (executionBrief) {
+        const { renderDynamicBriefBlock } = await import('./dynamic-context.js');
+        const briefBlock = renderDynamicBriefBlock(executionBrief);
+        systemText += `\n\n${briefBlock}`;
+        // Surface critic warnings so the model self-corrects before acting
+        const warnings = criticReport?.issues.filter((i) => i.severity === 'warn') ?? [];
+        if (warnings.length) {
+          systemText += `\n\n[Critic notes — address before executing]\n` + warnings.map((w) => `- ${w.message} — ${w.fix}`).join('\n');
+        }
+      }
+      activeSystem = systemText;
       runSystemPrompts.set(systemKey, activeSystem);
     }
     for (const update of drainInterjections(opts.sessionId)) {
@@ -253,6 +399,7 @@ export async function runAgent(
     const streamController = new AbortController();
     const onParentAbort = () => streamController.abort();
     opts.signal.addEventListener('abort', onParentAbort, { once: true });
+    const streamStartTime = Date.now();
 
     const stream = activeProvider.streamChat(
       {
@@ -366,15 +513,37 @@ export async function runAgent(
     } finally {
       if (streamStallInterval) clearInterval(streamStallInterval);
       opts.signal.removeEventListener('abort', onParentAbort);
+      performanceMetrics.totalStreamMs += Date.now() - streamStartTime;
     }
     }
 
     if (providerFailure) {
       decisionRouter.recordTask(activeCandidate.model, false);
+      const isSelectedModel = failoverIndex === 0;
+      const maxRetries = isSelectedModel ? SAME_MODEL_STREAM_RETRIES : FAILOVER_CANDIDATE_RETRIES;
+      const retryCounter = isSelectedModel ? sameModelStreamRetries : failoverCandidateRetries;
+      if (isTransientStreamFailure(providerFailure) && retryCounter < maxRetries) {
+        // Transient hiccup (stall, 5xx, network blip, overload, rate limit):
+        // stay on the current model and retry with an appropriate backoff.
+        if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
+        performanceMetrics.retries++;
+        if (messages.at(-1) === assistant) messages.pop();
+        opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+        const delayMs = backoffForError(providerFailure, retryCounter);
+        console.warn(`[agent] Transient failure on ${activeCandidate.label} (retry ${retryCounter + 1}/${maxRetries}, backoff ${delayMs}ms): ${providerFailure}`);
+        if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+        continue;
+      }
       if (switchCandidate(providerFailure, assistant, 'model response stream')) continue;
+      // All candidates exhausted — notify the user with a clear message.
+      const errorMsg = buildExhaustedMessage(failoverPlan, providerFailure, capTracker);
+      opts.onEvent({ type: 'provider_status', status: errorMsg });
       opts.onEvent({ type: 'fallback_required' });
       return messages;
     }
+    // A clean turn resets the retry budgets.
+    sameModelStreamRetries = 0;
+    failoverCandidateRetries = 0;
 
     if (opts.signal.aborted) break;
 
@@ -415,6 +584,24 @@ export async function runAgent(
       const missingActions = missingRequiredTaskActions(originalRequest, successfulToolActions);
       const executionMissing = (requiresToolExecution(originalRequest) && successfulToolExecutions === 0) || missingActions.length > 0;
       if (isUnfulfilledActionPromise(originalRequest, assistantText) || executionMissing) {
+        // Track this as a capability failure — the model promised but didn't deliver.
+        const capType: CapabilityFailureType = isUnfulfilledActionPromise(originalRequest, assistantText) ? 'promise_only' : 'no_execution';
+        recordCapabilityFailure(capTracker, activeCandidate, capType);
+        const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+        const capLabel = capType === 'promise_only' ? 'promised to act but did not' : 'did not use required tools';
+
+        if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+          // This model is overmatched — skip it and try a stronger one.
+          const strongerMsg = `Model ${activeCandidate.label} is not capable enough for this task (${capLabel}, ${capCount} consecutive failures). Switching to a stronger model.`;
+          console.warn(`[agent] Capability threshold reached on ${activeCandidate.label}: ${strongerMsg}`);
+          opts.onEvent({ type: 'provider_status', status: strongerMsg });
+          if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+            intentOnlyRetries = 0;
+            failoverCandidateRetries = 0;
+            continue;
+          }
+        }
+
         if (missingActions.length && !activeToolsEnabled &&
             switchCandidate(`This model does not support tool calls for the remaining required desktop actions: ${missingActions.join(', ')}.`, assistant, 'compound-action execution')) {
           intentOnlyRetries = 0;
@@ -422,6 +609,7 @@ export async function runAgent(
         }
         if (intentOnlyRetries < MAX_INTENT_ONLY_RETRIES) {
           intentOnlyRetries++;
+          performanceMetrics.retries++;
           if (messages.at(-1) === assistant) messages.pop();
           opts.onEvent({ type: 'message_discard', message_id: assistant.id });
           messages.push({
@@ -440,22 +628,67 @@ export async function runAgent(
         return messages;
       }
       if (isExplicitActionFailure(originalRequest, assistantText)) {
+        // Track this as a capability failure — the model explicitly said it can't.
+        recordCapabilityFailure(capTracker, activeCandidate, 'explicit_failure');
+        const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+
+        if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+          const strongerMsg = `Model ${activeCandidate.label} explicitly stated it cannot perform this task (${capCount} times). Switching to a stronger model.`;
+          console.warn(`[agent] Capability threshold reached on ${activeCandidate.label}: ${strongerMsg}`);
+          opts.onEvent({ type: 'provider_status', status: strongerMsg });
+          if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+            intentOnlyRetries = 0;
+            failoverCandidateRetries = 0;
+            continue;
+          }
+        }
+
         if (switchCandidate('The model could not complete the requested action.', assistant, 'completion verification')) continue;
         opts.onEvent({ type: 'fallback_required' });
         return messages;
       }
       if (!assistantText.trim()) {
+        if (emptyResponseRetries < 1) {
+          // An empty turn is usually a transient glitch, not a dead model —
+          // retry the selected model once before failing over.
+          emptyResponseRetries++;
+          performanceMetrics.retries++;
+          if (messages.at(-1) === assistant) messages.pop();
+          opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+          continue;
+        }
         if (switchCandidate('The model returned no usable response.', assistant, 'final-answer generation')) continue;
         opts.onEvent({ type: 'fallback_required' });
         return messages;
       }
       if (lastToolBatchHadError) {
+        // Track this as a capability failure — the model's edits introduced errors.
+        recordCapabilityFailure(capTracker, activeCandidate, 'tool_error');
+        const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+
+        if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+          const strongerMsg = `Model ${activeCandidate.label} repeatedly introduced errors in its edits (${capCount} times). Switching to a more capable model.`;
+          console.warn(`[agent] Capability threshold reached on ${activeCandidate.label}: ${strongerMsg}`);
+          opts.onEvent({ type: 'provider_status', status: strongerMsg });
+          if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+            lastToolBatchHadError = false;
+            intentOnlyRetries = 0;
+            failoverCandidateRetries = 0;
+            continue;
+          }
+        }
+
         if (switchCandidate('The model did not recover from a failed tool attempt.', assistant, 'tool-result recovery')) continue;
         opts.onEvent({ type: 'fallback_required' });
         return messages;
       }
       decisionRouter.recordTask(activeCandidate.model, true);
       recordProviderSuccess(activeCandidate);
+      
+      // Log performance metrics
+      const totalRunMs = Date.now() - runStartedAt;
+      console.log(`[agent] Run completed in ${totalRunMs}ms. Tools: ${performanceMetrics.toolCalls} (${performanceMetrics.parallelToolCalls} parallel, ${performanceMetrics.sequentialToolCalls} sequential). Stream: ${performanceMetrics.totalStreamMs}ms. Failovers: ${performanceMetrics.failovers}`);
+      
       learnFromCompletedResponse({
         request: originalRequest,
         taskContext,
@@ -537,6 +770,11 @@ export async function runAgent(
     for (const tu of sequentialBatch) {
       sequentialResults.push(await executeOne(tu));
     }
+    
+    // Track performance metrics
+    performanceMetrics.toolCalls += toolUses.length;
+    performanceMetrics.parallelToolCalls += parallelBatch.length;
+    performanceMetrics.sequentialToolCalls += sequentialBatch.length;
     // Merge results preserving original order
     const resultOrder = new Map<string, number>();
     toolUses.forEach((tu, i) => resultOrder.set(tu.id, i));

@@ -316,7 +316,7 @@ const CHAT_MODE_OPTIONS: Array<{
 
 function initialChatMode(): ChatExecutionMode {
   const stored = localStorage.getItem(CHAT_MODE_STORAGE_KEY);
-  return CHAT_MODE_OPTIONS.some((option) => option.id === stored) ? (stored as ChatExecutionMode) : 'agent';
+  return CHAT_MODE_OPTIONS.some((option) => option.id === stored) ? (stored as ChatExecutionMode) : 'chat';
 }
 
 function initialChatAgent(): string {
@@ -2002,7 +2002,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               const tu = block as { id: string; name: string; input: unknown };
               const isRunning = runningToolIds?.has(tu.id) ?? false;
               return (
-                <ToolCallCard key={i} name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} />
+                <ToolCallCard key={i} name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} startTime={isRunning ? Date.now() - 1000 : undefined} />
               );
             })}
           </div>
@@ -2035,12 +2035,13 @@ function ThinkingBubble() {
 
   return (
     <div
-      className="flex gap-3 items-center rounded-xl px-4 py-3 bg-white/[0.02]"
+      className="flex gap-3 items-center rounded-xl px-4 py-3 bg-white/[0.02] animate-in fade-in duration-200"
       role="status"
       aria-live="polite"
     >
-      <div className="brand-avatar w-8 h-8 flex-shrink-0">
+      <div className="brand-avatar w-8 h-8 flex-shrink-0 relative">
         <InfiniteLogo className="w-5 h-3" />
+        <span className="absolute inset-0 rounded-full border border-indigo-400/30 animate-ping" />
       </div>
       <div className="flex-1 min-w-0 px-1">
         <div className="flex items-center gap-2">
@@ -2048,6 +2049,7 @@ function ThinkingBubble() {
             {label}
           </span>
           <span className="h-3 w-3 animate-spin rounded-full border border-zinc-700 border-t-zinc-300" aria-hidden="true" />
+          <span className="text-[10px] text-indigo-400/60 font-mono">{elapsed}s</span>
         </div>
         <div className="text-[10px] text-textMuted mt-0.5">{detail}</div>
       </div>

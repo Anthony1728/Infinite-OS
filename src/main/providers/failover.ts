@@ -39,17 +39,135 @@ export function jitteredBackoff(attempt: number, baseMs = 800, maxMs = 30_000): 
   return Math.max(200, Math.round(exp + jitter));
 }
 
+/**
+ * How many times a stream failure may retry on the SAME model before the
+ * run is allowed to fail over to another candidate. Retrying first keeps
+ * the user's explicit model selection stable across transient hiccups
+ * (stalls, 5xx, network blips, rate limits) instead of changing models
+ * on every blip.
+ */
+export const SAME_MODEL_STREAM_RETRIES = 3;
+
+/**
+ * How many times a NON-selected model (failover candidate) may retry
+ * before moving to the next candidate. Lower than the selected-model
+ * budget because the user did not explicitly pick these.
+ */
+export const FAILOVER_CANDIDATE_RETRIES = 2;
+
+/**
+ * Capability failure types — these are NOT API errors. They mean the model
+ * is not strong enough for the task (can't code, can't use tools, etc.).
+ */
+export type CapabilityFailureType =
+  | 'promise_only'      // Model said "I'll do X" but never did
+  | 'explicit_failure'  // Model said "I can't do X"
+  | 'tool_error'        // Model's edits/introductions broke something
+  | 'no_execution';     // Model didn't call any tools when required
+
+/**
+ * Track capability failures per model to detect when a model is overmatched.
+ * A model with too many capability failures should be swapped for a stronger one.
+ */
+export interface CapabilityTracker {
+  /** Map of "provider:model" -> count of capability failures */
+  failures: Map<string, number>;
+  /** Map of "provider:model" -> list of failure descriptions */
+  details: Map<string, CapabilityFailureType[]>;
+}
+
+export function createCapabilityTracker(): CapabilityTracker {
+  return { failures: new Map(), details: new Map() };
+}
+
+export function recordCapabilityFailure(
+  tracker: CapabilityTracker,
+  candidate: Pick<ProviderCandidate, 'provider' | 'model'>,
+  type: CapabilityFailureType,
+): void {
+  const id = candidateId(candidate);
+  tracker.failures.set(id, (tracker.failures.get(id) ?? 0) + 1);
+  const details = tracker.details.get(id) ?? [];
+  details.push(type);
+  tracker.details.set(id, details);
+}
+
+export function getCapabilityFailureCount(tracker: CapabilityTracker, candidate: Pick<ProviderCandidate, 'provider' | 'model'>): number {
+  return tracker.failures.get(candidateId(candidate)) ?? 0;
+}
+
+/**
+ * Threshold: after this many capability failures on the same model, switch.
+ * The model is clearly overmatched — don't let it keep trying and potentially
+ * breaking the user's project.
+ */
+export const CAPABILITY_FAILURE_THRESHOLD = 2;
+
+/**
+ * Transient stream failures: worth retrying on the same model before any
+ * failover. Credential/billing/model/config/content failures are NOT
+ * transient — retrying them on the same model can never succeed, so those
+ * still switch candidates immediately.
+ *
+ * Rate limits ARE transient: the user's model selection matters, and a
+ * short backoff often resolves a 429. The loop applies a longer
+ * rate-limit-specific backoff before retrying.
+ */
+export function isTransientStreamFailure(error: string): boolean {
+  const reason = classifyError(error);
+  return reason === 'timeout' || reason === 'network' || reason === 'server_error' || reason === 'overloaded' || reason === 'rate_limit';
+}
+
+/**
+ * Errors that are fatal for the ENTIRE provider (all its models), not just
+ * one model. If a provider's API key is dead, expired, or out of quota,
+ * every model on that provider will fail the same way — skip them all.
+ */
+export function isProviderFatal(error: string): boolean {
+  const reason = classifyError(error);
+  return reason === 'auth' || reason === 'billing';
+}
+
+/**
+ * Backoff delay in ms for a given error type. Rate limits get longer
+ * backoff (the API needs time to reset the quota window); other
+ * transient errors use shorter delays.
+ */
+export function backoffForError(error: string, attempt: number): number {
+  const reason = classifyError(error);
+  if (reason === 'rate_limit') {
+    // Rate limits: 5s, 15s, 30s, 60s (cap) — quota windows are typically 1 min
+    return Math.min(5000 * Math.pow(3, attempt), 60_000);
+  }
+  if (reason === 'overloaded') {
+    // Overloaded: 3s, 8s, 20s
+    return Math.min(3000 * Math.pow(2.5, attempt), 20_000);
+  }
+  // Default transient: jittered 1s–4s
+  return jitteredBackoff(attempt, 1000, 4000);
+}
+
 /** Temporarily deprioritize a model that just failed so the next request starts with a known-healthier option. */
 export function recordProviderFailure(candidate: Pick<ProviderCandidate, 'provider' | 'model'>, error: string): void {
   const reason = classifyError(error);
   const cooldown =
     reason === 'auth' || reason === 'billing' ? 10 * 60_000
-    : reason === 'rate_limit' ? 2 * 60_000
+    : reason === 'rate_limit' ? 60_000
     : reason === 'overloaded' ? 60_000
     : reason === 'server_error' ? 30_000
     : reason === 'timeout' || reason === 'network' ? 15_000
     : 20_000;
   unhealthyUntil.set(candidateId(candidate), Date.now() + cooldown);
+  // Auth/billing failures are provider-wide: mark ALL models on this provider
+  // as unhealthy so the failover chain skips them entirely.
+  if (reason === 'auth' || reason === 'billing') {
+    const providerPrefix = `${candidate.provider}:`;
+    for (const [key, expiry] of unhealthyUntil) {
+      if (key.startsWith(providerPrefix)) {
+        unhealthyUntil.set(key, Math.max(expiry ?? 0, Date.now() + 10 * 60_000));
+      }
+    }
+  }
 }
 
 export function recordProviderSuccess(candidate: Pick<ProviderCandidate, 'provider' | 'model'>): void {
@@ -156,14 +274,11 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
     if (provider.defaultModel) await add(providerId, provider.defaultModel);
   }
 
-  // Cap the chain so a heavily-configured install never tries providers for hours.
-  const MAX_CANDIDATES = 10;
+  // Include ALL available models — no cap. If a user has 10 API keys, the
+  // failover chain tries every one. Cooldowns and provider-wide auth/billing
+  // skips prevent wasted attempts.
   const prioritized = prioritizeProviderCandidates(candidates);
-  // Live model scanning belongs in settings. Keeping it off the request path
-  // lets an agent begin and publish visible activity immediately.
-  // Preserve configured preference while moving recently failed models behind
-  // healthy candidates. Cooldowns are in-memory and never expose key material.
-  return prioritized.slice(0, MAX_CANDIDATES);
+  return prioritized;
 }
 
 export function isRecoverableProviderError(error: string): boolean {

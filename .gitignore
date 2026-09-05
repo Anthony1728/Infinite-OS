@@ -1,6 +1,7 @@
 node_modules/
 release/
 dist/
+out/
 .vite/
 *.log
 .DS_Store

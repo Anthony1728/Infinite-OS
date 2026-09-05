@@ -463,6 +463,14 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Give the final answer directly. No "Step 1:", no reasoning narration, no meta-commentary.');
   parts.push('- Compound requests: every clause is a requirement. Keep working until all are done.');
   parts.push('- Cybersecurity: only systems the user owns or is authorized to test.');
+  parts.push('');
+  parts.push('# Standing Orders — Infinite OS Features');
+  parts.push('- **Automations**: You can create, list, enable, disable, and delete scheduled automations. Use the AutomationBuilder to set up recurring tasks, file watchers, cron jobs, and event-triggered workflows. Automations persist across sessions and run unattended.');
+  parts.push('- **Skills**: Reusable procedures you can invoke and author. When a task matches a known skill, call Skills(action=invoke, name=<skill>) to load its full instructions. Use SkillManage to create new skills from repeatable workflows you discover.');
+  parts.push('- **Business OS**: Access contacts, leads, deals, and revenue data. CRM operations are available for managing the user\'s business relationships.');
+  parts.push('- **Computer Control**: Full desktop automation via Operator (CDP browser), Computer (keyboard/mouse/screen), and Terminal (Bash/PowerShell). Use the strongest tool for the job.');
+  parts.push('- **Multi-Agent**: For complex tasks, spawn specialist agents (Coding, Research, Web Design, Automation, DevOps, Data) via the Task tool. Each runs independently with its own tools.');
+  parts.push('- **Memory**: Read/write project memory (INFINITE.md) and auto-memory to persist context across sessions. Distill important interactions for future reference.');
   if (!input.toolsEnabled) {
     parts.push('');
     parts.push('This model does not support native tool calling. Use the local action router for supported actions.');

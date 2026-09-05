@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export function ToolIcon({ name }: { name: string }) {
   const n = name.toLowerCase();
@@ -86,12 +86,15 @@ export function ToolCallCard({
   name,
   input,
   status,
+  startTime,
 }: {
   name: string;
   input: unknown;
   status: 'running' | 'done';
+  startTime?: number;
 }) {
   const [open, setOpen] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const running = status === 'running';
   const summary = (() => {
     const i = (input ?? {}) as Record<string, unknown>;
@@ -99,6 +102,20 @@ export function ToolCallCard({
     const cmd = s(i.command ?? i.cmd ?? i.path ?? i.file_path ?? i.query ?? i.url ?? '').slice(0, 80);
     return cmd ? `· ${cmd}` : '';
   })();
+
+  useEffect(() => {
+    if (!running || !startTime) return;
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - startTime);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [running, startTime]);
+
+  const formatElapsed = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+  };
 
   return (
     <div
@@ -116,7 +133,12 @@ export function ToolCallCard({
             running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-400'
           }`}
         >
-          {running && <span className="absolute inset-0 rounded-lg border border-indigo-400/50 animate-ping" />}
+          {running && (
+            <>
+              <span className="absolute inset-0 rounded-lg border border-indigo-400/50 animate-ping" />
+              <span className="absolute inset-0 rounded-lg border-2 border-transparent border-t-indigo-400 animate-spin" />
+            </>
+          )}
           <ToolIcon name={name} />
         </span>
 
@@ -129,6 +151,11 @@ export function ToolCallCard({
             <>
               <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current/40 border-t-current text-indigo-300" />
               <span className="text-indigo-300">running</span>
+              {elapsed > 0 && (
+                <span className="text-indigo-400/60 font-mono text-[10px]">
+                  {formatElapsed(elapsed)}
+                </span>
+              )}
             </>
           ) : (
             <>

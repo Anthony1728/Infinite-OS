@@ -12,10 +12,19 @@ import type { ContentBlock, Message } from '../../shared/types.js';
 import { isExplicitActionFailure, isUnfulfilledActionPromise, requiresToolExecution } from './completion-guards.js';
 import {
   buildProviderFailoverPlan,
+  isTransientStreamFailure,
+  backoffForError,
   recordProviderFailure,
   recordProviderSuccess,
+  SAME_MODEL_STREAM_RETRIES,
+  FAILOVER_CANDIDATE_RETRIES,
   selectNextProviderCandidate,
+  createCapabilityTracker,
+  recordCapabilityFailure,
+  getCapabilityFailureCount,
+  CAPABILITY_FAILURE_THRESHOLD,
   type ProviderCandidate,
+  type CapabilityFailureType,
 } from '../providers/failover.js';
 import { selectLocalModelTools } from './local-tool-routing.js';
 import { getAutomationDisplayState, restoreInfiniteOsFocus } from '../automation/display-policy.js';
@@ -318,6 +327,13 @@ export async function runSubagent(
   let verifiedComplete = false;
   let lastToolBatchHadError = false;
   let intentOnlyRetries = 0;
+  // Same-model stream retry budget (mirrors loop.ts): transient hiccups retry
+  // on the active candidate before any failover. Reset after every clean turn.
+  let sameModelStreamRetries = 0;
+  // Failover-candidate retry budget: non-selected models get fewer retries.
+  let failoverCandidateRetries = 0;
+  // Capability tracker: detects when a model is overmatched for the task.
+  const capTracker = createCapabilityTracker();
   let successfulToolExecutions = 0;
   const failedAttemptCounts = new Map<string, number>();
   let recoveryContext: Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'> | null = null;
@@ -327,6 +343,7 @@ export async function runSubagent(
     recordProviderFailure(activeCandidate, failure);
     const next = selectNextProviderCandidate(failoverPlan, failoverIndex, activeCandidate, failure);
     if (messages.at(-1) === assistant) messages.pop();
+    opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
     if (!next) return false;
     recoveryContext = {
       failedProvider: activeCandidate.provider,
@@ -336,6 +353,8 @@ export async function runSubagent(
     };
     failoverIndex = failoverPlan.indexOf(next);
     state.preview = 'Trying another available model…';
+    opts.sink({ type: 'provider_status', runId: state.id, status: 'failover', from: activeCandidate.label, to: next.label, reason: failure });
+    console.warn(`[agent] Subagent recovering in background: ${activeCandidate.label} -> ${next.label}: ${failure}`);
     activeCandidate = next;
     return true;
   };
@@ -461,6 +480,10 @@ export async function runSubagent(
     };
     messages.push(assistant);
     let providerFailure = '';
+    // Turn boundaries stream exactly like the automatic agent loop so every
+    // agent renders identically in the UI.
+    opts.sink({ type: 'message_start', runId: state.id, message_id: assistant.id });
+    opts.sink({ type: 'provider_start', runId: state.id, message_id: assistant.id, provider: activeCandidate.provider, model: activeCandidate.model, requested_provider: activeCandidate.provider, requested_model: activeCandidate.model, turn });
 
     // Stall watchdog: mirrors the one in loop.ts, using the local controller
     // so abort() actually kills the fetch connection.
@@ -477,15 +500,23 @@ export async function runSubagent(
     try {
       for await (const chunk of stream) {
         streamLastEvent = Date.now();
+        // Every stream event is provider progress: without this, the
+        // supervisor mistakes a long healthy text response for a stall and
+        // aborts it at 45s.
+        runProgressAt.set(state.id, Date.now());
         if (signal.aborted) break;
         if (chunk.type === 'text_delta') {
           appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
           state.preview = (state.preview ?? '') + chunk.text;
-          opts.sink({ type: 'text_delta', runId: state.id, text: chunk.text });
+          opts.sink({ type: 'text_delta', runId: state.id, message_id: assistant.id, text: chunk.text });
+        }
+        if (chunk.type === 'tool_use_start') {
+          opts.sink({ type: 'tool_use_start', runId: state.id, message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name });
         }
         if (chunk.type === 'tool_use_end') {
           state.toolCallCount++;
           opts.sink({ type: 'tool_call', runId: state.id, toolName: chunk.name });
+          opts.sink({ type: 'tool_use_end', runId: state.id, message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name, input: chunk.input });
           activity(state, opts.sink, 'tool', `Running ${chunk.name}`, summarize(chunk.input));
           const tu: ContentBlock = { type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input };
           assistant.content.push(tu);
@@ -497,6 +528,14 @@ export async function runSubagent(
             opts.sink({ type: 'tool_call', runId: state.id, toolName: chunk.name });
             activity(state, opts.sink, 'tool', `Running ${chunk.name}`, summarize(chunk.input));
           }
+          opts.sink({
+            type: 'tool_progress',
+            runId: state.id,
+            tool_use_id: chunk.id,
+            name: chunk.name,
+            status: chunk.status === 'completed' ? 'completed' : chunk.status === 'error' ? 'error' : 'running',
+            ...(chunk.detail ? { detail: chunk.detail } : {}),
+          });
           if (chunk.status === 'completed') successfulToolExecutions++;
           if (chunk.status === 'completed') activity(state, opts.sink, 'result', `${chunk.name} completed`, chunk.detail);
           if (chunk.status === 'error') activity(state, opts.sink, 'error', `${chunk.name} failed`, chunk.detail);
@@ -506,6 +545,7 @@ export async function runSubagent(
         }
         if (chunk.type === 'message_end') {
           assistant.stop_reason = chunk.stop_reason as Message['stop_reason'];
+          opts.sink({ type: 'message_end', runId: state.id, message_id: assistant.id, stop_reason: chunk.stop_reason });
           // Validate output if confidence threshold is set
           if (config?.confidenceThreshold && chunk.stop_reason === 'tool_use') {
             const confidence = await calculateConfidence(assistant.content);
@@ -544,12 +584,30 @@ export async function runSubagent(
         opts.sink({ type: 'fail', runId: state.id, error: state.error ?? 'Cancelled before completion.' });
         return '';
       }
+      if (isTransientStreamFailure(providerFailure)) {
+        const isSelectedModel = failoverIndex === 0;
+        const maxRetries = isSelectedModel ? SAME_MODEL_STREAM_RETRIES : FAILOVER_CANDIDATE_RETRIES;
+        const retryCounter = isSelectedModel ? sameModelStreamRetries : failoverCandidateRetries;
+        if (retryCounter < maxRetries) {
+          // Transient hiccup: stay on the current model and retry with backoff.
+          if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
+          if (messages.at(-1) === assistant) messages.pop();
+          opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
+          const delayMs = backoffForError(providerFailure, retryCounter);
+          console.warn(`[agent] Subagent transient failure on ${activeCandidate.label} (retry ${retryCounter + 1}/${maxRetries}, backoff ${delayMs}ms): ${providerFailure}`);
+          if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
       if (switchCandidate(providerFailure, assistant, 'model response stream')) continue;
       state.status = 'failed';
-      state.error = providerFailure;
-      opts.sink({ type: 'fail', runId: state.id, error: providerFailure });
+      state.error = `All available models have been tried. Last error: ${providerFailure}`;
+      opts.sink({ type: 'fail', runId: state.id, error: state.error });
       return '';
     }
+    // A clean turn resets the retry budgets.
+    sameModelStreamRetries = 0;
+    failoverCandidateRetries = 0;
 
     if (signal.aborted) break;
 
@@ -587,6 +645,21 @@ export async function runSubagent(
     if (!toolUses.length && taskComplete && assistantText && !lastToolBatchHadError) {
       const executionMissing = requiresToolExecution(opts.task) && successfulToolExecutions === 0;
       if (isUnfulfilledActionPromise(opts.task, assistantText) || executionMissing) {
+        const capType: CapabilityFailureType = isUnfulfilledActionPromise(opts.task, assistantText) ? 'promise_only' : 'no_execution';
+        recordCapabilityFailure(capTracker, activeCandidate, capType);
+        const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+
+        if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+          const strongerMsg = `Model ${activeCandidate.label} is not capable enough for this task (${capType === 'promise_only' ? 'promised but did not act' : 'did not use tools'}, ${capCount} failures). Switching.`;
+          console.warn(`[agent] Subagent capability threshold on ${activeCandidate.label}: ${strongerMsg}`);
+          opts.sink({ type: 'provider_status', runId: state.id, status: strongerMsg });
+          if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+            intentOnlyRetries = 0;
+            failoverCandidateRetries = 0;
+            continue;
+          }
+        }
+
         if (intentOnlyRetries < 2) {
           intentOnlyRetries++;
           messages.push({
@@ -608,6 +681,20 @@ export async function runSubagent(
         return '';
       }
       if (isExplicitActionFailure(opts.task, assistantText)) {
+        recordCapabilityFailure(capTracker, activeCandidate, 'explicit_failure');
+        const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+
+        if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+          const strongerMsg = `Model ${activeCandidate.label} explicitly stated it cannot perform this task (${capCount} times). Switching.`;
+          console.warn(`[agent] Subagent capability threshold on ${activeCandidate.label}: ${strongerMsg}`);
+          opts.sink({ type: 'provider_status', runId: state.id, status: strongerMsg });
+          if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+            intentOnlyRetries = 0;
+            failoverCandidateRetries = 0;
+            continue;
+          }
+        }
+
         if (switchCandidate('The model could not complete the assigned action.', assistant, 'completion verification')) continue;
         state.status = 'failed';
         state.completedAt = Date.now();
@@ -619,6 +706,21 @@ export async function runSubagent(
       break;
     }
     if (!toolUses.length && lastToolBatchHadError) {
+      recordCapabilityFailure(capTracker, activeCandidate, 'tool_error');
+      const capCount = getCapabilityFailureCount(capTracker, activeCandidate);
+
+      if (capCount >= CAPABILITY_FAILURE_THRESHOLD) {
+        const strongerMsg = `Model ${activeCandidate.label} repeatedly introduced errors in its edits (${capCount} times). Switching.`;
+        console.warn(`[agent] Subagent capability threshold on ${activeCandidate.label}: ${strongerMsg}`);
+        opts.sink({ type: 'provider_status', runId: state.id, status: strongerMsg });
+        if (switchCandidate(strongerMsg, assistant, 'capability detection')) {
+          lastToolBatchHadError = false;
+          intentOnlyRetries = 0;
+          failoverCandidateRetries = 0;
+          continue;
+        }
+      }
+
       if (switchCandidate('The model did not recover from a failed tool attempt.', assistant, 'tool-result recovery')) continue;
       state.status = 'failed';
       state.completedAt = Date.now();
@@ -643,16 +745,16 @@ export async function runSubagent(
       if (previousFailures >= 2) {
         return { tu, tool, result: { content: 'This identical tool call already failed twice. Change the arguments, preconditions, or tool family instead of repeating it.', is_error: true } };
       }
-      try {
-        const result = await executeToolCall({
-          tool,
-          toolUse: tu,
-          sessionId: opts.sessionId,
-          cwd: opts.cwd,
-          parentSignal: signal,
-          onUpdate: () => {},
-        });
-        return { tu, tool, result };
+        try {
+          const result = await executeToolCall({
+            tool,
+            toolUse: tu,
+            sessionId: opts.sessionId,
+            cwd: opts.cwd,
+            parentSignal: signal,
+            onUpdate: (partial) => opts.sink({ type: 'tool_result', runId: state.id, tool_use_id: tu.id, partial: true, content: partial.content }),
+          });
+          return { tu, tool, result };
       } catch (e) {
         return { tu, tool, result: { content: (e as Error).message, is_error: true } };
       }
@@ -691,6 +793,7 @@ export async function runSubagent(
         if (tool) failedAttemptCounts.delete(signature);
       }
       activity(state, opts.sink, toolResult.is_error ? 'error' : 'result', `${tu.name} ${toolResult.is_error ? 'failed' : 'completed'}`, resultContent);
+      opts.sink({ type: 'tool_result', runId: state.id, tool_use_id: tu.id, content: resultContent, is_error: toolResult.is_error });
       messages.push({ id: uuid(), role: 'user', content: [{ type: 'tool_result', tool_use_id: tu.id, content: resultContent, is_error: toolResult.is_error }], timestamp: Date.now() });
     }
     if (batchFailures.length) {

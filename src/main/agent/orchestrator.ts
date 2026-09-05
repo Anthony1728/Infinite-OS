@@ -485,7 +485,13 @@ export class TaskOrchestrator {
         subTask.status = 'failed';
         subTask.error = error;
         sink({ type: 'subtask_failed', taskId: task.id, data: { subTaskId: subTask.id, error: subTask.error } });
-      } else if (e.type === 'activity' || e.type === 'text_delta' || e.type === 'tool_call' || e.type === 'retrying') {
+      } else if (e.type === 'activity' || e.type === 'text_delta' || e.type === 'tool_call' || e.type === 'retrying' ||
+        // Live chat-compatible stream events (message/tool/provider boundaries)
+        // so subtasks render with the same live streaming as every other agent.
+        e.type === 'message_start' || e.type === 'provider_start' ||
+        e.type === 'tool_use_start' || e.type === 'tool_use_end' || e.type === 'tool_progress' ||
+        e.type === 'tool_result' || e.type === 'provider_status' ||
+        e.type === 'message_end' || e.type === 'message_discard') {
         sink({ type: 'subtask_progress', taskId: task.id, data: { subTaskId: subTask.id, agentType: subTask.agentType, event: e } });
       }
     };
