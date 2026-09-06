@@ -19,7 +19,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
   'GitPull': 5 * 60_000,
 };
 
-function getToolTimeout(toolName: string): number {
+export function getToolTimeout(toolName: string): number {
   return TOOL_TIMEOUTS[toolName] ?? TOOL_EXECUTION_TIMEOUT_MS;
 }
 

@@ -4,7 +4,7 @@ import type { Tool } from '../tools/base.js';
 vi.mock('./hooks.js', () => ({ runHooks: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./permissions.js', () => ({ checkPermission: vi.fn().mockResolvedValue(true) }));
 
-import { executeToolCall, TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
+import { executeToolCall, TOOL_EXECUTION_TIMEOUT_MS, getToolTimeout } from './tool-execution.js';
 
 const toolUse = { id: 'tool-1', name: 'Bash', input: { command: 'hang' }, type: 'tool_use' } as const;
 
@@ -35,7 +35,7 @@ describe('executeToolCall', () => {
       onUpdate: () => {},
     });
     const rejection = expect(result).rejects.toThrow('was cancelled');
-    await vi.advanceTimersByTimeAsync(TOOL_EXECUTION_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(getToolTimeout('Bash'));
     await rejection;
     expect(aborted).toBe(true);
   });
