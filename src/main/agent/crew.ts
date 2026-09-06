@@ -135,11 +135,24 @@ const AGENT_ROLE: Record<string, { role: string; description: string }> = {
 
 function scoreModel(kind: TaskKind, m: { id: string; label: string; free: boolean; supportsTools: boolean }, wantTools: boolean): number {
   let score = 0;
+  const combined = (m.id + ' ' + m.label).toLowerCase();
+  // Base fitness: does this model match the task kind?
   if (MODEL_FIT[kind](m.id, m.label)) score += 10;
+  // Tool support: critical for code/devops/automation tasks
   if (wantTools && m.supportsTools) score += 4;
+  // Free tier bonus: prefer free models when possible
   if (m.free) score += 2;
-  const family = (m.id + ' ' + m.label).toLowerCase();
-  if (/70b|72b|80b|90b|100b|plus|pro|opus/.test(family)) score += 1;
+  // Model size: larger models are generally better
+  if (/100b|120b|180b|405b/.test(combined)) score += 4;
+  else if (/70b|72b|80b|90b/.test(combined)) score += 3;
+  else if (/30b|34b|32b|13b/.test(combined)) score += 1;
+  // Model family bonuses: known strong families
+  if (/claude|opus|sonnet/.test(combined)) score += 3;
+  if (/gpt-4o|o1|o3/.test(combined)) score += 3;
+  if (/deepseek|r1|qwq/.test(combined)) score += 2;
+  if (/qwen|llama/.test(combined)) score += 1;
+  // Penalty for very small models (unlikely to handle complex tasks)
+  if (/8b|7b|3b|1b|mini/.test(combined)) score -= 2;
   return score;
 }
 
