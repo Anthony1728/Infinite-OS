@@ -303,13 +303,14 @@ interface ChatState {
   currentSessionId: string | null;
   messages: Message[];
   streaming: boolean;
+  loadingSession: boolean;
   activity: ActivityItem[];
   pendingPermission: { id: string; tool: string; input: unknown } | null;
   orchestratedTaskId: string | null;
   orchestratorEvents: unknown[];
-  // Real-time status from the main process (e.g. "Connecting to OpenRouterΓÇª")
+  // Real-time status from the main process (e.g. "Connecting to OpenRouter…")
   // so the Thinking bubble can reflect what's actually happening instead of
-  // showing a static "Reasoning through your requestΓÇª" until the first token.
+  // showing a static "Reasoning through your request…" until the first token.
   providerStatus: {
     label: string;
     detail: string;
@@ -342,6 +343,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentSessionId: null,
   messages: [],
   streaming: false,
+  loadingSession: false,
   activity: [],
   pendingPermission: null,
   orchestratedTaskId: null,
@@ -886,15 +888,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   selectSession: async (id) => {
-    const messages = await window.api.loadSession({ sessionId: id });
-    const orchestratedTaskId = orchestratorBySession.get(id) ?? null;
-    set({
-      currentSessionId: id,
-      messages,
-      orchestratedTaskId,
-      streaming: activeChatTaskBySession.has(id) || Boolean(orchestratedTaskId),
-      activity: [],
-    });
+    set({ loadingSession: true });
+    try {
+      const messages = await window.api.loadSession({ sessionId: id });
+      const orchestratedTaskId = orchestratorBySession.get(id) ?? null;
+      set({
+        currentSessionId: id,
+        messages,
+        orchestratedTaskId,
+        streaming: activeChatTaskBySession.has(id) || Boolean(orchestratedTaskId),
+        activity: [],
+      });
+    } finally {
+      set({ loadingSession: false });
+    }
   },
 
   deleteSession: async (id) => {

@@ -87,15 +87,18 @@ export function ToolCallCard({
   input,
   status,
   startTime,
+  error,
 }: {
   name: string;
   input: unknown;
-  status: 'running' | 'done';
+  status: 'running' | 'done' | 'error';
   startTime?: number;
+  error?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const running = status === 'running';
+  const failed = status === 'error';
   const summary = (() => {
     const i = (input ?? {}) as Record<string, unknown>;
     const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -120,7 +123,7 @@ export function ToolCallCard({
   return (
     <div
       className={`group my-2 rounded-xl border bg-[#0c1018] overflow-hidden transition-colors ${
-        running ? 'border-indigo-500/40 animate-glow-border' : 'border-white/[0.06]'
+        failed ? 'border-red-500/40' : running ? 'border-indigo-500/40 animate-glow-border' : 'border-white/[0.06]'
       }`}
     >
       <button
@@ -130,7 +133,7 @@ export function ToolCallCard({
       >
         <span
           className={`relative flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 ${
-            running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-400'
+            failed ? 'bg-red-500/15 text-red-300' : running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-400'
           }`}
         >
           {running && (
@@ -157,6 +160,11 @@ export function ToolCallCard({
                 </span>
               )}
             </>
+          ) : failed ? (
+            <>
+              <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+              <span className="text-red-400">failed</span>
+            </>
           ) : (
             <>
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -169,13 +177,17 @@ export function ToolCallCard({
 
       {open && (
         <pre className="max-h-48 overflow-auto border-t border-white/[0.06] bg-black/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400">
-          {(() => {
-            try {
-              return JSON.stringify(input, null, 2).slice(0, 4000);
-            } catch {
-              return String(input).slice(0, 4000);
-            }
-          })()}
+          {failed && error ? (
+            <span className="text-red-400">{error}</span>
+          ) : (
+            (() => {
+              try {
+                return JSON.stringify(input, null, 2).slice(0, 4000);
+              } catch {
+                return String(input).slice(0, 4000);
+              }
+            })()
+          )}
         </pre>
       )}
     </div>

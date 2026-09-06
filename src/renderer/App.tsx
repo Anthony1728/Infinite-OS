@@ -18,6 +18,7 @@ import { MainView } from './components/layout/MainView';
 import { CommandPalette } from './components/command/CommandPalette';
 import { DeployModal } from './components/deploy/DeployModal';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { SettingsModalClassic } from './components/settings/SettingsModalClassic';
 import { useUiTheme } from './theme/uiTheme';
 import { ExperienceSettingsModal, type ExperienceSettingsSection } from './components/settings/ExperienceSettingsModal';
@@ -183,6 +184,36 @@ export function App() {
     };
   }, []);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      switch (e.key.toLowerCase()) {
+        case 'k':
+          e.preventDefault();
+          setCommandOpen(true);
+          break;
+        case 'n':
+          e.preventDefault();
+          setActiveView('chats');
+          window.dispatchEvent(new CustomEvent('infinite:new-chat'));
+          break;
+        case 'b':
+          e.preventDefault();
+          setSidebarCollapsed((c) => !c);
+          break;
+        case '.':
+          e.preventDefault();
+          setRightPanelOpen((o) => !o);
+          break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated || isNewUser) return;
     void restoreSession();
@@ -223,6 +254,7 @@ export function App() {
 
   // Main app
   return (
+    <ErrorBoundary>
     <div className="app-shell h-screen w-full flex flex-col overflow-hidden text-[12px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -293,5 +325,6 @@ export function App() {
       <ToastContainer />
       </div>
     </div>
+    </ErrorBoundary>
   );
 }

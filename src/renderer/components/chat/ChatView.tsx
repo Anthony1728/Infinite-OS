@@ -1694,6 +1694,7 @@ function RealChat({
   const interject = useChatStore((s) => s.interject);
   const activity = useChatStore((s) => s.activity);
   const providerStatus = useChatStore((s) => s.providerStatus);
+  const loadingSession = useChatStore((s) => s.loadingSession);
   const [isOnline, setIsOnline] = useState(false);
 
   // Check if AI model is online
@@ -1748,7 +1749,44 @@ function RealChat({
         {header}
         <BrainLearningPanel />
         <div className="flex w-full flex-col gap-5 px-6 py-5 lg:px-10">
-          {messages.map((m) => (
+          {messages.length === 0 && !streaming && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="mb-6 opacity-80">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="32" cy="32" r="30" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+                  <path d="M22 32L29 39L42 26" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.5" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-white/90 mb-2">What can I help you with?</h3>
+              <p className="text-sm text-white/50 mb-6 max-w-md">I can write code, search the web, control your desktop, manage files, and much more. Just ask.</p>
+              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+                {[
+                  { label: 'Write a Python script', icon: ' ' },
+                  { label: 'Search the web', icon: ' ' },
+                  { label: 'Open Chrome', icon: ' ' },
+                  { label: 'Create a file', icon: ' ' },
+                ].map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => { setInput(s.label); inputRef.current?.focus(); }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white/90 transition-colors cursor-pointer"
+                  >
+                    {s.icon} {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-white/30 mt-4">Type <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-mono text-[10px]">/</kbd> for commands</p>
+            </div>
+          )}
+          {loadingSession ? (
+            <div className="flex items-center justify-center py-16">
+              <span className="relative flex h-8 w-8">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-25 animate-ping" />
+                <span className="relative inline-flex rounded-full h-8 w-8 bg-indigo-500/30 border-2 border-transparent border-t-indigo-400 animate-spin" />
+              </span>
+              <span className="ml-3 text-sm text-zinc-400">Loading conversation…</span>
+            </div>
+          ) : messages.map((m) => (
             <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
           ))}
           {showThinking && <ThinkingBubble />}
@@ -1800,6 +1838,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const updateMessage = useChatStore((state) => state.updateMessage);
   const branchSession = useChatStore((state) => state.branchSession);
   const [editing, setEditing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const textBlocks = message.content.filter((b) => b.type === 'text');
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
@@ -1872,14 +1911,24 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
           )}
           <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/message:opacity-100 focus-within:opacity-100 transition-opacity">
             <button
-              onClick={() => void navigator.clipboard.writeText(plainText)}
+              onClick={() => {
+                void navigator.clipboard.writeText(plainText);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
               className="icon-button w-7 h-7"
-              title="Copy message"
-              aria-label="Copy message"
+              title={copied ? 'Copied!' : 'Copy message'}
+              aria-label={copied ? 'Copied!' : 'Copy message'}
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-                <path d="M8 8h11v11H8zM5 16H4V5h11v1" />
-              </svg>
+              {copied ? (
+                <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                  <path d="M8 8h11v11H8zM5 16H4V5h11v1" />
+                </svg>
+              )}
             </button>
             {isUser && (
               <button
