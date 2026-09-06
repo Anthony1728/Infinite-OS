@@ -8,6 +8,7 @@ import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { MessageContextMenu, type ContextMenuItem } from './MessageContextMenu';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
 import { ToolCallCard } from '../tools/ToolCallCard';
@@ -1839,6 +1840,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const branchSession = useChatStore((state) => state.branchSession);
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const textBlocks = message.content.filter((b) => b.type === 'text');
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
@@ -1868,9 +1870,29 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   if (isToolResult) return null;
   if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0 && quizBlocks.length === 0) return null;
 
+  const contextMenuItems: ContextMenuItem[] = [
+    {
+      label: 'Copy text',
+      icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M8 8h11v11H8zM5 16H4V5h11v1" /></svg>,
+      onClick: () => { void navigator.clipboard.writeText(plainText); setCopied(true); setTimeout(() => setCopied(false), 1500); },
+    },
+    ...(isUser ? [{
+      label: 'Edit message',
+      icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
+      onClick: () => setEditing(true),
+    }] : []),
+    ...(isAssistant && currentSessionId ? [{
+      label: 'Branch from here',
+      icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M6 3v12M18 9a3 3 0 01-3 3h-4a3 3 0 00-3 3M6 21l4-8h8l4 8" /></svg>,
+      onClick: () => void branchSession(currentSessionId, message.id),
+    }] : []),
+  ];
+
   return (
+    <>
     <div
       className={`group/message flex gap-5 rounded-xl px-5 py-4 ${isUser ? 'bg-blue-500/[0.04]' : 'bg-white/[0.02]'}`}
+      onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
     >
       {isAssistant ? (
         <div className="brand-avatar w-8 h-8 flex-shrink-0 mt-0.5">
@@ -2114,6 +2136,15 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
         )}
       </div>
     </div>
+    {contextMenu && (
+      <MessageContextMenu
+        items={contextMenuItems}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onClose={() => setContextMenu(null)}
+      />
+    )}
+    </>
   );
 }
 
