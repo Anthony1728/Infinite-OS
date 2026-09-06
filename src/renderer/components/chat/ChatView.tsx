@@ -1715,6 +1715,37 @@ function RealChat({
   const loadingSession = useChatStore((s) => s.loadingSession);
   const abortChat = useChatStore((s) => s.abort);
   const [isOnline, setIsOnline] = useState(false);
+  const [statsExpanded, setStatsExpanded] = useState(false);
+
+  const sessionStats = useMemo(() => {
+    if (messages.length === 0) return null;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheRead = 0;
+    let models = new Set<string>();
+    for (const m of messages) {
+      if (m.usage) {
+        inputTokens += m.usage.input ?? 0;
+        outputTokens += m.usage.output ?? 0;
+        cacheRead += m.usage.cache_read ?? 0;
+      }
+      if (m.model) models.add(m.model);
+    }
+    const first = messages[0]?.timestamp ?? 0;
+    const last = messages[messages.length - 1]?.timestamp ?? 0;
+    const durationMs = last - first;
+    const mins = Math.floor(durationMs / 60_000);
+    const secs = Math.floor((durationMs % 60_000) / 1000);
+    return {
+      inputTokens,
+      outputTokens,
+      cacheRead,
+      totalTokens: inputTokens + outputTokens,
+      models: [...models],
+      messageCount: messages.length,
+      duration: mins > 0 ? `${mins}m ${secs}s` : `${secs}s`,
+    };
+  }, [messages]);
 
   // Check if AI model is online
   useEffect(() => {
@@ -1766,6 +1797,42 @@ function RealChat({
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scrollbar">
         {header}
+        {sessionStats && messages.length > 2 && (
+          <div className="mx-6 lg:mx-10 mb-2">
+            <button
+              onClick={() => setStatsExpanded(!statsExpanded)}
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors text-left group"
+            >
+              <svg className={`w-3 h-3 text-zinc-500 transition-transform duration-200 ${statsExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
+              <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Session Stats</span>
+              <span className="text-[10px] text-zinc-600">{sessionStats.messageCount} messages</span>
+              <span className="text-[10px] text-zinc-600">{sessionStats.totalTokens.toLocaleString()} tokens</span>
+              <span className="text-[10px] text-zinc-600">{sessionStats.duration}</span>
+            </button>
+            {statsExpanded && (
+              <div className="mt-1 px-3 py-2.5 rounded-lg border border-white/[0.06] bg-white/[0.02] grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Input Tokens</div>
+                  <div className="text-xs font-medium text-zinc-300">{sessionStats.inputTokens.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Output Tokens</div>
+                  <div className="text-xs font-medium text-zinc-300">{sessionStats.outputTokens.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Cache Read</div>
+                  <div className="text-xs font-medium text-zinc-300">{sessionStats.cacheRead.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Model{sessionStats.models.length > 1 ? 's' : ''}</div>
+                  <div className="text-xs font-medium text-zinc-300 truncate">{sessionStats.models.join(', ') || 'Unknown'}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         <BrainLearningPanel />
         <div className="flex w-full flex-col gap-5 px-6 py-5 lg:px-10">
           {messages.length === 0 && !streaming && (

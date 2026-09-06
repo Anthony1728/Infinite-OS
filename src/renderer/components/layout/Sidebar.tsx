@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
@@ -7,6 +7,7 @@ import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { useNotificationStore } from '../../stores/notifications';
 import { PhoneConnectModal } from '../phone/PhoneConnectModal';
+import type { Session } from '../../../shared/types';
 
 // Flat, monochrome nav — icons inherit their color from the row state so the
 // whole rail reads as one system instead of a set of colored widgets.
@@ -24,6 +25,29 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
 ];
+
+function groupSessionsByDate(sessions: Session[]): { label: string; sessions: Session[] }[] {
+  const now = Date.now();
+  const day = 86_400_000;
+  const groups: Record<string, Session[]> = {
+    'Today': [],
+    'Yesterday': [],
+    'Previous 7 days': [],
+    'Previous 30 days': [],
+    'Older': [],
+  };
+  for (const s of sessions) {
+    const age = now - s.updated_at;
+    if (age < day) groups['Today'].push(s);
+    else if (age < 2 * day) groups['Yesterday'].push(s);
+    else if (age < 7 * day) groups['Previous 7 days'].push(s);
+    else if (age < 30 * day) groups['Previous 30 days'].push(s);
+    else groups['Older'].push(s);
+  }
+  return Object.entries(groups)
+    .filter(([, items]) => items.length > 0)
+    .map(([label, items]) => ({ label, sessions: items }));
+}
 
 interface SidebarProps {
   activeView: string;
@@ -520,86 +544,91 @@ export function Sidebar({
                 {chatSearch ? 'No matching conversations' : 'No conversations yet'}
               </div>
             ) : (
-              sessions.map((s) => (
-                <div key={s.id} className="relative">
-                  <button
-                    onClick={() => handleSelectSession(s.id)}
-                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-150 text-xs ${
-                      currentSessionId === s.id
-                        ? 'bg-white/[0.06] text-white'
-                        : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.03]'
-                    }`}
-                  >
-                    <svg
-                      className={`w-3 h-3 flex-shrink-0 ${s.pinned ? 'text-zinc-400' : 'opacity-40'}`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d={
-                          s.pinned
-                            ? 'm14 4 6 6-3 1-4 4-1 5-3-3-5 3 3-5-3-3 5-1 4-4 1-3Z'
-                            : 'M3 12.76c0 1.6 1.1 3 2.7 3.2 1.1.2 2.3.3 3.4.4L12 21l2.8-4.1c.2-.3.5-.5.9-.5 1.1-.1 2.3-.2 3.4-.4 1.6-.2 2.7-1.6 2.7-3.2V6.7c0-1.6-1.1-3-2.7-3.2A48 48 0 0 0 12 3c-2.4 0-4.7.2-7 .5C3.4 3.7 2.3 5.1 2.3 6.7v6Z'
-                        }
-                      />
-                    </svg>
-                    <span className="truncate flex-1 text-left">{s.title || 'New Chat'}</span>
-                    {useChatStore.getState().isSessionStreaming(s.id) && (
-                      <span className="relative flex h-2 w-2 flex-shrink-0">
-                        <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSessionMenu((value) => (value === s.id ? null : s.id));
-                    }}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md text-zinc-600 hover:text-zinc-200 hover:bg-white/[0.06]"
-                    aria-label={`Conversation actions for ${s.title}`}
-                  >
-                    ···
-                  </button>
-                  {sessionMenu === s.id && (
-                    <div className="absolute z-50 right-1 top-7 w-36 rounded-lg border border-white/[0.08] bg-[#111113] p-1 shadow-2xl animate-scale-in">
-                      {[
-                        { label: s.pinned ? 'Unpin' : 'Pin', action: () => pinSession(s.id, !s.pinned) },
-                        {
-                          label: 'Rename',
-                          action: () => {
-                            const title = window.prompt('Rename conversation', s.title);
-                            if (title) void renameSession(s.id, title);
-                          },
-                        },
-                        { label: 'Branch', action: () => branchSession(s.id) },
-                        {
-                          label: 'Copy share',
-                          action: async () => {
-                            const r = await shareSession(s.id) as { ok: boolean; length?: number };
-                            addToast({ title: r.ok ? 'Conversation copied to clipboard' : 'Share failed', type: r.ok ? 'success' : 'error' });
-                          },
-                        },
-                        { label: 'Export', action: () => exportSession(s.id) },
-                        { label: 'Delete', action: () => deleteSession(s.id), danger: true },
-                      ].map((item) => (
-                        <button
-                          key={item.label}
-                          onClick={() => {
-                            void item.action();
-                            setSessionMenu(null);
-                          }}
-                          className={`w-full rounded-md px-2 py-1.5 text-left text-[10px] hover:bg-white/[0.05] ${item.danger ? 'text-red-400' : 'text-zinc-400 hover:text-zinc-100'}`}
+              groupSessionsByDate(sessions).map((group) => (
+                <div key={group.label} className="mb-2">
+                  <div className="px-2.5 py-1 text-[9px] font-medium text-zinc-600 uppercase tracking-wider">{group.label}</div>
+                  {group.sessions.map((s) => (
+                    <div key={s.id} className="relative">
+                      <button
+                        onClick={() => handleSelectSession(s.id)}
+                        className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-150 text-xs ${
+                          currentSessionId === s.id
+                            ? 'bg-white/[0.06] text-white'
+                            : 'text-gray-500 hover:text-zinc-200 hover:bg-white/[0.03]'
+                        }`}
+                      >
+                        <svg
+                          className={`w-3 h-3 flex-shrink-0 ${s.pinned ? 'text-zinc-400' : 'opacity-40'}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
                         >
-                          {item.label}
-                        </button>
-                      ))}
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d={
+                              s.pinned
+                                ? 'm14 4 6 6-3 1-4 4-1 5-3-3-5 3 3-5-3-3 5-1 4-4 1-3Z'
+                                : 'M3 12.76c0 1.6 1.1 3 2.7 3.2 1.1.2 2.3.3 3.4.4L12 21l2.8-4.1c.2-.3.5-.5.9-.5 1.1-.1 2.3-.2 3.4-.4 1.6-.2 2.7-1.6 2.7-3.2V6.7c0-1.6-1.1-3-2.7-3.2A48 48 0 0 0 12 3c-2.4 0-4.7.2-7 .5C3.4 3.7 2.3 5.1 2.3 6.7v6Z'
+                            }
+                          />
+                        </svg>
+                        <span className="truncate flex-1 text-left">{s.title || 'New Chat'}</span>
+                        {useChatStore.getState().isSessionStreaming(s.id) && (
+                          <span className="relative flex h-2 w-2 flex-shrink-0">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSessionMenu((value) => (value === s.id ? null : s.id));
+                        }}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md text-zinc-600 hover:text-zinc-200 hover:bg-white/[0.06]"
+                        aria-label={`Conversation actions for ${s.title}`}
+                      >
+                        ···
+                      </button>
+                      {sessionMenu === s.id && (
+                        <div className="absolute z-50 right-1 top-7 w-36 rounded-lg border border-white/[0.08] bg-[#111113] p-1 shadow-2xl animate-scale-in">
+                          {[
+                            { label: s.pinned ? 'Unpin' : 'Pin', action: () => pinSession(s.id, !s.pinned) },
+                            {
+                              label: 'Rename',
+                              action: () => {
+                                const title = window.prompt('Rename conversation', s.title);
+                                if (title) void renameSession(s.id, title);
+                              },
+                            },
+                            { label: 'Branch', action: () => branchSession(s.id) },
+                            {
+                              label: 'Copy share',
+                              action: async () => {
+                                const r = await shareSession(s.id) as { ok: boolean; length?: number };
+                                addToast({ title: r.ok ? 'Conversation copied to clipboard' : 'Share failed', type: r.ok ? 'success' : 'error' });
+                              },
+                            },
+                            { label: 'Export', action: () => exportSession(s.id) },
+                            { label: 'Delete', action: () => deleteSession(s.id), danger: true },
+                          ].map((item) => (
+                            <button
+                              key={item.label}
+                              onClick={() => {
+                                void item.action();
+                                setSessionMenu(null);
+                              }}
+                              className={`w-full rounded-md px-2 py-1.5 text-left text-[10px] hover:bg-white/[0.05] ${item.danger ? 'text-red-400' : 'text-zinc-400 hover:text-zinc-100'}`}
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
               ))
             )}
