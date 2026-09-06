@@ -88,12 +88,14 @@ export function ToolCallCard({
   status,
   startTime,
   error,
+  onRetry,
 }: {
   name: string;
   input: unknown;
   status: 'running' | 'done' | 'error';
   startTime?: number;
   error?: string;
+  onRetry?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -164,6 +166,18 @@ export function ToolCallCard({
             <>
               <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
               <span className="text-red-400">failed</span>
+              {onRetry && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRetry(); }}
+                  className="ml-1 p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
+                  title="Retry"
+                  aria-label="Retry"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                </button>
+              )}
             </>
           ) : (
             <>

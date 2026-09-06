@@ -1992,7 +1992,63 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
             if (!text.trim()) return null;
             return (
               <div key={i} className="text-sm text-zinc-300 leading-relaxed">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      const isBlock = String(children).includes('\n');
+                      if (isBlock) {
+                        return (
+                          <div className="relative my-3 rounded-lg border border-white/[0.08] bg-black/40 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/[0.06]">
+                              <span className="text-[10px] text-zinc-500 font-mono">{match?.[1] || 'code'}</span>
+                              <button
+                                onClick={() => {
+                                  void navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
+                                }}
+                                className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                              >
+                                Copy
+                              </button>
+                            </div>
+                            <pre className="p-3 overflow-x-auto text-[12px] font-mono leading-relaxed">
+                              <code className={className} {...props}>{children}</code>
+                            </pre>
+                          </div>
+                        );
+                      }
+                      return (
+                        <code className="px-1.5 py-0.5 rounded bg-white/[0.08] text-[12px] font-mono text-indigo-300" {...props}>
+                          {children}
+                        </code>
+                      );
+                    },
+                    table({ children }) {
+                      return (
+                        <div className="my-3 overflow-x-auto rounded-lg border border-white/[0.08]">
+                          <table className="w-full text-[12px]">{children}</table>
+                        </div>
+                      );
+                    },
+                    th({ children }) {
+                      return (
+                        <th className="px-3 py-2 text-left font-semibold text-zinc-300 bg-white/[0.04] border-b border-white/[0.08]">
+                          {children}
+                        </th>
+                      );
+                    },
+                    td({ children }) {
+                      return (
+                        <td className="px-3 py-2 border-b border-white/[0.04] text-zinc-400">
+                          {children}
+                        </td>
+                      );
+                    },
+                  }}
+                >
+                  {text}
+                </ReactMarkdown>
               </div>
             );
           })
