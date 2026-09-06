@@ -265,11 +265,29 @@ export class TaskOrchestrator {
 
   private classifyTask(prompt: string): 'code' | 'research' | 'design' | 'data' | 'seo' | 'general' {
     const lower = prompt.toLowerCase();
-    if (lower.includes('build') || lower.includes('code') || lower.includes('app') || lower.includes('api') || lower.includes('function')) return 'code';
-    if (lower.includes('research') || lower.includes('analyze') || lower.includes('find') || lower.includes('compare')) return 'research';
-    if (lower.includes('design') || lower.includes('ui') || lower.includes('css') || lower.includes('layout')) return 'design';
-    if (lower.includes('data') || lower.includes('csv') || lower.includes('database') || lower.includes('sql')) return 'data';
-    if (lower.includes('seo') || lower.includes('ranking') || lower.includes('keyword')) return 'seo';
+    // Weighted scoring for more accurate classification
+    const scores: Record<string, number> = { code: 0, research: 0, design: 0, data: 0, seo: 0, general: 1 };
+    // Code signals
+    if (/\b(build|code|implement|develop|function|class|module|fix|bug|refactor|feature|typescript|javascript|python|rust|api|endpoint|component|react|vue|angular)\b/i.test(lower)) scores.code += 3;
+    if (/\b(test|lint|typecheck|build|compile|deploy|git|commit|branch|merge)\b/i.test(lower)) scores.code += 2;
+    if (/\b(file|edit|write|read|create|delete|rename|move|copy)\b/i.test(lower)) scores.code += 1;
+    // Research signals
+    if (/\b(research|analyze|compare|investigate|survey|review|summarize|evaluate|assess)\b/i.test(lower)) scores.research += 3;
+    if (/\b(find|search|look up|discover|explore|understand|explain|explain how)\b/i.test(lower)) scores.research += 2;
+    if (/\b(what is|how does|why does|what are|tell me about)\b/i.test(lower)) scores.research += 2;
+    // Design signals
+    if (/\b(design|ui|ux|css|style|layout|responsive|mockup|wireframe|color|font|animation|tailwind|bootstrap)\b/i.test(lower)) scores.design += 3;
+    if (/\b(beautiful|elegant|modern|minimal|dark mode|light mode|theme)\b/i.test(lower)) scores.design += 2;
+    // Data signals
+    if (/\b(data|csv|database|sql|query|dataset|analytics|dashboard|chart|graph|visualization|excel|spreadsheet)\b/i.test(lower)) scores.data += 3;
+    if (/\b(analyze|process|transform|clean|aggregate|filter|sort|group)\b/i.test(lower)) scores.data += 2;
+    // SEO signals
+    if (/\b(seo|ranking|keyword|meta|sitemap|robots|backlink| SERP|search engine|optimization)\b/i.test(lower)) scores.seo += 3;
+    if (/\b(title|description|heading|alt text|schema|structured data)\b/i.test(lower)) scores.seo += 1;
+    // Pick the highest scorer
+    const entries = Object.entries(scores).filter(([k]) => k !== 'general') as Array<[string, number]>;
+    entries.sort((a, b) => b[1] - a[1]);
+    if (entries[0][1] >= 3) return entries[0][0] as 'code' | 'research' | 'design' | 'data' | 'seo';
     return 'general';
   }
 
@@ -280,61 +298,42 @@ export class TaskOrchestrator {
    */
   private pickBestAgent(prompt: string): AgentId | null {
     const lower = prompt.toLowerCase();
-
-    // --- Single-domain tasks: return the best-fit agent directly ---
-    // Email
-    if (/\b(send|write|draft|compose|reply)\b.*\bemail\b|\bemail\b.*\b(send|write|draft|compose)\b/i.test(lower)) return 'general';
-    if (/\bemail\b|\binbox\b|\bmail\b/i.test(lower) && !/\b(and|then|also|while|build|create)\b/.test(lower)) return 'general';
-
-    // Security
-    if (/\b(security|vulnerab|penetrat|渗透|hack|exploit|audit|compliance|secret.?scan)\b/i.test(lower)) return 'security';
-
-    // DevOps / deployment
-    if (/\b(deploy|docker|ci[/]?cd|pipeline|container|kubernetes|k8s|terraform|aws|gcp|azure|vercel|netlify)\b/i.test(lower)) return 'devops';
-
-    // Writing / documentation
-    if (/\b(write|draft|document|blog|article|essay|book|grant|proposal|copy|content)\b.*\b(doc|docu|article|blog|book|essay|page|post)\b/i.test(lower)) return 'writer';
-    if (/\b(documentation|technical.?writing|readme|changelog)\b/i.test(lower)) return 'writer';
-
-    // Finance
-    if (/\b(financ|invoice|budget|tax|bookkeep|accounting|invoice|profit|revenue|expense)\b/i.test(lower)) return 'finance';
-
-    // Marketing
-    if (/\b(market|growth|campaign|seo|content.?market|social.?media|email.?market|brand)\b/i.test(lower)) return 'marketing';
-
-    // Testing
-    if (/\b(test|qa|quality|benchmark|performance.?test|load.?test|accessib|wcag)\b/i.test(lower)) return 'tester';
-
-    // Architecture
-    if (/\b(architect|system.?design|database.?design|api.?design|microservice|schema)\b/i.test(lower)) return 'architect';
-
-    // Mobile
-    if (/\b(mobile|ios|android|react.?native|flutter|swift|kotlin|app.?store)\b/i.test(lower)) return 'mobile';
-
-    // AI/ML
-    if (/\b(machine.?learn|ml|ai.?model|rag|llm|prompt.?engineer|fine.?tun|neural|deep.?learn)\b/i.test(lower)) return 'aieng';
-
-    // Business
-    if (/\b(business|crm|sales|lead|deal|pitch|strategy|project.?manage|roadmap)\b/i.test(lower)) return 'business';
-
-    // Automation
-    if (/\b(automate|workflow|schedule|cron|trigger|pipeline|batch.?process)\b/i.test(lower)) return 'automation';
-
-    // Desktop / computer control
-    if (/\b(desktop|mouse|keyboard|screenshot|screen|window|launch.?app|open.?app|computer)\b/i.test(lower)) return 'desktop';
-
-    // Research
-    if (/\b(research|analyze|compare|investigate|survey|review|summarize)\b/i.test(lower)) return 'research';
-
-    // Code / build
-    if (/\b(build|code|implement|develop|function|class|module|fix|bug|refactor|feature)\b/i.test(lower)) return 'code';
-
-    // Design
-    if (/\b(design|ui|ux|css|style|layout|responsive|mockup|wireframe)\b/i.test(lower)) return 'design';
-
-    // Data
-    if (/\b(data|csv|database|sql|query|dataset|analytics|dashboard)\b/i.test(lower)) return 'data';
-
+    // Weighted confidence scoring for agent selection
+    const scores: Array<{ agent: AgentId; score: number; patterns: RegExp[] }> = [
+      { agent: 'general', score: 0, patterns: [/\b(send|write|draft|compose|reply)\b.*\bemail\b/i, /\bemail\b|\binbox\b|\bmail\b/i] },
+      { agent: 'security', score: 0, patterns: [/\b(security|vulnerab|penetrat|hack|exploit|audit|compliance|secret.?scan)\b/i] },
+      { agent: 'devops', score: 0, patterns: [/\b(deploy|docker|ci[/]?cd|pipeline|container|kubernetes|k8s|terraform|aws|gcp|azure|vercel|netlify)\b/i] },
+      { agent: 'writer', score: 0, patterns: [/\b(write|draft|document|blog|article|essay|book|grant|proposal|copy|content)\b.*\b(doc|docu|article|blog|book|essay|page|post)\b/i, /\b(documentation|technical.?writing|readme|changelog)\b/i] },
+      { agent: 'finance', score: 0, patterns: [/\b(financ|invoice|budget|tax|bookkeep|accounting|profit|revenue|expense)\b/i] },
+      { agent: 'marketing', score: 0, patterns: [/\b(market|growth|campaign|seo|content.?market|social.?media|email.?market|brand)\b/i] },
+      { agent: 'tester', score: 0, patterns: [/\b(test|qa|quality|benchmark|performance.?test|load.?test|accessib|wcag)\b/i] },
+      { agent: 'architect', score: 0, patterns: [/\b(architect|system.?design|database.?design|api.?design|microservice|schema)\b/i] },
+      { agent: 'mobile', score: 0, patterns: [/\b(mobile|ios|android|react.?native|flutter|swift|kotlin|app.?store)\b/i] },
+      { agent: 'aieng', score: 0, patterns: [/\b(machine.?learn|ml|ai.?model|rag|llm|prompt.?engineer|fine.?tun|neural|deep.?learn)\b/i] },
+      { agent: 'business', score: 0, patterns: [/\b(business|crm|sales|lead|deal|pitch|strategy|project.?manage|roadmap)\b/i] },
+      { agent: 'automation', score: 0, patterns: [/\b(automate|workflow|schedule|cron|trigger|pipeline|batch.?process)\b/i] },
+      { agent: 'desktop', score: 0, patterns: [/\b(desktop|mouse|keyboard|screenshot|screen|window|launch.?app|open.?app|computer)\b/i] },
+      { agent: 'research', score: 0, patterns: [/\b(research|analyze|compare|investigate|survey|review|summarize)\b/i] },
+      { agent: 'code', score: 0, patterns: [/\b(build|code|implement|develop|function|class|module|fix|bug|refactor|feature)\b/i] },
+      { agent: 'design', score: 0, patterns: [/\b(design|ui|ux|css|style|layout|responsive|mockup|wireframe)\b/i] },
+      { agent: 'data', score: 0, patterns: [/\b(data|csv|database|sql|query|dataset|analytics|dashboard)\b/i] },
+    ];
+    // Score each agent
+    for (const entry of scores) {
+      for (const pattern of entry.patterns) {
+        if (pattern.test(lower)) entry.score += 1;
+      }
+    }
+    // Sort by score descending
+    scores.sort((a, b) => b.score - a.score);
+    // Return the best match if it has meaningful confidence
+    if (scores[0].score >= 1) {
+      // Special case: general agent should only be used for email/simple tasks
+      if (scores[0].agent === 'general' && scores[0].score < 2 && scores.length > 1 && scores[1].score >= 1) {
+        return scores[1].agent;
+      }
+      return scores[0].agent;
+    }
     return null; // truly ambiguous → may need decomposition
   }
 
@@ -351,14 +350,14 @@ export class TaskOrchestrator {
     const subTasks: SubTask[] = [];
 
     // Detect if this is a website/app building task
-    const isBuildTask = lower.includes('build') || lower.includes('create') || lower.includes('make') || lower.includes('develop');
-    const isWebsite = lower.includes('website') || lower.includes('web app') || lower.includes('landing page') || lower.includes('dashboard');
-    const isApp = lower.includes('app') || lower.includes('application') || lower.includes('software');
-    const isResearch = lower.includes('research') || lower.includes('analyze') || lower.includes('compare') || lower.includes('investigate');
-    const isMultiPart = lower.includes('and') || lower.includes('then') || lower.includes('also') || lower.includes('while');
+    const isBuildTask = /\b(build|create|make|develop|implement|scaffold|generate)\b/i.test(lower);
+    const isWebsite = /\b(website|web\s?app|landing\s?page|dashboard|site|frontend|front-end)\b/i.test(lower);
+    const isApp = /\b(app|application|software|tool|utility|cli|extension|plugin)\b/i.test(lower);
+    const isResearch = /\b(research|analyze|compare|investigate|survey|review|summarize|evaluate)\b/i.test(lower);
+    const isMultiPart = /\b(and then|also|while|after that|before|then|additionally|moreover|plus|as well as)\b/i.test(lower);
+    const hasExplicitSteps = /\b(first|step 1|1\.|then next|second|step 2|2\.|finally|lastly)\b/i.test(lower);
 
     // PREFER single-agent: use pickBestAgent to find the best fit.
-    // Only decompose for genuinely complex multi-phase build tasks.
     const bestAgent = this.pickBestAgent(prompt);
 
     if (isBuildTask && (isWebsite || isApp)) {
@@ -379,9 +378,10 @@ export class TaskOrchestrator {
         dependencies: [buildId],
         status: 'pending',
       });
-    } else if (bestAgent) {
+    } else if (bestAgent && !isMultiPart && !hasExplicitSteps) {
       // Single-agent path: the best agent handles the entire task directly.
-      // No decomposition, no over-spawning.
+      // No decomposition, no over-spawning. Only decompose if there are
+      // explicit multi-part signals.
       subTasks.push({
         id: uuid(),
         agentType: bestAgent,
@@ -389,20 +389,30 @@ export class TaskOrchestrator {
         dependencies: [],
         status: 'pending',
       });
-    } else if (isMultiPart || isResearch) {
+    } else if (isMultiPart || hasExplicitSteps || isResearch) {
       // Multi-part task: try to split into independent subtasks
-      // Look for patterns like "X and Y and Z" or "X, Y, Z"
       const parts = this.splitMultiPartTask(prompt);
-      if (parts.length > 1 && parts.length <= 4) {
-        // Only decompose if there are 2-4 clearly distinct parts
-        for (const part of parts) {
+      if (parts.length > 1 && parts.length <= 6) {
+        // Build a dependency graph: detect sequential dependencies
+        const partAgents: Array<{ id: string; agent: AgentId; desc: string; deps: string[] }> = [];
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
           const taskType = this.classifyTask(part);
-          const agentType = taskType === 'general' ? 'general' : taskType;
+          const agentType = taskType === 'general' ? (bestAgent ?? 'general') : taskType;
+          const partId = uuid();
+          // Later parts that reference earlier work depend on it
+          const deps: string[] = [];
+          if (i > 0 && /\b(after|using|with the|based on|then)\b/i.test(part)) {
+            deps.push(partAgents[i - 1].id);
+          }
+          partAgents.push({ id: partId, agent: agentType, desc: part.trim(), deps });
+        }
+        for (const pa of partAgents) {
           subTasks.push({
-            id: uuid(),
-            agentType,
-            description: part.trim(),
-            dependencies: [],
+            id: pa.id,
+            agentType: pa.agent,
+            description: pa.desc,
+            dependencies: pa.deps,
             status: 'pending',
           });
         }
@@ -410,7 +420,7 @@ export class TaskOrchestrator {
         // Too many parts or unsplitable — use general agent
         subTasks.push({
           id: uuid(),
-          agentType: 'general',
+          agentType: bestAgent ?? 'general',
           description: prompt,
           dependencies: [],
           status: 'pending',
@@ -419,7 +429,7 @@ export class TaskOrchestrator {
     } else {
       // Generic: assign to the most appropriate agent type
       const taskType = this.classifyTask(prompt);
-      const agentType = taskType === 'general' ? 'general' : taskType;
+      const agentType = taskType === 'general' ? (bestAgent ?? 'general') : taskType;
 
       subTasks.push({
         id: uuid(),
