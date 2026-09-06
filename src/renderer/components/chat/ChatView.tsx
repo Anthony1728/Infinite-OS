@@ -1714,6 +1714,8 @@ function RealChat({
   const providerStatus = useChatStore((s) => s.providerStatus);
   const loadingSession = useChatStore((s) => s.loadingSession);
   const abortChat = useChatStore((s) => s.abort);
+  const sessions = useChatStore((s) => s.sessions);
+  const selectSession = useChatStore((s) => s.selectSession);
   const [isOnline, setIsOnline] = useState(false);
   const [statsExpanded, setStatsExpanded] = useState(false);
 
@@ -1861,6 +1863,26 @@ function RealChat({
                   </button>
                 ))}
               </div>
+              {sessions.length > 0 && (
+                <div className="mt-8 w-full max-w-md">
+                  <div className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider mb-3">Recent conversations</div>
+                  <div className="space-y-1">
+                    {sessions.slice(0, 4).map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => selectSession(s.id)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] transition-colors text-left group"
+                      >
+                        <svg className="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 12.76c0 1.6 1.1 3 2.7 3.2 1.1.2 2.3.3 3.4.4L12 21l2.8-4.1c.2-.3.5-.5.9-.5 1.1-.1 2.3-.2 3.4-.4 1.6-.2 2.7-1.6 2.7-3.2V6.7c0-1.6-1.1-3-2.7-3.2A48 48 0 0 0 12 3c-2.4 0-4.7.2-7 .5C3.4 3.7 2.3 5.1 2.3 6.7v6Z" />
+                        </svg>
+                        <span className="truncate text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">{s.title || 'New Chat'}</span>
+                        <span className="ml-auto text-[9px] text-zinc-700">{s.message_count} msgs</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p className="text-xs text-white/30 mt-4">Type <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-mono text-[10px]">/</kbd> for commands</p>
             </div>
           )}
