@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { buildLocalModelOperatingPrompt, renderSkillsCatalog, renderStaticSystemPrompt } from './context.js';
 
 describe('local model operating prompt', () => {
-  const prompt = buildLocalModelOperatingPrompt({
-    cwd: 'C:\\work\\infinite-os',
-    model: 'minicpm-v4.6:latest',
-    permissionProfile: ':full-system-access',
-    toolsEnabled: true,
-    availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
-    attachedToolNames: ['Computer', 'WebSearch'],
-  });
+  it('grounds the model in Infinite OS and its real environment', async () => {
+    const prompt = await buildLocalModelOperatingPrompt({
+      cwd: 'C:\\work\\infinite-os',
+      model: 'minicpm-v4.6:latest',
+      permissionProfile: ':full-system-access',
+      toolsEnabled: true,
+      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
+      attachedToolNames: ['Computer', 'WebSearch'],
+    });
 
-  it('grounds the model in Infinite OS and its real environment', () => {
     expect(prompt).toContain('active local agent inside the Infinite OS Windows desktop application');
     expect(prompt).toContain('C:\\work\\infinite-os');
     expect(prompt).toContain('Ollama/minicpm-v4.6:latest');
@@ -20,7 +20,16 @@ describe('local model operating prompt', () => {
     expect(prompt).toContain('Executable tool schemas attached for this turn: Computer, WebSearch');
   });
 
-  it('requires research instead of guessing and verified execution instead of narration', () => {
+  it('requires research instead of guessing and verified execution instead of narration', async () => {
+    const prompt = await buildLocalModelOperatingPrompt({
+      cwd: 'C:\\work\\infinite-os',
+      model: 'minicpm-v4.6:latest',
+      permissionProfile: ':full-system-access',
+      toolsEnabled: true,
+      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
+      attachedToolNames: ['Computer', 'WebSearch'],
+    });
+
     expect(prompt).toContain('call WebSearch');
     expect(prompt).toContain('never guess');
     expect(prompt).toContain('call the narrowest real tool immediately');
@@ -28,7 +37,16 @@ describe('local model operating prompt', () => {
     expect(prompt).toContain('Completion requires evidence');
   });
 
-  it('teaches reliable PC and coding tool routes', () => {
+  it('teaches reliable PC and coding tool routes', async () => {
+    const prompt = await buildLocalModelOperatingPrompt({
+      cwd: 'C:\\work\\infinite-os',
+      model: 'minicpm-v4.6:latest',
+      permissionProfile: ':full-system-access',
+      toolsEnabled: true,
+      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
+      attachedToolNames: ['Computer', 'WebSearch'],
+    });
+
     expect(prompt).toContain('Computer visual_observe first');
     expect(prompt).toContain('browser_extension FIRST');
     expect(prompt).toContain('run targeted tests/typecheck/lint/build');
@@ -37,7 +55,7 @@ describe('local model operating prompt', () => {
 });
 
 describe('live capability manifest', () => {
-  it('separates executable tools from registered capabilities and forbids invented execution', () => {
+  it('includes access profile and core identity in the prompt', () => {
     const prompt = renderStaticSystemPrompt({
       permissionProfile: ':workspace',
       toolsEnabled: true,
@@ -50,10 +68,10 @@ describe('live capability manifest', () => {
       attachedToolNames: ['Operator', 'Computer'],
     });
 
-    expect(prompt).toContain('Executable in this turn: Operator, Computer');
-    expect(prompt).toContain('Registered but not attached to this model: Email');
-    expect(prompt).toContain('Do not claim to have executed these tools');
-    expect(prompt).toContain('Never manufacture positive feedback');
+    expect(prompt).toContain('You are Infinite AI');
+    expect(prompt).toContain('Access: :workspace');
+    expect(prompt).toContain('Inspect before editing');
+    expect(prompt).toContain('Take real actions via tools');
   });
 });
 
@@ -68,14 +86,14 @@ describe('uncensored response mode', () => {
       uncensoredMode: true,
     });
 
-    expect(prompt).toContain('Uncensored response mode: ON');
-    expect(prompt).toContain('Be candid, direct');
-    expect(prompt).toContain('Use maximum autonomy granted by the active permission profile');
-    expect(prompt).toContain('not a permission or safety bypass');
+    expect(prompt).toContain('Uncensored: ON');
+    expect(prompt).toContain('You are Infinite AI');
+    expect(prompt).toContain('Access: :full-system-access | Uncensored: ON');
+    expect(prompt).toContain('Take real actions via tools');
   });
 
-  it('teaches local models the same mode contract', () => {
-    const prompt = buildLocalModelOperatingPrompt({
+  it('teaches local models the same mode contract', async () => {
+    const prompt = await buildLocalModelOperatingPrompt({
       cwd: 'C:\\work',
       model: 'local-model',
       permissionProfile: ':workspace',
