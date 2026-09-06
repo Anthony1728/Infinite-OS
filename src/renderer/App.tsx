@@ -25,6 +25,7 @@ import { ExperienceSettingsModal, type ExperienceSettingsSection } from './compo
 import { PermissionDialog } from './components/permissions/PermissionDialog';
 import { ToastContainer } from './components/notifications/ToastContainer';
 import { InfiniteLogo } from './components/brand/InfiniteLogo';
+import { ShortcutsModal } from './components/modals/ShortcutsModal';
 
 type AuthView = 'login' | 'register';
 
@@ -105,6 +106,7 @@ export function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [experienceSettingsOpen, setExperienceSettingsOpen] = useState(false);
   const [experienceSettingsSection, setExperienceSettingsSection] = useState<ExperienceSettingsSection>('profile');
   const [startupLoading, setStartupLoading] = useState(true);
@@ -207,6 +209,10 @@ export function App() {
         case '.':
           e.preventDefault();
           setRightPanelOpen((o) => !o);
+          break;
+        case '/':
+          e.preventDefault();
+          setShortcutsOpen((o) => !o);
           break;
       }
     };
@@ -321,6 +327,7 @@ export function App() {
         ? <SettingsModalClassic onClose={() => setSettingsOpen(false)} />
         : <SettingsModal onClose={() => setSettingsOpen(false)} />)}
       {experienceSettingsOpen && <ExperienceSettingsModal key={experienceSettingsSection} initialSection={experienceSettingsSection} onClose={() => setExperienceSettingsOpen(false)} />}
+      <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <PermissionDialog />
       <ToastContainer />
       </div>

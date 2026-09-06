@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
