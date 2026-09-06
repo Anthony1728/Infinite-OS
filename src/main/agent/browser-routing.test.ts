@@ -14,11 +14,11 @@ describe('forced visible browser routing', () => {
     vi.mocked(bridgeServer.getStatus).mockReturnValue({ connected } as ReturnType<typeof bridgeServer.getStatus>);
   };
 
-  it('routes an Amazon search through the visual Operator when extension is offline', () => {
+  it('routes an Amazon search through browser_extension even when extension is offline (auto-fallback)', () => {
     setConnected(false);
     expect(routeForcedBrowserTool('Open Chrome and search Amazon for laptops')).toEqual({
-      name: 'Operator',
-      input: { action: 'search_amazon', query: 'laptops' },
+      name: 'browser_extension',
+      input: { action: 'navigate', url: 'https://www.amazon.com/s?k=laptops' },
     });
   });
 
@@ -46,10 +46,10 @@ describe('forced visible browser routing', () => {
     });
   });
 
-  it('routes a Google search to an encoded visible navigation via Operator when extension is offline', () => {
+  it('routes a Google search through browser_extension even when extension is offline (auto-fallback)', () => {
     setConnected(false);
     expect(routeForcedBrowserTool('Open Chrome and search Google for gaming laptops under R20 000')).toEqual({
-      name: 'Operator',
+      name: 'browser_extension',
       input: {
         action: 'navigate',
         url: 'https://www.google.com/search?q=gaming%20laptops%20under%20R20%20000',
