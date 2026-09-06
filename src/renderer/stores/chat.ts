@@ -335,6 +335,7 @@ interface ChatState {
   sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
+  isSessionStreaming: (id: string) => boolean;
   interject: (message: string) => Promise<void>;
 }
 
@@ -1860,6 +1861,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await window.api.respondPermission({ id: pendingPermission.id, allowed });
     set({ pendingPermission: null });
   },
+
+  isSessionStreaming: (id) => activeChatTaskBySession.has(id) || Boolean(orchestratorBySession.get(id)),
 
   interject: async (message) => {
     const { orchestratedTaskId, currentSessionId } = get();

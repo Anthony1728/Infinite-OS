@@ -548,6 +548,12 @@ export function Sidebar({
                       />
                     </svg>
                     <span className="truncate flex-1 text-left">{s.title || 'New Chat'}</span>
+                    {useChatStore.getState().isSessionStreaming(s.id) && (
+                      <span className="relative flex h-2 w-2 flex-shrink-0">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75 animate-ping" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-400" />
+                      </span>
+                    )}
                   </button>
                   <button
                     onClick={(e) => {
