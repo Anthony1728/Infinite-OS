@@ -4,11 +4,10 @@
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { spawn } from 'node:child_process';
 import { getBrain } from '../brain/core.js';
 import { detectLocalHardware, selectInstalledModel, type LocalHardwareProfile } from '../brain/hardware.js';
+import { ensureOllamaRunning, listOllamaModels, OLLAMA_URL } from './utils.js';
 
-const OLLAMA_BASE = 'http://localhost:11434';
 const FALLBACK_MODEL = 'qwen2.5:3b';
 
 interface ConversationEntry {
@@ -42,7 +41,6 @@ export class OllamaBrain {
   private teachTimer: ReturnType<typeof setTimeout> | null = null;
   private hardwareProfile: LocalHardwareProfile | null = null;
   private activeModel = '';
-  private serviceStartAttempted = false;
 
   constructor() {
     this.dataDir = join(homedir(), '.infinite-ai', 'ollama-brain');
@@ -94,7 +92,7 @@ export class OllamaBrain {
       const selectedModel = selectInstalledModel(installed, profile, model);
       if (!selectedModel) return '';
       this.activeModel = selectedModel;
-      const response = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      const response = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -322,14 +320,8 @@ export class OllamaBrain {
   }
 
   private async listInstalledModels(): Promise<string[]> {
-    try {
-      const response = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(3000) });
-      if (!response.ok) return [];
-      const data = await response.json() as { models?: Array<{ name?: string; model?: string }> };
-      return (data.models ?? []).map((item) => item.name || item.model || '').filter(Boolean);
-    } catch {
-      return [];
-    }
+    const models = await listOllamaModels();
+    return models.map((m) => m.id);
   }
 
   // ── Helpers ──
@@ -359,36 +351,7 @@ export class OllamaBrain {
 
   // ── Status ──
   async isAvailable(): Promise<boolean> {
-    try {
-      const res = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(3000) });
-      return res.ok;
-    } catch {
-      return this.startLocalService();
-    }
-  }
-
-  private async startLocalService(): Promise<boolean> {
-    if (this.serviceStartAttempted) return false;
-    this.serviceStartAttempted = true;
-    try {
-      const child = spawn('ollama', ['serve'], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-        env: process.env,
-      });
-      child.on('error', () => { /* Ollama binary not found — graceful fallback */ });
-      child.unref();
-      for (let attempt = 0; attempt < 10; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        try {
-          const response = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(1500) });
-          if (response.ok) return true;
-        } catch { /* keep polling during startup */ }
-      }
-    } catch { /* Ollama is optional and may not be installed */ }
-    this.serviceStartAttempted = false;
-    return false;
+    return ensureOllamaRunning();
   }
 
   async getStats() {

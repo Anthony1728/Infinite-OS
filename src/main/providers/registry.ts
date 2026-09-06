@@ -8,8 +8,7 @@ import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 import { opencode } from './opencode.js';
 import type { Message } from '../../shared/types.js';
-
-const OLLAMA_URL = 'http://localhost:11434';
+import { ensureOllamaRunning, OLLAMA_URL } from '../ollama/utils.js';
 
 // Ollama provider — auto-detects installed models from local Ollama API
 const ollamaAdapter: ProviderAdapter = {
@@ -21,6 +20,8 @@ const ollamaAdapter: ProviderAdapter = {
   freeModels: [],
 
   async testConnection() {
+    // Auto-start Ollama if not running
+    await ensureOllamaRunning();
     try {
       const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return { ok: false, error: `Ollama returned HTTP ${res.status}.` };
@@ -34,6 +35,8 @@ const ollamaAdapter: ProviderAdapter = {
   },
 
   async listModels() {
+    // Auto-start Ollama if not running
+    await ensureOllamaRunning();
     try {
       const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return [];
@@ -51,6 +54,8 @@ const ollamaAdapter: ProviderAdapter = {
   },
 
   async *streamChat(req) {
+    // Auto-start Ollama if not running before attempting to stream
+    await ensureOllamaRunning();
     const ollamaMessages = toOllamaMessages(req.messages, req.system);
     const tools = req.tools?.map((tool) => ({
       type: 'function',
