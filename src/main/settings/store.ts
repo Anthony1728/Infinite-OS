@@ -43,7 +43,10 @@ class SettingsStore {
         const data = JSON.parse(await readFile(path, 'utf8'));
         const scope = path.includes('.local') ? 'local' : path.includes('.infinite') ? 'project' : 'user';
         this.cache[scope] = data;
-      } catch { /* skip */ }
+        console.log(`[settings] reloaded ${scope} settings from ${path}`);
+      } catch (e) {
+        console.error(`[settings] failed to reload ${path}:`, (e as Error).message);
+      }
     });
     this.watchers.push(w);
   }
@@ -69,7 +72,22 @@ class SettingsStore {
     await writeFile(path, JSON.stringify(data, null, 2), 'utf8');
     this.cache[scope] = data;
   }
+
+  async clear(scope: Scope, key: string, cwd: string): Promise<void> {
+    const path = scope === 'user'
+      ? join(homedir(), '.infinite-ai', 'settings.json')
+      : scope === 'project'
+        ? join(cwd, '.infinite', 'settings.json')
+        : join(cwd, '.infinite', 'settings.local.json');
+
+    const data = (this.cache[scope] as Record<string, unknown>) ?? {};
+    if (key in data) {
+      delete data[key];
+      await writeFile(path, JSON.stringify(data, null, 2), 'utf8');
+      this.cache[scope] = data;
+      console.log(`[settings] cleared key "${key}" from ${scope} scope`);
+    }
+  }
 }
 
 export const settings = new SettingsStore();
-

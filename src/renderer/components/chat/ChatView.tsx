@@ -713,6 +713,8 @@ function InputBar({
   onWorkspaceOpenChange,
   onOpenWorkspace,
   onOpenDeploy,
+  streaming = false,
+  onAbort,
 }: {
   input: string;
   setInput: (v: string) => void;
@@ -728,6 +730,8 @@ function InputBar({
   onWorkspaceOpenChange: (open: boolean) => void;
   onOpenWorkspace: () => void;
   onOpenDeploy: () => void;
+  streaming?: boolean;
+  onAbort?: () => void;
 }) {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
@@ -1626,20 +1630,33 @@ function InputBar({
               {isListening ? 'Stop' : 'Dictate'}
             </button>
           </div>
-          <button
-            onClick={send}
-            disabled={!input.trim() && images.length === 0}
-            aria-label="Send message"
-            className="os-send-button w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-white disabled:cursor-not-allowed"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-              />
-            </svg>
-          </button>
+          {streaming && onAbort ? (
+            <button
+              onClick={onAbort}
+              aria-label="Stop generating"
+              title="Stop generating"
+              className="w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 animate-pulse"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={send}
+              disabled={!input.trim() && images.length === 0}
+              aria-label="Send message"
+              className="os-send-button w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 text-white disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
+                />
+              </svg>
+            </button>
+          )}
           <button
             onClick={async () => { await window.api.miniToggle(); }}
             aria-label="Toggle mini mode"
@@ -1696,6 +1713,7 @@ function RealChat({
   const activity = useChatStore((s) => s.activity);
   const providerStatus = useChatStore((s) => s.providerStatus);
   const loadingSession = useChatStore((s) => s.loadingSession);
+  const abortChat = useChatStore((s) => s.abort);
   const [isOnline, setIsOnline] = useState(false);
 
   // Check if AI model is online
@@ -1824,6 +1842,8 @@ function RealChat({
             onWorkspaceOpenChange={onWorkspaceOpenChange}
             onOpenWorkspace={onOpenWorkspace}
             onOpenDeploy={onOpenDeploy}
+            streaming={streaming}
+            onAbort={() => void abortChat()}
           />
         </div>
       </div>

@@ -40,6 +40,7 @@ import { registerMultiAgentIpc } from './multi-agent.js';
 import { registerRemoteIpc } from './remote.js';
 import { registerWorkspaceIpc } from './workspace.js';
 import { registerAuthIpc } from './auth.js';
+import { registerOwnerIpc } from './owner.js';
 import { registerTerminalIpc } from '../terminal/handler.js';
 import { registerCheckpointIpc } from './checkpoint.js';
 import { registerClipboardIpc } from './clipboard.js';
@@ -86,6 +87,7 @@ const discardedRuns = new Set<string>();
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerWindowIpc(getMainWindow);
   registerAuthIpc();
+  registerOwnerIpc();
   registerTerminalIpc();
   registerCheckpointIpc();
   registerClipboardIpc();

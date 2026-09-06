@@ -883,6 +883,22 @@ const api = {
   screenshotRestore: () => ipcRenderer.invoke('screenshot:restore'),
   screenshotStats: () => ipcRenderer.invoke('screenshot:stats'),
 
+  // Owner System
+  ownerGetProfile: () => ipcRenderer.invoke(IPC.OWNER_GET_PROFILE),
+  ownerGetPublicInfo: () => ipcRenderer.invoke(IPC.OWNER_GET_PUBLIC_INFO),
+  ownerUpdateProfile: (args: { email?: string; updates: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.OWNER_UPDATE_PROFILE, args),
+  ownerListDocuments: () => ipcRenderer.invoke(IPC.OWNER_LIST_DOCUMENTS),
+  ownerGetDocument: (args: { key: string }) => ipcRenderer.invoke(IPC.OWNER_GET_DOCUMENT, args),
+  ownerUpsertDocument: (args: { email?: string; key: string; title: string; category?: string; body: string }) =>
+    ipcRenderer.invoke(IPC.OWNER_UPSERT_DOCUMENT, args),
+  ownerDeleteDocument: (args: { email?: string; key: string }) =>
+    ipcRenderer.invoke(IPC.OWNER_DELETE_DOCUMENT, args),
+  ownerListCapabilities: () => ipcRenderer.invoke(IPC.OWNER_LIST_CAPABILITIES),
+  ownerToggleCapability: (args: { email?: string; capability: string; enabled: boolean }) =>
+    ipcRenderer.invoke(IPC.OWNER_TOGGLE_CAPABILITY, args),
+  ownerGetAudit: (args?: { limit?: number }) => ipcRenderer.invoke(IPC.OWNER_GET_AUDIT, args),
+
   // Mini Mode
   miniToggle: () => ipcRenderer.invoke(IPC.MINI_TOGGLE),
   miniRestore: () => ipcRenderer.invoke(IPC.MINI_RESTORE),

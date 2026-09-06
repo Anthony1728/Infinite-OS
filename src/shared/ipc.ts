@@ -428,6 +428,18 @@ export const IPC = {
   AUTH_GET_SESSION: 'auth:get-session',
   AUTH_SET_SESSION: 'auth:set-session',
 
+  // Owner System (owner of Infinite OS)
+  OWNER_GET_PROFILE: 'owner:get-profile',
+  OWNER_GET_PUBLIC_INFO: 'owner:get-public-info',
+  OWNER_UPDATE_PROFILE: 'owner:update-profile',
+  OWNER_LIST_DOCUMENTS: 'owner:list-documents',
+  OWNER_GET_DOCUMENT: 'owner:get-document',
+  OWNER_UPSERT_DOCUMENT: 'owner:upsert-document',
+  OWNER_DELETE_DOCUMENT: 'owner:delete-document',
+  OWNER_LIST_CAPABILITIES: 'owner:list-capabilities',
+  OWNER_TOGGLE_CAPABILITY: 'owner:toggle-capability',
+  OWNER_GET_AUDIT: 'owner:get-audit',
+
   // Task Replay
   REPLAY_EXECUTE: 'replay:execute',
   REPLAY_EXECUTE_TASK: 'replay:execute-task',
