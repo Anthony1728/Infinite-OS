@@ -108,6 +108,13 @@ export async function getApiKey(provider: string): Promise<string> {
   return key;
 }
 
+/** Return all configured API keys for a provider (currently one per provider). */
+export async function getAllApiKeys(provider: string): Promise<string[]> {
+  await load();
+  const key = cache[provider] ?? '';
+  return key ? [key] : [];
+}
+
 export async function setApiKey(provider: string, key: string): Promise<void> {
   await load();
   cache[provider] = key;

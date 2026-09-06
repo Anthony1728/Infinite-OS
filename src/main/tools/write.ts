@@ -1,10 +1,11 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
+import { backupFile } from './backup.js';
 
 export const write: Tool = {
   name: 'Write',
-  description: 'Create a new file or overwrite an existing file with the given content. Automatically creates parent directories.',
+  description: 'Create a new file or overwrite an existing file with the given content. Automatically creates parent directories and backs up existing files.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -22,9 +23,12 @@ export const write: Tool = {
       const signal = ctx.abortSignal;
       // Mark as agent-authorized so source guard allows it
       try { const { allowWrite } = await import('../guard/source-guard.js'); allowWrite(abs); } catch { /* guard optional */ }
+      // Auto-backup before overwriting existing files
+      const backupPath = await backupFile(abs);
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });
-      return { content: `Wrote ${content.length} bytes to ${file_path}` };
+      const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
+      return { content: `Wrote ${content.length} bytes to ${file_path}${backupNote}` };
     } catch (e) {
       return { content: `Error writing ${file_path}: ${(e as Error).message}`, is_error: true };
     }

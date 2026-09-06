@@ -47,6 +47,7 @@ export interface AgentActivity {
 
 export type AgentEvent =
   | { type: 'start'; run: AgentRunState }
+  | { type: 'welcome'; runId: string; agentName: string; role: string; model?: string; message: string }
   | { type: 'text_delta'; runId: string; message_id: string; text: string }
   | { type: 'tool_call'; runId: string; toolName: string }
   | { type: 'activity'; runId: string; activity: AgentActivity }

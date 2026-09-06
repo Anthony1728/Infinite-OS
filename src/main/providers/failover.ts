@@ -1,4 +1,4 @@
-import { getApiKey } from '../settings/secrets.js';
+import { getAllApiKeys } from '../settings/secrets.js';
 import { getProvider } from './registry.js';
 
 export interface ProviderCandidate { provider: string; model: string; apiKey: string; label: string; }
@@ -249,20 +249,27 @@ export function selectNextProviderCandidate(
 export async function buildProviderFailoverPlan(selected: { provider: string; model: string }): Promise<ProviderCandidate[]> {
   const candidates: ProviderCandidate[] = [];
   const seen = new Set<string>();
-  const credentials = new Map<string, string>();
+  const credentials = new Map<string, string[]>();
   const add = async (providerId: string, model: string) => {
     const provider = getProvider(providerId);
     if (!provider || !model) return;
-    const id = `${providerId}:${model}`;
-    if (seen.has(id)) return;
-    seen.add(id);
-    let apiKey = '';
     if (provider.requiresApiKey || provider.acceptsApiKey) {
-      if (!credentials.has(providerId)) credentials.set(providerId, await getApiKey(providerId) ?? '');
-      apiKey = credentials.get(providerId) ?? '';
+      if (!credentials.has(providerId)) credentials.set(providerId, await getAllApiKeys(providerId));
+      const keys = credentials.get(providerId) ?? [];
+      if (provider.requiresApiKey && !keys.length) return;
+      // Create a candidate for each API key (currently one per provider)
+      for (const apiKey of keys) {
+        const id = `${providerId}:${model}:${apiKey.slice(-4)}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        candidates.push({ provider: providerId, model, apiKey, label: `${provider.label} / ${model}` });
+      }
+    } else {
+      const id = `${providerId}:${model}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      candidates.push({ provider: providerId, model, apiKey: '', label: `${provider.label} / ${model}` });
     }
-    if (provider.requiresApiKey && !apiKey) return;
-    candidates.push({ provider: providerId, model, apiKey, label: `${provider.label} / ${model}` });
   };
 
   await add(selected.provider, selected.model);

@@ -14,6 +14,7 @@ import { bash } from '../tools/bash.js';
 const mocks = vi.hoisted(() => ({
   settingsValues: new Map<string, unknown>(),
   getApiKey: vi.fn<(provider: string) => Promise<string>>(),
+  getAllApiKeys: vi.fn<(provider: string) => Promise<string[]>>(),
   requestPermission: vi.fn<(tool: unknown, options: unknown) => Promise<boolean>>(),
   learnFromToolResult: vi.fn(),
   learnFromCompletedResponse: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('../settings/store.js', () => ({
 }));
 vi.mock('../settings/secrets.js', () => ({
   getApiKey: mocks.getApiKey,
+  getAllApiKeys: mocks.getAllApiKeys,
 }));
 vi.mock('./permission-prompt.js', () => ({
   requestPermission: mocks.requestPermission,
@@ -81,6 +83,7 @@ beforeEach(() => {
   mocks.settingsValues.clear();
   mocks.settingsValues.set('permissionMode', 'workspace');
   mocks.getApiKey.mockResolvedValue('test-zen-key');
+  mocks.getAllApiKeys.mockResolvedValue(['test-zen-key']);
   mocks.requestPermission.mockReset().mockResolvedValue(false);
   mocks.learnFromToolResult.mockReset();
   mocks.learnFromCompletedResponse.mockReset();

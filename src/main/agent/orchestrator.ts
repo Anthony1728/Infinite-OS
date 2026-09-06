@@ -45,7 +45,7 @@ export interface SubTask {
 }
 
 export interface OrchestratorEvent {
-  type: 'task_analyzed' | 'task_updated' | 'subtask_deployed' | 'subtask_progress' | 'subtask_completed' | 'subtask_failed' | 'subtask_retrying' | 'task_completed' | 'task_failed' | 'model_selected' | 'paid_model_warning';
+  type: 'task_analyzed' | 'task_updated' | 'subtask_deployed' | 'subtask_progress' | 'subtask_completed' | 'subtask_failed' | 'subtask_retrying' | 'task_completed' | 'task_failed' | 'model_selected' | 'paid_model_warning' | 'welcome';
   taskId: string;
   data: unknown;
 }
@@ -552,6 +552,19 @@ export class TaskOrchestrator {
     });
 
     sink({ type: 'subtask_deployed', taskId: task.id, data: { subTaskId: subTask.id, agentType: subTask.agentType, description: subTask.description } });
+
+    // Welcome event — introduces the agent by name and role
+    const agentName = subTask.agentType.charAt(0).toUpperCase() + subTask.agentType.slice(1);
+    sink({
+      type: 'welcome',
+      taskId: task.id,
+      data: {
+        runId: state.id,
+        agentName,
+        role: subTask.description,
+        message: `${agentName} working on: ${subTask.description}`,
+      },
+    });
   }
 
   private shouldRetry(task: OrchestratorTask, subTask: SubTask, error: string): boolean {

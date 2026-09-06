@@ -71,6 +71,7 @@ function clearAllSafetyTimers(): void {
 }
 
 export type StreamEvent =
+  | { type: 'welcome'; agentName: string; role: string; model?: string; message: string }
   | { type: 'message_start'; message_id: string }
   | { type: 'message_discard'; message_id: string }
   | { type: 'text_delta'; message_id: string; text: string }
@@ -387,6 +388,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const event = payload as {
         type:
           | 'start'
+          | 'welcome'
           | 'text_delta'
           | 'tool_call'
           | 'complete'
@@ -424,10 +426,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
         stop_reason?: Message['stop_reason'];
         usage?: unknown;
         attempt?: number;
+        agentName?: string;
+        role?: string;
+        message?: string;
       };
       if (!event.runId) return;
       const context = selectedAgentRuns.get(event.runId);
       if (!context) return;
+
+      // Welcome event — insert an assistant message introducing the agent
+      if (event.type === 'welcome' && event.message) {
+        if (context.sessionId === get().currentSessionId) {
+          const welcomeMsg: Message = {
+            id: `welcome-${event.runId}-${Date.now()}`,
+            role: 'assistant',
+            content: [{ type: 'text', text: event.message }],
+            timestamp: Date.now(),
+            model: event.model,
+          };
+          set((state) => ({
+            messages: [...state.messages, welcomeMsg],
+          }));
+        }
+        return;
+      }
 
       // Legacy preview updates for activity feed row
       if (event.type === 'text_delta') {
@@ -668,6 +690,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
           timestamp: Date.now(),
         };
         if (isCurrentSession) set((s) => ({ messages: [...s.messages, progressMsg] }));
+      } else if (ev.type === 'welcome') {
+        // Welcome event from orchestrator — introduce the agent
+        const data = ev.data as { runId?: string; agentName?: string; role?: string; model?: string; message?: string };
+        if (data.message && isCurrentSession) {
+          const welcomeMsg: Message = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: [{ type: 'text', text: data.message }],
+            timestamp: Date.now(),
+            model: data.model,
+          };
+          set((s) => ({ messages: [...s.messages, welcomeMsg] }));
+        }
       } else if (ev.type === 'subtask_progress') {
         // Live subagent stream (text, tools, retries) — activity feed only,
         // so parallel phases never interleave tokens into the chat transcript.

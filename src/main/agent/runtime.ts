@@ -10,6 +10,7 @@ import { buildContext, buildSystemPrompt } from './context.js';
 import type { AgentActivity, AgentEvent, AgentId, AgentRunState, AgentType } from '../agents/types.js';
 import type { ContentBlock, Message } from '../../shared/types.js';
 import { isExplicitActionFailure, isUnfulfilledActionPromise, requiresToolExecution } from './completion-guards.js';
+import { missingRequiredTaskActions, type SuccessfulToolAction } from './task-coverage.js';
 import {
   buildProviderFailoverPlan,
   isTransientStreamFailure,
@@ -196,6 +197,23 @@ export function spawnSubagent(opts: SpawnOpts): { state: AgentRunState; done: Pr
   startSupervisor();
   opts.sink({ type: 'start', run: { ...state } });
 
+  // Welcome event — introduces the agent by name and role so the user
+  // knows who is working on their task.
+  const agentDef = getAgent(opts.agentId);
+  if (agentDef) {
+    const roleDesc = opts.agentId === 'auto'
+      ? 'your all-purpose assistant'
+      : agentDef.description || opts.agentId;
+    opts.sink({
+      type: 'welcome',
+      runId: state.id,
+      agentName: agentDef.name || opts.agentId,
+      role: roleDesc,
+      model: opts.model,
+      message: `${agentDef.name || opts.agentId} ready — ${roleDesc}.`,
+    });
+  }
+
   const controller = new AbortController();
   activeRuns.set(state.id, controller);
 
@@ -335,6 +353,7 @@ export async function runSubagent(
   // Capability tracker: detects when a model is overmatched for the task.
   const capTracker = createCapabilityTracker();
   let successfulToolExecutions = 0;
+  const successfulToolActions: SuccessfulToolAction[] = [];
   const failedAttemptCounts = new Map<string, number>();
   let recoveryContext: Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'> | null = null;
   const providerProgressSeen = new Set<string>();
@@ -643,7 +662,8 @@ export async function runSubagent(
       .join('\n')
       .trim();
     if (!toolUses.length && taskComplete && assistantText && !lastToolBatchHadError) {
-      const executionMissing = requiresToolExecution(opts.task) && successfulToolExecutions === 0;
+      const missingActions = missingRequiredTaskActions(opts.task, successfulToolActions);
+      const executionMissing = (requiresToolExecution(opts.task) && successfulToolExecutions === 0) || missingActions.length > 0;
       if (isUnfulfilledActionPromise(opts.task, assistantText) || executionMissing) {
         const capType: CapabilityFailureType = isUnfulfilledActionPromise(opts.task, assistantText) ? 'promise_only' : 'no_execution';
         recordCapabilityFailure(capTracker, activeCandidate, capType);
@@ -658,6 +678,12 @@ export async function runSubagent(
             failoverCandidateRetries = 0;
             continue;
           }
+        }
+
+        if (missingActions.length && !toolsEnabled &&
+            switchCandidate(`This model does not support tool calls for the remaining required actions: ${missingActions.join(', ')}.`, assistant, 'compound-action execution')) {
+          intentOnlyRetries = 0;
+          continue;
         }
 
         if (intentOnlyRetries < 2) {
@@ -790,6 +816,7 @@ export async function runSubagent(
         batchFailures.push({ name: canonicalName, input: tu.input, error: resultContent });
       } else {
         successfulToolExecutions++;
+        successfulToolActions.push({ name: canonicalName, input: tu.input });
         if (tool) failedAttemptCounts.delete(signature);
       }
       activity(state, opts.sink, toolResult.is_error ? 'error' : 'result', `${tu.name} ${toolResult.is_error ? 'failed' : 'completed'}`, resultContent);

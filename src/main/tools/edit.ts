@@ -1,10 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
+import { backupFile } from './backup.js';
 
 export const edit: Tool = {
   name: 'Edit',
-  description: 'Perform exact string replacement in a file. old_string must appear exactly once unless replace_all is true.',
+  description: 'Perform exact string replacement in a file. old_string must appear exactly once unless replace_all is true. Automatically backs up the original file before editing.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -38,8 +39,11 @@ export const edit: Tool = {
         updated = original.replace(old_string, new_string);
       }
 
+      // Auto-backup before writing
+      const backupPath = await backupFile(abs);
       await writeFile(abs, updated, { encoding: 'utf8', ...fsOpts });
-      return { content: `Edited ${file_path} successfully` };
+      const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
+      return { content: `Edited ${file_path} successfully${backupNote}` };
     } catch (e) {
       return { content: `Error editing ${file_path}: ${(e as Error).message}`, is_error: true };
     }

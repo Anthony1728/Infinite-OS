@@ -75,7 +75,8 @@ export interface CrewEvent {
     | 'leader_completed'
     | 'crew_completed'
     | 'crew_failed'
-    | 'crew_degraded';
+    | 'crew_degraded'
+    | 'welcome';
   runId: string;
   data: unknown;
 }
@@ -361,6 +362,20 @@ export async function runCrew(
 
   if (plan.members.length > 0) {
     event({ type: 'crew_planned', runId: run.id, data: plan });
+
+    // Crew welcome — introduces the team
+    const leaderModel = plan.leader?.model || 'default model';
+    const memberList = plan.members.map(m => `${m.role} (${m.assignment.model})`).join(', ');
+    event({
+      type: 'welcome',
+      runId: run.id,
+      data: {
+        agentName: 'Crew',
+        role: `Team of ${plan.members.length} specialists`,
+        model: leaderModel,
+        message: `Your crew is assembled: ${leaderModel} leads, with ${memberList}. Beginning work.`,
+      },
+    });
   } else {
     fallbacks.push('No specialists assigned — leader handles everything directly.');
   }
