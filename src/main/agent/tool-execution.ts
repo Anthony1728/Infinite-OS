@@ -5,10 +5,37 @@ import type { Tool, ToolResult } from '../tools/base.js';
 
 export const TOOL_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 
+// Tool-specific timeouts: some tools need more time
+const TOOL_TIMEOUTS: Record<string, number> = {
+  'Bash': 10 * 60_000,        // Shell commands can take longer
+  'Computer': 5 * 60_000,     // Desktop automation
+  'Operator': 5 * 60_000,     // Browser automation
+  'browser_extension': 5 * 60_000,
+  'Deploy': 15 * 60_000,      // Deployment can be slow
+  'AppBuilder': 10 * 60_000,  // Building apps
+  'WebsiteBuilder': 10 * 60_000,
+  'Git': 5 * 60_000,          // Git operations
+  'GitPush': 5 * 60_000,
+  'GitPull': 5 * 60_000,
+};
+
+function getToolTimeout(toolName: string): number {
+  return TOOL_TIMEOUTS[toolName] ?? TOOL_EXECUTION_TIMEOUT_MS;
+}
+
 const PARALLEL_SAFE_TOOLS = new Set([
-  'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Browser', 'Skills',
-  'Json', 'Text', 'Crypto', 'Math', 'Time', 'Timer', 'GitStatus', 'GitLog', 'GitDiff',
-  'TodoRead', 'Knowledge', 'System', 'FileOps',
+  // Read-only file operations
+  'Read', 'Glob', 'Grep', 'FileOps',
+  // Web operations (read-only)
+  'WebFetch', 'WebSearch', 'Browser', 'browser_extension',
+  // Knowledge & skills (read-only)
+  'Skills', 'Knowledge', 'TodoRead',
+  // Compute-only (no side effects)
+  'Json', 'Text', 'Crypto', 'Math', 'Time', 'Timer', 'Regex', 'Color',
+  // Git read-only operations
+  'GitStatus', 'GitLog', 'GitDiff',
+  // System info (read-only)
+  'System', 'Network', 'Device',
 ]);
 
 /** Read-only/compute-only tools can safely fan out in one model turn. */
@@ -65,10 +92,11 @@ export async function executeToolCall(options: ToolExecutionOptions): Promise<To
     };
 
     const timeout = new Promise<never>((_resolve, reject) => {
+      const toolTimeout = getToolTimeout(toolUse.name);
       timeoutId = setTimeout(() => {
         controller.abort(new Error('tool timeout'));
-        reject(new Error(`Tool "${toolUse.name}" timed out after ${Math.round(TOOL_EXECUTION_TIMEOUT_MS / 60_000)} minutes and was cancelled.`));
-      }, TOOL_EXECUTION_TIMEOUT_MS);
+        reject(new Error(`Tool "${toolUse.name}" timed out after ${Math.round(toolTimeout / 60_000)} minutes and was cancelled.`));
+      }, toolTimeout);
     });
     return await Promise.race([operation(), timeout, cancellation]);
   } finally {
