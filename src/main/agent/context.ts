@@ -535,6 +535,27 @@ async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
   const projectPath = join(cwd, 'INFINITE.md');
   const projectHidden = join(cwd, '.infinite', 'INFINITE.md');
   const localPath = join(cwd, 'INFINITE.local.md');
+  // Hermes/agent-standard context files — picked up automatically so repos
+  // authored for Hermes, Claude Code, or Codex work in Infinite OS as-is.
+  const agentFiles = [
+    join(cwd, 'AGENTS.md'),
+    join(cwd, 'CLAUDE.md'),
+    join(cwd, '.hermes.md'),
+    join(cwd, 'SOUL.md'),
+  ];
+
+  const MAX_CONTEXT_CHARS = 8000;
+  const readCapped = async (path: string): Promise<DiscoveredMemory> => {
+    const { readFile } = await import('node:fs/promises');
+    const content = await readFile(path, 'utf8');
+    return {
+      path,
+      content:
+        content.length > MAX_CONTEXT_CHARS
+          ? content.slice(0, MAX_CONTEXT_CHARS) + `\n\n[... truncated ${content.length - MAX_CONTEXT_CHARS} chars]`
+          : content,
+    };
+  };
 
   const { readFile } = await import('node:fs/promises');
   const results = await Promise.allSettled([
@@ -542,6 +563,7 @@ async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
     readFile(projectPath, 'utf8').then((content) => ({ path: projectPath, content })),
     readFile(projectHidden, 'utf8').then((content) => ({ path: projectHidden, content })),
     readFile(localPath, 'utf8').then((content) => ({ path: localPath, content })),
+    ...agentFiles.map((path) => readCapped(path)),
   ]);
   return results.filter((r): r is PromiseFulfilledResult<DiscoveredMemory> => r.status === 'fulfilled').map((r) => r.value);
 }

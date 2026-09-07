@@ -29,7 +29,7 @@ import { ShortcutsModal } from './components/modals/ShortcutsModal';
 
 type AuthView = 'login' | 'register';
 
-const LOCAL_PRIMARY_MODEL = 'minicpm-v4.6:latest';
+const LOCAL_PRIMARY_CANDIDATES = ['minicpm-v4.6:latest', 'qwen3:4b', 'qwen2.5:3b', 'llama3.1:8b', 'mistral:7b'];
 
 async function openQuickCapturePrompt(): Promise<void> {
   // Native prompt() is the lowest-friction path that needs zero new UI.
@@ -138,8 +138,11 @@ export function App() {
         }
 
         const models = (await window.api.listProviderModels({ provider: 'ollama' })) as Array<{ id: string }>;
-        const localPrimary = models.find((item) => item.id === LOCAL_PRIMARY_MODEL)
-          ?? models.find((item) => item.id.toLowerCase().startsWith('minicpm-v4.6'));
+        const localPrimary = LOCAL_PRIMARY_CANDIDATES
+          .map((id) => models.find((item) => item.id === id))
+          .find(Boolean)
+          ?? models.find((item) => item.id.toLowerCase().startsWith('minicpm-v4.6'))
+          ?? models[0];
         if (!localPrimary) return;
         let current: Record<string, unknown> = {};
         try { current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}'); } catch { /* use defaults */ }

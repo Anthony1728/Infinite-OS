@@ -6,9 +6,9 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { getBrain } from '../brain/core.js';
 import { detectLocalHardware, selectInstalledModel, type LocalHardwareProfile } from '../brain/hardware.js';
-import { ensureOllamaRunning, listOllamaModels, OLLAMA_URL } from './utils.js';
+import { ensureOllamaRunning, listOllamaModels, OLLAMA_URL, resolveOllamaModel } from './utils.js';
 
-const FALLBACK_MODEL = 'qwen2.5:3b';
+const FALLBACK_MODELS = ['qwen3:4b', 'qwen2.5:3b', 'llama3.1:8b', 'mistral:7b'];
 
 interface ConversationEntry {
   id: string;
@@ -89,7 +89,11 @@ export class OllamaBrain {
     try {
       const profile = await this.getHardwareProfile();
       const installed = await this.listInstalledModels();
-      const selectedModel = selectInstalledModel(installed, profile, model);
+      const selectedModel =
+        resolveOllamaModel(model ?? '', installed) ||
+        selectInstalledModel(installed, profile, model) ||
+        installed[0] ||
+        '';
       if (!selectedModel) return '';
       this.activeModel = selectedModel;
       const response = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -237,7 +241,7 @@ export class OllamaBrain {
         brain.recordOutcome({
           taskType: 'knowledge-distillation',
           input: `Taught ${taught} entries`,
-          modelUsed: this.activeModel || FALLBACK_MODEL,
+          modelUsed: this.activeModel || FALLBACK_MODELS[0],
           output: `Consolidated ${taught} entries into local retrieval memory`,
           success: true,
           duration: 0,
@@ -362,7 +366,7 @@ export class OllamaBrain {
       totalTeachingEntries: this.teachingData.length,
       untaughtEntries: this.teachingData.filter(t => !t.taught).length,
       taughtEntries: this.teachingData.filter(t => t.taught).length,
-      model: this.activeModel || selectInstalledModel(installedModels, hardware) || FALLBACK_MODEL,
+      model: this.activeModel || selectInstalledModel(installedModels, hardware) || FALLBACK_MODELS[0],
       installedModels,
       hardware,
       learningMode: 'persistent-retrieval',

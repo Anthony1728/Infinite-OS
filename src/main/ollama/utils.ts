@@ -66,6 +66,28 @@ export async function listOllamaModels(): Promise<Array<{ id: string; label: str
 }
 
 /**
+ * Resolve the model to actually send to Ollama.
+ * The UI may request a model that was uninstalled (e.g. minicpm-v4.6) while
+ * the user has a different model installed (e.g. qwen3:4b). Never send a
+ * non-existent model name to Ollama — it returns 404 and the chat silently
+ * dies. Resolution order: exact → base-name → size-tier → first installed.
+ */
+export function resolveOllamaModel(requested: string, installed: string[]): string {
+  if (!requested) return installed[0] ?? '';
+  if (installed.includes(requested)) return requested;
+  const base = requested.split(':')[0].toLowerCase();
+  const fuzzy = installed.find((m) => m.toLowerCase().startsWith(base));
+  if (fuzzy) return fuzzy;
+  // Size-tier match (4b request → any installed 4b model, etc.)
+  const size = requested.match(/\b\d+(?:\.\d+)?b\b/i)?.[0]?.toLowerCase();
+  if (size) {
+    const sized = installed.find((m) => m.toLowerCase().includes(size));
+    if (sized) return sized;
+  }
+  return installed[0] ?? requested;
+}
+
+/**
  * Test if Ollama is reachable and has at least one model.
  */
 export async function testOllamaConnection(): Promise<{ ok: boolean; error?: string }> {

@@ -72,5 +72,6 @@ export function selectInstalledModel(models: string[], profile: LocalHardwarePro
   }
   // A model with no size marker may be a custom quantized model. Avoid
   // automatically choosing an explicitly oversized model on a small laptop.
-  return models.find((model) => !/\b\d+(?:\.\d+)?b\b/i.test(model)) ?? requested ?? '';
+  // Final fallback: any installed model beats no model (previous '' = dead chat).
+  return models.find((model) => !/\b\d+(?:\.\d+)?b\b/i.test(model)) ?? models[0] ?? requested ?? '';
 }

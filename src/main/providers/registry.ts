@@ -8,7 +8,7 @@ import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 import { opencode } from './opencode.js';
 import type { Message } from '../../shared/types.js';
-import { ensureOllamaRunning, OLLAMA_URL } from '../ollama/utils.js';
+import { ensureOllamaRunning, OLLAMA_URL, resolveOllamaModel } from '../ollama/utils.js';
 
 // Ollama provider — auto-detects installed models from local Ollama API
 const ollamaAdapter: ProviderAdapter = {
@@ -56,6 +56,18 @@ const ollamaAdapter: ProviderAdapter = {
   async *streamChat(req) {
     // Auto-start Ollama if not running before attempting to stream
     await ensureOllamaRunning();
+    // Never send a stale model name to Ollama (404 = silent dead chat).
+    // Resolve against actually-installed models first.
+    let model = req.model;
+    try {
+      const tags = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      if (tags.ok) {
+        const data = (await tags.json()) as { models?: Array<{ name: string }> };
+        model = resolveOllamaModel(req.model, (data.models ?? []).map((m) => m.name));
+      }
+    } catch {
+      /* keep requested model on listing failure */
+    }
     const ollamaMessages = toOllamaMessages(req.messages, req.system);
     const tools = req.tools?.map((tool) => ({
       type: 'function',
@@ -71,7 +83,7 @@ const ollamaAdapter: ProviderAdapter = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: req.model,
+          model,
           messages: ollamaMessages,
           stream: true,
           tools: tools?.length ? tools : undefined,

@@ -749,6 +749,14 @@ function InputBar({
   const [dragActive, setDragActive] = useState(false);
   const [ghost, setGhost] = useState('');
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const atMenuRef = useRef<HTMLDivElement>(null);
+  // @-references (Hermes context-references): @query → workspace file attach.
+  const [showAtMenu, setShowAtMenu] = useState(false);
+  const [atQuery, setAtQuery] = useState('');
+  const [atResults, setAtResults] = useState<Array<{ path: string; score?: number }>>([]);
+  const [selectedAtIndex, setSelectedAtIndex] = useState(0);
+  const atTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const atAnchorRef = useRef<{ start: number } | null>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dictationPrefixRef = useRef('');
@@ -936,22 +944,55 @@ function InputBar({
 
   const send = useCallback(() => {
     if (!input.trim() && images.length === 0 && files.length === 0) return;
-    const blocks = toImageBlocks();
-    // Persist to history for ghost autofill (non-annoying: only suggests your own prior prompts)
-    try {
-      const hist = JSON.parse(localStorage.getItem('infinite:input-history') || '[]') as string[];
-      const trimmed = input.trim();
-      if (trimmed.length >= 3 && hist[0] !== trimmed) {
-        hist.unshift(trimmed);
-        localStorage.setItem('infinite:input-history', JSON.stringify(hist.slice(0, 80)));
+    // Expand @-referenced workspace files into quoted context (Hermes @-syntax).
+    // Async but non-blocking: send immediately with whatever resolves fast.
+    const raw = input;
+    void (async () => {
+      let text = raw;
+      try {
+        const refs = Array.from(new Set(Array.from(raw.matchAll(/@([^\s@][^\s]*)/g)).map((m) => m[1]).slice(0, 5)));
+        if (refs.length) {
+          const parts: string[] = [];
+          for (const ref of refs) {
+            try {
+              const res = (await window.api.fileRead({ path: ref })) as
+                | { type: 'file'; content: string; isBinary?: boolean; mimeType?: string }
+                | { type: 'directory'; entries: Array<{ name: string; isDirectory: boolean }> }
+                | { error: string };
+              if ('error' in res) continue;
+              if (res.type === 'directory') {
+                const names = res.entries.slice(0, 50).map((e) => `${e.name}${e.isDirectory ? '/' : ''}`).join('\n');
+                parts.push(`[Attached directory: ${ref}]\n${names}`);
+              } else if (!res.isBinary && res.content) {
+                parts.push(`[Attached file: ${ref}]\n${res.content.slice(0, 12000)}`);
+              }
+            } catch {
+              /* unreadable ref stays as plain text */
+            }
+          }
+          if (parts.length) text = `${parts.join('\n\n')}\n\n${raw}`;
+        }
+      } catch {
+        /* fall back to raw input */
       }
-    } catch { /* ignore */ }
-    onSend(input, blocks);
+      const blocks = toImageBlocks();
+      // Persist to history for ghost autofill (non-annoying: only suggests your own prior prompts)
+      try {
+        const hist = JSON.parse(localStorage.getItem('infinite:input-history') || '[]') as string[];
+        const trimmed = raw.trim();
+        if (trimmed.length >= 3 && hist[0] !== trimmed) {
+          hist.unshift(trimmed);
+          localStorage.setItem('infinite:input-history', JSON.stringify(hist.slice(0, 80)));
+        }
+      } catch { /* ignore */ }
+      onSend(text, blocks);
+    })();
     setInput('');
     setGhost('');
     setImages([]);
     setFiles([]);
     setShowSlashMenu(false);
+    setShowAtMenu(false);
     if (inputRef.current) inputRef.current.style.height = '';
   }, [input, images, files, onSend, setInput, toImageBlocks, inputRef]);
 
@@ -1081,6 +1122,38 @@ function InputBar({
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showAtMenu && atResults.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedAtIndex((prev) => (prev + 1) % atResults.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedAtIndex((prev) => (prev - 1 + atResults.length) % atResults.length);
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault();
+        const pick = atResults[selectedAtIndex];
+        const anchor = atAnchorRef.current?.start ?? input.length - atQuery.length - 1;
+        const next = `${input.slice(0, Math.max(0, anchor))}@${pick.path} ${input.slice((inputRef.current?.selectionStart ?? input.length))}`;
+        setInput(next);
+        setShowAtMenu(false);
+        requestAnimationFrame(() => {
+          if (inputRef.current) {
+            const pos = Math.max(0, anchor) + pick.path.length + 2;
+            inputRef.current.selectionStart = inputRef.current.selectionEnd = pos;
+            inputRef.current.focus();
+          }
+        });
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowAtMenu(false);
+        return;
+      }
+    }
     if (showSlashMenu && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -1143,6 +1216,34 @@ function InputBar({
     setInput(value);
     setShowSlashMenu(value.startsWith('/'));
     setSelectedSlashIndex(0);
+    // @-reference detection: @query before caret → workspace file search.
+    const caret = e.target.selectionStart ?? value.length;
+    const before = value.slice(0, caret);
+    const at = before.match(/@([^\s@]*)$/);
+    if (at) {
+      const q = at[1];
+      setAtQuery(q);
+      setSelectedAtIndex(0);
+      atAnchorRef.current = { start: caret - q.length - 1 };
+      if (atTimerRef.current) clearTimeout(atTimerRef.current);
+      atTimerRef.current = setTimeout(() => {
+        void (async () => {
+          try {
+            const res = (await window.api.indexSearch({ query: q || '.', limit: 8 })) as {
+              ok: boolean;
+              results?: Array<{ file: { path: string }; score: number }>;
+            };
+            const list = (res.results ?? []).map((r) => ({ path: r.file.path, score: r.score }));
+            setAtResults(list.slice(0, 8));
+            setShowAtMenu(list.length > 0);
+          } catch {
+            setShowAtMenu(false);
+          }
+        })();
+      }, 180);
+    } else {
+      setShowAtMenu(false);
+    }
     if (!value.trim() || value.startsWith('/')) return;
     if (modeTimerRef.current) clearTimeout(modeTimerRef.current);
     modeTimerRef.current = setTimeout(() => onModeChange(inferExecutionMode(value)), 180);
@@ -1152,6 +1253,9 @@ function InputBar({
     const handleClickOutside = (e: MouseEvent) => {
       if (slashMenuRef.current && !slashMenuRef.current.contains(e.target as Node)) {
         setShowSlashMenu(false);
+      }
+      if (atMenuRef.current && !atMenuRef.current.contains(e.target as Node)) {
+        setShowAtMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1222,6 +1326,49 @@ function InputBar({
               <div>
                 <div className="text-sm font-medium">{cmd.label}</div>
                 <div className="text-[10px] text-textMuted">{cmd.description}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* @-reference menu (Hermes context-references): attach workspace files */}
+      {showAtMenu && atResults.length > 0 && (
+        <div
+          ref={atMenuRef}
+          className="absolute bottom-full left-0 right-0 mb-2 bg-[#0d0d11] rounded-xl shadow-2xl overflow-hidden z-50"
+        >
+          <div className="px-3 py-2 text-[10px] text-textMuted uppercase tracking-wider border-b border-white/5">
+            Attach file — Tab to insert
+          </div>
+          {atResults.map((r, i) => (
+            <button
+              key={r.path}
+              onClick={() => {
+                const anchor = atAnchorRef.current?.start ?? input.length - atQuery.length - 1;
+                const caret = inputRef.current?.selectionStart ?? input.length;
+                const next = `${input.slice(0, Math.max(0, anchor))}@${r.path} ${input.slice(caret)}`;
+                setInput(next);
+                setShowAtMenu(false);
+                inputRef.current?.focus();
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                i === selectedAtIndex
+                  ? 'bg-indigo-500/15 text-white'
+                  : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+              }`}
+            >
+              <svg
+                className="w-4 h-4 flex-shrink-0 text-cyan-400"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.5 1.5 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+              </svg>
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate font-mono">{r.path}</div>
               </div>
             </button>
           ))}
