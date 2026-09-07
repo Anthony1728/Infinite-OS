@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { IPC } from '../../shared/ipc.js';
-import { adoptProfileData, getActiveUid, setActiveUid } from '../profiles/home.js';
+import { adoptProfileData, getActiveUid, setActiveUid, sessionUidFor } from '../profiles/home.js';
 
 const authPath = join(homedir(), '.infinite-ai', 'auth.json');
 const sessionPath = join(homedir(), '.infinite-ai', 'auth-session.json');
@@ -38,8 +38,11 @@ export function registerAuthIpc(): void {
     // Netflix-style switch: a different account (or logout) re-homes all
     // user data. Main caches the home + holds open DBs, so relaunch —
     // every store then re-resolves under the new profile from boot.
-    const email = (session as { user?: { email?: unknown } } | null)?.user?.email;
-    const uid = typeof email === 'string' && email ? email.toLowerCase() : null;
+    // NOTE: compare SANITIZED uids — the session carries the raw email while
+    // the pointer file stores sanitizeUid(email). Comparing raw-vs-stored
+    // mismatches forever and would relaunch on every boot (black orphan
+    // window in dev, where the relaunched electron has no vite server).
+    const uid = sessionUidFor(session);
     if (uid !== getActiveUid()) {
       if (uid) {
         adoptProfileData(join(homedir(), '.infinite-ai'), uid);
@@ -47,14 +50,21 @@ export function registerAuthIpc(): void {
       } else {
         setActiveUid(null);
       }
-      setImmediate(() => {
-        try {
-          app.relaunch();
-          app.exit(0);
-        } catch {
-          /* relaunch best-effort */
-        }
-      });
+      // app.relaunch() under `npm run dev` spawns a bare electron with no
+      // vite server — it paints black and squats the ports. Only relaunch
+      // in packaged builds; in dev, ask for a manual restart instead.
+      if (app.isPackaged) {
+        setImmediate(() => {
+          try {
+            app.relaunch();
+            app.exit(0);
+          } catch {
+            /* relaunch best-effort */
+          }
+        });
+      } else {
+        console.warn(`[profiles] Account changed in dev (session=${uid} active=${getActiveUid()}) — restart \`npm run dev\` to re-home.`);
+      }
     }
     return { ok: true };
   });

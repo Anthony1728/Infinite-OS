@@ -41,6 +41,9 @@ interface AuthState {
   isLoading: boolean;
   isNewUser: boolean;
   isRestoringSession: boolean;
+  /** True right after register() succeeds — App shows the welcome splash once. */
+  justRegistered: boolean;
+  clearJustRegistered: () => void;
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -86,6 +89,14 @@ const persistLatestUser = (): void => {
       const latest = useAuthStore.getState().user;
       if (!latest) return;
       const users = await getUsers();
+      // Ghost guard: the account may have been deleted (profiles cleanup).
+      // Never write a file session for an unknown account — that flaps the
+      // active profile and breaks auto-login. Drop to logged-out instead.
+      if (!users[latest.email]) {
+        useAuthStore.setState({ user: null, isAuthenticated: false, isNewUser: false });
+        await saveSession(null);
+        return;
+      }
       if (users[latest.email]) users[latest.email].user = latest;
       await saveUsers(users);
       await saveSession(latest);
@@ -100,6 +111,8 @@ export const useAuthStore = create<AuthState>()(
       isLoading: false,
       isNewUser: false,
       isRestoringSession: false,
+      justRegistered: false,
+      clearJustRegistered: () => set({ justRegistered: false }),
 
       login: async (email: string, password: string) => {
         set({ isLoading: true });
@@ -165,6 +178,7 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: true,
           isLoading: false,
           isNewUser: true,
+          justRegistered: true,
         });
         return { success: true };
       },
@@ -249,6 +263,9 @@ const tryRestoreSession = async () => {
   try {
     const session = await loadSession();
     if (session?.user && session.isAuthenticated) {
+      // Ghost guard: ignore sessions for deleted accounts (stale file).
+      const users = await getUsers();
+      if (!users[session.user.email]) return;
       useAuthStore.setState({
         user: session.user,
         isAuthenticated: true,

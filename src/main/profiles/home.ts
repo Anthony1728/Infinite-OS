@@ -134,6 +134,12 @@ export function profileDirFor(base: string, uid: string): string {
   return join(base, PROFILES_DIR_NAME, sanitizeUid(uid));
 }
 
+/** Session payload → sanitized profile uid (null = logged out). Must match getActiveUid(). */
+export function sessionUidFor(session: unknown): string | null {
+  const email = (session as { user?: { email?: unknown } } | null)?.user?.email;
+  return typeof email === 'string' && email ? sanitizeUid(email.toLowerCase()) : null;
+}
+
 /** Read the active profile id fresh from disk (no cache — used at switch time). */
 export function getActiveUid(base: string = join(homedir(), '.infinite-ai')): string | null {
   try {
