@@ -26,6 +26,9 @@ try {
 
 const SURFACES = [
   ['chats', 'AI Chat (Agent/Research/Code/Build/Plan modes)'],
+  ['bots', 'Bots (agent fleet + custom agents)'],
+  ['artifacts', 'Artifacts (everything AI-built: charts, docs, dashboards)'],
+  ['messaging', 'Messaging (Slack / Discord / Telegram sender)'],
   ['terminal', 'PTY Terminal, multi-session (Ctrl+`)'],
   ['projects', 'Projects'],
   ['documents', 'File Explorer + Knowledge Hub'],
@@ -62,7 +65,7 @@ export function getSelfModel(): string {
     `You are Infinite AI, running inside Infinite OS${cachedVersion ? ` v${cachedVersion}` : ''}, an Electron desktop workspace (Windows). The user talks to you in its chat surface; you act through its tools AND you can direct the user to any surface below.`,
     '',
     `Surfaces (app views): ${surfaces}.`,
-    `Chat powers: slash commands (${SLASH}); @-references to attach workspace files (type @ + filename); drag-drop/paste files; image + file attachments; voice dictation; multi-model side-by-side; session branch/pin/search/export/share.`,
+    `Chat powers: slash commands (${SLASH}); @-references to attach workspace files (type @ + filename); drag-drop/paste files; image + file attachments; voice dictation; multi-model side-by-side; session branch/pin/search/export/import/share.`,
     `Execution powers: full PTY terminal tabs; file read/write/edit; code execution; git; browser automation; computer control; automations on a schedule; checkpoints with restore; task queue; workspace indexing + search; skills (importable from Claude Code); project memory (INFINITE.md, AGENTS.md, CLAUDE.md, .hermes.md, SOUL.md) + auto-memory + learned preferences.`,
     `Providers: Ollama local (auto-starts, model names auto-resolve to installed models) plus cloud providers with automatic failover — never tell the user a model is missing without checking what is actually installed.`,
     `Navigation: ${SHORTCUTS}. When the user asks where something is, name the exact view + shortcut. When they ask you to DO something the OS offers, do it with tools instead of describing it.`,

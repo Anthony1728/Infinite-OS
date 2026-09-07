@@ -34,6 +34,8 @@ const api = {
     ipcRenderer.invoke(IPC.SESSION_UPDATE_MESSAGE, args),
   exportSession: (args: { sessionId: string; format?: 'markdown' | 'json' }) =>
     ipcRenderer.invoke(IPC.SESSION_EXPORT, args),
+  importSession: (args: { format: 'markdown' | 'json'; content: string; cwd: string; model: string; provider: string }) =>
+    ipcRenderer.invoke(IPC.SESSION_IMPORT, args),
   shareSession: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.SESSION_SHARE, args),
   appendSessionMessage: (args: { sessionId: string; message: unknown }) => ipcRenderer.invoke(IPC.SESSION_APPEND, args),
 
@@ -658,6 +660,18 @@ const api = {
   // Clipboard
   clipboardRead: (args?: { format?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_READ, args ?? {}),
   clipboardWrite: (args: { text?: string; html?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_WRITE, args),
+
+  // Unified messaging (Slack / Discord / Telegram)
+  messagingStatus: () => ipcRenderer.invoke(IPC.MESSAGING_STATUS),
+  messagingSend: (args: {
+    action: 'send_slack' | 'send_discord' | 'send_telegram' | 'simulate';
+    text: string;
+    webhookUrl?: string;
+    channel?: string;
+    username?: string;
+    telegramToken?: string;
+    telegramChatId?: string;
+  }) => ipcRenderer.invoke(IPC.MESSAGING_SEND, args),
 
   // Notifications
   notificationShow: (args: { title: string; body: string; silent?: boolean }) =>

@@ -329,6 +329,7 @@ interface ChatState {
   searchSessions: (query: string) => Promise<void>;
   branchSession: (id: string, messageId?: string) => Promise<void>;
   exportSession: (id: string, format?: 'markdown' | 'json') => Promise<void>;
+  importSession: (content: string, format: 'markdown' | 'json') => Promise<Session>;
   shareSession: (id: string) => Promise<{ ok: boolean; length?: number }>;
   updateMessage: (messageId: string, text: string) => Promise<void>;
   announceUncensoredMode: () => Promise<void>;
@@ -944,6 +945,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   exportSession: async (id, format = 'markdown') => {
     await window.api.exportSession({ sessionId: id, format });
+  },
+
+  importSession: async (content, format) => {
+    const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as {
+      cwd?: string;
+      model?: string;
+      provider?: string;
+    };
+    const result = (await window.api.importSession({
+      format,
+      content,
+      cwd: current.cwd ?? '.',
+      model: current.model ?? 'qwen3:4b',
+      provider: current.provider ?? 'ollama',
+    })) as { ok: boolean; session?: Session; error?: string };
+    if (!result.ok || !result.session) throw new Error(result.error ?? 'Import failed');
+    const messages = await window.api.loadSession({ sessionId: result.session.id });
+    set((state) => ({ sessions: [result.session!, ...state.sessions], currentSessionId: result.session!.id, messages }));
+    return result.session;
   },
 
   shareSession: async (id) => {

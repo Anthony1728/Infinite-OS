@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useChatStore } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
 import { useAuthStore } from '../../stores/auth';
@@ -19,7 +19,11 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
 ];
 
 const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
+  { id: 'bots', label: 'Bots', icon: 'nav.agents' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory' },
+  { id: 'automations', label: 'Scheduled Jobs', icon: 'nav.automations' },
+  { id: 'messaging', label: 'Messaging', icon: 'home.chat' },
+  { id: 'artifacts', label: 'Artifacts', icon: 'tab.document' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
   { id: 'active-memory', label: 'Active Memory', icon: 'home.memory' },
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
@@ -77,6 +81,7 @@ export function Sidebar({
   const renameSession = useChatStore((state) => state.renameSession);
   const pinSession = useChatStore((state) => state.pinSession);
   const searchSessions = useChatStore((state) => state.searchSessions);
+  const importSession = useChatStore((state) => state.importSession);
   const branchSession = useChatStore((state) => state.branchSession);
   const exportSession = useChatStore((state) => state.exportSession);
   const shareSession = useChatStore((state) => state.shareSession);
@@ -155,6 +160,23 @@ export function Sidebar({
     requestAnimationFrame(() => {
       document.getElementById('sidebar-chat-search')?.focus();
     });
+  };
+
+  // Hermes parity: import an exported session (.json / .md) back into chats.
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const content = await file.text();
+      const format = file.name.toLowerCase().endsWith('.json') ? 'json' as const : 'markdown' as const;
+      await importSession(content, format);
+      onNavChange('chats');
+      addToast({ title: 'Session imported', message: file.name, type: 'success' });
+    } catch (err) {
+      addToast({ title: 'Import failed', message: err instanceof Error ? err.message : 'Could not import file', type: 'error' });
+    }
   };
 
   const handleSelectSession = (id: string) => {
@@ -303,6 +325,23 @@ export function Sidebar({
             <path strokeLinecap="round" d="m20 20-4-4m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
           </svg>,
         )}
+        {renderActionRow(
+          'import',
+          'Import session',
+          null,
+          () => importInputRef.current?.click(),
+          <svg className="w-4 h-4 flex-shrink-0 text-gray-500 group-hover:text-zinc-200 transition-colors" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V3m0 13.5 4.5-4.5M12 16.5 7.5 12M4.5 19.5h15" />
+          </svg>,
+        )}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,.md,.markdown"
+          className="hidden"
+          aria-label="Import session file"
+          onChange={(e) => void handleImportFile(e)}
+        />
       </div>
 
       {/* Nav */}

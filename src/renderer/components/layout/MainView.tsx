@@ -31,6 +31,9 @@ const WebsiteBuilderView = lazy(() => import('../views/WebsiteBuilderView').then
 const StandingOrdersView = lazy(() => import('../views/StandingOrdersView').then(m => ({ default: m.StandingOrdersView })));
 const ActiveMemoryView = lazy(() => import('../views/ActiveMemoryView').then(m => ({ default: m.ActiveMemoryView })));
 const CapabilitiesView = lazy(() => import('../views/CapabilitiesView').then(m => ({ default: m.CapabilitiesView })));
+const BotsView = lazy(() => import('../views/AgentsView').then(m => ({ default: m.AgentsView })));
+const ArtifactsView = lazy(() => import('../views/ArtifactsView').then(m => ({ default: m.ArtifactsView })));
+const MessagingView = lazy(() => import('../views/MessagingView').then(m => ({ default: m.MessagingView })));
 const TerminalView = lazy(() => import('../views/TerminalView').then(m => ({ default: m.TerminalView })));
 
 interface MainViewProps {
@@ -117,6 +120,12 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <EnterpriseView />;
       case 'capabilities':
         return <CapabilitiesView />;
+      case 'bots':
+        return <BotsView />;
+      case 'artifacts':
+        return <ArtifactsView onOpenTab={onViewChange} />;
+      case 'messaging':
+        return <MessagingView />;
       case 'terminal':
         return <TerminalView />;
       case 'settings':

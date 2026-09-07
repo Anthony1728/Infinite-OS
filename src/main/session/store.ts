@@ -240,3 +240,89 @@ export async function cleanupOld(maxAgeDays: number): Promise<number> {
   }
   return deleted;
 }
+
+const IMPORT_ROLES = new Set(['user', 'assistant', 'system', 'tool']);
+
+function sanitizeImportedMessage(raw: unknown, fallbackModel: string, fallbackProvider: string): Message | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const m = raw as Record<string, unknown>;
+  if (!IMPORT_ROLES.has(String(m.role))) return null;
+  const blocks = Array.isArray(m.content)
+    ? (m.content as unknown[]).filter(
+        (b): b is Message['content'][number] =>
+          !!b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' &&
+          typeof (b as { text?: unknown }).text === 'string',
+      )
+    : typeof m.content === 'string'
+      ? [{ type: 'text' as const, text: m.content }]
+      : [];
+  if (!blocks.length) return null;
+  return {
+    id: typeof m.id === 'string' && m.id ? m.id : uuid(),
+    role: m.role as Message['role'],
+    content: blocks.map((b) => (b.type === 'text' ? { type: 'text' as const, text: b.text.slice(0, 50000) } : b)),
+    timestamp: typeof m.timestamp === 'number' && Number.isFinite(m.timestamp) ? m.timestamp : Date.now(),
+    model: typeof m.model === 'string' ? m.model : fallbackModel,
+    provider: typeof m.provider === 'string' ? m.provider : fallbackProvider,
+  };
+}
+
+/**
+ * Import a session from exported content.
+ * - json: Infinite OS `{ session, messages }` export (or bare messages array).
+ * - markdown: whole file becomes one user message; title from first `# `.
+ * Returns the new session (fresh id — never overwrites an existing one).
+ */
+export async function importSession(opts: {
+  format: 'markdown' | 'json';
+  content: string;
+  cwd: string;
+  model: string;
+  provider: string;
+}): Promise<Session> {
+  const MAX_CHARS = 500_000;
+  const MAX_MESSAGES = 500;
+  if (!opts.content || !opts.content.trim()) throw new Error('Import file is empty');
+  if (opts.content.length > MAX_CHARS) throw new Error('Import file is too large (max ~500KB)');
+
+  let title = 'Imported session';
+  let messages: Message[] = [];
+
+  if (opts.format === 'json') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(opts.content);
+    } catch {
+      throw new Error('Invalid JSON — expected an Infinite OS session export');
+    }
+    const root = parsed as Record<string, unknown>;
+    const rawMessages = Array.isArray(root) ? root : (root.messages as unknown);
+    if (!Array.isArray(rawMessages)) throw new Error('Invalid session JSON — missing messages array');
+    if (typeof root.session === 'object' && root.session !== null) {
+      const t = (root.session as Record<string, unknown>).title;
+      if (typeof t === 'string' && t.trim()) title = t.trim().slice(0, 120);
+    }
+    messages = rawMessages
+      .slice(0, MAX_MESSAGES)
+      .map((m) => sanitizeImportedMessage(m, opts.model, opts.provider))
+      .filter((m): m is Message => m !== null);
+    if (!messages.length) throw new Error('No importable messages found (need user/assistant text turns)');
+  } else {
+    const firstHeading = opts.content.match(/^#\s+(.+)$/m)?.[1]?.trim();
+    if (firstHeading) title = firstHeading.slice(0, 120);
+    messages = [
+      {
+        id: uuid(),
+        role: 'user',
+        content: [{ type: 'text', text: opts.content.slice(0, 50000) }],
+        timestamp: Date.now(),
+        model: opts.model,
+        provider: opts.provider,
+      },
+    ];
+  }
+
+  const session = await createSession({ cwd: opts.cwd, model: opts.model, provider: opts.provider, title });
+  for (const message of messages) await appendMessage(session.id, message);
+  return { ...session, message_count: messages.length };
+}

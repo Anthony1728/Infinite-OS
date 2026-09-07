@@ -24,6 +24,7 @@ import { useUiTheme } from './theme/uiTheme';
 import { ExperienceSettingsModal, type ExperienceSettingsSection } from './components/settings/ExperienceSettingsModal';
 import { PermissionDialog } from './components/permissions/PermissionDialog';
 import { ToastContainer } from './components/notifications/ToastContainer';
+import { StatusBar } from './components/layout/StatusBar';
 import { InfiniteLogo } from './components/brand/InfiniteLogo';
 import { ShortcutsModal } from './components/modals/ShortcutsModal';
 
@@ -309,6 +310,7 @@ export function App() {
         <main className="flex-1 min-h-0 overflow-hidden">
           <MainView activeView={activeView} onViewChange={setActiveView} onOpenDeploy={() => setDeployOpen(true)} />
         </main>
+        <StatusBar />
       </div>
             {(activeView === 'chats' || activeView === 'research') && (
         <div

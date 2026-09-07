@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { clearAllSessions } from './store.js';
+import { clearAllSessions, importSession } from './store.js';
 
 const createdDirectories: string[] = [];
 
@@ -31,5 +31,25 @@ describe('clearAllSessions', () => {
 
     await expect(clearAllSessions(directory)).resolves.toBe(0);
     await expect(clearAllSessions(directory)).resolves.toBe(0);
+  });
+});
+
+describe('importSession validation', () => {
+  const base = { cwd: '.', model: 'qwen3:4b', provider: 'ollama' };
+  it('rejects empty content', async () => {
+    await expect(importSession({ ...base, format: 'json', content: '   ' })).rejects.toThrow('empty');
+  });
+  it('rejects malformed JSON', async () => {
+    await expect(importSession({ ...base, format: 'json', content: '{nope' })).rejects.toThrow('Invalid JSON');
+  });
+  it('rejects JSON without a messages array', async () => {
+    await expect(importSession({ ...base, format: 'json', content: '{"session":{}}' })).rejects.toThrow('messages array');
+  });
+  it('rejects JSON with no importable text turns', async () => {
+    const content = JSON.stringify({ session: { title: 'x' }, messages: [{ role: 'user', content: [] }] });
+    await expect(importSession({ ...base, format: 'json', content })).rejects.toThrow('No importable messages');
+  });
+  it('rejects oversized payloads', async () => {
+    await expect(importSession({ ...base, format: 'markdown', content: 'x'.repeat(500_001) })).rejects.toThrow('too large');
   });
 });

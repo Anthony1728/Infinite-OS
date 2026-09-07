@@ -20,6 +20,7 @@ export const IPC = {
   SESSION_SEARCH: 'session:search',
   SESSION_PIN: 'session:pin',
   SESSION_EXPORT: 'session:export',
+  SESSION_IMPORT: 'session:import',
   SESSION_SHARE: 'session:share',
   SESSION_BRANCH: 'session:branch',
   SESSION_UPDATE_MESSAGE: 'session:update-message',
@@ -471,6 +472,10 @@ export const IPC = {
   CLIPBOARD_WRITE: 'clipboard:write',
   CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
   CLIPBOARD_WRITE_IMAGE: 'clipboard:write-image',
+
+  // Messaging (unified Slack / Discord / Telegram)
+  MESSAGING_STATUS: 'messaging:status',
+  MESSAGING_SEND: 'messaging:send',
 
   // Notification
   NOTIFICATION_SHOW: 'notification:show',

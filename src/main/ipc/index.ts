@@ -55,6 +55,7 @@ import { registerOllamaIpc } from './ollama.js';
 import { registerQueueIpc } from './queue.js';
 import { registerGitIpc } from './git.js';
 import { registerLearningIpc } from './learning.js';
+import { registerMessagingIpc } from './messaging.js';
 import { registerWindowIpc } from './window.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
 import { getEngine } from '../engine/intelligence.js';
@@ -102,6 +103,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerQueueIpc();
   registerGitIpc();
   registerLearningIpc(getMainWindow);
+  registerMessagingIpc();
   ipcMain.handle(IPC.HEARTBEAT_STATUS, async () => {
     const { heartbeatStatus } = await import('../heartbeat/index.js');
     return heartbeatStatus();
@@ -343,6 +345,14 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     if (result.canceled || !result.filePath) return { ok: false, canceled: true };
     await writeFile(result.filePath, await sessionStore.exportSession(sessionId, format), 'utf8');
     return { ok: true, path: result.filePath };
+  });
+  ipcMain.handle(IPC.SESSION_IMPORT, async (_e, { format, content, cwd, model, provider }) => {
+    try {
+      const session = await sessionStore.importSession({ format, content, cwd, model, provider });
+      return { ok: true, session };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   });
   // Share a conversation: produce compact markdown and copy it to the clipboard
   // so the user can paste it anywhere (chat, email, notes) — like a share link.
