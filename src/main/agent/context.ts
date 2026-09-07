@@ -9,6 +9,7 @@ import { settings } from '../settings/store.js';
 import { getBrainTeachingManager } from '../brain/teacher.js';
 import { retrieveLearningContext } from '../brain/learning.js';
 import { SkillsManager } from '../skills/manager.js';
+import { getSelfModel } from './self-model.js';
 
 // Read the user's display name from auth-session.json (written by the renderer auth store).
 let cachedUserName: string | null = null;
@@ -245,7 +246,10 @@ async function finishSystemPrompt(
   }
 
   // Infinite OS system state — agents must know everything in the system.
-  const systemState = await loadInfiniteOSState();
+  // Self-model is static per app version (cached inside getSelfModel).
+  parts.push('');
+  parts.push(getSelfModel());
+  const systemState = await loadInfiniteOSState(cwd);
   if (systemState) {
     parts.push('');
     parts.push(systemState);
@@ -304,10 +308,13 @@ const SYSTEM_STATE_CACHE_TTL_MS = 60_000;
 /**
  * Load the current state of all Infinite OS subsystems so agents know
  * everything that exists: contacts, emails, tasks, automations, etc.
+ * Workspace snapshot is keyed by cwd (the request's directory, not a stale
+ * global setting) so the agent sees the project it's actually working in.
  */
-async function loadInfiniteOSState(): Promise<string | null> {
+async function loadInfiniteOSState(cwd?: string): Promise<string | null> {
   const now = Date.now();
-  const hit = systemStateCache.get('global');
+  const cacheKey = `global:${cwd ?? ''}`;
+  const hit = systemStateCache.get(cacheKey);
   if (hit && now - hit.at < SYSTEM_STATE_CACHE_TTL_MS) return hit.content;
 
   const parts: string[] = [];
@@ -361,15 +368,36 @@ async function loadInfiniteOSState(): Promise<string | null> {
         return lines.join('\n');
       } catch { return null; }
     })(),
-    // Workspace — folder names only
+    // Workspace — the project the agent is actually working in.
     (async () => {
       try {
-        const cwdRaw = settings.get('cwd') as string | undefined;
-        const cwd = cwdRaw && cwdRaw.trim() ? cwdRaw.trim() : join(homedir(), 'Desktop', 'New folder (2)');
+        const dir = cwd && cwd.trim() ? cwd.trim() : join(homedir(), 'Desktop', 'New folder (2)');
         const { readdir } = await import('node:fs/promises');
-        const entries = await readdir(cwd, { withFileTypes: true }).catch(() => []);
-        const folders = entries.filter((e) => e.isDirectory).slice(0, 15).map((e) => e.name);
-        return `## Workspace\n${cwd}\nFolders: ${folders.join(', ') || 'none'}`;
+        const { execFile } = await import('node:child_process');
+        const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+        const folders = entries.filter((e) => e.isDirectory()).slice(0, 12).map((e) => e.name);
+        const files = entries.filter((e) => e.isFile()).slice(0, 12).map((e) => e.name);
+        const KEY_FILES = ['package.json', 'AGENTS.md', 'CLAUDE.md', '.hermes.md', 'INFINITE.md', 'README.md', 'tsconfig.json', '.gitignore'];
+        const present = files.filter((f) => KEY_FILES.includes(f));
+        const lines = [`## Workspace`, dir, `Folders: ${folders.join(', ') || 'none'}`, `Files: ${files.join(', ') || 'none'}`];
+        if (present.length) lines.push(`Key files: ${present.join(', ')}`);
+        // Git awareness — branch + dirty state, fast and failure-safe.
+        try {
+          const branch = await new Promise<string>((resolve) => {
+            execFile('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+              resolve(err ? '' : String(stdout).trim());
+            });
+          });
+          if (branch) {
+            const dirty = await new Promise<boolean>((resolve) => {
+              execFile('git', ['-C', dir, 'status', '--porcelain'], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+                resolve(!err && String(stdout).trim().length > 0);
+              });
+            });
+            lines.push(`Git: ${branch}${dirty ? ' (uncommitted changes)' : ' (clean)'}`);
+          }
+        } catch { /* not a git repo — skip silently */ }
+        return lines.join('\n');
       } catch { return null; }
     })(),
     // Preferences — capped at 500 chars (async, no sync I/O on main thread)
@@ -390,7 +418,7 @@ async function loadInfiniteOSState(): Promise<string | null> {
 
   const result = parts.length > 1 ? parts.join('\n') : null;
   if (result) {
-    systemStateCache.set('global', { at: now, content: result });
+    systemStateCache.set(cacheKey, { at: now, content: result });
   }
   return result;
 }
