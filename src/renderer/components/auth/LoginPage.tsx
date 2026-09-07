@@ -18,7 +18,8 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [roster, setRoster] = useState<RosterProfile[]>([]);
-  const { login, isLoading } = useAuthStore();
+  const [profileError, setProfileError] = useState('');
+  const { login, loginAs, isLoading } = useAuthStore();
 
   // Netflix-style picker: who's using Infinite OS on this machine?
   // Passwords never leave main — the roster carries names only.
@@ -36,6 +37,16 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
       alive = false;
     };
   }, []);
+
+  // One click on a face = signed in. No password typing (Netflix-style).
+  const handleProfileClick = async (profileEmail: string) => {
+    setProfileError('');
+    setEmail(profileEmail);
+    const result = await loginAs(profileEmail);
+    if (!result.success) {
+      setProfileError(result.error ?? 'Could not open profile');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,9 +85,10 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             {roster.slice(0, 5).map((p) => (
               <button
                 key={p.email}
-                onClick={() => setEmail(p.email)}
-                title={p.email}
-                className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors ${
+                onClick={() => void handleProfileClick(p.email)}
+                disabled={isLoading}
+                title={`${p.email} — click to enter`}
+                className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors disabled:opacity-60 ${
                   email === p.email ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]'
                 }`}
               >
@@ -97,9 +109,9 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
+          {(error || profileError) && (
             <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-sm text-red-400">
-              {error}
+              {error || profileError}
             </div>
           )}
 

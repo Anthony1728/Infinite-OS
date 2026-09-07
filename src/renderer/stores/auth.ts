@@ -47,6 +47,8 @@ interface AuthState {
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  /** Netflix-style entry: pick a profile face, go straight in — no password typing. */
+  loginAs: (email: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   completeOnboarding: () => void;
   updateAccount: (updates: Partial<Pick<User, 'name' | 'avatar'>>) => void;
@@ -147,6 +149,32 @@ export const useAuthStore = create<AuthState>()(
           isNewUser: !hasOnboarded,
         });
         return { success: true };
+      },
+
+      loginAs: async (email: string) => {
+        set({ isLoading: true });
+        try {
+          const users = await getUsers();
+          const entry = users[email.toLowerCase()];
+          if (!entry) {
+            set({ isLoading: false });
+            return { success: false, error: 'Profile not found on this machine' };
+          }
+          const updatedUser = { ...entry.user, lastLoginAt: Date.now() };
+          entry.user = updatedUser;
+          await saveUsers(users);
+          await saveSession(updatedUser);
+          set({
+            user: updatedUser,
+            isAuthenticated: true,
+            isLoading: false,
+            isNewUser: !entry.user.hasCompletedOnboarding,
+          });
+          return { success: true };
+        } catch {
+          set({ isLoading: false });
+          return { success: false, error: 'Could not open profile' };
+        }
       },
 
       register: async (name: string, email: string, password: string) => {
