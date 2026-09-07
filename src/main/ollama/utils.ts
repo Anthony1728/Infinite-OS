@@ -7,6 +7,31 @@ const OLLAMA_URL = 'http://localhost:11434';
 let serviceStartAttempted = false;
 
 /**
+ * Boot-time weight warm: pull the preferred local model into VRAM/RAM and
+ * keep it resident so the first real chat skips the ~10-15s cold load.
+ * Fire-and-forget — never blocks boot, never throws. Call once at startup.
+ */
+export function warmLocalModels(): void {
+  void (async () => {
+    try {
+      const tags = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(5000) });
+      if (!tags.ok) return;
+      const data = (await tags.json()) as { models?: Array<{ name?: string }> };
+      const names = (data.models ?? []).map((m) => m?.name ?? '').filter(Boolean);
+      const pick = names.find((n) => n.toLowerCase().includes('qwen3')) ?? names[0];
+      if (!pick) return;
+      // num_predict:1 loads weights then stops; keep_alive pins them.
+      await fetch(`${OLLAMA_URL}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: pick, prompt: 'ok', stream: false, keep_alive: '30m', options: { num_predict: 1 } }),
+        signal: AbortSignal.timeout(45_000),
+      }).catch(() => undefined);
+    } catch { /* warm is best-effort — a cold model still works, just slower once */ }
+  })();
+}
+
+/**
  * Ensure Ollama is running. If not, attempt to start it.
  * Returns true if Ollama is reachable after this call.
  */

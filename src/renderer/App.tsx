@@ -95,7 +95,7 @@ function BriefLoading({ onComplete }: { onComplete: () => void }) {
 }
 
 /** Post-signup welcome: animated logo moment before entering the OS. */
-function WelcomeSplash({ name, onDone }: { name: string; onDone: () => void }) {
+function WelcomeSplash({ name, returning, onDone }: { name: string; returning: boolean; onDone: () => void }) {
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
@@ -117,8 +117,8 @@ function WelcomeSplash({ name, onDone }: { name: string; onDone: () => void }) {
         <div className="absolute inset-3 rounded-full bg-indigo-500/15 blur-2xl" />
         <InfiniteLogo className="relative w-32 h-20" animated variant="spectrum" />
       </div>
-      <div className="text-white text-xl font-semibold tracking-[0.01em] mb-1.5">Welcome, {name}</div>
-      <div className="text-zinc-500 text-[13px] font-medium mb-5">Preparing your Infinite OS…</div>
+      <div className="text-white text-xl font-semibold tracking-[0.01em] mb-1.5">{returning ? 'Welcome back' : 'Welcome'}, {name}</div>
+      <div className="text-zinc-500 text-[13px] font-medium mb-5">{returning ? 'Opening your workspace…' : 'Preparing your Infinite OS…'}</div>
       <div className="w-52 h-1 bg-white/[0.06] rounded-full overflow-hidden ring-1 ring-white/[0.04]">
         <div className="h-full w-2/3 bg-gradient-to-r from-violet-500 via-cyan-400 to-pink-500 rounded-full animate-pulse" />
       </div>
@@ -127,7 +127,7 @@ function WelcomeSplash({ name, onDone }: { name: string; onDone: () => void }) {
 }
 
 export function App() {
-  const { isAuthenticated, isNewUser, user, justRegistered, clearJustRegistered, isRestoringSession } = useAuthStore();
+  const { isAuthenticated, isNewUser, user, justRegistered, clearJustRegistered, isRestoringSession, welcomeBack } = useAuthStore();
   const uiTheme = useUiTheme((s) => s.theme);
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -315,7 +315,7 @@ export function App() {
 
   // Fresh signups land here once: logo moment, then straight into the OS.
   if (justRegistered) {
-    return <WelcomeSplash name={user?.name?.split(' ')[0] ?? 'friend'} onDone={clearJustRegistered} />;
+    return <WelcomeSplash name={user?.name?.split(' ')[0] ?? 'friend'} returning={welcomeBack} onDone={clearJustRegistered} />;
   }
 
   // Auth flow

@@ -103,6 +103,51 @@ interface BrainState {
   checkEngineReady: () => boolean;
 }
 
+// ─── LOCAL-MODEL SMARTS ─────────────────────────────────────────────
+// The brain answers from the on-device model when seeds/learned entries
+// miss — a real mini-model instead of canned text. Short timeout + tiny
+// budget so a cold/stopped Ollama never makes the fallback feel slow.
+const LOCAL_BRAIN_TIMEOUT_MS = 9000;
+
+async function askLocalBrain(input: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LOCAL_BRAIN_TIMEOUT_MS);
+  try {
+    const tagsRes = await fetch('http://127.0.0.1:11434/api/tags', { signal: ctrl.signal });
+    if (!tagsRes.ok) return null;
+    const tags = (await tagsRes.json()) as { models?: Array<{ name?: string }> };
+    const names = (tags.models ?? []).map((m) => m?.name ?? '').filter(Boolean);
+    const model = names.find((n) => n.toLowerCase().includes('qwen3')) ?? names[0];
+    if (!model) return null;
+    const res = await fetch('http://127.0.0.1:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are the Infinite AI Brain inside Infinite OS, a helpful on-device assistant. Answer directly and concisely. Never narrate your reasoning; output only the answer.' },
+          { role: 'user', content: input.slice(0, 1500) },
+        ],
+        stream: false,
+        think: false,
+        keep_alive: '30m',
+        options: { temperature: 0.3, num_predict: 512 },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { message?: { content?: string } };
+    const text = (data.message?.content ?? '')
+      .replace(/<think>[\s\S]*?(<\/think>|$)/gi, '')
+      .trim();
+    return text || null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ─── SEED KNOWLEDGE ───────────────────────────────────────────────
 // Pre-loaded foundational knowledge so the brain works immediately
 
@@ -1195,6 +1240,16 @@ export const useBrainStore = create<BrainState>((set, get) => ({
         const action = rule.handler(input, match);
         return await executeBrainAction(action, state.cwd);
       }
+    }
+
+    // 4b. No seed/learned/intent hit — ask the on-device model before the
+    // static fallback, so the brain is genuinely smart, not canned.
+    const localAnswer = await askLocalBrain(input).catch(() => null);
+    if (localAnswer) {
+      set((s) => ({
+        followUps: [...s.followUps.slice(-7), { input: input.slice(0, 200), topic: topicLabel(input), at: Date.now() }],
+      }));
+      return localAnswer;
     }
 
     // 5. Record this turn in the digest for the next follow-up.

@@ -11,6 +11,71 @@ import type { Message } from '../../shared/types.js';
 import { ensureOllamaRunning, OLLAMA_URL, resolveOllamaModel } from '../ollama/utils.js';
 
 // Ollama provider — auto-detects installed models from local Ollama API
+/**
+ * Stateful <think>…</think> stripper for reasoning models (qwen3, deepseek-r1).
+ * Even with think:false some servers leak the reasoning channel into content —
+ * sometimes split across stream chunks. Thinking is swallowed; only the final
+ * answer passes through. Call flush() at stream end to release held text.
+ */
+export function createThinkingStripper(): { push(chunk: string): string; flush(): string } {
+  let buf = '';
+  let inThink = false;
+  // Longest tag we may be holding half of.
+  const HOLD = '</think>'.length;
+  function drain(): string {
+    let out = '';
+    for (;;) {
+      if (!inThink) {
+        const i = buf.indexOf('<think>');
+        // Some servers emit the thinking trace with no opening tag, closed
+        // only by </think> — treat everything up to that close as thinking.
+        const j = buf.indexOf('</think>');
+        if (i < 0 && j >= 0) {
+          buf = buf.slice(j + '</think>'.length);
+          continue;
+        }
+        if (i < 0) {
+          // Hold back a tail that could be a split tag opener.
+          const keep = Math.min(buf.length, HOLD);
+          out += buf.slice(0, buf.length - keep);
+          buf = buf.slice(buf.length - keep);
+          return out;
+        }
+        out += buf.slice(0, i);
+        buf = buf.slice(i + '<think>'.length);
+        inThink = true;
+      } else {
+        const j = buf.indexOf('</think>');
+        if (j < 0) {
+          // Thinking content: drop it, but keep a tail that could complete
+          // a close tag split across chunks.
+          buf = buf.slice(-HOLD);
+          return out;
+        }
+        buf = buf.slice(j + '</think>'.length);
+        inThink = false;
+      }
+    }
+  }
+  return {
+    push(chunk: string): string {
+      buf += chunk;
+      return drain();
+    },
+    flush(): string {
+      // Stream over with no close tag: outside thinking, the held tail is
+      // real answer text — release it. Inside thinking, drop it.
+      if (!inThink) {
+        const out = buf;
+        buf = '';
+        return out;
+      }
+      buf = '';
+      return '';
+    },
+  };
+}
+
 const ollamaAdapter: ProviderAdapter = {
   id: 'ollama',
   label: 'Ollama (local)',
@@ -111,6 +176,7 @@ const ollamaAdapter: ProviderAdapter = {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      const think = createThinkingStripper();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -132,7 +198,8 @@ const ollamaAdapter: ProviderAdapter = {
               eval_count?: number;
             };
             if (parsed.message?.content) {
-              yield { type: 'text_delta', text: parsed.message.content };
+              const clean = think.push(parsed.message.content);
+              if (clean) yield { type: 'text_delta', text: clean };
             }
             for (const call of parsed.message?.tool_calls ?? []) {
               const name = call.function?.name ?? '';
@@ -153,6 +220,8 @@ const ollamaAdapter: ProviderAdapter = {
           } catch { /* skip malformed lines */ }
         }
       }
+      const tail = think.flush();
+      if (tail) yield { type: 'text_delta', text: tail };
     } catch (e) {
       yield { type: 'error', error: (e as Error).message };
     }

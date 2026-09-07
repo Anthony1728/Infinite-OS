@@ -74,6 +74,12 @@ async function warmUpModels(): Promise<void> {
   } catch (err) {
     logger.warn({ err }, 'Model warm-up encountered issues (non-blocking)');
   }
+  // Pin local weights in memory too — otherwise the first local chat pays
+  // a ~10-15s cold load even though Ollama itself is already running.
+  try {
+    const { warmLocalModels } = await import('./ollama/utils.js');
+    warmLocalModels();
+  } catch { /* local warm is best-effort */ }
 }
 
 // Keep acceleration available on integrated and discrete graphics. It can be

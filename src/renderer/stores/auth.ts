@@ -44,6 +44,8 @@ interface AuthState {
   /** True right after register() succeeds — App shows the welcome splash once. */
   justRegistered: boolean;
   clearJustRegistered: () => void;
+  /** True when the splash follows a login (welcome back) vs a signup. */
+  welcomeBack: boolean;
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -120,7 +122,8 @@ export const useAuthStore = create<AuthState>()(
       isNewUser: false,
       isRestoringSession: false,
       justRegistered: false,
-      clearJustRegistered: () => set({ justRegistered: false }),
+      welcomeBack: false,
+      clearJustRegistered: () => set({ justRegistered: false, welcomeBack: false }),
 
       login: async (email: string, password: string) => {
         set({ isLoading: true });
@@ -147,6 +150,8 @@ export const useAuthStore = create<AuthState>()(
           isAuthenticated: true,
           isLoading: false,
           isNewUser: !hasOnboarded,
+          justRegistered: true,
+          welcomeBack: true,
         });
         return { success: true };
       },
@@ -169,6 +174,8 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false,
             isNewUser: !entry.user.hasCompletedOnboarding,
+            justRegistered: true,
+            welcomeBack: true,
           });
           return { success: true };
         } catch {
@@ -213,6 +220,7 @@ export const useAuthStore = create<AuthState>()(
           isLoading: false,
           isNewUser: true,
           justRegistered: true,
+          welcomeBack: false,
         });
         return { success: true };
       },

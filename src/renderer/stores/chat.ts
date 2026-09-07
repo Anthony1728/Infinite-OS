@@ -43,6 +43,23 @@ const selectedAgentRuns = new Map<
 >();
 let activeTeachingChatSessionId: string | null = null;
 
+/** What the user currently has selected (provider/model), for error context. Never throws. */
+function currentSelectionLabel(): string | null {
+  try {
+    const raw = localStorage.getItem('infinite:current');
+    if (!raw) return null;
+    const cur = JSON.parse(raw) as { provider?: unknown; model?: unknown; modelLabel?: unknown };
+    const provider = typeof cur.provider === 'string' && cur.provider ? cur.provider : null;
+    const model = typeof cur.modelLabel === 'string' && cur.modelLabel
+      ? cur.modelLabel
+      : typeof cur.model === 'string' && cur.model ? cur.model : null;
+    if (!provider && !model) return null;
+    return [provider, model].filter(Boolean).join(' / ');
+  } catch {
+    return null;
+  }
+}
+
 function clearSafetyTimer(sessionId: string): void {
   const watchdog = pendingSafetyTimers.get(sessionId);
   if (watchdog) clearTimeout(watchdog.timer);
@@ -602,7 +619,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const lastUser = [...curMsgs].reverse().find((m) => m.role === 'user');
           const userText = lastUser ? textFromMessage(lastUser) : '';
           const brainText = userText ? await useBrainStore.getState().generateOfflineResponse(userText) : isBillingError ? 'Infinite AI Brain is ready. Fix your credits or switch provider and retry — I can still help locally.' : 'Infinite AI Brain is ready with a local answer while the agent recovers. Try a more explicit tool request if needed.';
-          const brainMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `🧠 **Infinite AI Brain (offline, no credits needed):**\n\n${brainText}` }], timestamp: Date.now(), provider: 'offline-brain', model: 'local-recovery' };
+          const tried = currentSelectionLabel();
+          const brainMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `🧠 **Infinite AI Brain (offline, no credits needed):**${tried ? `\n_${tried} didn't answer, so here's the local brain instead._` : ''}\n\n${brainText}` }], timestamp: Date.now(), provider: 'offline-brain', model: 'local-recovery' };
           if (context.sessionId === get().currentSessionId) set((s) => ({ messages: [...s.messages, brainMsg] }));
           void window.api.appendSessionMessage({ sessionId: context.sessionId, message: brainMsg }).catch(() => undefined);
         } catch { /* ignore */ }
