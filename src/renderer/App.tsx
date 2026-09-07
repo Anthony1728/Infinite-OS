@@ -127,7 +127,7 @@ function WelcomeSplash({ name, onDone }: { name: string; onDone: () => void }) {
 }
 
 export function App() {
-  const { isAuthenticated, isNewUser, user, justRegistered, clearJustRegistered } = useAuthStore();
+  const { isAuthenticated, isNewUser, user, justRegistered, clearJustRegistered, isRestoringSession } = useAuthStore();
   const uiTheme = useUiTheme((s) => s.theme);
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -307,7 +307,9 @@ export function App() {
     }
   }, [activeView, aiTabs]);
 
-  if (startupLoading) {
+  // Boot gate: splash art while starting, and hold it until the stored
+  // session has been checked — no login flash for returning users.
+  if (startupLoading || isRestoringSession) {
     return <BriefLoading onComplete={() => setStartupLoading(false)} />;
   }
 

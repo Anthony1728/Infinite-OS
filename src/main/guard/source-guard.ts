@@ -58,8 +58,9 @@ export function startGuard(cwd: string): void {
       if (!filename) return;
       const fullPath = join(srcDir, filename as string);
       const rel = relative(cwd, fullPath).replace(/\\/g, '/');
-      // Ignore build output, node_modules
+      // Ignore build output, node_modules, and agent tool temp files.
       if (rel.includes('node_modules') || rel.startsWith('out/') || rel.startsWith('dist/')) return;
+      if (/(^|\/)\.hermes-tmp\./.test(rel)) return;
       // If this write was allowed (agent tool), ignore
       if (isAllowed(fullPath) || isAllowed(rel)) return;
       // Spurious-event filter: mtime must have advanced since we last saw it.

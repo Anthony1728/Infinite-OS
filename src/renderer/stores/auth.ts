@@ -69,6 +69,9 @@ const saveUsers = async (users: Record<string, { user: User; password: string }>
 };
 
 const saveSession = async (user: User | null) => {
+  if (typeof window !== 'undefined') {
+    console.log('[auth] saveSession:', user ? user.email : null);
+  }
   await window.api.authSetSession(user ? { user, isAuthenticated: true } : null);
 };
 
@@ -89,6 +92,9 @@ const persistLatestUser = (): void => {
       const latest = useAuthStore.getState().user;
       if (!latest) return;
       const users = await getUsers();
+      // Fail OPEN on an unreadable store: an empty read must never wipe
+      // auth.json or the session file (that bricks auto-login).
+      if (Object.keys(users).length === 0) return;
       // Ghost guard: the account may have been deleted (profiles cleanup).
       // Never write a file session for an unknown account — that flaps the
       // active profile and breaks auto-login. Drop to logged-out instead.
@@ -256,16 +262,23 @@ export const useAuthStore = create<AuthState>()(
 // Auto-login on startup: try to restore from file-based session
 // Wait for window.api to be available (preload)
 const tryRestoreSession = async () => {
+  console.info('[auth] restore: start, api =', typeof window.api, typeof window.api?.authGetSession);
+  useAuthStore.getState().setRestoringSession(true);
   for (let i = 0; i < 50; i++) {
     if (window.api?.authGetSession) break;
     await new Promise((r) => setTimeout(r, 100));
   }
   try {
+    console.info('[auth] restore: loading session');
     const session = await loadSession();
+    console.info('[auth] restore: session =', session ? session.user?.email ?? '(no email)' : null);
     if (session?.user && session.isAuthenticated) {
       // Ghost guard: ignore sessions for deleted accounts (stale file).
+      // Fail open: only skip when the store positively loaded and lacks it.
+      console.info('[auth] restore: checking users');
       const users = await getUsers();
-      if (!users[session.user.email]) return;
+      console.info('[auth] restore: users =', Object.keys(users).join(',') || '(none)');
+      if (Object.keys(users).length > 0 && !users[session.user.email]) return;
       useAuthStore.setState({
         user: session.user,
         isAuthenticated: true,
@@ -275,6 +288,8 @@ const tryRestoreSession = async () => {
     }
   } catch (e) {
     console.error('[auth] Session restore failed:', e);
+  } finally {
+    useAuthStore.getState().setRestoringSession(false);
   }
 };
 tryRestoreSession();
