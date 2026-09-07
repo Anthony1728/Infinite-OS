@@ -9,7 +9,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { BUNDLED_SKILLS } from './bundled.js';
 import { SkillFileStore, slugifySkillName } from './skill-store.js';
 
@@ -71,7 +71,7 @@ export class SkillsManager {
         ? { workspaceRoot: workspaceRootOrOptions, seedBundled: true }
         : { ...DEFAULT_OPTIONS, ...(workspaceRootOrOptions ?? {}) };
 
-    this.personalDir = options.personalDir ?? join(homedir(), '.infinite-ai', 'skills');
+    this.personalDir = options.personalDir ?? join(infiniteHome(), 'skills');
     this.ownDir = options.workspaceRoot
       ? join(options.workspaceRoot, '.infinite', 'skills')
       : this.personalDir;

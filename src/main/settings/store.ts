@@ -3,8 +3,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import chokidar from 'chokidar';
+import { infiniteHome } from '../profiles/home.js';
 
 type Scope = 'managed' | 'user' | 'project' | 'local';
 
@@ -18,7 +18,7 @@ class SettingsStore {
     this.watchers = [];
 
     const paths: { scope: Scope; path: string }[] = [
-      { scope: 'user', path: join(homedir(), '.infinite-ai', 'settings.json') },
+      { scope: 'user', path: join(infiniteHome(), 'settings.json') },
       { scope: 'project', path: join(cwd, '.infinite', 'settings.json') },
       { scope: 'local', path: join(cwd, '.infinite', 'settings.local.json') },
     ];
@@ -61,7 +61,7 @@ class SettingsStore {
 
   async set(scope: Scope, key: string, value: unknown, cwd: string): Promise<void> {
     const path = scope === 'user'
-      ? join(homedir(), '.infinite-ai', 'settings.json')
+      ? join(infiniteHome(), 'settings.json')
       : scope === 'project'
         ? join(cwd, '.infinite', 'settings.json')
         : join(cwd, '.infinite', 'settings.local.json');
@@ -75,7 +75,7 @@ class SettingsStore {
 
   async clear(scope: Scope, key: string, cwd: string): Promise<void> {
     const path = scope === 'user'
-      ? join(homedir(), '.infinite-ai', 'settings.json')
+      ? join(infiniteHome(), 'settings.json')
       : scope === 'project'
         ? join(cwd, '.infinite', 'settings.json')
         : join(cwd, '.infinite', 'settings.local.json');

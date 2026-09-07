@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface Tool {
   id: string;
@@ -57,7 +57,7 @@ export class ToolMarketplace {
   private dataDir: string;
 
   constructor(dataDir?: string) {
-    this.dataDir = dataDir ?? join(homedir(), '.infinite-ai', 'marketplace');
+    this.dataDir = dataDir ?? join(infiniteHome(), 'marketplace');
     this.ensureDir();
     this.loadData();
     this.initCategories();

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
 
@@ -28,7 +28,7 @@ interface ProjectToolInput {
   board?: string[];
 }
 
-const dir = join(homedir(), '.infinite-ai', 'projects');
+const dir = join(infiniteHome(), 'projects');
 const file = join(dir, 'project-management.json');
 
 export const projectTool: Tool = {

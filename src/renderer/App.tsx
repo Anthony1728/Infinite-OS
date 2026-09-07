@@ -162,6 +162,25 @@ export function App() {
     })();
   }, []);
 
+  // Netflix-style isolation, renderer side: device storage (provider pick,
+  // bot chats, tabs, history, workspace UI) belongs to one account. When the
+  // signed-in account differs from whoever used this window last, wipe it —
+  // main already re-homed files + secrets; auth restores from main after.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const sess = (await window.api.authGetSession()) as { user?: { email?: string } } | null;
+        const email = sess?.user?.email?.toLowerCase() ?? '';
+        if ((localStorage.getItem('infinite:last-email') ?? '') !== email) {
+          localStorage.clear();
+          localStorage.setItem('infinite:last-email', email);
+        }
+      } catch {
+        /* storage stays as-is when the bridge is unavailable */
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     const navigate = (event: Event) => {
       const view = (event as CustomEvent<string>).detail;

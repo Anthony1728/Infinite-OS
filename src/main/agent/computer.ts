@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { spawn } from 'node:child_process';
 
 function psExec(command: string, timeout = 30_000): Promise<{ stdout: string; stderr: string }> {
@@ -104,7 +105,7 @@ export class ComputerControlAgent {
       enableKeyboard: config?.enableKeyboard ?? true,
       enableScreenCapture: config?.enableScreenCapture ?? true,
     };
-    this.dataDir = join(homedir(), '.infinite-ai', 'computer');
+    this.dataDir = join(infiniteHome(), 'computer');
     this.ensureDir();
     this.loadData();
   }

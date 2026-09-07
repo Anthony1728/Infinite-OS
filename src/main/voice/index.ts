@@ -11,6 +11,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { infiniteHome } from '../profiles/home.js';
 import { homedir } from 'node:os';
 
 // Resolve the Python wrapper relative to the app root.
@@ -76,8 +77,8 @@ export class EdgeTTSProvider implements TTSProvider {
 
   async synthesize(text: string, voice?: string): Promise<Buffer> {
     const voiceName = EDGE_TTS_VOICES[voice ?? 'ava']?.voice ?? voice ?? DEFAULT_EDGE_VOICE;
-    const tmpFile = join(homedir(), '.infinite-ai', 'voice', `edge-tts-${Date.now()}.mp3`);
-    mkdirSync(join(homedir(), '.infinite-ai', 'voice'), { recursive: true });
+    const tmpFile = join(infiniteHome(), 'voice', `edge-tts-${Date.now()}.mp3`);
+    mkdirSync(join(infiniteHome(), 'voice'), { recursive: true });
 
     const wrapper = wrapperPath();
     await new Promise<void>((resolve, reject) => {
@@ -157,7 +158,7 @@ export class VoiceManager {
   private providers: TTSProvider[];
 
   constructor() {
-    this.dataDir = join(homedir(), '.infinite-ai', 'voice');
+    this.dataDir = join(infiniteHome(), 'voice');
     if (!existsSync(this.dataDir)) {
       mkdirSync(this.dataDir, { recursive: true });
     }

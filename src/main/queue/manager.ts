@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface QueuedTask {
   id: string;
@@ -59,7 +59,7 @@ export class TaskQueueManager extends EventEmitter {
 
   constructor(dataDir?: string) {
     super();
-    this.dataDir = dataDir ?? join(homedir(), '.infinite-ai', 'queues');
+    this.dataDir = dataDir ?? join(infiniteHome(), 'queues');
     this.load();
   }
 

@@ -1,7 +1,7 @@
 import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { randomUUID } from 'node:crypto';
 
 interface ProactiveContext {
@@ -41,7 +41,7 @@ interface UserPattern {
   suggestion: string;
 }
 
-const DATA_DIR = join(homedir(), '.infinite-ai', 'proactive');
+const DATA_DIR = join(infiniteHome(), 'proactive');
 
 function ensureDir(): void {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });

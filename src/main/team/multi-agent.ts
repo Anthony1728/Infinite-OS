@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import type { AgentId } from '../agents/types.js';
 
 export interface MultiAgentConfig {
@@ -66,7 +66,7 @@ export class MultiAgentSystem {
 
   constructor(config?: Partial<MultiAgentConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'multi-agent'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'multi-agent'),
       maxConcurrent: config?.maxConcurrent ?? 10,
       defaultTimeout: config?.defaultTimeout ?? 120000,
     };

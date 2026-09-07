@@ -5,7 +5,7 @@
 
 import type { Tool, ToolResult } from './base.js';
 import { SkillsManager } from '../skills/manager.js';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 
 interface SkillInput {
@@ -139,7 +139,7 @@ export const skillManageTool: Tool = {
             enabled: input.enabled !== false,
           });
           const rawPath = manager.isPersonal
-            ? join(homedir(), '.infinite-ai', 'skills', skill.name, 'SKILL.md')
+            ? join(infiniteHome(), 'skills', skill.name, 'SKILL.md')
             : join(ctx.cwd, '.infinite', 'skills', skill.name, 'SKILL.md');
           return json({
             ok: true,

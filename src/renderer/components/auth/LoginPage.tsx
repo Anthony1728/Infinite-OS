@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/auth';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 
@@ -6,11 +6,36 @@ interface LoginPageProps {
   onSwitchToRegister: () => void;
 }
 
+interface RosterProfile {
+  name: string;
+  email: string;
+  avatar?: string;
+  lastLoginAt: number;
+}
+
 export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [roster, setRoster] = useState<RosterProfile[]>([]);
   const { login, isLoading } = useAuthStore();
+
+  // Netflix-style picker: who's using Infinite OS on this machine?
+  // Passwords never leave main — the roster carries names only.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const list = (await window.api.authListProfiles()) as RosterProfile[];
+        if (alive && Array.isArray(list)) setRoster(list);
+      } catch {
+        /* single-user machine — form stays as-is */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +67,33 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
           <h1 className="text-2xl font-bold text-white">Welcome back</h1>
           <p className="text-gray-500 text-sm mt-2">Sign in to Infinite OS</p>
         </div>
+
+        {/* Who's using Infinite OS? */}
+        {roster.length > 0 && (
+          <div className="flex items-center justify-center gap-3 mb-6">
+            {roster.slice(0, 5).map((p) => (
+              <button
+                key={p.email}
+                onClick={() => setEmail(p.email)}
+                title={p.email}
+                className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors ${
+                  email === p.email ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]'
+                }`}
+              >
+                {p.avatar ? (
+                  <img src={p.avatar} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-white/10" />
+                ) : (
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-violet-600/60 to-cyan-500/60 text-base font-bold text-white ring-2 ring-white/10">
+                    {(p.name || '?').charAt(0).toUpperCase()}
+                  </span>
+                )}
+                <span className="max-w-[72px] truncate text-[11px] text-zinc-300">
+                  {p.name.split(' ')[0]}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">

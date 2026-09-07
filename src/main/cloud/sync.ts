@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface CloudSyncConfig {
   dataDir: string;
@@ -60,7 +60,7 @@ export class CloudSync {
 
   constructor(config?: Partial<CloudSyncConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'cloud'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'cloud'),
       syncInterval: config?.syncInterval ?? 300000,
       maxBackupSize: config?.maxBackupSize ?? 100 * 1024 * 1024,
       enableAutoSync: config?.enableAutoSync ?? true,
@@ -195,7 +195,7 @@ export class CloudSync {
 
       // Backup settings
       if (includes.includes('settings') || includes.includes('all')) {
-        const settingsDir = join(homedir(), '.infinite-ai', 'settings');
+        const settingsDir = join(infiniteHome(), 'settings');
         if (existsSync(settingsDir)) {
           let settingsFiles = '{}';
           try {
@@ -211,7 +211,7 @@ export class CloudSync {
 
       // Backup chat history
       if (includes.includes('chats') || includes.includes('all')) {
-        const sessionsDir = join(homedir(), '.infinite-ai', 'sessions');
+        const sessionsDir = join(infiniteHome(), 'sessions');
         if (existsSync(sessionsDir)) {
           const { readdirSync } = await import('node:fs');
           const files = readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));

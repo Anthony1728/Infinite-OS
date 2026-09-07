@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 
 export type MemoryKind = 'fact' | 'procedure' | 'preference' | 'episode';
@@ -203,7 +203,7 @@ export class LearningMemoryStore {
   private records: MemoryRecord[];
 
   constructor(config: LearningMemoryConfig = {}) {
-    this.dataDir = config.dataDir ?? join(homedir(), '.infinite-ai', 'brain');
+    this.dataDir = config.dataDir ?? join(infiniteHome(), 'brain');
     this.storePath = join(this.dataDir, 'learning-memory.json');
     this.maxRecords = Math.max(100, config.maxRecords ?? 2_000);
     this.now = config.now ?? Date.now;

@@ -3,14 +3,14 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export class PersistentMemory {
   private db: Database.Database;
   private dataDir: string;
 
   constructor(dbPath?: string) {
-    this.dataDir = join(homedir(), '.infinite-ai', 'memory');
+    this.dataDir = join(infiniteHome(), 'memory');
     if (!existsSync(this.dataDir)) {
       mkdirSync(this.dataDir, { recursive: true });
     }

@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 import { getBrain } from '../brain/core.js';
 import { improvement as improvementEngine } from '../index.js';
@@ -68,7 +68,7 @@ export interface InteractionRecord {
 }
 
 const DEFAULT_CONFIG: EngineConfig = {
-  dataDir: join(homedir(), '.infinite-ai', 'engine'),
+  dataDir: join(infiniteHome(), 'engine'),
   minInteractions: 10,
   minCategories: 3,
   minSuccessRate: 0.6,
@@ -333,7 +333,7 @@ export class IntelligenceEngine {
   private detectApiKeys(): boolean {
     try {
       // Check the secrets storage location
-      const secretsPath = join(homedir(), '.infinite-ai', 'secrets.bin');
+      const secretsPath = join(infiniteHome(), 'secrets.bin');
       if (existsSync(secretsPath)) {
         return true; // At least one key is configured
       }

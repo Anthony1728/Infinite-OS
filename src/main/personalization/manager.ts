@@ -3,7 +3,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface UserProfile {
   id: string;
@@ -55,7 +55,7 @@ export class PersonalizationManager {
   private profile: UserProfile;
 
   constructor(workspaceRoot?: string) {
-    const baseDir = workspaceRoot ?? join(homedir(), '.infinite-ai');
+    const baseDir = workspaceRoot ?? join(infiniteHome());
     this.profileDir = join(baseDir, 'profile');
     this.profilePath = join(this.profileDir, 'user.json');
 

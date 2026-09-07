@@ -584,6 +584,7 @@ const api = {
   authSetUsers: (users: Record<string, unknown>) => ipcRenderer.invoke(IPC.AUTH_SET_USERS, users),
   authGetSession: () => ipcRenderer.invoke(IPC.AUTH_GET_SESSION),
   authSetSession: (session: unknown) => ipcRenderer.invoke(IPC.AUTH_SET_SESSION, session),
+  authListProfiles: () => ipcRenderer.invoke(IPC.AUTH_LIST_PROFILES),
 
   // Replay events
   onReplayCommand: (callback: (event: { type: string; data: unknown }) => void) => {

@@ -5,7 +5,7 @@ import { ImapFlow, type MailboxObject } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { safeStorage } from 'electron';
 import { getCredentials } from '../security/encryption.js';
 
@@ -37,7 +37,7 @@ import type { Transporter } from 'nodemailer';
 let transporter: Transporter | null = null;
 let lastConfigUser = '';
 
-const CONFIG_DIR = join(homedir(), '.infinite-ai');
+const CONFIG_DIR = join(infiniteHome());
 const CONFIG_FILE = join(CONFIG_DIR, 'email.json');
 
 type StoredEmailConfig = Omit<EmailConfig, 'password'> & {

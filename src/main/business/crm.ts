@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface BusinessConfig {
   dataDir: string;
@@ -97,7 +97,7 @@ export class BusinessOS {
 
   constructor(config?: Partial<BusinessConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'business'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'business'),
       currency: config?.currency ?? 'USD',
       taxRate: config?.taxRate ?? 0.1,
     };

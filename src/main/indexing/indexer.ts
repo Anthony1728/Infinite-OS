@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface IndexedFile {
   id: string;
@@ -158,7 +158,7 @@ export class WorkspaceIndexer {
   private lastIndexed: number = 0;
 
   constructor(dataDir?: string) {
-    this.dataDir = dataDir ?? join(homedir(), '.infinite-ai', 'index');
+    this.dataDir = dataDir ?? join(infiniteHome(), 'index');
     this.load();
   }
 

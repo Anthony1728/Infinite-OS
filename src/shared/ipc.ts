@@ -428,6 +428,7 @@ export const IPC = {
   AUTH_SET_USERS: 'auth:set-users',
   AUTH_GET_SESSION: 'auth:get-session',
   AUTH_SET_SESSION: 'auth:set-session',
+  AUTH_LIST_PROFILES: 'auth:list-profiles',
 
   // Owner System (owner of Infinite OS)
   OWNER_GET_PROFILE: 'owner:get-profile',

@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface Checkpoint {
   id: string;
@@ -90,7 +90,7 @@ export class CheckpointManager {
   private lastTimestamp = 0;
 
   constructor(dataDir?: string) {
-    this.dataDir = dataDir ?? join(homedir(), '.infinite-ai', 'checkpoints');
+    this.dataDir = dataDir ?? join(infiniteHome(), 'checkpoints');
     this.load();
   }
 

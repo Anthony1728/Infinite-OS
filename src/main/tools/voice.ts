@@ -3,7 +3,7 @@
 
 import type { Tool, ToolResult } from './base.js';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 interface VoiceInput {
   action: string;
@@ -37,9 +37,9 @@ export const voiceTool: Tool = {
         case 'speak': {
           if (!input.text) return { content: 'Error: text is required for speak', is_error: true };
           const buffer = await voice.textToSpeech(input.text, input.voice);
-          const outputPath = input.output_path ?? join(homedir(), '.infinite-ai', 'voice', `speech-${Date.now()}.mp3`);
+          const outputPath = input.output_path ?? join(infiniteHome(), 'voice', `speech-${Date.now()}.mp3`);
           const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
-          const dir = join(homedir(), '.infinite-ai', 'voice');
+          const dir = join(infiniteHome(), 'voice');
           if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
           writeFileSync(outputPath, buffer);
           return {
@@ -65,7 +65,7 @@ export const voiceTool: Tool = {
 
         case 'save': {
           if (!input.text) return { content: 'Error: text is required for save', is_error: true };
-          const outputPath = input.output_path ?? join(homedir(), '.infinite-ai', 'voice', `speech-${Date.now()}.mp3`);
+          const outputPath = input.output_path ?? join(infiniteHome(), 'voice', `speech-${Date.now()}.mp3`);
           const result = await voice.textToSpeechFile(input.text, outputPath, input.voice);
           return {
             content: JSON.stringify({

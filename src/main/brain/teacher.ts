@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 
 import {
@@ -195,7 +195,7 @@ export class BrainTeachingManager {
   private onlineResearch = false;
 
   constructor(config: BrainTeacherConfig = {}) {
-    this.dataDir = config.dataDir ?? join(homedir(), '.infinite-ai', 'brain');
+    this.dataDir = config.dataDir ?? join(infiniteHome(), 'brain');
     this.storePath = join(this.dataDir, 'distilled-lessons.json');
     this.cycleIntervalMs = Math.max(1_000, config.cycleIntervalMs ?? 30_000);
     this.providerTimeoutMs = Math.max(5_000, config.providerTimeoutMs ?? 45_000);

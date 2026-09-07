@@ -12,7 +12,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface GitHubConfig {
   token?: string;
@@ -90,7 +90,7 @@ export class GitHubManager {
       defaultBranch: 'main',
       ...config,
     };
-    this.dataDir = join(homedir(), '.infinite-ai', 'github');
+    this.dataDir = join(infiniteHome(), 'github');
     this.ensureDir();
     this.loadConfig();
   }

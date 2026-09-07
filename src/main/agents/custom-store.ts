@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import type { AgentType } from './types.js';
 
 export interface CustomAgent {
@@ -31,7 +31,7 @@ let db: Database.Database | null = null;
 function getDb(): Database.Database {
   if (db) return db;
 
-  const configDir = join(homedir(), '.infinite-ai');
+  const configDir = infiniteHome();
   mkdirSync(configDir, { recursive: true });
 
   db = new Database(join(configDir, 'agents.db'));

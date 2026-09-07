@@ -3,7 +3,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
@@ -15,7 +15,7 @@ export class CredentialManager {
   private credentials: Map<string, { service: string; encrypted: string; iv: string; tag: string }> = new Map();
 
   constructor(passphrase?: string) {
-    this.dataDir = join(homedir(), '.infinite-ai', 'credentials');
+    this.dataDir = join(infiniteHome(), 'credentials');
     if (!existsSync(this.dataDir)) {
       mkdirSync(this.dataDir, { recursive: true });
     }

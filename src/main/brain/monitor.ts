@@ -12,7 +12,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir, cpus, totalmem, freemem } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
+import { cpus, totalmem, freemem } from 'node:os';
 
 export interface MonitorConfig {
   checkInterval: number;
@@ -105,7 +106,7 @@ export class SystemMonitor {
         memory: config?.alertThresholds?.memory ?? 0.85,
         disk: config?.alertThresholds?.disk ?? 0.9,
       },
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'monitor'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'monitor'),
     };
     this.dataDir = this.config.dataDir;
     this.ensureDir();

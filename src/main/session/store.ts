@@ -3,11 +3,11 @@
 import { appendFile, readFile, writeFile, mkdir, unlink, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { homedir } from 'node:os';
 import type { Message, Session } from '../../shared/types.js';
 import { v4 as uuid } from 'uuid';
+import { infiniteHome } from '../profiles/home.js';
 
-const DIR = join(homedir(), '.infinite-ai', 'sessions');
+const DIR = join(infiniteHome(), 'sessions');
 
 export async function ensureDir(): Promise<void> {
   await mkdir(DIR, { recursive: true });

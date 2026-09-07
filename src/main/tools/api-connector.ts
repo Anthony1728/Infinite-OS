@@ -1,7 +1,7 @@
 import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 interface APIProvider {
   id: string;
@@ -723,7 +723,7 @@ const PROVIDERS: APIProvider[] = [
   },
 ];
 
-const DATA_DIR = join(homedir(), '.infinite-ai', 'api-connections');
+const DATA_DIR = join(infiniteHome(), 'api-connections');
 const CONNECTIONS_FILE = join(DATA_DIR, 'connections.json');
 
 function ensureDir(): void {

@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { toolRegistry } from '../tools/base.js';
 import { executeToolCall } from '../agent/tool-execution.js';
 import { spawnSubagent } from '../agent/runtime.js';
@@ -133,7 +134,7 @@ export class AutomationBuilder {
 
   constructor(config?: Partial<AutomationConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'automation'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'automation'),
       maxConcurrent: config?.maxConcurrent ?? 5,
       defaultTimeout: config?.defaultTimeout ?? 60000,
     };

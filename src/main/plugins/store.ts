@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { execSync } from 'node:child_process';
 
 export interface PluginConfig {
@@ -58,7 +58,7 @@ export class PluginStore {
 
   constructor(config?: Partial<PluginConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'plugins'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'plugins'),
     };
     this.dataDir = this.config.dataDir;
     this.ensureDir();

@@ -10,7 +10,7 @@
 
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { mkdirSync, existsSync } from 'node:fs';
 import type { OwnerProfile, OwnerDocument, OwnerPublicInfo, OwnerAuditEntry, OwnerPermission, PremiumCapability, OwnerMutation } from '../../shared/owner.js';
 
@@ -56,7 +56,7 @@ export class OwnerManager {
   private profileCache: OwnerProfile | null = null;
 
   constructor(dbPath?: string) {
-    const dir = join(homedir(), '.infinite-ai');
+    const dir = join(infiniteHome());
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const path = dbPath || join(dir, 'owner.db');
     this.db = new Database(path);

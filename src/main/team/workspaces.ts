@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface WorkspaceConfig {
   dataDir: string;
@@ -84,7 +84,7 @@ export class TeamWorkspaces {
 
   constructor(config?: Partial<WorkspaceConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'workspaces'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'workspaces'),
     };
     this.dataDir = this.config.dataDir;
     this.ensureDir();

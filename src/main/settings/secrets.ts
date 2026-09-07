@@ -13,9 +13,9 @@ import { safeStorage } from 'electron';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
-const DIR = join(homedir(), '.infinite-ai');
+const DIR = infiniteHome();
 const FILE = join(DIR, 'secrets.bin');
 const PLAINTEXT_FILE = join(DIR, 'secrets.plain.json');
 

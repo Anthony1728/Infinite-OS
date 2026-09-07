@@ -3,7 +3,7 @@
 
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { getBrain } from '../brain/core.js';
 import { settings } from '../settings/store.js';
 import { detectLocalHardware, selectInstalledModel, type LocalHardwareProfile } from '../brain/hardware.js';
@@ -44,7 +44,7 @@ export class OllamaBrain {
   private activeModel = '';
 
   constructor() {
-    this.dataDir = join(homedir(), '.infinite-ai', 'ollama-brain');
+    this.dataDir = join(infiniteHome(), 'ollama-brain');
     this.ensureDir();
     this.loadData();
     // Auto-teach every 5 minutes when there's new knowledge

@@ -1,7 +1,7 @@
 import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { randomUUID } from 'node:crypto';
 
 interface KnowledgeNode {
@@ -26,7 +26,7 @@ interface KnowledgeEdge {
   createdAt: number;
 }
 
-const DATA_DIR = join(homedir(), '.infinite-ai', 'knowledge-graph');
+const DATA_DIR = join(infiniteHome(), 'knowledge-graph');
 
 function ensureDir(): void {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });

@@ -2,6 +2,7 @@
 
 import { resolve, join } from 'node:path';
 import { arch, homedir, hostname, platform, release, userInfo } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { readFile } from 'node:fs/promises';
 
 import type { Message } from '../../shared/types.js';
@@ -340,7 +341,7 @@ async function loadInfiniteOSState(cwd?: string): Promise<string | null> {
     (async () => {
       try {
         const { AutomationBuilder } = await import('../automation/builder.js');
-        const auto = new AutomationBuilder({ dataDir: join(homedir(), '.infinite-ai', 'automations'), maxConcurrent: 3, defaultTimeout: 30000 });
+        const auto = new AutomationBuilder({ dataDir: join(infiniteHome(), 'automations'), maxConcurrent: 3, defaultTimeout: 30000 });
         const workflows = auto.listWorkflows();
         const enabled = workflows.filter((w: { enabled: boolean }) => w.enabled).length;
         return `## Automations\n${workflows.length} workflows (${enabled} enabled)`;
@@ -403,7 +404,7 @@ async function loadInfiniteOSState(cwd?: string): Promise<string | null> {
     // Preferences — capped at 500 chars (async, no sync I/O on main thread)
     (async () => {
       try {
-        const prefPath = join(homedir(), '.infinite-ai', 'INFINITE.md');
+        const prefPath = join(infiniteHome(), 'INFINITE.md');
         const { readFile } = await import('node:fs/promises');
         const content = await readFile(prefPath, 'utf8').then((c) => c.trim().slice(0, 500)).catch(() => '');
         if (content) return `## Preferences\n${content}`;
@@ -559,7 +560,7 @@ async function getLocalModelPrompt(opts: LocalModelPromptOptions): Promise<strin
 interface DiscoveredMemory { path: string; content: string }
 
 async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
-  const userPath = join(homedir(), '.infinite-ai', 'INFINITE.md');
+  const userPath = join(infiniteHome(), 'INFINITE.md');
   const projectPath = join(cwd, 'INFINITE.md');
   const projectHidden = join(cwd, '.infinite', 'INFINITE.md');
   const localPath = join(cwd, 'INFINITE.local.md');
@@ -598,7 +599,7 @@ async function discoverMemory(cwd: string): Promise<DiscoveredMemory[]> {
 
 async function loadAutoMemory(cwd: string): Promise<string | null> {
   const hash = await hashPath(cwd);
-  const dir = join(homedir(), '.infinite-ai', 'memory', hash);
+  const dir = join(infiniteHome(), 'memory', hash);
   const { readdir, readFile } = await import('node:fs/promises');
   let files: string[];
   try {

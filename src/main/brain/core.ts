@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 // Types
 export interface BrainConfig {
@@ -105,7 +105,7 @@ export class InfiniteBrain {
 
   constructor(config?: Partial<BrainConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'brain'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'brain'),
       enableLearning: config?.enableLearning ?? true,
       enableOfflineMode: config?.enableOfflineMode ?? true,
       maxMemoryEntries: config?.maxMemoryEntries ?? 10000,

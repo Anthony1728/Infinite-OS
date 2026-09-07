@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface ImprovementConfig {
   dataDir: string;
@@ -72,7 +72,7 @@ export class SelfImprovementEngine {
 
   constructor(config?: Partial<ImprovementConfig>) {
     this.config = {
-      dataDir: config?.dataDir ?? join(homedir(), '.infinite-ai', 'improvement'),
+      dataDir: config?.dataDir ?? join(infiniteHome(), 'improvement'),
       maxPatterns: config?.maxPatterns ?? 500,
       learningRate: config?.learningRate ?? 0.1,
       improvementThreshold: config?.improvementThreshold ?? 0.05,

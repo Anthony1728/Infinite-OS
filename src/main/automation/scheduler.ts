@@ -7,7 +7,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 import { powerMonitor, powerSaveBlocker } from 'electron';
 import { nextCronRuns, parseCron } from '../tools/time.js';
@@ -38,7 +38,7 @@ class AutomationScheduler {
   private keepAwakeBlockerId: number | null = null;
   private keepAwakeEnabled = false;
   private broadcast: ((progress: AutomationRunProgress) => void) | null = null;
-  private statePath = join(homedir(), '.infinite-ai', 'automation', 'scheduler.json');
+  private statePath = join(infiniteHome(), 'automation', 'scheduler.json');
 
   start(broadcast?: (progress: AutomationRunProgress) => void): void {
     if (this.timer) return;
@@ -145,7 +145,7 @@ class AutomationScheduler {
 
   private saveState(): void {
     try {
-      mkdirSync(join(homedir(), '.infinite-ai', 'automation'), { recursive: true });
+      mkdirSync(join(infiniteHome(), 'automation'), { recursive: true });
       writeFileSync(
         this.statePath,
         JSON.stringify({ keepAwake: this.keepAwakeEnabled } satisfies SchedulerPersistentState, null, 2),
