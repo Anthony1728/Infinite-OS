@@ -197,6 +197,10 @@ export function App() {
           e.preventDefault();
           setCommandOpen(true);
           break;
+        case '`':
+          e.preventDefault();
+          setActiveView('terminal');
+          break;
         case 'n':
           e.preventDefault();
           setActiveView('chats');
@@ -232,6 +236,14 @@ export function App() {
   useEffect(() => {
     useAgentsStore.getState().init();
     hydrateAiTabs();
+    // Idle-prefetch Terminal chunk so Ctrl+` opens instantly (Hermes-instant).
+    // Separate chunk (vendor-xterm) keeps initial bundle lean.
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    const prefetch = () => {
+      void import('./components/views/TerminalView').catch(() => {});
+    };
+    if (idle) idle(prefetch);
+    else setTimeout(prefetch, 2500);
   }, [hydrateAiTabs]);
 
   useEffect(() => {

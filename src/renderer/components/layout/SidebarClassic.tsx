@@ -11,6 +11,7 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'chats', label: 'Chats', icon: 'nav.chats', color: 'text-cyan-400' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects', color: 'text-emerald-400' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files', color: 'text-sky-400' },
+  { id: 'terminal', label: 'Terminal', icon: 'nav.terminal', color: 'text-lime-400' },
   { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },

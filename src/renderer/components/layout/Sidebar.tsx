@@ -15,6 +15,7 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'chats', label: 'Chats', icon: 'nav.chats' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files' },
+  { id: 'terminal', label: 'Terminal', icon: 'nav.terminal' },
 ];
 
 const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [

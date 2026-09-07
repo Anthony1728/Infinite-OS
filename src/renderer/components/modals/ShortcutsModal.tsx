@@ -8,6 +8,7 @@ interface ShortcutsModalProps {
 const SHORTCUTS = [
   { category: 'Navigation', items: [
     { keys: ['Ctrl', 'K'], label: 'Open command palette' },
+    { keys: ['Ctrl', '`'], label: 'Open terminal' },
     { keys: ['Ctrl', 'N'], label: 'New chat' },
     { keys: ['Ctrl', 'B'], label: 'Toggle sidebar' },
     { keys: ['Ctrl', '.'], label: 'Toggle right panel' },

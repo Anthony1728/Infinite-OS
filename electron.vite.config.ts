@@ -53,6 +53,7 @@ export default defineConfig({
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
             'vendor-ui': ['framer-motion', 'lucide-react', 'cmdk'],
+            'vendor-xterm': ['xterm', 'xterm-addon-fit'],
             'vendor-ai': ['@anthropic-ai/sdk', 'openai', '@google/generative-ai'],
           },
         },

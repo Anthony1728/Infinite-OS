@@ -31,6 +31,7 @@ const WebsiteBuilderView = lazy(() => import('../views/WebsiteBuilderView').then
 const StandingOrdersView = lazy(() => import('../views/StandingOrdersView').then(m => ({ default: m.StandingOrdersView })));
 const ActiveMemoryView = lazy(() => import('../views/ActiveMemoryView').then(m => ({ default: m.ActiveMemoryView })));
 const CapabilitiesView = lazy(() => import('../views/CapabilitiesView').then(m => ({ default: m.CapabilitiesView })));
+const TerminalView = lazy(() => import('../views/TerminalView').then(m => ({ default: m.TerminalView })));
 
 interface MainViewProps {
   activeView: string;
@@ -116,6 +117,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <EnterpriseView />;
       case 'capabilities':
         return <CapabilitiesView />;
+      case 'terminal':
+        return <TerminalView />;
       case 'settings':
         return <SettingsView />;
       default:

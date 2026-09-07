@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 
-export function ToolIcon({ name }: { name: string }) {
+export const ToolIcon = memo(function ToolIcon({ name }: { name: string }) {
   const n = name.toLowerCase();
   let inner: React.ReactNode;
 
@@ -80,9 +80,9 @@ export function ToolIcon({ name }: { name: string }) {
       {inner}
     </svg>
   );
-}
+});
 
-export function ToolCallCard({
+export const ToolCallCard = memo(function ToolCallCard({
   name,
   input,
   status,
@@ -206,4 +206,4 @@ export function ToolCallCard({
       )}
     </div>
   );
-}
+});

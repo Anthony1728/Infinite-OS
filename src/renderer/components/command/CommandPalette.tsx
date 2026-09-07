@@ -13,6 +13,7 @@ const COMMANDS = [
   { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace' },
   { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace' },
   { id: 'documents', label: 'Knowledge Hub', icon: 'KH', category: 'Knowledge' },
+  { id: 'terminal', label: 'Terminal', icon: 'TM', category: 'Tools', shortcut: 'Ctrl+`' },
   { id: 'memory', label: 'Memory', icon: 'MM', category: 'Knowledge' },
   { id: 'website-builder', label: 'Website Builder', icon: 'WB', category: 'Creative' },
   { id: 'app-builder', label: 'App Builder', icon: 'AB', category: 'Creative' },
