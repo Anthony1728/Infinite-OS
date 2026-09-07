@@ -1717,3 +1717,10 @@ button:disabled {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.18);
 }
+
+/* ── Static card variant ─────────────────────────────────────────────
+   Same glass look, no hover lift. Use in dense grids (Bots, Artifacts)
+   where translateY would overlap neighboring controls like search bars. */
+.agent-card--static:hover {
+  transform: none;
+}

@@ -1930,9 +1930,12 @@ function RealChat({
   const showThinking = streaming && !isStreamingText && !hasRunningTool && activity.length === 0;
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    const el = scrollRef.current;
+    if (!el) return;
+    // Empty chat (new session): start at the top so the greeting is visible.
+    // Slamming to bottom here is what stranded new chats mid-page.
+    if (messages.length === 0 && !streaming) el.scrollTop = 0;
+    else el.scrollTop = el.scrollHeight;
   }, [messages, streaming, activity]);
 
   // Handle sending during streaming (interjection)

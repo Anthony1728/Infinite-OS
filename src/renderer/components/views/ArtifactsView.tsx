@@ -39,7 +39,7 @@ export function ArtifactsView({ onOpenTab }: { onOpenTab: (view: string) => void
             {tabs.map((t) => (
               <div
                 key={t.id}
-                className="agent-card !p-4 cursor-pointer"
+                className="agent-card agent-card--static !p-4 cursor-pointer"
                 onClick={() => onOpenTab(t.id)}
                 role="button"
                 tabIndex={0}

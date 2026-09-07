@@ -66,6 +66,7 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
   const [hidden, setHidden] = useState<string[]>(() => readHidden());
   const [showHidden, setShowHidden] = useState(false);
   const [dialog, setDialog] = useState<null | { mode: 'new' | 'edit'; bot?: Bot }>(null);
+  const [taskFor, setTaskFor] = useState<Bot | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -164,9 +165,7 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
   );
 
   const runBot = useCallback(
-    async (bot: Bot) => {
-      const task = window.prompt(`Task for ${bot.name}:`);
-      if (!task?.trim()) return;
+    async (bot: Bot, task: string) => {
       try {
         await spawnAgent(
           bot.id,
@@ -311,7 +310,7 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
               const dimmed = hidden.includes(b.id);
               const routines = routineCount(b.name);
               return (
-                <div key={b.id} className={`agent-card !p-4 ${dimmed ? 'opacity-50' : ''}`}>
+                <div key={b.id} className={`agent-card agent-card--static !p-4 ${dimmed ? 'opacity-50' : ''}`}>
                   <div className="flex items-start gap-3">
                     <BotAvatar name={b.name} seed={b.avatarSeed} size={44} busy={busy} />
                     <div className="min-w-0 flex-1">
@@ -337,12 +336,34 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
                       Chat
                     </button>
                     <button
-                      onClick={() => void runBot(b)}
+                      onClick={() => setTaskFor(b)}
                       className="af-action"
                     >
                       Run task
                     </button>
                   </div>
+                  {(() => {
+                    const last = runs.find((r) => r.agentId === b.id);
+                    if (!last) return null;
+                    const dot =
+                      last.status === 'running' || last.status === 'queued'
+                        ? 'bg-amber-400 animate-pulse'
+                        : last.status === 'failed'
+                          ? 'bg-red-400'
+                          : last.status === 'completed'
+                            ? 'bg-emerald-400'
+                            : 'bg-zinc-500';
+                    const detail =
+                      last.preview?.trim() ||
+                      (last.status === 'failed' && last.error ? last.error.slice(0, 90) : '') ||
+                      last.status;
+                    return (
+                      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-500 min-w-0">
+                        <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                        <span className="truncate" title={detail}>{detail}</span>
+                      </div>
+                    );
+                  })()}
                   <div className="mt-2 flex items-center gap-1 text-[11px]">
                     <button onClick={() => setDialog({ mode: 'edit', bot: b })} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Edit</button>
                     <button onClick={() => void duplicateBot(b)} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Duplicate</button>
@@ -367,6 +388,18 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
         )}
       </div>
 
+      {taskFor && (
+        <TaskDialog
+          key={taskFor.id}
+          botName={taskFor.name}
+          onClose={() => setTaskFor(null)}
+          onRun={(task) => {
+            setTaskFor(null);
+            void runBot(taskFor, task);
+          }}
+        />
+      )}
+
       {dialog && (
         <BotDialog
           key={dialog.mode + (dialog.bot?.id ?? 'new')}
@@ -380,6 +413,67 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
           }}
         />
       )}
+    </div>
+  );
+}
+
+function TaskDialog({
+  botName,
+  onClose,
+  onRun,
+}: {
+  botName: string;
+  onClose: () => void;
+  onRun: (task: string) => void;
+}) {
+  const [task, setTask] = useState('');
+  const submit = () => {
+    if (task.trim()) onRun(task.trim());
+  };
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#111113] shadow-2xl p-5"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={`Run task with ${botName}`}
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <BotAvatar name={botName} size={32} />
+          <h2 className="text-sm font-semibold text-zinc-100">Task for {botName}</h2>
+          <button onClick={onClose} className="ml-auto text-zinc-500 hover:text-zinc-200 transition-colors" aria-label="Close">✕</button>
+        </div>
+        <textarea
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="Describe the task… (Enter to run, Shift+Enter for a new line)"
+          rows={3}
+          autoFocus
+          className="w-full rounded-xl bg-black/20 border border-white/[0.07] px-3 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/30 transition-colors resize-y"
+        />
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={submit}
+            disabled={!task.trim()}
+            className="rounded-lg px-4 py-2 text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-[0_6px_16px_rgba(124,58,237,.3)] hover:from-violet-500 hover:to-cyan-400 active:scale-[0.98] disabled:opacity-50 transition-all"
+          >
+            Run task
+          </button>
+          <button
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-xs font-medium bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.07] transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
