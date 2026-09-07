@@ -15,6 +15,15 @@ export interface CustomAgent {
   maxTurns: number;
   createdAt: number;
   updatedAt: number;
+  // ── Bot profile fields (Hermes parity, all optional — old rows unaffected) ──
+  /** Pinned model id (empty = inherit session default). */
+  model?: string;
+  /** Pinned provider id (empty = inherit session default). */
+  provider?: string;
+  /** Persona / standing instructions (SOUL.md equivalent), merged into the system prompt at run time. */
+  soul?: string;
+  /** Deterministic avatar seed (empty = derived from name). */
+  avatarSeed?: string;
 }
 
 let db: Database.Database | null = null;
@@ -42,6 +51,19 @@ function getDb(): Database.Database {
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
   `);
+  // Additive bot-profile columns — migrate databases created before them.
+  for (const ddl of [
+    `ALTER TABLE custom_agents ADD COLUMN model TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE custom_agents ADD COLUMN provider TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE custom_agents ADD COLUMN soul TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE custom_agents ADD COLUMN avatar_seed TEXT NOT NULL DEFAULT ''`,
+  ]) {
+    try {
+      db.exec(ddl);
+    } catch {
+      // Column already exists — nothing to do.
+    }
+  }
 
   return db;
 }
@@ -52,18 +74,19 @@ export function createCustomAgent(agent: Omit<CustomAgent, 'id' | 'createdAt' | 
   const now = Date.now();
 
   d.prepare(`
-    INSERT INTO custom_agents (id, name, description, icon, color, system_prompt, allowed_tools, max_turns, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, agent.name, agent.description, agent.icon, agent.color, agent.systemPrompt, JSON.stringify(agent.allowedTools), agent.maxTurns, now, now);
+    INSERT INTO custom_agents (id, name, description, icon, color, system_prompt, allowed_tools, max_turns, created_at, updated_at, model, provider, soul, avatar_seed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, agent.name, agent.description, agent.icon, agent.color, agent.systemPrompt, JSON.stringify(agent.allowedTools), agent.maxTurns, now, now, agent.model ?? '', agent.provider ?? '', agent.soul ?? '', agent.avatarSeed ?? '');
 
   return getCustomAgent(id)!;
 }
 
-export function getCustomAgent(id: string): CustomAgent | null {
-  const d = getDb();
-  const row = d.prepare('SELECT * FROM custom_agents WHERE id = ?').get(id) as Record<string, unknown> | undefined;
-  if (!row) return null;
-
+function rowToAgent(row: Record<string, unknown>): CustomAgent {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const strOrUndef = (v: unknown) => {
+    const s = text(v);
+    return s ? s : undefined;
+  };
   return {
     id: row.id as string,
     name: row.name as string,
@@ -75,25 +98,25 @@ export function getCustomAgent(id: string): CustomAgent | null {
     maxTurns: row.max_turns as number,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
+    model: strOrUndef(row.model),
+    provider: strOrUndef(row.provider),
+    soul: strOrUndef(row.soul),
+    avatarSeed: strOrUndef(row.avatar_seed),
   };
+}
+
+export function getCustomAgent(id: string): CustomAgent | null {
+  const d = getDb();
+  const row = d.prepare('SELECT * FROM custom_agents WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return rowToAgent(row);
 }
 
 export function listCustomAgents(): CustomAgent[] {
   const d = getDb();
   const rows = d.prepare('SELECT * FROM custom_agents ORDER BY created_at DESC').all() as Record<string, unknown>[];
 
-  return rows.map((row) => ({
-    id: row.id as string,
-    name: row.name as string,
-    description: row.description as string,
-    icon: row.icon as string,
-    color: row.color as string,
-    systemPrompt: row.system_prompt as string,
-    allowedTools: JSON.parse(row.allowed_tools as string),
-    maxTurns: row.max_turns as number,
-    createdAt: row.created_at as number,
-    updatedAt: row.updated_at as number,
-  }));
+  return rows.map(rowToAgent);
 }
 
 export function updateCustomAgent(id: string, updates: Partial<Omit<CustomAgent, 'id' | 'createdAt'>>): CustomAgent | null {
@@ -112,6 +135,10 @@ export function updateCustomAgent(id: string, updates: Partial<Omit<CustomAgent,
   if (updates.systemPrompt !== undefined) { fields.push('system_prompt = ?'); values.push(updates.systemPrompt); }
   if (updates.allowedTools !== undefined) { fields.push('allowed_tools = ?'); values.push(JSON.stringify(updates.allowedTools)); }
   if (updates.maxTurns !== undefined) { fields.push('max_turns = ?'); values.push(updates.maxTurns); }
+  if (updates.model !== undefined) { fields.push('model = ?'); values.push(updates.model ?? ''); }
+  if (updates.provider !== undefined) { fields.push('provider = ?'); values.push(updates.provider ?? ''); }
+  if (updates.soul !== undefined) { fields.push('soul = ?'); values.push(updates.soul ?? ''); }
+  if (updates.avatarSeed !== undefined) { fields.push('avatar_seed = ?'); values.push(updates.avatarSeed ?? ''); }
 
   fields.push('updated_at = ?');
   values.push(now);
@@ -130,15 +157,17 @@ export function deleteCustomAgent(id: string): boolean {
 }
 
 export function customAgentToAgentType(agent: CustomAgent): AgentType {
+  const soul = (agent.soul ?? '').trim();
   return {
     id: agent.id,
     name: agent.name,
     description: agent.description,
     icon: agent.icon,
     color: agent.color,
-    systemPrompt: agent.systemPrompt,
+    systemPrompt: soul ? `${agent.systemPrompt}\n\n# Bot persona (SOUL)\n${soul}` : agent.systemPrompt,
     allowedTools: agent.allowedTools,
     maxTurns: agent.maxTurns,
+    ...(agent.model && agent.provider ? { preferredModel: { provider: agent.provider, model: agent.model } } : {}),
   };
 }
 

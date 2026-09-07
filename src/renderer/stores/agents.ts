@@ -67,7 +67,7 @@ interface AgentsState {
 
   init: () => Promise<void>;
   refreshRuns: () => Promise<void>;
-  spawn: (agentId: string, task: string) => Promise<AgentRun | null>;
+  spawn: (agentId: string, task: string, modelOverride?: { provider?: string; model?: string }) => Promise<AgentRun | null>;
   abort: (runId: string) => Promise<void>;
   getRunsByStatus: (status: AgentRun['status']) => AgentRun[];
   addChatTask: (title: string) => string;
@@ -144,7 +144,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     set({ runs });
   },
 
-  spawn: async (agentId, task) => {
+  spawn: async (agentId, task, modelOverride) => {
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
 
     // Resolve session — auto-create if needed so agents always work
@@ -174,8 +174,8 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       task,
       sessionId,
       cwd: settings.cwd ?? '.',
-      provider: settings.provider ?? 'openrouter',
-      model: settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      provider: modelOverride?.provider ?? settings.provider ?? 'openrouter',
+      model: modelOverride?.model ?? settings.model ?? 'meta-llama/llama-3.3-70b-instruct:free',
     })) as AgentRun;
     set((s) => ({ runs: [run, ...s.runs.filter((item) => item.id !== run.id)] }));
     return run;

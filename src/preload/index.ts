@@ -79,6 +79,10 @@ const api = {
       systemPrompt: string;
       allowedTools: string[];
       maxTurns: number;
+      model?: string;
+      provider?: string;
+      soul?: string;
+      avatarSeed?: string;
     };
   }) => ipcRenderer.invoke(IPC.CUSTOM_AGENT_CREATE, args),
   listCustomAgents: () => ipcRenderer.invoke(IPC.CUSTOM_AGENT_LIST),

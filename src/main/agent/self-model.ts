@@ -67,6 +67,7 @@ export function getSelfModel(): string {
     `Surfaces (app views): ${surfaces}.`,
     `Chat powers: slash commands (${SLASH}); @-references to attach workspace files (type @ + filename); drag-drop/paste files; image + file attachments; voice dictation; multi-model side-by-side; session branch/pin/search/export/import/share.`,
     `Execution powers: full PTY terminal tabs; file read/write/edit; code execution; git; browser automation; computer control; automations on a schedule; checkpoints with restore; task queue; workspace indexing + search; skills (importable from Claude Code); project memory (INFINITE.md, AGENTS.md, CLAUDE.md, .hermes.md, SOUL.md) + auto-memory + learned preferences.`,
+    `Bots: named specialists (custom agents) with optional model/provider pin, SOUL persona, per-bot tool allowlist, deterministic avatar, and hide/unhide. Every bot owns a canonical forever-chat (created + pinned at first open, titled "Bot: <name>") — always talk to a bot in its own chat, never fork it. Bot routines are automations named "[bot:<name>] <task>". Bot task runs use the bot's pinned model when set.`,
     `Providers: Ollama local (auto-starts, model names auto-resolve to installed models) plus cloud providers with automatic failover — never tell the user a model is missing without checking what is actually installed.`,
     `Navigation: ${SHORTCUTS}. When the user asks where something is, name the exact view + shortcut. When they ask you to DO something the OS offers, do it with tools instead of describing it.`,
   ].join('\n');
