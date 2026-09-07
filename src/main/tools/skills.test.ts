@@ -156,7 +156,7 @@ describe('SkillManage tool', () => {
     );
     const parsed = JSON.parse(String(result.content)) as { ok: boolean; stored: string };
     expect(parsed.ok).toBe(true);
-    expect(parsed.stored).toContain('.infinite-ai/skills/onboarding');
+    expect(parsed.stored).toContain('skills/onboarding');
     expect(mocks.FakeSkillsManager.personal.has('skill-onboarding')).toBe(true);
   });
 

@@ -10,12 +10,18 @@ const root = join(__dirname, '..');
 const isWin = process.platform === 'win32';
 const npmCmd = isWin ? 'npm.cmd' : 'npm';
 
-const p = spawn(npmCmd, ['exec', '--', 'electron-vite', 'dev'], {
-  stdio: 'inherit',
-  cwd: root,
-  env: process.env,
-  shell: isWin,
-});
+const p = isWin
+  // No shell:true (DEP0190): run npm through cmd /c with a static argv.
+  ? spawn('cmd', ['/c', 'npm', 'exec', '--', 'electron-vite', 'dev'], {
+      stdio: 'inherit',
+      cwd: root,
+      env: process.env,
+    })
+  : spawn(npmCmd, ['exec', '--', 'electron-vite', 'dev'], {
+      stdio: 'inherit',
+      cwd: root,
+      env: process.env,
+    });
 
 p.on('exit', (code) => {
   console.log(`[electron-vite] exited ${code}`);
