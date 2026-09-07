@@ -369,7 +369,7 @@ const api = {
   },
 
   // Crew — multi-agent, multi-model orchestration
-  crewStart: (args: { prompt: string; displayPrompt?: string; sessionId: string; cwd: string; provider: string; model: string; agents?: string[]; preferPaid?: boolean }) =>
+  crewStart: (args: { prompt: string; displayPrompt?: string; sessionId: string; cwd: string; provider: string; model: string; agents?: string[]; preferPaid?: boolean; provider2?: string; model2?: string }) =>
     ipcRenderer.invoke(IPC.CREW_START, args),
   crewStatus: () => ipcRenderer.invoke(IPC.CREW_STATUS),
   onCrewEvent: (cb: (e: unknown) => void) => {

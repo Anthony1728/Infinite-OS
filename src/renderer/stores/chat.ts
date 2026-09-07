@@ -658,6 +658,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (complete) activeTeachingChatSessionId = null;
     });
 
+    window.api.onCrewEvent(async (payload: unknown) => {
+      const ev = payload as { sessionId?: string; type?: string; data?: { summary?: string } };
+      if (!ev || typeof ev.sessionId !== 'string' || typeof ev.type !== 'string') return;
+      const { sessionId } = ev;
+      const chatTaskId = activeChatTaskBySession.get(sessionId);
+      const terminal = ev.type === 'crew_completed' || ev.type === 'crew_failed';
+      if (!terminal) {
+        // Progress: keep the run visibly alive in the composer status.
+        if (sessionId === get().currentSessionId) {
+          const detail =
+            ev.type === 'crew_member_started' ? 'Crew specialist working…'
+            : ev.type === 'leader_started' ? 'Crew leader integrating…'
+            : ev.type === 'crew_planned' ? 'Crew planned — specialists deploying…'
+            : 'Crew working…';
+          set((state) => ({
+            providerStatus: state.providerStatus
+              ? { ...state.providerStatus, detail, receivedAt: Date.now() }
+              : state.providerStatus,
+          }));
+        }
+        return;
+      }
+      clearSafetyTimer(sessionId);
+      activeChatTaskBySession.delete(sessionId);
+      const ok = ev.type === 'crew_completed';
+      if (chatTaskId) {
+        if (ok) useAgentsStore.getState().completeChatTask(chatTaskId);
+        else useAgentsStore.getState().failChatTask(chatTaskId, ev.data?.summary ?? 'Crew run failed.');
+      }
+      if (!ok) {
+        const errMsg: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `**Crew run failed.**\n\n${ev.data?.summary ?? 'Unknown crew error.'}\n\n**Try:** a different paired model, or turn **Pair model** off for a single-model run.` }],
+          timestamp: Date.now(),
+        };
+        void window.api.appendSessionMessage({ sessionId, message: errMsg }).catch(() => undefined);
+        if (sessionId === get().currentSessionId) {
+          set((state) => ({ messages: [...state.messages, errMsg], streaming: false }));
+          return;
+        }
+      }
+      // Main persisted the final answer — reload the transcript.
+      try {
+        const messages = (await window.api.loadSession({ sessionId })) as Message[];
+        if (sessionId === get().currentSessionId) set({ messages, streaming: false });
+      } catch {
+        if (sessionId === get().currentSessionId) set({ streaming: false });
+      }
+    });
+
     window.api.onOrchestratorEvent(async (payload: unknown) => {
       const ev = payload as { sessionId: string; taskId: string; type: string; data: unknown };
       const isCurrentSession = ev.sessionId === get().currentSessionId;
@@ -1725,6 +1776,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const taskTitle = visibleText.length > 60 ? visibleText.slice(0, 60) + '...' : visibleText;
     const chatTaskId = prestartedTaskId ?? useAgentsStore.getState().addChatTask(taskTitle);
     activeChatTaskBySession.set(sessionId!, chatTaskId);
+
+    // Paired second model (paid feature): two models collaborate as a crew —
+    // leader on the primary model + Collaborator on the paired model.
+    // Falls through to the normal single-model path on any failure.
+    const pairedModel =
+      settings.secondModelEnabled && settings.model2 && !agentId && !(images && images.length)
+        ? {
+            provider: (settings.provider2 as string | undefined) ?? provider,
+            model: settings.model2 as string,
+            label: (settings.model2Label as string | undefined) ?? (settings.model2 as string),
+          }
+        : null;
+    if (pairedModel) {
+      try {
+        const crew = (await window.api.crewStart({
+          prompt: text,
+          displayPrompt: visibleText,
+          sessionId: sessionId!,
+          cwd: settings.cwd ?? '.',
+          provider,
+          model,
+          provider2: pairedModel.provider,
+          model2: pairedModel.model,
+        })) as {
+          strategy?: string;
+          members?: Array<{ role: string; provider: string; model: string }>;
+          leader?: { provider: string; model: string };
+          paired?: { role: string; provider: string; model: string } | null;
+        };
+        const team = [
+          `Leader: ${crew.leader?.provider ?? provider}/${crew.leader?.model ?? model}`,
+          ...(crew.members ?? []).map((m) => `${m.role}: ${m.provider}/${m.model}`),
+        ].join(' · ');
+        set((s) => ({
+          providerStatus: { label: `Crew (${crew.strategy ?? 'paired'})`, detail: team.slice(0, 220), receivedAt: Date.now() },
+          messages: [
+            ...s.messages,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: [{ type: 'text', text: `Two models collaborating — ${team}. Working…` }],
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+        // Completion/failure lands via onCrewEvent (transcript reload + task close).
+        return;
+      } catch (e) {
+        console.error('[chat] Crew start failed, falling back to single model:', e);
+      }
+    }
 
     // Fall back only after 150 seconds without provider, token, or tool
     // activity. NVIDIA may legitimately take 120 seconds before retrying.
