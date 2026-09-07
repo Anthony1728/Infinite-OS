@@ -617,10 +617,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                     {provider.acceptsApiKey && (
                       <div className="mt-2 flex items-center justify-between gap-3">
-                        <p className="text-xs text-zinc-500">Enter an OpenCode Zen key to validate it and scan the available Zen models. The selected model is used by Infinite OS chat and agents.</p>
-                        {apiKeyLoaded && (
-                          <button onClick={() => void handleUseInstalledOpenCode()} className="shrink-0 text-xs text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline">Use installed CLI</button>
-                        )}
+                        <p className="text-xs text-zinc-500">Free path: use your installed OpenCode CLI credentials — no key needed. Or paste an OpenCode Zen key to scan Zen models.</p>
+                        <button onClick={() => void handleUseInstalledOpenCode()} className="shrink-0 text-xs text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline">Use installed CLI (free)</button>
                       </div>
                     )}
                   </div>

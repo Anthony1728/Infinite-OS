@@ -1985,15 +1985,15 @@ function RealChat({
         <BrainLearningPanel />
         <div className="flex w-full flex-col gap-5 px-6 py-5 lg:px-10">
           {messages.length === 0 && !streaming && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="mb-6 opacity-80">
-                <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <div className="mb-3 opacity-80">
+                <svg width="44" height="44" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <circle cx="32" cy="32" r="30" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
                   <path d="M22 32L29 39L42 26" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.5" />
                 </svg>
               </div>
-              <h3 className="text-lg font-medium text-white/90 mb-2">What can I help you with?</h3>
-              <p className="text-sm text-white/50 mb-6 max-w-md">I can write code, search the web, control your desktop, manage files, and much more. Just ask.</p>
+              <h3 className="text-lg font-medium text-white/90 mb-1">What can I help you with?</h3>
+              <p className="text-sm text-white/50 mb-3 max-w-md">I can write code, search the web, control your desktop, manage files, and much more. Just ask.</p>
               <div className="flex flex-wrap gap-2 justify-center max-w-lg">
                 {[
                   { label: 'Write a Python script', icon: ' ' },
@@ -2011,10 +2011,10 @@ function RealChat({
                 ))}
               </div>
               {sessions.length > 0 && (
-                <div className="mt-8 w-full max-w-md">
-                  <div className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider mb-3">Recent conversations</div>
+                <div className="mt-4 w-full max-w-md">
+                  <div className="text-[9px] font-semibold text-zinc-600 uppercase tracking-wider mb-2">Recent conversations</div>
                   <div className="space-y-1">
-                    {sessions.slice(0, 4).map((s) => (
+                    {sessions.slice(0, 3).map((s) => (
                       <button
                         key={s.id}
                         onClick={() => selectSession(s.id)}
@@ -2030,7 +2030,7 @@ function RealChat({
                   </div>
                 </div>
               )}
-              <p className="text-xs text-white/30 mt-4">Type <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-mono text-[10px]">/</kbd> for commands</p>
+              <p className="text-xs text-white/30 mt-2">Type <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white/50 font-mono text-[10px]">/</kbd> for commands</p>
             </div>
           )}
           {loadingSession ? (

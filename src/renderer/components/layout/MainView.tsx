@@ -34,6 +34,7 @@ const CapabilitiesView = lazy(() => import('../views/CapabilitiesView').then(m =
 const BotsView = lazy(() => import('../views/BotsView').then(m => ({ default: m.BotsView })));
 const ArtifactsView = lazy(() => import('../views/ArtifactsView').then(m => ({ default: m.ArtifactsView })));
 const MessagingView = lazy(() => import('../views/MessagingView').then(m => ({ default: m.MessagingView })));
+const CanvasBoard = lazy(() => import('../workspace/InfiniteCanvas').then(m => ({ default: m.InfiniteCanvas })));
 const TerminalView = lazy(() => import('../views/TerminalView').then(m => ({ default: m.TerminalView })));
 
 interface MainViewProps {
@@ -126,6 +127,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <ArtifactsView onOpenTab={onViewChange} />;
       case 'messaging':
         return <MessagingView />;
+      case 'canvas':
+        return <CanvasBoard />;
       case 'terminal':
         return <TerminalView />;
       case 'settings':

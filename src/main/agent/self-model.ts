@@ -29,6 +29,7 @@ const SURFACES = [
   ['bots', 'Bots (agent fleet + custom agents)'],
   ['artifacts', 'Artifacts (everything AI-built: charts, docs, dashboards)'],
   ['messaging', 'Messaging (Slack / Discord / Telegram sender)'],
+  ['canvas', 'Infinite Canvas (n8n-like visual workflows: AI, code, webhook, condition, timer, email, deploy, transform, agent, research nodes; persists locally, runs real actions)'],
   ['terminal', 'PTY Terminal, multi-session (Ctrl+`)'],
   ['projects', 'Projects'],
   ['documents', 'File Explorer + Knowledge Hub'],

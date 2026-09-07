@@ -10,7 +10,7 @@ describe('self-model', () => {
 
   it('covers the surfaces the agent can direct users to', () => {
     const model = getSelfModel();
-    for (const id of ['terminal', 'automations', 'deploy', 'plugins', 'replay', 'bots', 'artifacts', 'messaging']) {
+    for (const id of ['terminal', 'automations', 'deploy', 'plugins', 'replay', 'bots', 'artifacts', 'messaging', 'canvas']) {
       expect(model).toContain(id);
     }
     expect(getSurfaceIds()).toContain('terminal');
