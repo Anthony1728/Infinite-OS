@@ -503,7 +503,7 @@ export class AutomationBuilder {
             const task = String(action.config.task ?? '');
             if (!task.trim()) throw new Error('agent_run requires a task.');
             const provider = String(settings.get<string>('provider') ?? 'openrouter');
-            const model = String(settings.get<string>('model') ?? 'meta-llama/llama-3.3-70b-instruct:free');
+            const model = String(settings.get<string>('model') ?? 'google/gemma-4-31b-it:free');
             const spawned = spawnSubagent({
               agentId,
               task,

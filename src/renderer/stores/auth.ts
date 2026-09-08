@@ -72,11 +72,18 @@ const saveUsers = async (users: Record<string, { user: User; password: string }>
   await window.api.authSetUsers(users);
 };
 
+let lastSavedSessionJson: string | undefined;
 const saveSession = async (user: User | null) => {
+  // Dedupe identical back-to-back writes (restore + persists + queue replays
+  // spam main otherwise). Full-payload compare so profile updates still land.
+  const payload = user ? { user, isAuthenticated: true } : null;
+  const json = JSON.stringify(payload);
+  if (json === lastSavedSessionJson) return;
+  lastSavedSessionJson = json;
   if (typeof window !== 'undefined') {
     console.log('[auth] saveSession:', user ? user.email : null);
   }
-  await window.api.authSetSession(user ? { user, isAuthenticated: true } : null);
+  await window.api.authSetSession(payload);
 };
 
 const loadSession = async (): Promise<{ user: User; isAuthenticated: boolean } | null> => {

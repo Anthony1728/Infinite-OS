@@ -72,7 +72,7 @@ export class TaskOrchestrator {
       originalPrompt: prompt,
       subTasks: [],
       status: 'analyzing',
-      modelSelection: { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free', free: true },
+      modelSelection: { provider: 'openrouter', model: 'google/gemma-4-31b-it:free', free: true },
       startedAt: Date.now(),
       results: new Map(),
       errors: [],

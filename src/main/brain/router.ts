@@ -45,7 +45,7 @@ export class DecisionRouter {
 
   constructor(config?: Partial<RouterConfig>) {
     this.config = {
-      defaultModel: config?.defaultModel ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      defaultModel: config?.defaultModel ?? 'google/gemma-4-31b-it:free',
       defaultProvider: config?.defaultProvider ?? 'openrouter',
       fallbackToLocal: config?.fallbackToLocal ?? true,
       costOptimization: config?.costOptimization ?? true,
@@ -172,7 +172,7 @@ export class DecisionRouter {
     // Model definitions
     const models = [
       {
-        id: 'meta-llama/llama-3.3-70b-instruct:free',
+        id: 'google/gemma-4-31b-it:free',
         provider: 'openrouter',
         name: 'Llama 3.3 70B',
         types: ['general', 'coding', 'analysis'],

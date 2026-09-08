@@ -221,8 +221,19 @@ async function ensureServer(baseUrl: string, cwd = process.cwd()): Promise<boole
   if (starting) return starting;
   starting = (async () => {
     try {
+      // Server stderr goes to a real log file (not ignored): when the runtime
+      // 500s a turn, its own error text is the only thing that names the cause.
+      let errFd: number | undefined;
+      try {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+        const os = await import('node:os');
+        const logPath = path.join(os.homedir(), '.infinite-ai', 'opencode-server.log');
+        try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch { /* exists */ }
+        errFd = fs.openSync(logPath, 'a');
+      } catch { /* logging is best-effort; server still starts */ }
       const child = spawn(executable(), ['serve', '--pure', '--hostname', '127.0.0.1', '--port', '4096'], {
-        cwd, detached: true, stdio: 'ignore', windowsHide: true,
+        cwd, detached: true, stdio: ['ignore', 'ignore', errFd ?? 'ignore'], windowsHide: true,
         env: process.env,
       });
       child.unref();
@@ -906,7 +917,12 @@ export const opencode: ProviderAdapter = {
     const selected = decodeModel(req.model);
     const modelId = `${selected.providerID}::${selected.modelID}`;
     const tier = modelTiers.get(modelId) ?? 'zen';
-    if (apiKey && selected.providerID === 'opencode') {
+    // Zen's HTTP API rejects free-tier models by key ("free tier can only be
+    // used in OpenCode") — Hermes works because it drives the local runtime.
+    // Route free-tier models through the local server even when a key is
+    // saved; the credential is configured into that server below.
+    const freeTier = selected.modelID === 'big-pickle' || /(?:^|[-_])free$/i.test(selected.modelID);
+    if (apiKey && selected.providerID === 'opencode' && !freeTier) {
       yield* streamRemoteOpenCode(req, apiKey, tier);
       return;
     }
@@ -914,15 +930,25 @@ export const opencode: ProviderAdapter = {
       yield { type: 'error', error: 'OpenCode server is unavailable.' };
       return;
     }
-    // A Zen/Go credential is unrelated to free models from other CLI-connected
-    // providers, so an expired key cannot break those routes.
+    // Credential rule: the CLI's own stored auth (oauth/subscription) always
+    // wins. PUTting a pasted key over it breaks working free-tier auth with
+    // server 500s — so only configure the pasted key when the local server
+    // has NO opencode credential of its own.
     if (apiKey && selected.providerID === 'opencode') {
+      let cliHasAuth = false;
       try {
-        await configureRemoteCredential(url, apiKey, tier);
-      } catch (error) {
-        const tierLabel = tier === 'go' ? 'Go' : 'Zen';
-        yield { type: 'error', error: `OpenCode: could not configure ${tierLabel} credential: ${(error as Error).message}` };
-        return;
+        const data = await providerData(url);
+        cliHasAuth = (data.connected ?? []).includes('opencode');
+      } catch { /* unknown — fall through to configuring the pasted key */ }
+      console.info(`[opencode] turn model=${req.model} freeTier=${freeTier} keySaved=true cliHasAuth=${cliHasAuth}`);
+      if (!cliHasAuth) {
+        try {
+          await configureRemoteCredential(url, apiKey, tier);
+        } catch (error) {
+          const tierLabel = tier === 'go' ? 'Go' : 'Zen';
+          yield { type: 'error', error: `OpenCode: could not configure ${tierLabel} credential: ${(error as Error).message}` };
+          return;
+        }
       }
     }
     // A Zen key selects the OpenCode Zen catalog. Models shown in the

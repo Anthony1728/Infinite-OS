@@ -82,7 +82,7 @@ export class PersonalizationManager {
         theme: 'dark',
         language: 'en',
         defaultProvider: 'openrouter',
-        defaultModel: 'meta-llama/llama-3.3-70b-instruct:free',
+        defaultModel: 'google/gemma-4-31b-it:free',
         autoApproveReads: true,
         autoApproveWrites: false,
         notificationStyle: 'minimal',

@@ -104,7 +104,7 @@ export class CoreAgent {
   constructor(options: CoreAgentOptions = {}) {
     this.options = {
       defaultProvider: options.defaultProvider ?? 'openrouter',
-      defaultModel: options.defaultModel ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      defaultModel: options.defaultModel ?? 'google/gemma-4-31b-it:free',
       maxTurns: options.maxTurns ?? Number.POSITIVE_INFINITY,
       onEvent: options.onEvent ?? (() => {}),
     };

@@ -97,7 +97,7 @@ interface RawLesson {
   tags?: unknown;
 }
 
-const DEFAULT_PREFERRED = { provider: 'nvidia', model: 'meta/llama-3.3-70b-instruct' };
+const DEFAULT_PREFERRED = { provider: 'nvidia', model: 'mistralai/mistral-large' };
 const MAX_LESSONS_BY_DURATION: Record<TeachingDurationMinutes, number> = { 10: 20, 60: 120 };
 const MAX_PROVIDER_ATTEMPTS_PER_CYCLE = 4;
 

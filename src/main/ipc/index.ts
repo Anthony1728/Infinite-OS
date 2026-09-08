@@ -917,7 +917,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
     const leader: { provider: string; model: string; free: boolean } = {
       provider: provider ?? 'openrouter',
-      model: model ?? 'meta-llama/llama-3.3-70b-instruct:free',
+      model: model ?? 'google/gemma-4-31b-it:free',
       free: false,
     };
     try {

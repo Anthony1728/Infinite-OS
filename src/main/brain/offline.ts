@@ -148,7 +148,7 @@ export class OfflineManager {
 
   private getProviderModel(provider: string): string {
     const models: Record<string, string> = {
-      openrouter: 'meta-llama/llama-3.3-70b-instruct:free',
+      openrouter: 'google/gemma-4-31b-it:free',
       anthropic: 'claude-3-5-sonnet-20241022',
       openai: 'gpt-4o',
       gemini: 'gemini-2.0-flash-exp',
