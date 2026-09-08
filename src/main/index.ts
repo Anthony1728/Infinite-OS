@@ -138,10 +138,13 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     title: 'Infinite OS',
-    backgroundColor: '#0e0e10',
+    // Matches the boot splash exactly, and the window stays hidden until
+    // ready-to-show — opening the app fades straight into the Infinite logo,
+    // never a blank frame first.
+    backgroundColor: '#08080b',
     frame: false,
     roundedCorners: true,
-    show: true,
+    show: false,
     autoHideMenuBar: true,
     icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.png')),
     webPreferences: {
@@ -166,6 +169,14 @@ function createWindow(): void {
       mainWindow?.setFullScreen(true);
     }
   });
+
+  // Failsafe for show:false above: if ready-to-show somehow never fires,
+  // never leave the user staring at nothing — show the window after 8s.
+  setTimeout(() => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) mainWindow.show();
+    } catch { /* show is best-effort */ }
+  }, 8000);
 
   // Open DevTools automatically to surface render errors
   if (process.env['INFINITY_DEVTOOLS'] === '1') {

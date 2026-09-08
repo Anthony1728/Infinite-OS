@@ -148,6 +148,7 @@ const ollamaAdapter: ProviderAdapter = {
     }));
 
     try {
+      console.info(`[ollama] POST /api/chat model=${model} msgs=${ollamaMessages.length} tools=${tools?.length ?? 0}`);
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -180,10 +181,18 @@ const ollamaAdapter: ProviderAdapter = {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let gotFirstChunk = false;
       const think = createThinkingStripper();
+      // While reasoning traces are swallowed, nothing would reach the agent
+      // loop's stall watchdog — heartbeat so long thoughts don't look dead.
+      let lastHeartbeat = Date.now();
 
       while (true) {
         const { done, value } = await reader.read();
+        if (!gotFirstChunk) {
+          gotFirstChunk = true;
+          console.info(`[ollama] first chunk model=${model} done=${done} bytes=${value?.byteLength ?? 0}`);
+        }
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -203,7 +212,13 @@ const ollamaAdapter: ProviderAdapter = {
             };
             if (parsed.message?.content) {
               const clean = think.push(parsed.message.content);
-              if (clean) yield { type: 'text_delta', text: clean };
+              if (clean) {
+                lastHeartbeat = Date.now();
+                yield { type: 'text_delta', text: clean };
+              } else if (Date.now() - lastHeartbeat > 8000) {
+                lastHeartbeat = Date.now();
+                yield { type: 'provider_status', status: 'streaming', provider: 'ollama', model, reason: 'Local model is thinking — answer streams when ready.' };
+              }
             }
             for (const call of parsed.message?.tool_calls ?? []) {
               const name = call.function?.name ?? '';

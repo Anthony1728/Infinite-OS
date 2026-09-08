@@ -546,6 +546,10 @@ async function* streamSessionMessage(args: {
     // the actual model request for more than one second.
     await Promise.race([readyPromise, new Promise((resolve) => setTimeout(resolve, 50))]);
     const directory = args.directory ? `?directory=${encodeURIComponent(args.directory)}` : '';
+    try {
+      const dbgParts = JSON.stringify({ model: args.selected, agent: 'build', systemLen: (args.request.system ?? '').length, msgsLen: JSON.stringify(args.request.messages).length, tools: args.request.tools?.length ?? 0 });
+      console.info(`[opencode] message ${dbgParts}`);
+    } catch { /* debug only */ }
     type MessageResult = {
       info?: { error?: { data?: { message?: string }; name?: string }; tokens?: { input?: number; output?: number } };
       parts?: Array<{ type?: string; text?: string }>;
