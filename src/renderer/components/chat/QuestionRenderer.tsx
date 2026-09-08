@@ -79,8 +79,9 @@ export function QuestionRenderer({ block }: Props) {
 
       {/* Options */}
       <div className="p-3 space-y-2">
-        {options.map((opt) => {
+        {options.map((opt, oi) => {
           const isSelected = selected.includes(opt.label);
+          const letter = String.fromCharCode(65 + oi);
           return (
             <button
               key={opt.label}
@@ -93,13 +94,13 @@ export function QuestionRenderer({ block }: Props) {
               } ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <span
-                className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors ${
+                className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] font-bold transition-colors ${
                   isSelected
                     ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white'
-                    : 'border-white/15 bg-white/5 text-transparent'
+                    : 'border-white/15 bg-white/5 text-zinc-500'
                 }`}
               >
-                ✓
+                {letter}
               </span>
               <span className="min-w-0 flex-1">
                 <span className={`block text-sm font-medium leading-5 ${isSelected ? 'text-violet-100' : 'text-zinc-200'}`}>{opt.label}</span>
@@ -120,11 +121,11 @@ export function QuestionRenderer({ block }: Props) {
           } ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
         >
           <span
-            className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] ${
-              customSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-transparent'
+            className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] font-bold ${
+              customSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-zinc-500'
             }`}
           >
-            ✓
+            ✎
           </span>
           <span className={`text-sm ${customSelected ? 'text-violet-100 font-medium' : 'text-zinc-400'}`}>Type your own answer</span>
           <span className="ml-auto text-xs text-zinc-600">Custom</span>
@@ -159,7 +160,7 @@ export function QuestionRenderer({ block }: Props) {
               : 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'
           }`}
         >
-          {submitted ? 'Sent ✓' : 'Submit'}
+          {submitted ? 'Sent' : 'Submit'}
         </button>
       </div>
     </div>

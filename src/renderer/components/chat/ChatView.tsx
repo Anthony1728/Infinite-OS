@@ -14,6 +14,7 @@ import { ProjectCards } from '../layout/ProjectCards';
 import { ToolCallCard } from '../tools/ToolCallCard';
 import { LiveActivityFeed } from './LiveActivityFeed';
 import { QuizRenderer } from './QuizRenderer';
+import { PairPanel, type PairSection } from './PairPanel';
 import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
@@ -67,8 +68,9 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
         <p className="mt-2 text-sm font-medium leading-6 text-zinc-100">{block.question}</p>
       </div>
       <div className="p-3 space-y-2">
-        {block.options.map((opt) => {
+        {block.options.map((opt, oi) => {
           const isSelected = selected.includes(opt.label);
+          const letter = String.fromCharCode(65 + oi);
           return (
             <button
               key={opt.label}
@@ -76,7 +78,7 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
               disabled={submitted}
               className={`w-full text-left rounded-xl border px-3 py-3 flex items-start gap-3 transition-all duration-150 ${isSelected ? 'bg-gradient-to-r from-violet-500/15 via-cyan-500/10 to-transparent border-violet-500/30 shadow-[0_4px_12px_rgba(139,92,246,.15)]' : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.05] hover:border-white/[0.09] hover:shadow-[0_4px_12px_rgba(0,0,0,.2)]'} ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
             >
-              <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] transition-colors ${isSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-transparent'}`}>✓</span>
+              <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] font-bold transition-colors ${isSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-zinc-500'}`}>{letter}</span>
               <span className="min-w-0 flex-1">
                 <span className={`block text-sm font-medium leading-5 ${isSelected ? 'text-violet-100' : 'text-zinc-200'}`}>{opt.label}</span>
                 {opt.description && <span className="block text-xs leading-5 text-zinc-500 mt-0.5">{opt.description}</span>}
@@ -91,7 +93,7 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
               disabled={submitted}
               className={`w-full text-left rounded-xl border px-3 py-3 flex items-center gap-3 transition-all ${customSelected ? 'bg-gradient-to-r from-violet-500/15 via-cyan-500/10 to-transparent border-violet-500/30' : 'bg-white/[0.02] border-dashed border-white/10 hover:bg-white/[0.04] hover:border-white/15'} ${submitted ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
             >
-              <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[10px] ${customSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-transparent'}`}>✓</span>
+              <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border text-[11px] font-bold ${customSelected ? 'bg-gradient-to-br from-violet-500 to-cyan-400 border-transparent text-white' : 'border-white/15 bg-white/5 text-zinc-500'}`}>✎</span>
               <span className={`text-sm ${customSelected ? 'text-violet-100 font-medium' : 'text-zinc-400'}`}>Type your own answer</span>
               <span className="ml-auto text-xs text-zinc-600">Custom</span>
             </button>
@@ -116,7 +118,7 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
           disabled={!canSubmit}
           className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${canSubmit ? 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-[0_6px_16px_rgba(124,58,237,.3)] hover:from-violet-500 hover:to-cyan-400 active:scale-[0.98]' : 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'}`}
         >
-          {submitted ? 'Sent ✓' : 'Submit'}
+          {submitted ? 'Sent' : 'Submit'}
         </button>
       </div>
     </div>
@@ -2105,6 +2107,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
   const imageBlocks = message.content.filter((b) => b.type === 'image');
   const questionBlocks = message.content.filter((b) => b.type === 'question') as Array<{ type: 'question'; question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }>;
+  const pairSections = message.content.filter((b) => b.type === 'pair') as PairSection[];
   const quizBlocks = message.content.filter((b) => b.type === 'quiz') as Array<{ type: 'quiz'; quizId: string; title: string; description?: string; questions: Array<{ id: string; question: string; options: Array<{ label: string; text: string; isCorrect: boolean }>; explanation?: string }> }>;
   const hasText = textBlocks.some((b) => b.type === 'text' && (b as { text: string }).text.trim());
   const plainText = textBlocks
@@ -2127,7 +2130,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   );
 
   if (isToolResult) return null;
-  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0 && quizBlocks.length === 0) return null;
+  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0 && quizBlocks.length === 0 && pairSections.length === 0) return null;
 
   const contextMenuItems: ContextMenuItem[] = [
     {
@@ -2347,6 +2350,9 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               />
             ))}
           </div>
+        )}
+        {pairSections.length > 0 && (
+          <PairPanel sections={pairSections} />
         )}
         {quizBlocks.length > 0 && (
           <div className="mt-3 space-y-3">

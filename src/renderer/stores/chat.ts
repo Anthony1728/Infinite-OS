@@ -43,6 +43,56 @@ const selectedAgentRuns = new Map<
 >();
 let activeTeachingChatSessionId: string | null = null;
 
+/** Live pair-panel message per crew run (both models streaming, one narrative). Not persisted — the final transcript replaces it. */
+const pairPanelByRun = new Map<string, string>();
+
+type PairSectionBlock = {
+  type: 'pair';
+  memberId: string;
+  role: string;
+  provider: string;
+  model: string;
+  text: string;
+  status: 'running' | 'done' | 'error';
+};
+
+function upsertPairSection(runId: string, section: PairSectionBlock, appendText?: string): void {
+  const state = useChatStore.getState();
+  const msgId = pairPanelByRun.get(runId);
+  const existing = msgId ? state.messages.find((m) => m.id === msgId) : undefined;
+  if (!existing) {
+    const msg = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: [section],
+      timestamp: Date.now(),
+    } as unknown as Message;
+    pairPanelByRun.set(runId, msg.id);
+    useChatStore.setState((s) => ({ messages: [...s.messages, msg], streaming: true }));
+    return;
+  }
+  useChatStore.setState((s) => ({
+    messages: s.messages.map((m) => {
+      if (m.id !== msgId) return m;
+      const blocks = m.content as unknown as PairSectionBlock[];
+      const idx = blocks.findIndex((b) => b.type === 'pair' && b.memberId === section.memberId);
+      if (idx < 0) return { ...m, content: [...(m.content as unknown[]), section] as Message['content'] };
+      const next = [...blocks];
+      const prev = next[idx];
+      // Empty-string fields never clobber (delta/completion events often
+      // carry only the fields that changed).
+      const patch = Object.fromEntries(
+        Object.entries(section).filter(([, v]) => v !== ''),
+      ) as Partial<PairSectionBlock>;
+      next[idx] = appendText !== undefined
+        ? { ...prev, status: section.status, text: `${prev.text}${appendText}` }
+        : { ...prev, ...patch };
+      return { ...m, content: next as unknown as Message['content'] };
+    }),
+    streaming: true,
+  }));
+}
+
 /** What the user currently has selected (provider/model), for error context. Never throws. */
 function currentSelectionLabel(): string | null {
   try {
@@ -682,11 +732,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { sessionId } = ev;
       const chatTaskId = activeChatTaskBySession.get(sessionId);
       const terminal = ev.type === 'crew_completed' || ev.type === 'crew_failed';
+      if (terminal) pairPanelByRun.delete((ev as { runId?: string }).runId ?? sessionId);
       if (!terminal) {
         // Progress: keep the run visibly alive in the composer status.
         if (sessionId === get().currentSessionId) {
+          const data = (ev as { data?: {
+            id?: string; role?: string; memberId?: string; text?: string;
+            assignment?: { provider?: string; model?: string };
+          } }).data;
+          const runId = (ev as { runId?: string }).runId ?? sessionId;
+          const shortModel = (m?: string) => m?.split('/').pop()?.replace(/:free$/, '') ?? '';
+          if (ev.type === 'crew_member_started' && data) {
+            // One model narrates: name WHO is working so the pair story reads.
+            const provider = data.assignment?.provider ?? '';
+            const model = data.assignment?.model ?? '';
+            upsertPairSection(runId, {
+              type: 'pair',
+              memberId: data.id ?? runId,
+              role: data.role ?? 'Specialist',
+              provider, model, text: '', status: 'running',
+            });
+          } else if (ev.type === 'crew_member_delta' && data?.memberId && typeof data.text === 'string') {
+            upsertPairSection(runId, {
+              type: 'pair',
+              memberId: data.memberId,
+              role: '', provider: '', model: '', text: '', status: 'running',
+            }, data.text);
+          } else if ((ev.type === 'crew_member_completed' || ev.type === 'crew_member_failed') && data) {
+            const memberId = data.memberId ?? data.id ?? runId;
+            upsertPairSection(runId, {
+              type: 'pair',
+              memberId,
+              role: data.role ?? '',
+              provider: data.assignment?.provider ?? '',
+              model: data.assignment?.model ?? '',
+              text: '',
+              status: ev.type === 'crew_member_failed' ? 'error' : 'done',
+            });
+          } else if (ev.type === 'crew_member_retrying' && data?.memberId) {
+            upsertPairSection(runId, {
+              type: 'pair',
+              memberId: data.memberId,
+              role: '', provider: '', model: '', text: '', status: 'running',
+            });
+          }
+          const memberLabel = data?.role && (data.assignment?.provider || data.assignment?.model)
+            ? `${data.role} · ${shortModel(data.assignment?.model)} working…`
+            : undefined;
           const detail =
-            ev.type === 'crew_member_started' ? 'Crew specialist working…'
+            memberLabel && (ev.type === 'crew_member_started' || ev.type === 'crew_member_retrying') ? memberLabel
+            : ev.type === 'crew_member_started' ? 'Crew specialist working…'
             : ev.type === 'leader_started' ? 'Crew leader integrating…'
             : ev.type === 'crew_planned' ? 'Crew planned — specialists deploying…'
             : 'Crew working…';

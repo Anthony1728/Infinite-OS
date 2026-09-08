@@ -17,9 +17,20 @@ export type ContentBlock =
   | {
       type: 'question';
       question: string;
+      header?: string;
+      multiple?: boolean;
       options: Array<{ label: string; description?: string }>;
       allowCustom?: boolean;
       questionId: string;
+    }
+  | {
+      type: 'pair';
+      memberId: string;
+      role: string;
+      provider: string;
+      model: string;
+      text: string;
+      status: 'running' | 'done' | 'error';
     }
   | {
       type: 'quiz';

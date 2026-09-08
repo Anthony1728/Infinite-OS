@@ -7,7 +7,7 @@ export const askQuestionTool: Tool = {
     'Use this when your request is underspecified and you need the user to choose. For example, when the user says "2 models" without saying which two and what action, ask them to pick.',
     'You can ask 1-4 questions at once, each with 2-5 options plus an automatic "Type your own answer" custom input. The UI renders as beautiful Infinite OS glass cards (dark, rounded, violet→cyan gradient).',
     'The user\'s selection is sent back to you as a new user message and as a tool result, so you can continue the original task immediately after they answer. Always continue the original task after asking — do not stop.',
-    'Example: user says "2 models" → ask: header="Model selection", question="Which 2 models and what should I do with them?", options=[{label:"Compare Llama 3.3 70B vs Qwen 2.5 72B", description:"Side-by-side compare page"}, {label:"Use OpenCode Zen + NVIDIA as paired models", description:"Enable failover"}, {label:"Run a quick test through both", description:"Benchmark"}].',
+    'Example: user says "2 models" → ask: header="Model selection", question="Which 2 models and what should I do with them?", options=[{label:"Compare Gemma 4 31B vs Nemotron 3 Super", description:"Side-by-side compare page"}, {label:"Use OpenCode Zen + Ollama as paired models", description:"Enable pair mode"}, {label:"Run a quick test through both", description:"Benchmark"}].',
   ].join(' '),
   permission: 'allow',
   inputSchema: {

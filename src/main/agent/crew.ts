@@ -68,6 +68,7 @@ export interface CrewEvent {
     | 'crew_planned'
     | 'crew_member_started'
     | 'crew_member_progress'
+    | 'crew_member_delta'
     | 'crew_member_completed'
     | 'crew_member_failed'
     | 'crew_member_retrying'
@@ -410,6 +411,15 @@ export async function runCrew(
           background: false,
           retry: { maxAttempts: 2, backoff: true },
           sink: (ev: AgentEvent) => {
+            // Stream the member's text live so the pair panel shows BOTH
+            // models working — one coherent narrative, not a silent handoff.
+            if (ev.type === 'text_delta' && (ev as { text?: unknown }).text) {
+              event({
+                type: 'crew_member_delta',
+                runId: run.id,
+                data: { memberId: member.id, text: (ev as { text: string }).text },
+              });
+            }
             event({
               type: 'crew_member_progress',
               runId: run.id,
