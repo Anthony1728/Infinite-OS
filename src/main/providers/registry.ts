@@ -112,6 +112,10 @@ const ollamaAdapter: ProviderAdapter = {
         label: m.name.replace(':latest', ''),
         provider: 'ollama',
         free: true,
+        // Matches the adapter's num_ctx: buildContext truncates history to
+        // fit, so a long session can never crawl-or-stall a small local model.
+        context_window: 8192,
+        supports_tools: true,
       }));
     } catch {
       return [];
