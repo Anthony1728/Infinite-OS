@@ -400,6 +400,9 @@ export async function runAgent(
     const onParentAbort = () => streamController.abort();
     opts.signal.addEventListener('abort', onParentAbort, { once: true });
     const streamStartTime = Date.now();
+    // Local models are free but slow to cold-start and eval long prompts —
+    // give Ollama 4x the stall budget instead of killing its first answer.
+    const stallBudgetMs = activeCandidate.provider === 'ollama' ? 240_000 : LOOP_STREAM_STALL_TIMEOUT_MS;
 
     const stream = activeProvider.streamChat(
       {
@@ -425,12 +428,12 @@ export async function runAgent(
     try {
       streamStallInterval = setInterval(() => {
         if (providerFailure) return;
-        if (Date.now() - streamLastEvent >= LOOP_STREAM_STALL_TIMEOUT_MS) {
-          providerFailure = `Agent stream stalled (no events for ${Math.round(LOOP_STREAM_STALL_TIMEOUT_MS / 1000)}s)`;
+        if (Date.now() - streamLastEvent >= stallBudgetMs) {
+          providerFailure = `Agent stream stalled (no events for ${Math.round(stallBudgetMs / 1000)}s)`;
           console.error(`[agent] ${providerFailure} — aborting stream`);
           streamController.abort();
         }
-      }, Math.min(30_000, LOOP_STREAM_STALL_TIMEOUT_MS / 4));
+      }, Math.min(30_000, stallBudgetMs / 4));
 
       for await (const chunk of stream) {
         streamLastEvent = Date.now();
