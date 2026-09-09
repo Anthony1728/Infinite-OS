@@ -737,6 +737,40 @@ function InputBar({
 }) {
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  // Custom /commands (user-defined Markdown files in the profile commands dir).
+  const [customCommands, setCustomCommands] = useState<Array<{ id: string; label: string; description: string; icon: string; custom: true; template: string }>>([]);
+  const [customCommandsDir, setCustomCommandsDir] = useState('');
+  const customCommandsRef = useRef<Array<{ id: string; template: string }>>([]);
+  const refreshCustomCommands = async () => {
+    try {
+      const res = (await window.api.customCommandsList()) as {
+        ok: boolean;
+        dir?: string;
+        commands?: Array<{ name: string; description: string; template: string }>;
+      };
+      if (res.ok && Array.isArray(res.commands)) {
+        const customs = res.commands.map((c) => ({
+          id: c.name,
+          label: `/${c.name}`,
+          description: c.description,
+          icon: 'M16 18l6-6-6-6M8 6l-6 6 6 6',
+          custom: true as const,
+          template: c.template,
+        }));
+        setCustomCommands(customs);
+        customCommandsRef.current = res.commands.map((c) => ({ id: c.name, template: c.template }));
+        if (res.dir) setCustomCommandsDir(res.dir);
+      }
+    } catch {
+      /* custom commands are optional — built-ins always work */
+    }
+  };
+  useEffect(() => {
+    void refreshCustomCommands();
+  }, []);
+  useEffect(() => {
+    if (showSlashMenu) void refreshCustomCommands();
+  }, [showSlashMenu]);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [model2MenuOpen, setModel2MenuOpen] = useState(false);
@@ -949,10 +983,22 @@ function InputBar({
     // Expand @-referenced workspace files into quoted context (Hermes @-syntax).
     // Async but non-blocking: send immediately with whatever resolves fast.
     const raw = input;
+    // Expand a custom /command into its template before anything else, so the
+    // parent dispatch sees plain prompt text (built-ins are handled there).
+    const slashMatch = /^\/([a-z0-9][a-z0-9-_]{0,31})([\s\S]*)$/.exec(raw.trim());
+    const customHit = slashMatch ? customCommandsRef.current.find((c) => c.id === slashMatch[1]) : undefined;
+    let rawExpanded = raw;
+    if (customHit && slashMatch) {
+      const argString = (slashMatch[2] ?? '').trim();
+      const words = argString ? argString.split(/\s+/) : [];
+      rawExpanded = customHit.template
+        .replace(/\$ARGS\b/g, argString)
+        .replace(/\$([1-9])\b/g, (_m, d) => words[Number(d) - 1] ?? '');
+    }
     void (async () => {
-      let text = raw;
+      let text = rawExpanded;
       try {
-        const refs = Array.from(new Set(Array.from(raw.matchAll(/@([^\s@][^\s]*)/g)).map((m) => m[1]).slice(0, 5)));
+        const refs = Array.from(new Set(Array.from(text.matchAll(/@([^\s@][^\s]*)/g)).map((m) => m[1]).slice(0, 5)));
         if (refs.length) {
           const parts: string[] = [];
           for (const ref of refs) {
@@ -1119,9 +1165,28 @@ function InputBar({
 
   const isSlashCommand = input.startsWith('/');
   const slashQuery = isSlashCommand ? input.slice(1).toLowerCase() : '';
-  const filteredCommands = SLASH_COMMANDS.filter(
-    (cmd) => cmd.label.toLowerCase().includes(slashQuery) || cmd.description.toLowerCase().includes(slashQuery),
+  const allCommands = [...SLASH_COMMANDS, ...customCommands];
+  const filteredCommands = allCommands.filter(
+    (cmd) =>
+      cmd.label.toLowerCase().includes(slashQuery) ||
+      cmd.description.toLowerCase().includes(slashQuery) ||
+      ('id' in cmd && String(cmd.id).toLowerCase().includes(slashQuery)),
   );
+
+  const pickSlashCommand = (cmd: { id: string; custom?: boolean }) => {
+    if (cmd.custom) {
+      // Custom commands take arguments: complete the name and let the user type args.
+      setInput(`/${cmd.id} `);
+      setShowSlashMenu(false);
+      setGhost('');
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+    onSend(`/${cmd.id}`);
+    setInput('');
+    setShowSlashMenu(false);
+    setGhost('');
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (showAtMenu && atResults.length > 0) {
@@ -1170,10 +1235,7 @@ function InputBar({
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
         e.preventDefault();
         const cmd = filteredCommands[selectedSlashIndex];
-        onSend(`/${cmd.id}`);
-        setInput('');
-        setShowSlashMenu(false);
-        setGhost('');
+        pickSlashCommand(cmd);
         return;
       }
       if (e.key === 'Escape') {
@@ -1304,12 +1366,8 @@ function InputBar({
           </div>
           {filteredCommands.map((cmd, i) => (
             <button
-              key={cmd.id}
-              onClick={() => {
-                onSend(`/${cmd.id}`);
-                setInput('');
-                setShowSlashMenu(false);
-              }}
+              key={('custom' in cmd && cmd.custom ? 'custom:' : 'built-in:') + cmd.id}
+              onClick={() => pickSlashCommand(cmd as { id: string; custom?: boolean })}
               className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
                 i === selectedSlashIndex
                   ? 'bg-indigo-500/15 text-white'
@@ -1326,11 +1384,23 @@ function InputBar({
                 <path strokeLinecap="round" strokeLinejoin="round" d={cmd.icon} />
               </svg>
               <div>
-                <div className="text-sm font-medium">{cmd.label}</div>
+                <div className="text-sm font-medium flex items-center gap-1.5">
+                  {cmd.label}
+                  {(cmd as { custom?: boolean }).custom === true && (
+                    <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-px rounded bg-cyan-500/15 text-cyan-300 border border-cyan-400/20">
+                      custom
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10px] text-textMuted">{cmd.description}</div>
               </div>
             </button>
           ))}
+          {customCommandsDir && (
+            <div className="px-3 py-1.5 text-[10px] text-textMuted border-t border-white/5 truncate" title={customCommandsDir}>
+              Custom /commands live in commands/ — add a .md file to create your own
+            </div>
+          )}
         </div>
       )}
 

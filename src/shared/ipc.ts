@@ -480,6 +480,10 @@ export const IPC = {
   MESSAGING_INBOUND_GET: 'messaging:inbound:get',
   MESSAGING_INBOUND_SET: 'messaging:inbound:set',
 
+  // Custom slash commands (user-defined /commands from files)
+  COMMANDS_CUSTOM_LIST: 'commands:custom:list',
+  COMMANDS_CUSTOM_SAVE: 'commands:custom:save',
+
   // Notification
   NOTIFICATION_SHOW: 'notification:show',
   NOTIFICATION_PROGRESS: 'notification:progress',

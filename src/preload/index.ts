@@ -688,6 +688,11 @@ const api = {
   messagingInboundSet: (args: { enabled?: boolean; allowedChatIds?: string[] }) =>
     ipcRenderer.invoke(IPC.MESSAGING_INBOUND_SET, args),
 
+  // Custom slash commands (user-defined /commands from profile files)
+  customCommandsList: () => ipcRenderer.invoke(IPC.COMMANDS_CUSTOM_LIST),
+  customCommandSave: (args: { name: string; description?: string; template: string }) =>
+    ipcRenderer.invoke(IPC.COMMANDS_CUSTOM_SAVE, args),
+
   // Notifications
   notificationShow: (args: { title: string; body: string; silent?: boolean }) =>
     ipcRenderer.invoke(IPC.NOTIFICATION_SHOW, args),

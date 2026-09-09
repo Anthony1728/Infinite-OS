@@ -56,6 +56,7 @@ import { registerQueueIpc } from './queue.js';
 import { registerGitIpc } from './git.js';
 import { registerLearningIpc } from './learning.js';
 import { registerMessagingIpc } from './messaging.js';
+import { registerCommandsIpc } from './commands.js';
 import { registerWindowIpc } from './window.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
 import { getEngine } from '../engine/intelligence.js';
@@ -104,6 +105,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerGitIpc();
   registerLearningIpc(getMainWindow);
   registerMessagingIpc();
+  registerCommandsIpc();
   ipcMain.handle(IPC.HEARTBEAT_STATUS, async () => {
     const { heartbeatStatus } = await import('../heartbeat/index.js');
     return heartbeatStatus();
