@@ -221,6 +221,12 @@ const SLASH_COMMANDS = [
     icon: 'M4.5 6.75h15M4.5 10.5h15M4.5 14.25h9M4.5 18h6',
   },
   {
+    id: 'verify',
+    label: 'Verify',
+    description: 'Typecheck, lint & test the workspace after edits',
+    icon: 'M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  },
+  {
     id: 'pc',
     label: 'Control PC',
     description: 'Open apps, click, type, capture screen, and automate',
@@ -601,6 +607,13 @@ export function ChatView({
           case 'audit':
             dispatch(
               'Run a full Infinite OS self-improvement audit now. Inspect the codebase, use the SelfImprove tool if available, fix clear bugs, run validation, and report the changed files.',
+            );
+            break;
+          case 'verify':
+            dispatch(
+              arg
+                ? `Run the Verify tool now, limited to these checks: ${arg}. Fix every failure and re-run until green before summarizing.`
+                : 'Run the Verify tool on the current workspace now (quick checks first: typecheck, lint, test). Fix every failure and re-run until green before summarizing.',
             );
             break;
           default:

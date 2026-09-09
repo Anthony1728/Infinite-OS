@@ -488,7 +488,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Multi-step work → TodoWrite plan → execute step by step.');
   parts.push('- Ask before sending emails — show content for approval first (only exception to "fix, don\'t ask").');
   parts.push('- Terminal: Bash (PowerShell default). Files: Read/Write/Edit. Desktop: Computer.');
-  parts.push('- Code: inspect repo → plan → edit → test/build → report changed files.');
+  parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
   parts.push('');
   parts.push('# Error recovery');

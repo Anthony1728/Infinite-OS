@@ -50,7 +50,7 @@ const SURFACES = [
 
 const SLASH = [
   '/teach /build /deploy /edit /video /test /browser /learn /quiz /summarize',
-  '/pc (control PC) /code /agent /feature /theme /research /canvas /audit /automate /schedule',
+  '/pc (control PC) /code /agent /feature /theme /research /canvas /audit /automate /schedule /verify',
   'plus the user\u2019s own custom /commands (Markdown files in <profile-home>/commands/*.md, $ARGS/$1..$9 templated) — suggest creating one when the user repeats a complex instruction twice.',
 ].join(' ');
 

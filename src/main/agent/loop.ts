@@ -215,6 +215,10 @@ export async function runAgent(
   };
   const successfulToolNames = new Set<string>();
   const successfulToolActions: SuccessfulToolAction[] = [];
+  // Edit→verify→fix loop (the Claude Code discipline): tracks whether file edits
+  // are still unverified. Set on successful Write/Edit, cleared on a passing Verify.
+  let editsSinceVerify = false;
+  let verifyGuardPrompts = 0;
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
   const problemTracker = new ProblemTracker();
@@ -298,7 +302,7 @@ export async function runAgent(
     const CORE_TOOL_SET = new Set([
       'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
       'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
-      'Computer', 'browser_extension', 'Operator',
+      'Computer', 'browser_extension', 'Operator', 'Verify',
       'FileOps', 'Knowledge', 'System',
       'Git', 'CreateTab', 'BuildFeature',
       'Batch', 'AskQuestion', 'TaskGroup',
@@ -568,6 +572,22 @@ export async function runAgent(
     }
 
     if (!toolUses.length) {
+      // Edit→verify→fix guard: never finish a run with unverified file edits.
+      // Bounded (2 prompts) so a stubborn model still terminates via MAX_TURNS.
+      if (editsSinceVerify && verifyGuardPrompts < 2) {
+        verifyGuardPrompts++;
+        performanceMetrics.retries++;
+        messages.push({
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: [{
+            type: 'text',
+            text: '[Verification guard]: You modified files this run but have not run the Verify tool since the last edit. Run Verify now (quick checks first), fix every failure, and re-run it until green. Only then write your final summary. If the workspace has no supported checks, say so explicitly and finish.',
+          }],
+          timestamp: Date.now(),
+        });
+        continue;
+      }
       const updates = drainInterjections(opts.sessionId);
       if (updates.length > 0) {
         for (const update of updates) {
@@ -803,6 +823,9 @@ export async function runAgent(
         successfulToolExecutions++;
         successfulToolNames.add(canonicalName);
         successfulToolActions.push({ name: canonicalName, input: tu.input });
+        // Edit→verify→fix bookkeeping.
+        if (canonicalName === 'Verify') editsSinceVerify = false;
+        else if (canonicalName === 'Write' || canonicalName === 'Edit') editsSinceVerify = true;
         learnFromToolResult({
           request: originalRequest,
           taskContext,

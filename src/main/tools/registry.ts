@@ -111,6 +111,7 @@ import { regexTool } from './regex.js';
 import { csvTool } from './csv.js';
 import { translateTool } from './translate.js';
 import { colorTool } from './color.js';
+import { verifyTool } from './verify.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -232,6 +233,7 @@ export function registerBuiltinTools(): void {
     csvTool,
     translateTool,
     colorTool,
+    verifyTool,
   ]) {
     toolRegistry.register(t);
   }
