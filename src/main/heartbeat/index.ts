@@ -51,19 +51,14 @@ async function runHeartbeat(): Promise<void> {
   const state = loadState();
   heartbeatCount++;
 
-  // Consolidate: check if there are recent sessions worth summarizing.
-  // This is intentionally lightweight — just logs for now, but can be
-  // extended to call the LLM for summarization when a provider is free.
+  // Consolidate: decay stale episodic trivia via stratified-memory pruning
+  // (importance-gated, promoted rows survive). Replaces a legacy raw-SQL
+  // prune that referenced a non-existent column and could never match.
   try {
-    const { getDb } = await import('../memory/store.js');
-    const db = getDb();
-    // Prune old ephemeral entries (older than 30 days, not pinned)
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const result = db.prepare(
-      "DELETE FROM memories WHERE updatedAt < ? AND type = 'note' AND json_extract(tags, '$[0]') IS NULL",
-    ).run(thirtyDaysAgo);
-    if (result.changes > 0) {
-      console.log(`[heartbeat] pruned ${result.changes} stale notes`);
+    const { pruneEpisodic } = await import('../memory/store.js');
+    const deleted = pruneEpisodic({ olderThanDays: 30 });
+    if (deleted > 0) {
+      console.log(`[heartbeat] pruned ${deleted} stale episodic memories`);
     }
   } catch { /* memory not ready yet */ }
 
