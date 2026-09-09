@@ -4,7 +4,7 @@
 
 import { v4 as uuid } from 'uuid';
 import { getProvider } from '../providers/registry.js';
-import { toolRegistry, unknownToolMessage } from '../tools/base.js';
+import { toolRegistry, unknownToolMessage, CORE_TOOL_NAMES } from '../tools/base.js';
 import { getAgent } from '../agents/registry.js';
 import { buildContext, buildSystemPrompt } from './context.js';
 import type { AgentActivity, AgentEvent, AgentId, AgentRunState, AgentType } from '../agents/types.js';
@@ -410,16 +410,8 @@ export async function runSubagent(
             return agent.allowedTools.includes('*') || agent.allowedTools.includes(tool.name) || Boolean(config?.toolOverride?.include?.includes(tool.name));
           })
       : [];
-    // CORE TOOL SET — ~24 essential tools sent every turn. Cuts ~15k tokens vs 50.
-    // Non-core tools (CodeReview, Regex, CSV, etc.) are available via Agent spawning.
-    const CORE_TOOL_SET = new Set([
-      'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-      'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
-      'Computer', 'browser_extension', 'Operator',
-      'FileOps', 'Knowledge', 'System',
-      'Git', 'CreateTab', 'BuildFeature',
-      'Batch', 'AskQuestion', 'TaskGroup',
-    ]);
+    // CORE TOOL SET — canonical list in tools/base.ts (CORE_TOOL_NAMES).
+    const CORE_TOOL_SET = CORE_TOOL_NAMES;
     const tools = activeCandidate.provider === 'ollama'
       ? selectLocalModelTools(opts.task, allowedTools)
       : allowedTools.filter((t) => CORE_TOOL_SET.has(t.name));

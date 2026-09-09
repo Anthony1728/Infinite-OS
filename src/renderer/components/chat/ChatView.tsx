@@ -21,6 +21,56 @@ import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
 import { useLayoutStore } from '../../stores/layout';
 import { useNotificationStore } from '../../stores/notifications';
 
+interface FenceQuestion {
+  header: string;
+  question: string;
+  multiple: boolean;
+  options: Array<{ label: string; description?: string }>;
+}
+
+/**
+ * Parse a ```question fenced block into a card. This is the runtime-proof
+ * question path: foreign runtimes (OpenCode local loop) can't call our
+ * AskUserQuestion tool, but they CAN emit this fence per the system prompt —
+ * and it renders as the same clickable card everywhere.
+ * Returns null for anything malformed (renders as a plain code block).
+ */
+function parseQuestionFence(raw: string): FenceQuestion | null {
+  try {
+    const data = JSON.parse(raw.trim()) as Record<string, unknown>;
+    const question = typeof data.question === 'string' ? data.question.trim().slice(0, 500) : '';
+    const rawOptions = Array.isArray(data.options) ? data.options : [];
+    const options = rawOptions
+      .map((o) => {
+        if (typeof o === 'string') return { label: o.trim().slice(0, 120) };
+        const opt = o as Record<string, unknown>;
+        if (typeof opt.label !== 'string') return null;
+        return {
+          label: opt.label.trim().slice(0, 120),
+          ...(typeof opt.description === 'string' && opt.description.trim()
+            ? { description: opt.description.trim().slice(0, 200) }
+            : {}),
+        };
+      })
+      .filter((o): o is { label: string; description?: string } => !!o && o.label.length > 0)
+      .slice(0, 6);
+    if (!question || options.length < 2) return null;
+    return {
+      header: typeof data.header === 'string' ? data.header.trim().slice(0, 60) : 'Question',
+      question,
+      multiple: data.multiple === true,
+      options,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function countQuestionFences(text: string): number {
+  const matches = text.match(/```question[\s\S]*?```/g);
+  return matches ? matches.length : 0;
+}
+
 function InteractiveQuestion({ block, onAnswer, onSkip, answeredCount, totalCount }: { block: { question: string; header?: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string; multiple?: boolean }; onAnswer: (answer: string) => void; onSkip?: () => void; answeredCount?: number; totalCount?: number }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [customValue, setCustomValue] = useState('');
@@ -2387,6 +2437,35 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
                   components={{
                     code({ className, children, ...props }) {
                       const match = /language-(\w+)/.exec(className || '');
+                      const rawCode = String(children).replace(/\n$/, '');
+                      // ```question fences render as clickable multi-choice cards
+                      // (runtime-proof path for foreign runtimes without our tools).
+                      if (match?.[1] === 'question') {
+                        const fence = parseQuestionFence(rawCode);
+                        if (fence) {
+                          const fenceTotal = Math.max(1, countQuestionFences(text));
+                          return (
+                            <InteractiveQuestion
+                              block={{
+                                question: fence.question,
+                                header: fence.header,
+                                options: fence.options,
+                                multiple: fence.multiple,
+                                questionId: `fence:${message.id}:${i}`,
+                                allowCustom: true,
+                              }}
+                              answeredCount={i}
+                              totalCount={fenceTotal}
+                              onAnswer={(answer) => {
+                                useChatStore.getState().sendMessage(`[Question Answer] ${fence.header}: ${answer}`);
+                              }}
+                              onSkip={() => {
+                                useChatStore.getState().sendMessage(`[Question Skipped] ${fence.header}`);
+                              }}
+                            />
+                          );
+                        }
+                      }
                       const isBlock = String(children).includes('\n');
                       if (isBlock) {
                         return (

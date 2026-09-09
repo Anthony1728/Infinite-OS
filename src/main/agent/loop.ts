@@ -5,7 +5,7 @@ import type { Message, ContentBlock } from '../../shared/types.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getProvider } from '../providers/registry.js';
-import { toolRegistry, unknownToolMessage } from '../tools/base.js';
+import { toolRegistry, unknownToolMessage, CORE_TOOL_NAMES } from '../tools/base.js';
 import { buildSystemPrompt, buildContext } from './context.js';
 import { DecisionRouter } from '../brain/router.js';
 import {
@@ -302,14 +302,8 @@ export async function runAgent(
     const requestContext = [...history.slice(-6), userMessage].map(messageText).join('\n');
     // CORE TOOL SET — ~24 essential tools sent every turn. Cuts ~15k tokens vs 50.
     // Non-core tools (CodeReview, Regex, CSV, etc.) are available via Agent spawning.
-    const CORE_TOOL_SET = new Set([
-      'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-      'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
-      'Computer', 'browser_extension', 'Operator', 'Verify',
-      'FileOps', 'Knowledge', 'System',
-      'Git', 'CreateTab', 'BuildFeature',
-      'Batch', 'AskQuestion', 'TaskGroup', 'Snapshot',
-    ]);
+    // Canonical list lives in tools/base.ts (CORE_TOOL_NAMES) so renames can't orphan tools.
+    const CORE_TOOL_SET = CORE_TOOL_NAMES;
     // Dynamic tool selection: on the first turn, prefer the brief's tool hints if present
     // (already a filtered, task-aware set). Fall back to CORE set after that.
     let activeTools: ReturnType<typeof toolRegistry.asProviderTools>;

@@ -36,7 +36,7 @@ vi.mock('../providers/failover.js', () => ({
 vi.mock('./context.js', () => ({ buildSystemPrompt: mocks.buildSystemPrompt, buildContext: mocks.buildContext }));
 vi.mock('./hooks.js', () => ({ runHooks: mocks.runHooks }));
 vi.mock('./permissions.js', () => ({ checkPermission: mocks.checkPermission }));
-vi.mock('../tools/base.js', () => ({ toolRegistry: { asProviderTools: mocks.asProviderTools } }));
+vi.mock('../tools/base.js', () => ({ toolRegistry: { asProviderTools: mocks.asProviderTools }, CORE_TOOL_NAMES: new Set() }));
 vi.mock('../brain/router.js', () => ({ DecisionRouter: vi.fn().mockImplementation(() => ({ recordTask: vi.fn() })) }));
 vi.mock('./browser-routing.js', () => ({ routeForcedBrowserTool: mocks.routeForcedBrowserTool }));
 vi.mock('./learning-adapter.js', () => ({ learnFromToolResult: mocks.learnFromToolResult, learnFromCompletedResponse: vi.fn() }));

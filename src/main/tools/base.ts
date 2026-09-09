@@ -230,6 +230,21 @@ class ToolRegistry {
 export const toolRegistry = new ToolRegistry();
 
 /**
+ * CORE TOOL SET — the ~25 essential tools sent every turn (cuts ~15k tokens
+ * vs the full 50+). Single source of truth shared by the agent loop and the
+ * custom-agent runtime so a rename can never silently orphan a tool again
+ * (AskUserQuestion was once referenced as AskQuestion and never reached models).
+ */
+export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
+  'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
+  'Computer', 'browser_extension', 'Operator', 'Verify',
+  'FileOps', 'Knowledge', 'System',
+  'Git', 'CreateTab', 'BuildFeature',
+  'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot',
+]);
+
+/**
  * Builds the error fed back to the model when it emits an unresolvable tool
  * name, including close matches and the complete canonical name list so it
  * can immediately self-correct.

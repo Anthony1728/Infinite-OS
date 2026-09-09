@@ -11,7 +11,7 @@ vi.mock('electron', () => {
 });
 
 import { registerBuiltinTools } from './registry.js';
-import { toolRegistry } from './base.js';
+import { toolRegistry, CORE_TOOL_NAMES } from './base.js';
 import { AGENTS } from '../agents/registry.js';
 
 const NEW_TOOLS = ['Json', 'Text', 'Crypto', 'Time', 'Math', 'Timer'];
@@ -57,6 +57,18 @@ describe('tool registry', () => {
       expect(AGENTS[id]?.allowedTools).toContain('*');
     }
     expect(names.size).toBeGreaterThan(30);
+  });
+
+  it('resolves every CORE_TOOL_NAMES entry to a registered tool (no orphan names)', () => {
+    registerBuiltinTools();
+    const names = new Set(toolRegistry.list().map((tool) => tool.name));
+    for (const name of CORE_TOOL_NAMES) {
+      expect(names.has(name), `core tool ${name} is registered`).toBe(true);
+    }
+    // The bug that motivated this: the loop referenced AskQuestion while the
+    // tool is named AskUserQuestion, so the question UI never reached models.
+    expect(names.has('AskQuestion')).toBe(false);
+    expect(names.has('AskUserQuestion')).toBe(true);
   });
 
   it('resolves model-emitted tool name variants to canonical tools', () => {

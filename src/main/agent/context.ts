@@ -492,6 +492,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Ask before sending emails — show content for approval first (only exception to "fix, don\'t ask"; waived when uncensored + full system access is active — then send as instructed and report).');
   parts.push('- Terminal: Bash (PowerShell default). Files: Read/Write/Edit. Desktop: Computer.');
   parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
+  parts.push('- Questions UI: when the user must choose between options, call the AskUserQuestion tool when it is available. On runtimes without that tool, emit a fenced block instead — it renders as clickable cards: ```question {"header":"Short label","question":"The full question","multiple":false,"options":[{"label":"Choice A","description":"Why pick it"},{"label":"Choice B","description":"Why pick it"}]} ``` — then continue once the user answers. Never paste the raw JSON outside the fence.');
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
   parts.push('');
   parts.push('# Error recovery');
