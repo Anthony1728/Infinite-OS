@@ -2426,11 +2426,25 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
             </div>
           </div>
         ) : (
-          textBlocks.map((block, i) => {
-            if (block.type !== 'text') return null;
-            const text = (block as { text: string }).text;
-            if (!text.trim()) return null;
-            return (
+          // Chronological flow: text and tool calls render in the exact order
+          // they happened (newest at the bottom) — never text-first grouping,
+          // so follow-up narration after tools reads naturally without scrolling up.
+          message.content
+            .filter((b) => b.type === 'text' || b.type === 'tool_use')
+            .map((block, i) => {
+              if (block.type === 'tool_use') {
+                const tu = block as { id: string; name: string; input: unknown };
+                const isRunning = runningToolIds?.has(tu.id) ?? false;
+                return (
+                  <div key={`tool-${tu.id || i}`} className="mt-2">
+                    <ToolCallCard name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} startTime={isRunning ? Date.now() - 1000 : undefined} />
+                  </div>
+                );
+              }
+              if (block.type !== 'text') return null;
+              const text = (block as { text: string }).text;
+              if (!text.trim()) return null;
+              return (
               <div key={i} className="text-sm text-zinc-300 leading-relaxed">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -2578,18 +2592,7 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
             ))}
           </div>
         )}
-        {toolUseBlocks.length > 0 && (
-          <div className="mt-2 space-y-2">
-            {toolUseBlocks.map((block, i) => {
-              if (block.type !== 'tool_use') return null;
-              const tu = block as { id: string; name: string; input: unknown };
-              const isRunning = runningToolIds?.has(tu.id) ?? false;
-              return (
-                <ToolCallCard key={i} name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} startTime={isRunning ? Date.now() - 1000 : undefined} />
-              );
-            })}
-          </div>
-        )}
+        {/* Tool calls render inline in the chronological flow above, not here. */}
       </div>
     </div>
     {contextMenu && (

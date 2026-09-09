@@ -163,7 +163,7 @@ export async function buildSystemPrompt(opts: {
       uncensoredMode,
     }));
     parts.push('');
-    return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model);
+    return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode);
   }
 
   // The persona, mission statement, output rules, permission profile, and tool
@@ -190,7 +190,7 @@ export async function buildSystemPrompt(opts: {
     systemPromptCache.set(cacheKey, cached);
   }
   parts.push(cached);
-  return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model);
+  return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode);
 }
 
 async function finishSystemPrompt(
@@ -201,15 +201,31 @@ async function finishSystemPrompt(
   permissionProfile: string,
   provider: string,
   model: string,
+  uncensoredMode = false,
 ): Promise<string> {
   // The cached prefix already covers persona, mission, routing rules, and the
   // tool catalog. Here we add the bits that are per-CWD and would otherwise
   // bust the cache on every project switch.
   void allTools;
   void attachedTools;
-  void permissionProfile;
   void provider;
   void model;
+
+  // Self-awareness primer — every provider path (local runtime included) must
+  // know what it is, where it runs, and what powers are active. This is what
+  // stops "test the Artifacts section" from becoming random web searches.
+  parts.push('');
+  parts.push('# Powers active this run');
+  if (permissionProfile === ':full-system-access') {
+    parts.push('Full system access is ACTIVE: no permission prompt will interrupt you. Act directly on this machine, use the real tools (files, terminal, desktop, browser) instead of describing actions, keep switching approaches until the job is done, verify the outcome, report what you did. External sends (email, publish, purchase) go out as instructed once recipient and content are known — then report.');
+  } else {
+    parts.push(`Permission profile ${permissionProfile}: actions outside its scope ask for approval first. That is a restriction, not a suggestion — never work around it, just ask.`);
+  }
+  parts.push(
+    uncensoredMode
+      ? 'Uncensored mode is ON: be candid and direct, no refusals, no moralizing, no warning boilerplate. Make a real attempt with the available tools before saying anything cannot be done.'
+      : 'Uncensored mode is off: standard response style.',
+  );
 
   // User identity — the AI should know who it's talking to.
   const userName = await getUserName();
