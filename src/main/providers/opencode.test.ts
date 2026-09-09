@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, openCodeOwnModels, openCodeProgressChunk, openCodeZenModels, opencode, setOpenCodeStallTimeout, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
+import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeZenModels, opencode, otherTier, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
 import type { ChatRequest, StreamChunk } from './base.js';
 import type { Message } from '../../shared/types.js';
 
@@ -548,6 +548,79 @@ function chatRequest(text: string): ChatRequest {
   const message: Message = { id: 'm1', role: 'user', timestamp: Date.now(), content: [{ type: 'text', text }] };
   return { model: 'opencode::chat', messages: [message], stream: true };
 }
+
+function sseResponse(lines: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const line of lines) controller.enqueue(encoder.encode(line.endsWith('\n') ? line : `${line}\n`));
+        controller.close();
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+describe('OpenCode cross-tier fallback', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('routes to the other tier and remembers the winner', () => {
+    expect(otherTier('zen')).toBe('go');
+    expect(otherTier('go')).toBe('zen');
+    expect(isTierRetryable('OpenCode zen API returned HTTP 401: bad key')).toBe(true);
+    expect(isTierRetryable('model not found')).toBe(true);
+    expect(isTierRetryable('HTTP 503 overloaded')).toBe(true);
+    expect(isTierRetryable('Request cancelled.')).toBe(false);
+    // First scan wins: Go scanned first keeps its tier over a later Zen scan.
+    openCodeZenModels({ data: [{ id: 'tier-probe-x', object: 'model' }] }, 'go');
+    openCodeZenModels({ data: [{ id: 'tier-probe-x', object: 'model' }] }, 'zen');
+    expect(tierFor('opencode::tier-probe-x')).toBe('go');
+    expect(tierFor('opencode::never-seen')).toBe('zen');
+  });
+
+  it('retries a rejected tier on the other tier and streams the answer', async () => {
+    openCodeZenModels({ data: [{ id: 'tier-probe-y', object: 'model' }] }, 'zen');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === 'https://opencode.ai/zen/v1/chat/completions') return new Response('unauthorized', { status: 401 });
+      if (url === 'https://opencode.ai/zen/go/v1/chat/completions') {
+        return sseResponse([
+          'data: {"choices":[{"delta":{"content":"hello-tier"}}]}',
+          '',
+          'data: [DONE]',
+          '',
+        ]);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const request: ChatRequest = { ...chatRequest('hi'), model: 'opencode::tier-probe-y' };
+    const attempt = await tryRemote(request, 'test-key', 'zen');
+    expect(attempt.ok).toBe(false);
+    expect(attempt.ok === false && attempt.error).toMatch(/401/);
+    // Full entry point falls across tiers and remembers Go for next time.
+    const chunks: StreamChunk[] = [];
+    for await (const chunk of opencode.streamChat(request, 'test-key')) chunks.push(chunk);
+    expect(chunks).toContainEqual({ type: 'text_delta', text: 'hello-tier' });
+    expect(tierFor('opencode::tier-probe-y')).toBe('go');
+  });
+
+  it('sends free-tier models with a key to the remote API without touching the local server', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:4096')) throw new Error(`Local server must not be contacted: ${url}`);
+      if (url === 'https://opencode.ai/zen/v1/chat/completions') {
+        return sseResponse(['data: {"choices":[{"delta":{"content":"free-remote-ok"}}]}', '', 'data: [DONE]', '']);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    const request: ChatRequest = { ...chatRequest('hi'), model: 'opencode::mimo-v2.5-free' };
+    const chunks: StreamChunk[] = [];
+    for await (const chunk of opencode.streamChat(request, 'test-key')) chunks.push(chunk);
+    expect(chunks).toContainEqual({ type: 'text_delta', text: 'free-remote-ok' });
+    expect(chunks.some((c) => c.type === 'error')).toBe(false);
+  });
+});
 
 async function collect(url: string, req: ChatRequest): Promise<StreamChunk[]> {
   const chunks: StreamChunk[] = [];

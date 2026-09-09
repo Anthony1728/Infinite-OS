@@ -309,7 +309,10 @@ export function openCodeZenModels(data: ZenModelsResponse, tier: 'zen' | 'go' = 
         .map((part) => (/^\d/.test(part) ? part : `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`))
         .join(' ');
       const id = `opencode::${model.id}`;
-      modelTiers.set(id, tier);
+      // First scan wins (Go is scanned before Zen): a model living in both
+      // catalogs keeps its Go tier instead of being misrouted to Zen, where a
+      // Go-only key gets rejected and the turn pointlessly fails over.
+      if (!modelTiers.has(id)) modelTiers.set(id, tier);
       return {
         id,
         label: tier === 'go' ? `OpenCode Go / ${label}` : `OpenCode Zen / ${label}`,
@@ -629,11 +632,27 @@ async function* streamSessionMessage(args: {
   }
 }
 
-/** Use the authenticated OpenCode subscription API directly so Infinite OS's
- * own tools (Computer, Bash, files, bridge, etc.) remain the executable tool
- * surface. The local OpenCode runtime has a separate tool loop and only emits
- * telemetry for those calls, which makes API-key chat unable to act locally. */
-async function* streamRemoteOpenCode(req: ChatRequest, apiKey: string, tier: 'zen' | 'go'): AsyncIterable<StreamChunk> {
+/** The other subscription tier — a key rejected by one is retried on the other. */
+export function otherTier(tier: 'zen' | 'go'): 'zen' | 'go' {
+  return tier === 'zen' ? 'go' : 'zen';
+}
+
+/** Test seam: which tier would a model id route to. */
+export function tierFor(modelId: string): 'zen' | 'go' {
+  return modelTiers.get(modelId) ?? 'zen';
+}
+
+/**
+ * Whether a remote failure is worth retrying on the other tier: auth and
+ * entitlement rejections (wrong tier, revoked key, unknown model) plus
+ * server-side outages. Never user aborts.
+ */
+export function isTierRetryable(error: string): boolean {
+  if (/abort|cancel/i.test(error)) return false;
+  return /401|403|404|unauthori|forbidden|invalid.*key|expired|entitl|free.?tier|model.*not|not.*model|5\d\d|server error|bad gateway|service unavailable|gateway timeout/i.test(error);
+}
+/** One attempt against a single tier endpoint (Zen or Go). */
+async function* attemptRemoteTier(req: ChatRequest, apiKey: string, tier: 'zen' | 'go'): AsyncGenerator<StreamChunk> {
   const endpoint = `${tier === 'go' ? GO_API_URL : ZEN_API_URL}/chat/completions`;
   const messages = toRemoteMessages(req.messages, req.system);
   const tools = req.tools?.length
@@ -774,6 +793,90 @@ async function* streamRemoteOpenCode(req: ChatRequest, apiKey: string, tier: 'ze
       }
     }
   }
+}
+
+type RemoteAttempt =
+  | { ok: true; stream: AsyncGenerator<StreamChunk> }
+  | { ok: false; error: string };
+
+async function* prependBuffered(buffered: StreamChunk[], rest: AsyncGenerator<StreamChunk>): AsyncGenerator<StreamChunk> {
+  try {
+    yield* buffered;
+    yield* rest;
+  } finally {
+    try {
+      await rest.return(undefined);
+    } catch { /* already closed */ }
+  }
+}
+
+/**
+ * Pull a remote attempt only up to the commit point (first text or terminal
+ * chunk). Pre-text errors stay recoverable: the caller can retry another tier
+ * or fall back to the local runtime without the user ever seeing a glitch.
+ * Exported for tests.
+ */
+export async function tryRemote(req: ChatRequest, apiKey: string, tier: 'zen' | 'go'): Promise<RemoteAttempt> {
+  const gen = attemptRemoteTier(req, apiKey, tier);
+  const buffered: StreamChunk[] = [];
+  // Manual next() loop (NOT for-await): exiting a for-await would close the
+  // generator and the buffered-then-stream handoff would lose everything.
+  try {
+    while (true) {
+      const { value, done } = await gen.next();
+      if (done) break;
+      if (value.type === 'error') {
+        try {
+          await gen.return(undefined);
+        } catch { /* already closed */ }
+        return { ok: false, error: value.error };
+      }
+      buffered.push(value);
+      if (value.type === 'text_delta' || value.type === 'message_end') break;
+    }
+    return { ok: true, stream: prependBuffered(buffered, gen) };
+  } catch (error) {
+    try {
+      await gen.return(undefined);
+    } catch { /* already closed */ }
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+function noteTier(model: string, tier: 'zen' | 'go'): void {
+  const selected = decodeModel(model);
+  modelTiers.set(`${selected.providerID}::${selected.modelID}`, tier);
+}
+
+/**
+ * Remote with cross-tier fallback: try the mapped tier, and on auth /
+ * entitlement / outage rejections retry the other tier before giving up.
+ * Records the winning tier so the next turn goes straight there.
+ */
+async function remoteWithFallback(req: ChatRequest, apiKey: string, tier: 'zen' | 'go'): Promise<RemoteAttempt> {
+  const first = await tryRemote(req, apiKey, tier);
+  if (first.ok) {
+    noteTier(req.model, tier);
+    return first;
+  }
+  if (!isTierRetryable(first.error)) return first;
+  const other = otherTier(tier);
+  const second = await tryRemote(req, apiKey, other);
+  if (second.ok) {
+    noteTier(req.model, other);
+    return second;
+  }
+  return { ok: false, error: `${first.error} | ${other} retry: ${second.error}`.slice(0, 500) };
+}
+
+/** Use the authenticated OpenCode subscription API directly so Infinite OS's
+ * own tools (Computer, Bash, files, bridge, etc.) remain the executable tool
+ * surface. The local OpenCode runtime has a separate tool loop and only emits
+ * telemetry for those calls, which makes API-key chat unable to act locally. */
+export async function* streamRemoteOpenCode(req: ChatRequest, apiKey: string, tier: 'zen' | 'go'): AsyncIterable<StreamChunk> {
+  const attempt = await remoteWithFallback(req, apiKey, tier);
+  if (attempt.ok) yield* attempt.stream;
+  else yield { type: 'error', error: attempt.error };
 }
 
 function toRemoteMessages(messages: Message[], system?: string): Array<Record<string, unknown>> {
@@ -921,14 +1024,22 @@ export const opencode: ProviderAdapter = {
     const selected = decodeModel(req.model);
     const modelId = `${selected.providerID}::${selected.modelID}`;
     const tier = modelTiers.get(modelId) ?? 'zen';
-    // Zen's HTTP API rejects free-tier models by key ("free tier can only be
-    // used in OpenCode") — Hermes works because it drives the local runtime.
-    // Route free-tier models through the local server even when a key is
-    // saved; the credential is configured into that server below.
     const freeTier = selected.modelID === 'big-pickle' || /(?:^|[-_])free$/i.test(selected.modelID);
-    if (apiKey && selected.providerID === 'opencode' && !freeTier) {
-      yield* streamRemoteOpenCode(req, apiKey, tier);
-      return;
+    if (apiKey && selected.providerID === 'opencode') {
+      // Remote-first for EVERY keyed model, free-tier included: a valid key is
+      // the fastest path and never touches the local runtime's failure modes.
+      // Only when the remote API rejects the turn before producing text do we
+      // fall through to the local server (free-tier entitlement lives there).
+      const remote = await remoteWithFallback(req, apiKey, tier);
+      if (remote.ok) {
+        yield* remote.stream;
+        return;
+      }
+      if (!freeTier) {
+        yield { type: 'error', error: remote.error };
+        return;
+      }
+      console.info(`[opencode] remote attempt rejected (${remote.error.slice(0, 140)}); using local runtime for free-tier model`);
     }
     if (!await ensureServer(url, req.cwd)) {
       yield { type: 'error', error: 'OpenCode server is unavailable.' };
