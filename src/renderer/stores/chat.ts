@@ -2444,7 +2444,14 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
           liveId && target.transcript
             ? s.messages.map((m) =>
                 m.id === liveId
-                  ? { ...m, content: [...m.content, { type: 'tool_use', id: toolId, name: toolName, input: ev.input }] }
+                  ? {
+                      ...m,
+                      // Dedupe: synthesized remote-telemetry blocks already live
+                      // in content (start arrived before end) — never double cards.
+                      content: m.content.some((b) => b.type === 'tool_use' && (b as { id?: string }).id === toolId)
+                        ? m.content
+                        : [...m.content, { type: 'tool_use', id: toolId, name: toolName, input: ev.input }],
+                    }
                   : m,
               )
             : s.messages,
@@ -2643,9 +2650,10 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       setState((s) => ({
         messages: s.messages.map((m) => {
           if (m.id !== ev.message_id) return m;
+          const already = m.content.some((b) => b.type === 'tool_use' && (b as { id?: string }).id === ev.tool_use_id);
           return {
             ...m,
-            content: [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }],
+            content: already ? m.content : [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }],
           };
         }),
         activity: s.activity.some((item) => item.toolUseId === ev.tool_use_id)

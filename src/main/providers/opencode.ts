@@ -273,7 +273,10 @@ function quarantineFailure(selected: { providerID: string; modelID: string }, fa
 }
 
 function transcript(messages: Message[]): string {
-  return messages.slice(-400).map((message) => {
+  // Bounded context: the last 120 messages / 300k chars. Full turns were
+  // observed shipping 44k+ input tokens to shared free-tier models, which is
+  // the dominant first-token latency driver. Tool results stay verbatim.
+  return messages.slice(-120).map((message) => {
     const content = message.content.map((block) => {
       if (block.type === 'text') return block.text;
       if (block.type === 'tool_result') {
@@ -284,7 +287,7 @@ function transcript(messages: Message[]): string {
       return '';
     }).filter(Boolean).join('\n');
     return `${message.role.toUpperCase()}: ${content}`;
-  }).join('\n\n').slice(-1_000_000);
+  }).join('\n\n').slice(-300_000);
 }
 
 async function providerData(baseUrl: string): Promise<ProviderResponse> {
@@ -395,7 +398,24 @@ interface OpenCodeBusEvent {
   properties?: Record<string, unknown>;
 }
 
+// Per-part text already emitted (part id -> full text). The runtime may
+// re-publish parts, so deltas are computed against this. Bounded to avoid
+// unbounded growth across long sessions.
+const textSeen = new Map<string, string>();
+// messageID -> role, learned from message.updated events. The runtime echoes
+// the USER's own text back as parts too — those must never stream into the
+// assistant bubble.
+const messageRoles = new Map<string, string>();
+
 export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string): StreamChunk | null {
+  if (event.type === 'message.updated') {
+    const info = (event.properties ?? {}).info as Record<string, unknown> | undefined;
+    if (info && typeof info.id === 'string' && typeof info.role === 'string') {
+      if (messageRoles.size > 500) messageRoles.clear();
+      messageRoles.set(info.id, info.role);
+    }
+    return null;
+  }
   if (event.type !== 'message.part.updated') return null;
   const properties = event.properties ?? {};
   const part = properties.part as Record<string, unknown> | undefined;
@@ -403,12 +423,30 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
 
   // Live text streaming: the runtime publishes text-part updates as the model
   // generates, so we can emit text_delta chunks before the final response.
+  // Shape note (verified against opencode 1.17.20): text arrives FLAT on the
+  // part (part.text), not nested under part.state — only the latter was read
+  // before, which silently dropped every live chunk.
   if (part.type === 'text') {
+    // Never stream the user's own echoed text into the answer.
+    const partMessageId = typeof part.messageID === 'string' ? part.messageID : '';
+    if (partMessageId && messageRoles.get(partMessageId) === 'user') return null;
     const state = (part.state ?? {}) as Record<string, unknown>;
-    const text = typeof state.text === 'string' ? state.text : '';
-    if (text) {
-      return { type: 'text_delta', text };
+    const raw = typeof part.text === 'string' && part.text
+      ? part.text
+      : typeof state.text === 'string' ? state.text : '';
+    if (!raw) return null;
+    // Parts may arrive as full snapshots (emit the unseen suffix) or true
+    // deltas (emit whole); identical re-publishes emit nothing.
+    const key = String(part.id ?? part.messageID ?? part.sessionID ?? '');
+    const seen = key ? textSeen.get(key) ?? '' : '';
+    if (raw === seen) return null;
+    let delta = raw;
+    if (key && seen && raw.startsWith(seen)) delta = raw.slice(seen.length);
+    if (key) {
+      if (textSeen.size > 500) textSeen.clear();
+      textSeen.set(key, raw);
     }
+    if (delta) return { type: 'text_delta', text: delta };
     return null;
   }
 

@@ -215,6 +215,9 @@ export async function runAgent(
   };
   const successfulToolNames = new Set<string>();
   const successfulToolActions: SuccessfulToolAction[] = [];
+  // Ids of display-only remote-runtime tool calls (synthesized from provider
+  // telemetry). They render as cards but must never execute locally.
+  const remoteTelemetryIds = new Set<string>();
   // Edit→verify→fix loop (the Claude Code discipline): tracks whether file edits
   // are still unverified. Set on successful Write/Edit, cleared on a passing Verify.
   let editsSinceVerify = false;
@@ -478,6 +481,23 @@ export async function runAgent(
           }
           case 'provider_progress':
             if (chunk.status === 'completed') successfulToolExecutions++;
+            // Remote-runtime telemetry (OpenCode local loop) is display-only:
+            // synthesize content blocks so each remote tool call renders a
+            // live ToolCallCard, but NEVER execute them locally (the runtime
+            // already ran them — see the remoteTelemetryIds exclusion below).
+            {
+              const tid = typeof chunk.id === 'string' && chunk.id ? chunk.id : '';
+              const tname = typeof chunk.name === 'string' && chunk.name ? chunk.name : '';
+              if (tid && tname && !remoteTelemetryIds.has(tid) && !pendingToolCalls.has(tid)) {
+                remoteTelemetryIds.add(tid);
+                const block: ContentBlock = { type: 'tool_use', id: tid, name: tname, input: chunk.input ?? {} };
+                assistant.content.push(block);
+                opts.onEvent({ type: 'tool_use_start', message_id: assistant.id, tool_use_id: tid, name: tname });
+              }
+              if (tid && remoteTelemetryIds.has(tid) && (chunk.status === 'completed' || chunk.status === 'error')) {
+                opts.onEvent({ type: 'tool_use_end', message_id: assistant.id, tool_use_id: tid, name: tname || chunk.name, input: chunk.input ?? {} });
+              }
+            }
             opts.onEvent({
               type: 'tool_progress',
               tool_use_id: chunk.id,
@@ -556,7 +576,8 @@ export async function runAgent(
 
     // If no tool calls → done
     const allToolUses = assistant.content.filter((b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use');
-    const toolUses = allToolUses.filter((tu) => tu.name?.trim());
+    // Display-only remote telemetry never executes locally (already ran remotely).
+    const toolUses = allToolUses.filter((tu) => tu.name?.trim() && !remoteTelemetryIds.has(tu.id));
     const emptyToolUses = allToolUses.filter((tu) => !tu.name?.trim());
 
     // Emit synthetic errors for empty tool names so the model sees the

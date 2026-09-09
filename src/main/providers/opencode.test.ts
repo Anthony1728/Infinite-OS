@@ -374,6 +374,39 @@ describe('OpenCode free chat model filtering', () => {
     }, 'session-1')).toBeNull();
   });
 
+  it('reads flat part.text from opencode 1.17.20, dedupes re-publishes, and never streams user echoes', () => {
+    const sid = 'session-live-probe';
+    // Assistant turn starts.
+    expect(openCodeProgressChunk({
+      type: 'message.updated',
+      properties: { sessionID: sid, info: { id: 'msg-assistant-1', role: 'assistant' } },
+    }, sid)).toBeNull();
+    // First publish of the assistant text part streams whole.
+    expect(openCodeProgressChunk({
+      type: 'message.part.updated',
+      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey ' } },
+    }, sid)).toEqual({ type: 'text_delta', text: 'Hey ' });
+    // Re-publish with more text streams only the suffix.
+    expect(openCodeProgressChunk({
+      type: 'message.part.updated',
+      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Anthony, working on it' } },
+    }, sid)).toEqual({ type: 'text_delta', text: 'Anthony, working on it' });
+    // Identical re-publish streams nothing.
+    expect(openCodeProgressChunk({
+      type: 'message.part.updated',
+      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Anthony, working on it' } },
+    }, sid)).toBeNull();
+    // The user's own echoed text is never streamed into the answer.
+    expect(openCodeProgressChunk({
+      type: 'message.updated',
+      properties: { sessionID: sid, info: { id: 'msg-user-9', role: 'user' } },
+    }, sid)).toBeNull();
+    expect(openCodeProgressChunk({
+      type: 'message.part.updated',
+      properties: { part: { id: 'prt-user-9', messageID: 'msg-user-9', sessionID: sid, type: 'text', text: 'do the thing' } },
+    }, sid)).toBeNull();
+  });
+
   it('surfaces the real cause of a bare `fetch failed` error', () => {
     const error = describeOpenCodeFailure(
       Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED', address: '127.0.0.1', port: 4096, syscall: 'connect' } }),
