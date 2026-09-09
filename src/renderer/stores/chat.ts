@@ -850,26 +850,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ],
           }));
         }
-        // Show progress message
-        const progressMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{ type: 'text', text: `**Agent ${data.agentType}** deployed: ${data.description}` }],
-          timestamp: Date.now(),
-        };
-        if (isCurrentSession) set((s) => ({ messages: [...s.messages, progressMsg] }));
+        // No canned chat bubble here by design: the sub-agent's live stream
+        // (activity rows + transcript) IS the communication. Announcements
+        // like "Agent X deployed" felt robotic and duplicated the activity feed.
+        if (isCurrentSession) {
+          set((state) => ({
+            activity: state.activity.map((item) =>
+              item.id === `subtask-${data.subTaskId}` ? { ...item, status: 'running' as const } : item,
+            ),
+          }));
+        }
       } else if (ev.type === 'welcome') {
-        // Welcome event from orchestrator — introduce the agent
-        const data = ev.data as { runId?: string; agentName?: string; role?: string; model?: string; message?: string };
-        if (data.message && isCurrentSession) {
-          const welcomeMsg: Message = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: [{ type: 'text', text: data.message }],
-            timestamp: Date.now(),
-            model: data.model,
-          };
-          set((s) => ({ messages: [...s.messages, welcomeMsg] }));
+        // Welcome events feed the activity row only — no canned "X working on"
+        // bubble. The agent's own live stream is the communication.
+        if (isCurrentSession) {
+          const data = ev.data as { agentName?: string; role?: string };
+          if (data.agentName) {
+            set((state) => ({
+              activity: state.activity.map((item) =>
+                item.name === data.agentName && item.status === 'running'
+                  ? { ...item, detail: data.role || item.detail }
+                  : item,
+              ),
+            }));
+          }
         }
       } else if (ev.type === 'subtask_progress') {
         // Live subagent stream (text, tools, retries) — activity feed only,
@@ -902,18 +906,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           data.event,
         );
       } else if (ev.type === 'task_updated') {
+        // Silent by design: interjections join the mission context without a
+        // canned "Update received" bubble — the agent's next stream shows it.
         if (!isCurrentSession) return;
-        const data = ev.data as { interjection?: string; affectedPendingTasks?: number };
-        const updateMsg: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: [{
-            type: 'text',
-            text: `**Update received.** I added it to the mission context${data.affectedPendingTasks ? ` for ${data.affectedPendingTasks} upcoming phase(s)` : ' for final verification'}.`,
-          }],
-          timestamp: Date.now(),
-        };
-        set((s) => ({ messages: [...s.messages, updateMsg] }));
       } else if (ev.type === 'task_completed') {
         if (isCurrentSession) set({ streaming: false, orchestratedTaskId: null });
         const data = ev.data as { totalSubTasks: number; completed: number; failed: number; duration: number };
@@ -2004,18 +1999,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           orchestratorBySession.set(sessionId!, result.taskId);
           set({ orchestratedTaskId: result.taskId });
 
-          const systemMsg: Message = {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: [
-              {
-                type: 'text',
-                text: `I'm breaking this down into ${result.subTasks} specialized sub-tasks and deploying multiple agents to work on them in parallel. I'll keep going until everything is complete.\n\nYou can send me updates or suggestions at any time while I'm working ΓÇö just type and send.`,
-              },
-            ],
-            timestamp: Date.now(),
-          };
-          set((s) => ({ messages: [...s.messages, systemMsg] }));
+          // No canned "breaking this down" bubble: the sub-agents' live
+          // activity rows + transcript ARE the announcement.
         } catch (e) {
           console.error('[chat] Orchestrator failed, falling back to direct:', e);
           await window.api.sendMessage({

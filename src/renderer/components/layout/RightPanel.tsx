@@ -6,6 +6,36 @@ import { AppIcon } from '../brand/AppIcon';
 type PanelId = 'agents' | 'workspace' | 'tasks';
 type AgentTab = 'ACTIVE' | 'IDLE' | 'ALL';
 
+/**
+ * Honest progress bar: while running it eases toward 97% on elapsed time
+ * (fast at first, then creeps — it never claims completion early); terminal
+ * states snap to a full bar in their own color. Tool activity beneath the
+ * bar carries the real step-by-step truth.
+ */
+function TaskProgressBar({ status, startedAt }: { status: string; startedAt: number }) {
+  const failed = status === 'failed' || status === 'cancelled';
+  const complete = status === 'completed';
+  const terminal = failed || complete;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (terminal) return;
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [terminal]);
+  const width = terminal
+    ? 100
+    : Math.min(97, (1 - Math.exp(-Math.max(0, now - startedAt) / 22000)) * 100);
+  const color = failed ? 'bg-red-500' : complete ? 'bg-emerald-500' : 'bg-indigo-500';
+  return (
+    <div className="ml-5.5 mt-1.5 h-0.5 bg-white/[0.05] rounded-full overflow-hidden">
+      <div
+        className={`h-full rounded-full ${color}${terminal ? '' : ' animate-pulse'}`}
+        style={{ width: `${width}%`, transition: 'width 0.5s linear, background-color 0.4s ease' }}
+      />
+    </div>
+  );
+}
+
 export function RightPanel({ onViewChange }: { onViewChange: (view: string) => void }) {
   const [expanded, setExpanded] = useState<PanelId | null>('tasks');
   const [agentTab, setAgentTab] = useState<AgentTab>('ACTIVE');
@@ -241,10 +271,8 @@ export function RightPanel({ onViewChange }: { onViewChange: (view: string) => v
                         {complete ? 'Complete' : failed ? 'Failed' : running ? 'Working' : 'Queued'}
                       </span>
                     </div>
-                    {running && (
-                      <div className="ml-5.5 mt-1.5 h-0.5 bg-white/[0.05] rounded-full">
-                        <div className="h-full w-1/3 bg-indigo-500 animate-pulse" />
-                      </div>
+                    {(running || complete || failed) && (
+                      <TaskProgressBar status={task.status} startedAt={task.startedAt} />
                     )}
                     {'activity' in task && task.activity?.length ? (
                       <div className="ml-5.5 mt-2 space-y-1 border-l border-white/[0.06] pl-2">
