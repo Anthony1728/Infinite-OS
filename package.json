@@ -25,6 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "exec": "node scripts/exec.mjs",
     "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps"
   },
   "build": {

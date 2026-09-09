@@ -47,6 +47,11 @@ export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cw
   // Other modes (:read-only, :workspace, :accept-edits) remain enforced as designed.
   const profile = resolvePermissionProfile();
   if (profile === ':full-system-access') return true;
+  // Headless exec run-scoping (set only by `npm run exec` for its own process,
+  // never persisted): --yes bypasses prompts for the run; --review forces
+  // read-only. Without --yes, prompts fail closed (no window can answer).
+  if (process.env.INFINITE_EXEC_YES === '1') return true;
+  if (process.env.INFINITE_EXEC_READONLY === '1') return checkReadOnlyPermission(canonicalTu, opts);
   // For restricted modes, deny rules and disabled tools remain authoritative
   if (tool?.permission === 'deny' || deny.some((rule) => matchRule(rule, canonicalTu, opts.cwd))) return false;
   if (profile === ':read-only') return checkReadOnlyPermission(canonicalTu, opts);

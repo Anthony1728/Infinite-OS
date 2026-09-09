@@ -231,6 +231,35 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  // Headless exec (`npm run exec -- "prompt"`): no window, no servers — one
+  // agent turn to completion on stdout, exit code for scripts/CI.
+  if (process.argv.includes('--exec')) {
+    const { parseExecArgs, execUsage } = await import('./exec/args.js');
+    const { runExec } = await import('./exec/run.js');
+    const { readFileSync } = await import('node:fs');
+    let stdinPrompt = '';
+    let raw = process.argv.slice(process.argv.indexOf('--exec') + 1);
+    if (raw.length === 1 && raw[0] === '-') {
+      try {
+        stdinPrompt = readFileSync(0, 'utf8').trim();
+      } catch {
+        stdinPrompt = '';
+      }
+      raw = [];
+    }
+    const parsed = parseExecArgs(raw);
+    if ('error' in parsed) {
+      if (parsed.error !== 'help') console.error(`exec: ${parsed.error}\n`);
+      console.error(execUsage());
+      app.exit(parsed.error === 'help' ? 0 : 2);
+      return;
+    }
+    if (stdinPrompt) parsed.prompt = stdinPrompt;
+    registerBuiltinTools();
+    const code = await runExec(parsed);
+    app.exit(code);
+    return;
+  }
   // Dictation is a local composer capability and must not depend on a model
   // provider. Grant microphone capture only to the trusted Infinite OS window.
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {

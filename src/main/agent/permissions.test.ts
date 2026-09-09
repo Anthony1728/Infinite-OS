@@ -93,4 +93,26 @@ describe('permission profiles', () => {
     await expect(checkPermission(tool('Computer', { action: 'type_text' }), options)).resolves.toBe(true);
     expect(mocks.requestPermission).not.toHaveBeenCalled();
   });
+
+  it('headless exec --yes bypasses prompts for the run only', async () => {
+    mocks.values.set('permissionMode', 'workspace');
+    process.env.INFINITE_EXEC_YES = '1';
+    try {
+      await expect(checkPermission(tool('Bash', { command: 'Remove-Item C:\\\\ -Recurse -Force' }), options)).resolves.toBe(true);
+      expect(mocks.requestPermission).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.INFINITE_EXEC_YES;
+    }
+  });
+
+  it('headless exec --review forces read-only for the run only', async () => {
+    mocks.values.set('permissionMode', 'workspace');
+    process.env.INFINITE_EXEC_READONLY = '1';
+    try {
+      await expect(checkPermission(tool('Write', { file_path: 'C:\\\\outside\\\\x.ts' }), options)).resolves.toBe(false);
+      await expect(checkPermission(tool('Read', { file_path: 'README.md' }), options)).resolves.toBe(true);
+    } finally {
+      delete process.env.INFINITE_EXEC_READONLY;
+    }
+  });
 });
