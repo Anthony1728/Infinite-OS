@@ -5,8 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com blob:; worker-src 'self' blob:; font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434 ws://127.0.0.1:8765 ws://localhost:8765 http://localhost:5173 ws://localhost:5173 https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://*.monaco-editor.com;" />
     <title>Infinite OS</title>
+    <style>
+      /* Pre-React boot splash: pure HTML/CSS so the Infinite mark paints the
+         instant the window opens — never a blank frame before the bundle loads. */
+      html, body { margin: 0; padding: 0; background: #08080b; }
+      #boot-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #08080b;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        transition: opacity .35s ease;
+      }
+      #boot-splash.done { opacity: 0; pointer-events: none; }
+      #boot-splash .glow {
+        position: absolute; width: 220px; height: 120px; border-radius: 9999px;
+        background: rgba(99,102,241,.14); filter: blur(48px);
+        animation: boot-breathe 2.2s ease-in-out infinite;
+      }
+      @keyframes boot-breathe { 0%,100% { opacity: .6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.12); } }
+      #boot-splash svg { position: relative; width: 128px; height: 64px; animation: boot-rise .5s ease-out; }
+      @keyframes boot-rise { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+      #boot-splash .bar { position: relative; margin-top: 28px; width: 208px; height: 4px; border-radius: 9999px; background: rgba(255,255,255,.06); overflow: hidden; }
+      #boot-splash .bar > div {
+        height: 100%; width: 40%; border-radius: 9999px;
+        background: linear-gradient(90deg, #8b5cf6, #22d3ee, #ec4899);
+        animation: boot-slide 1.1s ease-in-out infinite;
+      }
+      @keyframes boot-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(280%); } }
+    </style>
   </head>
   <body class="bg-bg text-fg antialiased">
+    <div id="boot-splash" aria-hidden="true">
+      <div class="glow"></div>
+      <svg viewBox="0 0 200 100" fill="none" aria-label="Infinite OS">
+        <defs>
+          <linearGradient id="boot-spectrum" x1="18" y1="16" x2="182" y2="84" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#8b5cf6" />
+            <stop offset=".5" stop-color="#22d3ee" />
+            <stop offset="1" stop-color="#ec4899" />
+          </linearGradient>
+        </defs>
+        <path d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="#38bdf8" stroke-width="7" opacity=".34" />
+        <path d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="url(#boot-spectrum)" stroke-width="12" opacity=".45" />
+        <path d="M18 50C18 29 32 16 50 16c21 0 34 18 50 34s29 34 50 34c18 0 32-13 32-34s-14-34-32-34c-21 0-34 18-50 34S71 84 50 84C32 84 18 71 18 50Z" stroke="url(#boot-spectrum)" stroke-width="7" />
+      </svg>
+      <div class="bar"><div></div></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

@@ -21,7 +21,7 @@ import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
 import { useLayoutStore } from '../../stores/layout';
 import { useNotificationStore } from '../../stores/notifications';
 
-function InteractiveQuestion({ block, onAnswer }: { block: { question: string; header?: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string; multiple?: boolean }; onAnswer: (answer: string) => void }) {
+function InteractiveQuestion({ block, onAnswer, onSkip, answeredCount, totalCount }: { block: { question: string; header?: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string; multiple?: boolean }; onAnswer: (answer: string) => void; onSkip?: () => void; answeredCount?: number; totalCount?: number }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [customValue, setCustomValue] = useState('');
   const [customSelected, setCustomSelected] = useState(false);
@@ -56,9 +56,21 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
     if (customSelected && customValue.trim()) parts.push(customValue.trim());
     onAnswer(parts.join(' | '));
   };
+  const skip = () => {
+    if (submitted) return;
+    setSubmitted(true);
+    if (onSkip) onSkip();
+    else onAnswer('[skipped]');
+  };
+  const showProgress = typeof answeredCount === 'number' && typeof totalCount === 'number' && totalCount > 0;
 
   return (
     <div className="my-3 rounded-2xl border border-white/[0.06] bg-[#0c1018]/80 backdrop-blur-xl overflow-hidden shadow-[0_12px_32px_rgba(0,0,0,.35)]">
+      {showProgress && (
+        <div className="px-4 pt-3 text-[11px] text-zinc-500">
+          {(answeredCount ?? 0) + (submitted ? 1 : 0)} of {totalCount} answered
+        </div>
+      )}
       <div className="px-4 pt-4 pb-3 border-b border-white/[0.05] bg-gradient-to-r from-violet-500/[0.06] via-cyan-500/[0.06] to-transparent">
         <div className="flex items-center gap-2">
           <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-cyan-400 text-white text-[10px]">?</span>
@@ -113,13 +125,24 @@ function InteractiveQuestion({ block, onAnswer }: { block: { question: string; h
       </div>
       <div className="px-3 pb-3 flex items-center justify-between">
         <span className="text-[11px] text-zinc-600">{submitted ? 'Answered — continuing…' : isMultiple ? 'Select one or more, or type your own' : 'Select one or type your own'}</span>
-        <button
-          onClick={submit}
-          disabled={!canSubmit}
-          className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${canSubmit ? 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-[0_6px_16px_rgba(124,58,237,.3)] hover:from-violet-500 hover:to-cyan-400 active:scale-[0.98]' : 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'}`}
-        >
-          {submitted ? 'Sent' : 'Submit'}
-        </button>
+        <div className="flex items-center gap-2">
+          {!submitted && (
+            <button
+              onClick={skip}
+              className="rounded-full px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
+            >
+              Skip
+            </button>
+          )}
+          <button
+            onClick={submit}
+            disabled={!canSubmit}
+            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${canSubmit ? 'bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-[0_6px_16px_rgba(124,58,237,.3)] hover:from-violet-500 hover:to-cyan-400 active:scale-[0.98]' : 'bg-white/5 text-zinc-500 border border-white/5 cursor-not-allowed'}`}
+          >
+            {submitted ? 'Sent' : 'Confirm and continue'}
+            {!submitted && <span aria-hidden>»</span>}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2426,9 +2449,15 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               <InteractiveQuestion
                 key={i}
                 block={block}
+                answeredCount={i}
+                totalCount={questionBlocks.length}
                 onAnswer={(answer) => {
                   const sendMessage = useChatStore.getState().sendMessage;
                   sendMessage(`[Question Answer] ${block.questionId}: ${answer}`);
+                }}
+                onSkip={() => {
+                  const sendMessage = useChatStore.getState().sendMessage;
+                  sendMessage(`[Question Skipped] ${block.questionId}`);
                 }}
               />
             ))}
