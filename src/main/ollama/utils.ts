@@ -53,7 +53,11 @@ export async function ensureOllamaRunning(): Promise<boolean> {
       windowsHide: true,
       env: process.env,
     });
-    child.on('error', () => { /* Ollama binary not found — graceful fallback */ });
+    child.on('error', (err) => {
+      // Visible (not silent): if Ollama can't even start, local models can
+      // never work and every turn pointlessly waits through the poll window.
+      console.warn(`[ollama] could not start server process: ${(err as Error).message}`);
+    });
     child.unref();
 
     // Poll up to 10 seconds for Ollama to come up.
