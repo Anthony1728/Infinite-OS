@@ -474,9 +474,11 @@ export const IPC = {
   CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
   CLIPBOARD_WRITE_IMAGE: 'clipboard:write-image',
 
-  // Messaging (unified Slack / Discord / Telegram)
+  // Messaging (unified Slack / Discord / Telegram / WhatsApp + Telegram inbound)
   MESSAGING_STATUS: 'messaging:status',
   MESSAGING_SEND: 'messaging:send',
+  MESSAGING_INBOUND_GET: 'messaging:inbound:get',
+  MESSAGING_INBOUND_SET: 'messaging:inbound:set',
 
   // Notification
   NOTIFICATION_SHOW: 'notification:show',

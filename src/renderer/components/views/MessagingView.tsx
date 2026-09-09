@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNotificationStore } from '../../stores/notifications';
 
-type Channel = 'send_slack' | 'send_discord' | 'send_telegram';
+type Channel = 'send_slack' | 'send_discord' | 'send_telegram' | 'send_whatsapp';
 
 const CHANNELS: Array<{ id: Channel; name: string; hint: string; credFields: Array<{ key: string; label: string; placeholder: string; secret?: boolean }> }> = [
   {
@@ -28,6 +28,20 @@ const CHANNELS: Array<{ id: Channel; name: string; hint: string; credFields: Arr
       { key: 'telegramChatId', label: 'Chat id', placeholder: '@channel or 123456789' },
     ],
   },
+  {
+    id: 'send_whatsapp',
+    name: 'WhatsApp',
+    hint: 'Meta Cloud (default) or Twilio — per-send creds or WHATSAPP_*/TWILIO_* env',
+    credFields: [
+      { key: 'whatsappTo', label: 'To (E.164)', placeholder: '+15551234567' },
+      { key: 'whatsappVia', label: 'Via (meta/twilio)', placeholder: 'meta' },
+      { key: 'whatsappPhoneNumberId', label: 'Meta phone_number_id', placeholder: '123456789…' },
+      { key: 'whatsappToken', label: 'Meta access token', placeholder: 'EAAB…', secret: true },
+      { key: 'twilioAccountSid', label: 'Twilio SID (twilio only)', placeholder: 'AC…' },
+      { key: 'twilioAuthToken', label: 'Twilio token (twilio only)', placeholder: '…', secret: true },
+      { key: 'twilioFrom', label: 'Twilio from (twilio only)', placeholder: 'whatsapp:+14155238886' },
+    ],
+  },
 ];
 
 // Messaging — Slack / Discord / Telegram through one unified sender.
@@ -39,28 +53,72 @@ export function MessagingView() {
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<Record<string, boolean> | null>(null);
+  const [inbound, setInbound] = useState<{ enabled: boolean; running: boolean; allowedChatIds: string[] } | null>(null);
+  const [allowInput, setAllowInput] = useState('');
+  const [inboundSaving, setInboundSaving] = useState(false);
+
+  const refreshInbound = async () => {
+    try {
+      const res = (await window.api.messagingInboundGet()) as {
+        ok: boolean;
+        enabled?: boolean;
+        running?: boolean;
+        allowedChatIds?: string[];
+      };
+      if (res.ok) {
+        setInbound({ enabled: !!res.enabled, running: !!res.running, allowedChatIds: res.allowedChatIds ?? [] });
+        setAllowInput((res.allowedChatIds ?? []).join(', '));
+      }
+    } catch {
+      /* inbound panel is advisory */
+    }
+  };
 
   useEffect(() => {
     void (async () => {
       try {
         const res = (await window.api.messagingStatus()) as {
           ok: boolean;
-          status?: { slackWebhook?: boolean; discordWebhook?: boolean; telegram?: boolean };
+          status?: { slackWebhook?: boolean; discordWebhook?: boolean; telegram?: boolean; whatsappMeta?: boolean; whatsappTwilio?: boolean };
         };
         if (res.ok && res.status) {
           setStatus({
             send_slack: !!res.status.slackWebhook,
             send_discord: !!res.status.discordWebhook,
             send_telegram: !!res.status.telegram,
+            send_whatsapp: !!(res.status.whatsappMeta || res.status.whatsappTwilio),
           });
         }
       } catch {
         /* status is advisory only */
       }
+      void refreshInbound();
     })();
   }, []);
 
   const active = CHANNELS.find((c) => c.id === channel)!;
+
+  const saveInbound = async (enabled: boolean) => {
+    setInboundSaving(true);
+    try {
+      const allowedChatIds = allowInput.split(',').map((c) => c.trim().replace(/^@/, '')).filter(Boolean);
+      const res = (await window.api.messagingInboundSet({ enabled, allowedChatIds })) as { ok: boolean; error?: string };
+      if (!res.ok) {
+        addToast({ title: 'Inbox update failed', message: res.error ?? 'Unknown error', type: 'error' });
+      } else {
+        addToast({
+          title: enabled ? 'Telegram inbox on' : 'Telegram inbox off',
+          message: enabled ? 'DMs from allowlisted chats become agent turns.' : 'The bot will ignore incoming DMs.',
+          type: 'success',
+        });
+      }
+      await refreshInbound();
+    } catch (e) {
+      addToast({ title: 'Inbox update failed', message: e instanceof Error ? e.message : 'Unknown error', type: 'error' });
+    } finally {
+      setInboundSaving(false);
+    }
+  };
 
   const send = async (simulate: boolean) => {
     if (!text.trim()) {
@@ -77,6 +135,13 @@ export function MessagingView() {
         username: undefined,
         telegramToken: creds.telegramToken || undefined,
         telegramChatId: creds.telegramChatId || undefined,
+        whatsappTo: creds.whatsappTo || undefined,
+        whatsappVia: creds.whatsappVia === 'twilio' ? 'twilio' : undefined,
+        whatsappPhoneNumberId: creds.whatsappPhoneNumberId || undefined,
+        whatsappToken: creds.whatsappToken || undefined,
+        twilioAccountSid: creds.twilioAccountSid || undefined,
+        twilioAuthToken: creds.twilioAuthToken || undefined,
+        twilioFrom: creds.twilioFrom || undefined,
       })) as { ok: boolean; error?: string; result?: string };
       if (!res.ok) {
         addToast({ title: 'Send failed', message: res.error ?? 'Unknown error', type: 'error' });
@@ -92,9 +157,9 @@ export function MessagingView() {
   };
 
   return (
-    <div className="flex-1 overflow-hidden p-6 animate-fade-in flex flex-col min-h-0">
+    <div className="flex-1 overflow-y-auto p-6 animate-fade-in flex flex-col gap-4 min-h-0">
       <h1 className="text-2xl font-bold text-white leading-tight">Messaging</h1>
-      <p className="text-zinc-500 text-sm mb-4">One sender for Slack, Discord, and Telegram.</p>
+      <p className="text-zinc-500 text-sm mb-4">One sender for Slack, Discord, Telegram, and WhatsApp — plus Telegram inbox control.</p>
 
       <div className="flex items-center gap-1.5 mb-4">
         {CHANNELS.map((c) => {
@@ -154,6 +219,45 @@ export function MessagingView() {
           >
             Dry run
           </button>
+        </div>
+      </div>
+
+      {/* Telegram inbox (OpenClaw loop) */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-semibold text-white">Telegram inbox → agent</h2>
+          <span className="text-[11px] text-zinc-500">
+            {inbound ? (inbound.running ? 'poller running' : 'poller idle') : 'loading…'}
+          </span>
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">
+          DMs to your Telegram bot become agent turns, answered back in that chat. Only allowlisted chats — everyone else is ignored. Needs a bot token (BotFather → saved as the <span className="text-zinc-300">telegram</span> key or TELEGRAM_BOT_TOKEN) and a local model ready.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={allowInput}
+            onChange={(e) => setAllowInput(e.target.value)}
+            placeholder="Allowed chat ids, comma-separated — find yours via @userinfobot"
+            className="flex-1 px-3 py-2 text-sm rounded-lg bg-black/30 border border-white/10 text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-400/60"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => void saveInbound(true)}
+              disabled={inboundSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:from-violet-500 hover:to-cyan-400 disabled:opacity-50 transition-all"
+            >
+              {inbound?.enabled ? 'Update & keep on' : 'Turn on'}
+            </button>
+            {inbound?.enabled && (
+              <button
+                onClick={() => void saveInbound(false)}
+                disabled={inboundSaving}
+                className="rounded-lg px-3 py-2 text-xs font-medium bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.07] disabled:opacity-50 transition-colors"
+              >
+                Turn off
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

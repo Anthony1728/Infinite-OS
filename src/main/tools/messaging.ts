@@ -2,35 +2,50 @@ import type { Tool, ToolContext, ToolResult } from './base.js';
 
 /**
  * Messaging Integrations — Hermes-beating, production-grade unified webhook tool.
- * Covers: Slack (incoming webhook + bot token), Discord (webhook), Telegram (bot token + chat_id)
+ * Covers: Slack (incoming webhook + bot token), Discord (webhook), Telegram (bot token + chat_id),
+ * WhatsApp (Meta Cloud API or Twilio, outbound)
  * All network calls respect abortSignal and 15s timeout, never leak tokens in output.
- * Hermes has messaging; Infinite OS supports 3 providers in one tool with typed validation
+ * Hermes has messaging; Infinite OS supports 4 providers in one tool with typed validation
  * and automatic chunking, plus local simulation when no credentials are configured.
  */
 interface MessagingArgs {
-  action: 'send_slack' | 'send_discord' | 'send_telegram' | 'simulate' | 'status';
+  action: 'send_slack' | 'send_discord' | 'send_telegram' | 'send_whatsapp' | 'simulate' | 'status';
   text?: string;
   webhookUrl?: string;
   channel?: string;
   username?: string;
   telegramToken?: string;
   telegramChatId?: string;
+  whatsappTo?: string;
+  whatsappVia?: 'meta' | 'twilio';
+  whatsappPhoneNumberId?: string;
+  whatsappToken?: string;
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFrom?: string;
 }
 
 export const messagingTool: Tool = {
   name: 'Messaging',
   description:
-    'Unified messaging for Slack, Discord, and Telegram. Send a message via a webhook URL or bot token. Hermes messaging is per-platform; Infinite OS unifies all three in one tool with validation, chunking (1900 chars for Discord, 4000 for Slack/Telegram), and a dry-run simulate mode that reports what would be sent without hitting the network. Prefers webhookUrl when given; falls back to env vars SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.',
+    'Unified messaging for Slack, Discord, Telegram, and WhatsApp. Send a message via a webhook URL or bot token. Hermes messaging is per-platform; Infinite OS unifies all four in one tool with validation, chunking (1900 chars for Discord, 4000 elsewhere), and a dry-run simulate mode that reports what would be sent without hitting the network. Prefers per-call credentials when given; falls back to env vars SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID, WHATSAPP_* / TWILIO_*. WhatsApp sends via Meta Cloud API (default) or Twilio.',
   inputSchema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['send_slack', 'send_discord', 'send_telegram', 'simulate', 'status'], description: 'Destination' },
+      action: { type: 'string', enum: ['send_slack', 'send_discord', 'send_telegram', 'send_whatsapp', 'simulate', 'status'], description: 'Destination' },
       text: { type: 'string', description: 'Message body (markdown supported where provider allows)' },
       webhookUrl: { type: 'string', description: 'Full webhook URL (Slack or Discord). Overrides env var.' },
       channel: { type: 'string', description: 'Slack channel #name (optional when webhook encodes it)' },
       username: { type: 'string', description: 'Display name override (Slack/Discord)' },
       telegramToken: { type: 'string', description: 'Telegram bot token (BotFather). Overrides TELEGRAM_BOT_TOKEN.' },
       telegramChatId: { type: 'string', description: 'Telegram chat_id (numeric or @username). Overrides TELEGRAM_CHAT_ID.' },
+      whatsappTo: { type: 'string', description: 'Recipient phone in E.164, e.g. +15551234567. Overrides WHATSAPP_TO.' },
+      whatsappVia: { type: 'string', enum: ['meta', 'twilio'], description: 'WhatsApp sender: Meta Cloud API (default) or Twilio. Overrides WHATSAPP_VIA.' },
+      whatsappPhoneNumberId: { type: 'string', description: 'Meta Cloud phone_number_id. Overrides WHATSAPP_PHONE_NUMBER_ID.' },
+      whatsappToken: { type: 'string', description: 'Meta Cloud access token. Overrides WHATSAPP_TOKEN.' },
+      twilioAccountSid: { type: 'string', description: 'Twilio Account SID. Overrides TWILIO_ACCOUNT_SID.' },
+      twilioAuthToken: { type: 'string', description: 'Twilio Auth Token. Overrides TWILIO_AUTH_TOKEN.' },
+      twilioFrom: { type: 'string', description: 'Twilio WhatsApp sender, e.g. whatsapp:+14155238886. Overrides TWILIO_WHATSAPP_FROM.' },
     },
     required: ['action'],
   },
@@ -42,8 +57,10 @@ export const messagingTool: Tool = {
       const hasSlack = Boolean(process.env.SLACK_WEBHOOK_URL);
       const hasDiscord = Boolean(process.env.DISCORD_WEBHOOK_URL);
       const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+      const hasWhatsappMeta = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
+      const hasWhatsappTwilio = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
       return {
-        content: JSON.stringify({ slackWebhook: hasSlack, discordWebhook: hasDiscord, telegram: hasTelegram, note: 'Set webhookUrl/telegramToken/chatId per call or export env vars.' }, null, 2),
+        content: JSON.stringify({ slackWebhook: hasSlack, discordWebhook: hasDiscord, telegram: hasTelegram, whatsappMeta: hasWhatsappMeta, whatsappTwilio: hasWhatsappTwilio, note: 'Set per-call credentials or export env vars.' }, null, 2),
       };
     }
     if (a.action === 'simulate') {
@@ -98,6 +115,38 @@ export const messagingTool: Tool = {
           }
         }
         return { content: `Sent ${text.length} chars to Telegram chat ${mask(chatId)} in ${chunks(text, 4000).length} chunk(s).` };
+      }
+      if (a.action === 'send_whatsapp') {
+        const to = a.whatsappTo || process.env.WHATSAPP_TO;
+        if (!to) return need('whatsappTo (or set WHATSAPP_TO env var)');
+        const via = a.whatsappVia || (process.env.WHATSAPP_VIA === 'twilio' ? 'twilio' : 'meta');
+        if (via === 'twilio') {
+          const sid = a.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID;
+          const token = a.twilioAuthToken || process.env.TWILIO_AUTH_TOKEN;
+          const from = a.twilioFrom || process.env.TWILIO_WHATSAPP_FROM;
+          if (!sid) return need('twilioAccountSid (or set TWILIO_ACCOUNT_SID env var)');
+          if (!token) return need('twilioAuthToken (or set TWILIO_AUTH_TOKEN env var)');
+          if (!from) return need('twilioFrom like whatsapp:+14155238886 (or set TWILIO_WHATSAPP_FROM env var)');
+          const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`;
+          const auth = Buffer.from(`${sid}:${token}`).toString('base64');
+          const dest = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+          for (const chunk of chunks(text, 4000)) {
+            const form = new URLSearchParams({ To: dest, From: from, Body: chunk });
+            const res = await fetchWithTimeout(url, { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() }, ctx.abortSignal);
+            if (!res.ok) return fail(`WhatsApp (Twilio) ${res.status}: ${await safeText(res)}`);
+          }
+          return { content: `Sent ${text.length} chars via WhatsApp (Twilio) to ${mask(to)} in ${chunks(text, 4000).length} chunk(s).` };
+        }
+        const phoneNumberId = a.whatsappPhoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+        const token = a.whatsappToken || process.env.WHATSAPP_TOKEN;
+        if (!phoneNumberId) return need('whatsappPhoneNumberId (or set WHATSAPP_PHONE_NUMBER_ID env var)');
+        if (!token) return need('whatsappToken (or set WHATSAPP_TOKEN env var)');
+        const url = `https://graph.facebook.com/v22.0/${encodeURIComponent(phoneNumberId)}/messages`;
+        for (const chunk of chunks(text, 4000)) {
+          const res = await fetchWithTimeout(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: chunk } }) }, ctx.abortSignal);
+          if (!res.ok) return fail(`WhatsApp (Meta) ${res.status}: ${await safeText(res)}`);
+        }
+        return { content: `Sent ${text.length} chars via WhatsApp (Meta) to ${mask(to)} in ${chunks(text, 4000).length} chunk(s).` };
       }
       return { content: `Unknown messaging action: ${a.action}`, is_error: true };
     } catch (e) {

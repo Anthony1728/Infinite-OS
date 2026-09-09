@@ -253,6 +253,16 @@ app.whenReady().then(async () => {
   // watch the agent over SSE. Never blocks startup.
   phoneRemoteServer.start();
 
+  // Telegram inbound (OpenClaw loop): DMs to your bot become agent turns.
+  // Idle until enabled via settings/env + token + allowlist. Never blocks startup.
+  void import('./messaging/telegram-inbound.js').then(({ telegramInbound }) => {
+    try {
+      telegramInbound.start();
+    } catch (e) {
+      logger.warn({ err: e }, 'Telegram inbound failed to start');
+    }
+  }).catch(() => {});
+
   // Pre-warm model connections in background (non-blocking)
   warmUpModels().catch((e) => logger.warn({ err: e }, 'Model warm-up failed'));
 
@@ -347,6 +357,11 @@ app.on('window-all-closed', () => {
   bridgeServer.stop();
   phoneRemoteServer.stop();
   automationScheduler.stop();
+  void import('./messaging/telegram-inbound.js').then(({ telegramInbound }) => {
+    try {
+      telegramInbound.stop();
+    } catch { /* already stopped */ }
+  }).catch(() => {});
   void browserOperator.shutdown().finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });

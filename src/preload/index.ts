@@ -666,17 +666,27 @@ const api = {
   clipboardRead: (args?: { format?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_READ, args ?? {}),
   clipboardWrite: (args: { text?: string; html?: string }) => ipcRenderer.invoke(IPC.CLIPBOARD_WRITE, args),
 
-  // Unified messaging (Slack / Discord / Telegram)
+  // Unified messaging (Slack / Discord / Telegram / WhatsApp + Telegram inbound)
   messagingStatus: () => ipcRenderer.invoke(IPC.MESSAGING_STATUS),
   messagingSend: (args: {
-    action: 'send_slack' | 'send_discord' | 'send_telegram' | 'simulate';
+    action: 'send_slack' | 'send_discord' | 'send_telegram' | 'send_whatsapp' | 'simulate';
     text: string;
     webhookUrl?: string;
     channel?: string;
     username?: string;
     telegramToken?: string;
     telegramChatId?: string;
+    whatsappTo?: string;
+    whatsappVia?: 'meta' | 'twilio';
+    whatsappPhoneNumberId?: string;
+    whatsappToken?: string;
+    twilioAccountSid?: string;
+    twilioAuthToken?: string;
+    twilioFrom?: string;
   }) => ipcRenderer.invoke(IPC.MESSAGING_SEND, args),
+  messagingInboundGet: () => ipcRenderer.invoke(IPC.MESSAGING_INBOUND_GET),
+  messagingInboundSet: (args: { enabled?: boolean; allowedChatIds?: string[] }) =>
+    ipcRenderer.invoke(IPC.MESSAGING_INBOUND_SET, args),
 
   // Notifications
   notificationShow: (args: { title: string; body: string; silent?: boolean }) =>
