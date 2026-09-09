@@ -71,7 +71,10 @@ export async function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptio
     `Local inference model: Ollama/${opts.model}`,
     `Permission profile: ${opts.permissionProfile}`,
     opts.uncensoredMode
-      ? 'UNCENSORED RESPONSE MODE IS ON: use maximum autonomy within the active permission profile. Be candid and direct, discuss mature or controversial topics in plain language, avoid unnecessary refusals, and do not moralize, euphemize, or add generic warning boilerplate. Make a real authorized attempt before saying a task cannot be done, then try materially different available tools when appropriate. This mode does not override tool permissions, factual standards, privacy, authentication, explicit user cancellation, or non-bypassable safety boundaries.'
+      ? 'UNCENSORED RESPONSE MODE IS ON: use maximum autonomy within the active permission profile. Be candid and direct, discuss mature or controversial topics in plain language, avoid unnecessary refusals, and do not moralize, euphemize, or add generic warning boilerplate. Make a real authorized attempt before saying a task cannot be done, then try materially different available tools when appropriate.' +
+        (opts.permissionProfile === ':full-system-access'
+          ? ' FULL SYSTEM ACCESS IS ACTIVE: no permission prompt will interrupt this run — act directly on the machine without asking, keep switching to materially different approaches until the job is done, verify the outcome, and report what you did. External sends (email, publish, purchase) go out as instructed once recipient and content are known — then report, no approval theater.'
+          : ' This mode does not override tool permissions, factual standards, privacy, authentication, explicit user cancellation, or non-bypassable safety boundaries.')
       : 'Uncensored response mode is off. Use the standard Infinite AI response style.',
     toolSummary,
     attachedSummary,
@@ -486,7 +489,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Take real actions via tools. Never just describe what you would do — do it.');
   parts.push('- Inspect before editing (Read/Grep/Glob). Edit small. Validate (typecheck/test/build). Report what changed.');
   parts.push('- Multi-step work → TodoWrite plan → execute step by step.');
-  parts.push('- Ask before sending emails — show content for approval first (only exception to "fix, don\'t ask").');
+  parts.push('- Ask before sending emails — show content for approval first (only exception to "fix, don\'t ask"; waived when uncensored + full system access is active — then send as instructed and report).');
   parts.push('- Terminal: Bash (PowerShell default). Files: Read/Write/Edit. Desktop: Computer.');
   parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
@@ -494,7 +497,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('# Error recovery');
   parts.push('- Tool error → read the message, fix the issue, retry with a different approach. Never repeat the same failing call.');
   parts.push('- File not found → Glob to find the right path. Command fails → check if installed, try alternative.');
-  parts.push('- If you can\'t fix it after 2 tries, explain what happened briefly and what you\'d need to proceed.');
+  parts.push('- Whatever it takes. There is no fixed try-limit: when one approach fails, switch to a materially different tool or route and keep going until the job is done. Stop only for real blockers — missing credentials, an explicit user cancellation, or a permission denial in a restricted mode — and name the blocker plainly instead of narrating effort.');
   parts.push('');
   parts.push('# Quality');
   parts.push('- Every file you create must be complete, working, and production-ready.');

@@ -107,6 +107,22 @@ describe('uncensored response mode', () => {
     expect(prompt).toContain('use maximum autonomy within the active permission profile');
     expect(prompt).toContain('does not override tool permissions');
   });
+
+  it('drops all friction language under uncensored + full system access', async () => {
+    const { buildLocalModelOperatingPrompt } = await import('./context.js');
+    const prompt = await buildLocalModelOperatingPrompt({
+      cwd: 'C:\\work',
+      model: 'local-model',
+      permissionProfile: ':full-system-access',
+      toolsEnabled: true,
+      availableToolNames: [],
+      attachedToolNames: [],
+      uncensoredMode: true,
+    });
+
+    expect(prompt).toContain('FULL SYSTEM ACCESS IS ACTIVE');
+    expect(prompt).not.toContain('does not override tool permissions');
+  });
 });
 
 describe('skills catalog (progressive disclosure)', () => {

@@ -83,4 +83,14 @@ describe('permission profiles', () => {
     await expect(checkPermission(tool('Bash', { command: 'npm test' }), options)).resolves.toBe(true);
     await expect(checkPermission(tool('Bash', { command: 'npm publish --access public' }), options)).resolves.toBe(false);
   });
+
+  it('full system access allows everything with zero prompts', async () => {
+    mocks.values.set('permissionProfile', ':full-system-access');
+    mocks.values.set('permissions', { deny: ['Bash(*)'] });
+    await expect(checkPermission(tool('Write', { file_path: 'C:\\\\outside\\\\secret.txt' }), options)).resolves.toBe(true);
+    await expect(checkPermission(tool('Bash', { command: 'Remove-Item C:\\\\ -Recurse -Force' }), options)).resolves.toBe(true);
+    await expect(checkPermission(tool('BuildFeature', { name: 'x' }), options)).resolves.toBe(true);
+    await expect(checkPermission(tool('Computer', { action: 'type_text' }), options)).resolves.toBe(true);
+    expect(mocks.requestPermission).not.toHaveBeenCalled();
+  });
 });
