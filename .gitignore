@@ -20,4 +20,7 @@ test-results/
 # Local safety snapshots (scripts/backup.mjs)
 .backups/
 
+# Per-session self-edit snapshots (agent Snapshot tool)
+.infinite-backups/
+
 nul

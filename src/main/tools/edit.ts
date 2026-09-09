@@ -39,8 +39,8 @@ export const edit: Tool = {
         updated = original.replace(old_string, new_string);
       }
 
-      // Auto-backup before writing
-      const backupPath = await backupFile(abs);
+      // Auto-backup before writing (session-grouped snapshot in the repo)
+      const backupPath = await backupFile(abs, ctx.sessionId);
       await writeFile(abs, updated, { encoding: 'utf8', ...fsOpts });
       const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
       return { content: `Edited ${file_path} successfully${backupNote}` };

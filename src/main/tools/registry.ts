@@ -112,6 +112,7 @@ import { csvTool } from './csv.js';
 import { translateTool } from './translate.js';
 import { colorTool } from './color.js';
 import { verifyTool } from './verify.js';
+import { snapshotTool } from './snapshot.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -234,6 +235,7 @@ export function registerBuiltinTools(): void {
     translateTool,
     colorTool,
     verifyTool,
+    snapshotTool,
   ]) {
     toolRegistry.register(t);
   }

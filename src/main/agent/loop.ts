@@ -305,7 +305,7 @@ export async function runAgent(
       'Computer', 'browser_extension', 'Operator', 'Verify',
       'FileOps', 'Knowledge', 'System',
       'Git', 'CreateTab', 'BuildFeature',
-      'Batch', 'AskQuestion', 'TaskGroup',
+      'Batch', 'AskQuestion', 'TaskGroup', 'Snapshot',
     ]);
     // Dynamic tool selection: on the first turn, prefer the brief's tool hints if present
     // (already a filtered, task-aware set). Fall back to CORE set after that.
