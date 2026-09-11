@@ -11,6 +11,7 @@
 
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
+import { mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs';
 import { infiniteHome } from '../profiles/home.js';
 import { settings } from '../settings/store.js';
 
@@ -24,6 +25,7 @@ export interface WhatsAppLinkStatus {
   startedAt: number | null;
   lastInbound: { at: number; from: string; reason: string; answered: boolean } | null;
   lastTurn: { at: number; ok: boolean; error: string | null } | null;
+  debugLog: string | null;
 }
 
 export interface WhatsAppLinkDeps {
@@ -138,6 +140,27 @@ export function extraAllowedJids(): Set<string> {
   return out;
 }
 
+export function debugLogPath(): string {
+  return join(infiniteHome(), 'whatsapp-link', 'debug.log');
+}
+
+/** Append-only debug log (capped): every connection event, inbound summary,
+ * gate decision, and turn outcome lands here so a silent phone-side failure
+ * can be diagnosed from the file instead of guessed at. */
+export function appendDebugLog(line: string): void {
+  try {
+    const p = debugLogPath();
+    mkdirSync(join(infiniteHome(), 'whatsapp-link'), { recursive: true });
+    try {
+      // Cap the file: keep the last ~100KB so it can never grow unbounded.
+      if (statSync(p).size > 200_000) {
+        writeFileSync(p, readFileSync(p, 'utf8').slice(-100_000), 'utf8');
+      }
+    } catch { /* no log yet */ }
+    appendFileSync(p, `${new Date().toISOString()} ${line}\n`, 'utf8');
+  } catch { /* logging must never break the link */ }
+}
+
 class WhatsAppLink {
   private state: WhatsAppLinkState = 'off';
   private sock: WhatsAppSocket | null = null;
@@ -152,7 +175,7 @@ class WhatsAppLink {
   private lastTurn: WhatsAppLinkStatus['lastTurn'] = null;
 
   status(): WhatsAppLinkStatus {
-    return { state: this.state, owner: this.owner, qrDataUrl: this.qrDataUrl, lastError: this.lastError, startedAt: this.startedAt, lastInbound: this.lastInbound, lastTurn: this.lastTurn };
+    return { state: this.state, owner: this.owner, qrDataUrl: this.qrDataUrl, lastError: this.lastError, startedAt: this.startedAt, lastInbound: this.lastInbound, lastTurn: this.lastTurn, debugLog: debugLogPath() };
   }
 
   isOn(): boolean {
@@ -264,6 +287,7 @@ class WhatsAppLink {
     const log = deps.log ?? (() => {});
     const connection = update.connection as string | undefined;
     if (typeof update.qr === 'string' && update.qr) {
+      appendDebugLog('event connection.update qr=present');
       try {
         const { default: QRCode } = await import('qrcode');
         this.qrDataUrl = await QRCode.toDataURL(update.qr, { width: 264, margin: 1 });
@@ -278,6 +302,7 @@ class WhatsAppLink {
       this.owner = ownId || this.owner;
       this.lastError = null;
       this.setState('open');
+      appendDebugLog(`event connection=open owner=${this.owner ?? '(unknown)'}`);
       log('[whatsapp-link] connected as', this.owner ?? '(unknown)');
       return;
     }
@@ -288,11 +313,13 @@ class WhatsAppLink {
       if (code === 401) {
         // Logged out on the phone — creds are dead, stay off until re-pair.
         this.lastError = 'Logged out on the phone. Unpair and scan again.';
+        appendDebugLog('event connection=close code=401 (logged out on phone)');
         this.wantOn = false;
         this.setState('closed');
         return;
       }
       this.lastError = `Connection closed${code ? ` (${code})` : ''}.`;
+      appendDebugLog(`event connection=close code=${code ?? 'unknown'}`);
       this.setState('closed');
       if (this.wantOn) {
         this.setState('connecting');
@@ -308,6 +335,7 @@ class WhatsAppLink {
     const now = deps.now ?? Date.now;
     if (upsert.type !== 'notify') return;
     const messages = (upsert.messages ?? []) as Array<Record<string, unknown>>;
+    appendDebugLog(`event messages.upsert count=${messages.length}`);
     const ownJid = this.owner ?? (this.sock?.user?.id ? normalizeJid(this.sock.user.id) : '');
     for (const raw of messages) {
       const key = (raw.key ?? {}) as Record<string, unknown>;
@@ -331,7 +359,10 @@ class WhatsAppLink {
       });
       if (!decision.answer || !this.sock) {
         // Record drops too — a panel showing "dropped (history)" beats silence.
-        if (text) this.lastInbound = { at: now(), from: remoteJid, reason: this.sock ? decision.reason : 'no-socket', answered: false };
+        if (text) {
+          this.lastInbound = { at: now(), from: remoteJid, reason: this.sock ? decision.reason : 'no-socket', answered: false };
+          appendDebugLog(`inbound from=${remoteJid} decision=${this.sock ? decision.reason : 'no-socket'} answered=false chars=${text.length}`);
+        }
         continue;
       }
       // Claim the id BEFORE the turn so our own echo can never re-trigger.
@@ -344,16 +375,20 @@ class WhatsAppLink {
       }
       this.lastInbound = { at: now(), from: remoteJid, reason: decision.reason, answered: true };
       log('[whatsapp-link] answering', remoteJid, `(${decision.reason})`);
+      appendDebugLog(`inbound from=${remoteJid} decision=${decision.reason} answered=true chars=${text.length}`);
       try {
         const answer = deps.runTurn ? await deps.runTurn(text, remoteJid) : await this.defaultRunTurn(text, log);
         this.lastTurn = { at: now(), ok: true, error: null };
+        appendDebugLog(`turn ok chars=${answer.length}`);
         const sent = await this.sock.sendMessage(remoteJid, { text: answer.slice(0, 4000) });
         const sentId = sent?.key?.id;
         if (sentId) this.sentIds.add(sentId);
+        appendDebugLog(`reply sent id=${sentId ?? '(unknown)'}`);
       } catch (e) {
         const err = (e as Error).message;
         this.lastTurn = { at: now(), ok: false, error: err };
         this.lastError = `Reply failed: ${err}`;
+        appendDebugLog(`turn FAILED error=${err.slice(0, 200)}`);
         log('[whatsapp-link] turn failed:', err);
         try {
           await this.sock.sendMessage(remoteJid, { text: `Sorry — I tried to run that but hit an error: ${err.slice(0, 300)}` });

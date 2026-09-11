@@ -56,7 +56,7 @@ export function MessagingView() {
   const [inbound, setInbound] = useState<{ enabled: boolean; running: boolean; allowedChatIds: string[] } | null>(null);
   const [allowInput, setAllowInput] = useState('');
   const [inboundSaving, setInboundSaving] = useState(false);
-  const [waLink, setWaLink] = useState<{ state: string; owner?: string | null; qrDataUrl?: string | null; lastError?: string | null; lastInbound?: { at: number; from: string; reason: string; answered: boolean } | null; lastTurn?: { at: number; ok: boolean; error: string | null } | null } | null>(null);
+  const [waLink, setWaLink] = useState<{ state: string; owner?: string | null; qrDataUrl?: string | null; lastError?: string | null; lastInbound?: { at: number; from: string; reason: string; answered: boolean } | null; lastTurn?: { at: number; ok: boolean; error: string | null } | null; debugLog?: string | null } | null>(null);
   const [waBusy, setWaBusy] = useState(false);
 
   const refreshWaLink = async () => {
@@ -69,8 +69,9 @@ export function MessagingView() {
         lastError?: string | null;
         lastInbound?: { at: number; from: string; reason: string; answered: boolean } | null;
         lastTurn?: { at: number; ok: boolean; error: string | null } | null;
+        debugLog?: string | null;
       };
-      if (res.ok) setWaLink({ state: res.state ?? 'off', owner: res.owner, qrDataUrl: res.qrDataUrl, lastError: res.lastError, lastInbound: res.lastInbound, lastTurn: res.lastTurn });
+      if (res.ok) setWaLink({ state: res.state ?? 'off', owner: res.owner, qrDataUrl: res.qrDataUrl, lastError: res.lastError, lastInbound: res.lastInbound, lastTurn: res.lastTurn, debugLog: res.debugLog });
     } catch {
       /* link panel is advisory */
     }
@@ -345,6 +346,9 @@ export function MessagingView() {
         )}
         {waLink?.state === 'open' && !waLink.lastInbound && (
           <p className="text-[11px] text-zinc-500 mb-3">Connected. Message yourself — nothing received yet.</p>
+        )}
+        {waLink?.debugLog && (
+          <p className="text-[10px] text-zinc-600 mb-3 font-mono break-all">Log: {waLink.debugLog}</p>
         )}
         <div className="flex gap-2">
           {(waLink?.state === 'off' || waLink?.state === 'closed') && (

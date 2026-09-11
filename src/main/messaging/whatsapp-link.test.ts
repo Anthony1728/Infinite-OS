@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeJid, isSelfChat, extractInboundText, shouldAnswerInbound } from './whatsapp-link.js';
+import { normalizeJid, isSelfChat, extractInboundText, shouldAnswerInbound, appendDebugLog, debugLogPath } from './whatsapp-link.js';
 
 const base = {
   ownJid: '15551234567@s.whatsapp.net',
@@ -68,5 +68,24 @@ describe('whatsapp link gating', () => {
     expect(
       shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', fromMe: true, messageId: 'msg-10' }).reason,
     ).toBe('self-chat');
+  });
+
+  it('writes a capped debug log under the active home', async () => {
+    const { mkdtempSync, rmSync, readFileSync, existsSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'wa-log-'));
+    const saved = process.env.INFINITE_TEST_HOME;
+    process.env.INFINITE_TEST_HOME = home;
+    try {
+      appendDebugLog('hello-log');
+      const p = debugLogPath();
+      expect(existsSync(p)).toBe(true);
+      expect(readFileSync(p, 'utf8')).toContain('hello-log');
+    } finally {
+      if (saved === undefined) delete process.env.INFINITE_TEST_HOME;
+      else process.env.INFINITE_TEST_HOME = saved;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
