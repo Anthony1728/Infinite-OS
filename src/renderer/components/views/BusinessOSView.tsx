@@ -95,6 +95,9 @@ const api = {
   updateDealStage: (id: string, stage: string) => window.api.businessUpdateDealStage({ id, stage }),
   getAnalytics: () => window.api.businessAnalytics(),
   getStats: () => window.api.businessStats(),
+  listEmails: () => window.api.businessListEmails(),
+  saveEmail: (data: Record<string, unknown>) => window.api.businessSaveEmail(data),
+  deleteEmail: (id: string) => window.api.businessDeleteEmail({ id }),
 };
 
 export function BusinessOSView() {
@@ -137,14 +140,16 @@ export function BusinessOSView() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [contactsData, invoicesData, dealsData] = await Promise.all([
+        const [contactsData, invoicesData, dealsData, emailsData] = await Promise.all([
           api.listContacts(),
           api.listInvoices(),
           api.listDeals(),
+          api.listEmails().catch(() => null),
         ]);
         if (contactsData) setContacts(contactsData);
         if (invoicesData) setInvoices(invoicesData);
         if (dealsData) setDeals(dealsData);
+        if (emailsData) setEmails(emailsData);
       } catch (e) {
         console.error('Failed to load business data:', e);
       }
@@ -242,15 +247,31 @@ export function BusinessOSView() {
     }
   };
 
-  const sendEmail = () => {
+  const sendEmail = async () => {
     if (!emailTo || !emailSubject) return;
-    const e: Email = {
-      id: uid(), from: 'me', to: emailTo, subject: emailSubject,
-      body: emailBody, preview: emailBody.slice(0, 80), time: now(), read: true,
-    };
-    setEmails(prev => [e, ...prev]);
+    try {
+      const saved = (await api.saveEmail({ from: 'me', to: emailTo, subject: emailSubject, body: emailBody })) as Email;
+      setEmails(prev => [saved, ...prev.filter(e => e.id !== saved.id)]);
+    } catch (e) {
+      console.error('Failed to save email:', e);
+      const fallback: Email = {
+        id: uid(), from: 'me', to: emailTo, subject: emailSubject,
+        body: emailBody, preview: emailBody.slice(0, 80), time: now(), read: true,
+      };
+      setEmails(prev => [fallback, ...prev]);
+    }
     setEmailTo(''); setEmailSubject(''); setEmailBody('');
     addActivity(`Email sent to ${emailTo}`, 'email');
+  };
+
+  const removeEmail = async (id: string) => {
+    try {
+      await api.deleteEmail(id);
+    } catch (e) {
+      console.error('Failed to delete email:', e);
+    }
+    setEmails(prev => prev.filter(e => e.id !== id));
+    if (selectedEmail?.id === id) setSelectedEmail(null);
   };
 
   const toggleTask = (id: string) => {
@@ -549,7 +570,7 @@ export function BusinessOSView() {
                 <div className="text-xs font-medium text-white/70 mb-2">Inbox</div>
                 <div className="space-y-1 max-h-[calc(100vh-220px)] overflow-y-auto">
                   {emails.map(e => (
-                    <button key={e.id} onClick={() => { setSelectedEmail(e); setEmails(prev => prev.map(em => em.id === e.id ? { ...em, read: true } : em)); }}
+                    <button key={e.id} onClick={() => { setSelectedEmail({ ...e, read: true }); setEmails(prev => prev.map(em => em.id === e.id ? { ...em, read: true } : em)); void api.saveEmail({ id: e.id, from: e.from, to: e.to, subject: e.subject, body: e.body, read: true }).catch(() => undefined); }}
                       className={`w-full text-left p-2 rounded-xl transition-all ${selectedEmail?.id === e.id ? 'bg-indigo-500/15 border border-indigo-500/30' : 'hover:bg-white/5 border border-transparent'}`}>
                       <div className="flex items-center gap-1.5">
                         {!e.read && <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />}
@@ -587,7 +608,10 @@ export function BusinessOSView() {
                       <div className="text-sm font-semibold text-white">{selectedEmail.subject}</div>
                       <div className="text-[10px] text-white/30 mt-0.5">From: {selectedEmail.from} Â· To: {selectedEmail.to}</div>
                     </div>
-                    <button onClick={() => setSelectedEmail(null)} className="text-white/30 hover:text-white/60"><X size={14} /></button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => void removeEmail(selectedEmail.id)} className="text-white/30 hover:text-red-400 text-[11px]">Delete</button>
+                      <button onClick={() => setSelectedEmail(null)} className="text-white/30 hover:text-white/60"><X size={14} /></button>
+                    </div>
                   </div>
                   <div className="text-xs text-white/60 whitespace-pre-wrap">{selectedEmail.body || 'No content'}</div>
                 </div>

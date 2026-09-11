@@ -61,7 +61,7 @@ export function CreationsView() {
 
   const reveal = async (item: Creation) => {
     if (!item.outputPath) {
-      addToast({ title: 'No output folder', message: 'This creation has no generated files yet.', type: 'error' });
+      addToast({ title: 'No folder yet', message: item.kind === 'app' ? 'Build the project first — its folder appears after the first build.' : 'Generate the site first — its folder appears after generation.', type: 'error' });
       return;
     }
     try {
@@ -150,10 +150,10 @@ export function CreationsView() {
               <div className="flex gap-2 mt-3">
                 <button
                   onClick={() => void reveal(item)}
-                  disabled={!item.outputPath}
-                  className="rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:from-violet-500 hover:to-cyan-400 disabled:opacity-40 transition-all"
+                  title={item.outputPath ?? 'No generated files yet'}
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:from-violet-500 hover:to-cyan-400 transition-all"
                 >
-                  Open folder
+                  {item.outputPath ? 'Open folder' : 'No folder yet'}
                 </button>
                 <button
                   onClick={() => void remove(item)}

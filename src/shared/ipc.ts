@@ -234,6 +234,9 @@ export const IPC = {
   BUSINESS_LIST_DEALS: 'business:list-deals',
   BUSINESS_ANALYTICS: 'business:analytics',
   BUSINESS_STATS: 'business:stats',
+  BUSINESS_LIST_EMAILS: 'business:list-emails',
+  BUSINESS_SAVE_EMAIL: 'business:save-email',
+  BUSINESS_DELETE_EMAIL: 'business:delete-email',
 
   // Plugin Store
   PLUGIN_INSTALL: 'plugin:install',

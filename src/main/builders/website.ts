@@ -56,6 +56,8 @@ export interface Website {
   updatedAt: number;
   deployedAt?: number;
   deployUrl?: string;
+  /** On-disk folder holding the last generated files (set by generateFiles). */
+  outputPath?: string;
 }
 
 export interface WebsiteTemplate {
@@ -449,11 +451,15 @@ const theme = {
     }
   }
 
+  private defaultOutputDir(website: Website): string {
+    return join(this.outputDir, website.name.toLowerCase().replace(/\s+/g, '-'));
+  }
+
   generateFiles(websiteId: string, outputDir?: string): string[] {
     const website = this.websites.get(websiteId);
     if (!website) return [];
 
-    const dir = outputDir || join(this.outputDir, website.name.toLowerCase().replace(/\s+/g, '-'));
+    const dir = outputDir || this.defaultOutputDir(website);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const files: string[] = [];
@@ -473,6 +479,9 @@ const theme = {
       }
     }
 
+    website.outputPath = dir;
+    website.updatedAt = Date.now();
+    this.saveData();
     return files;
   }
 
@@ -502,6 +511,16 @@ const theme = {
   }
 
   listWebsites(): Website[] {
+    // Backfill folders generated before outputPath was recorded: the default
+    // dir is deterministic, so adopt it when it exists on disk.
+    let changed = false;
+    for (const website of this.websites.values()) {
+      if (!website.outputPath && existsSync(this.defaultOutputDir(website))) {
+        website.outputPath = this.defaultOutputDir(website);
+        changed = true;
+      }
+    }
+    if (changed) this.saveData();
     return Array.from(this.websites.values());
   }
 

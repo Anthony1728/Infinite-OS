@@ -279,6 +279,9 @@ const api = {
   businessListDeals: () => ipcRenderer.invoke(IPC.BUSINESS_LIST_DEALS),
   businessAnalytics: () => ipcRenderer.invoke(IPC.BUSINESS_ANALYTICS),
   businessStats: () => ipcRenderer.invoke(IPC.BUSINESS_STATS),
+  businessListEmails: () => ipcRenderer.invoke(IPC.BUSINESS_LIST_EMAILS),
+  businessSaveEmail: (args: unknown) => ipcRenderer.invoke(IPC.BUSINESS_SAVE_EMAIL, args),
+  businessDeleteEmail: (args: unknown) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_EMAIL, args),
 
   // Plugin Store
   pluginInstall: (args: unknown) => ipcRenderer.invoke(IPC.PLUGIN_INSTALL, args),

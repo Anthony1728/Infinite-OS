@@ -85,6 +85,17 @@ export interface BusinessMetric {
   timestamp: number;
 }
 
+export interface EmailRecord {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  preview: string;
+  time: number;
+  read: boolean;
+}
+
 export class BusinessOS {
   private config: BusinessConfig;
   private contacts: Map<string, Contact> = new Map();
@@ -92,6 +103,7 @@ export class BusinessOS {
   private invoices: Map<string, Invoice> = new Map();
   private deals: Map<string, Deal> = new Map();
   private metrics: BusinessMetric[] = [];
+  private emails: Map<string, EmailRecord> = new Map();
   private dataDir: string;
   private invoiceCounter: number = 1000;
 
@@ -122,6 +134,7 @@ export class BusinessOS {
       this.invoices = new Map(load('invoices'));
       this.deals = new Map(load('deals'));
       this.metrics = load('metrics');
+      this.emails = new Map(load('emails'));
     } catch { /* silent */ }
   }
 
@@ -133,6 +146,7 @@ export class BusinessOS {
       save('invoices', Array.from(this.invoices.entries()));
       save('deals', Array.from(this.deals.entries()));
       save('metrics', this.metrics.slice(-1000));
+      save('emails', Array.from(this.emails.entries()));
     } catch { /* silent */ }
   }
 
@@ -285,6 +299,34 @@ export class BusinessOS {
   listDeals(stage?: Deal['stage']): Deal[] {
     const deals = Array.from(this.deals.values());
     return stage ? deals.filter((d) => d.stage === stage) : deals;
+  }
+
+  // Emails (Business Command Center drafts/sent log — persisted, survives restart)
+  listEmails(): EmailRecord[] {
+    return Array.from(this.emails.values()).sort((a, b) => b.time - a.time);
+  }
+
+  saveEmail(data: { id?: string; from: string; to: string; subject: string; body: string; read?: boolean }): EmailRecord {
+    const existing = data.id ? this.emails.get(data.id) : undefined;
+    const record: EmailRecord = {
+      id: existing?.id ?? data.id ?? randomUUID(),
+      from: data.from,
+      to: data.to,
+      subject: data.subject,
+      body: data.body,
+      preview: data.body.slice(0, 80),
+      time: existing?.time ?? Date.now(),
+      read: data.read ?? existing?.read ?? true,
+    };
+    this.emails.set(record.id, record);
+    this.saveData();
+    return record;
+  }
+
+  deleteEmail(id: string): boolean {
+    const deleted = this.emails.delete(id);
+    if (deleted) this.saveData();
+    return deleted;
   }
 
   // Analytics

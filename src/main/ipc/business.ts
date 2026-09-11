@@ -66,6 +66,19 @@ export function registerBusinessIpc(): void {
     return businessOS.getAnalytics();
   });
 
+  // Emails (persisted drafts/sent log)
+  ipcMain.handle(IPC.BUSINESS_LIST_EMAILS, async () => {
+    return businessOS.listEmails();
+  });
+
+  ipcMain.handle(IPC.BUSINESS_SAVE_EMAIL, async (_e, data) => {
+    return businessOS.saveEmail(data);
+  });
+
+  ipcMain.handle(IPC.BUSINESS_DELETE_EMAIL, async (_e, { id }) => {
+    return businessOS.deleteEmail(id);
+  });
+
   ipcMain.handle(IPC.BUSINESS_STATS, async () => {
     return businessOS.getStats();
   });

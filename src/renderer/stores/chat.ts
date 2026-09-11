@@ -827,11 +827,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
       // Main persisted the final answer — flush our appends first, then reload
-      // the transcript so just-sent messages can never vanish in the race.
+      // the transcript. Merge, never blind-replace: anything shown on screen
+      // during the run (live member turns main never persisted) must survive
+      // even if it never reached disk; rescued messages are re-persisted so
+      // the next reload keeps them too.
       try {
         await flushPersists();
-        const messages = (await window.api.loadSession({ sessionId })) as Message[];
-        if (sessionId === get().currentSessionId) set({ messages, streaming: false });
+        const loaded = (await window.api.loadSession({ sessionId })) as Message[];
+        if (sessionId === get().currentSessionId) {
+          const current = get().messages;
+          const seen = new Set(loaded.map((m) => m.id));
+          const missing = current.filter((m) => !seen.has(m.id));
+          for (const m of missing) persistSessionMessage(sessionId, m);
+          set({ messages: missing.length ? [...loaded, ...missing] : loaded, streaming: false });
+        }
       } catch {
         if (sessionId === get().currentSessionId) set({ streaming: false });
       }
