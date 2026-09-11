@@ -321,7 +321,7 @@ export function MessagingView() {
           </span>
         </div>
         <p className="text-xs text-zinc-500 mb-3">
-          Link your number as a companion device, then message yourself — the agent runs the turn on this PC and replies in that chat. Only your self-chat (plus allowlisted numbers) is ever answered.
+          Link your number as a companion device. Message yourself to talk to the agent, and anyone who messages you directly gets an answer too — the agent runs the turn on this PC and replies in that chat. Groups are ignored.
         </p>
         {waLink?.state === 'qr' && waLink.qrDataUrl && (
           <div className="mb-3 flex justify-center">

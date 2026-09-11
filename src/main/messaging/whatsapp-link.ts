@@ -3,8 +3,8 @@
  * your number (companion device, like WhatsApp Web), then message yourself —
  * the agent runs the turn on your PC and replies in that chat.
  *
- * Safety: answers ONLY the linked owner's self-chat plus explicitly allowlisted
- * JIDs; groups, broadcasts, strangers, and our own echoed replies are ignored.
+ * Safety: answers the owner's self-chat and any direct (1:1) chat; groups,
+ * broadcasts, our own echoed replies, and pre-link history are ignored.
  * Auth creds persist under <profile-home>/whatsapp-link. Never auto-starts —
  * the user starts it from Messaging → WhatsApp Link and scans the QR.
  */
@@ -93,8 +93,11 @@ export interface InboundDecision {
 
 /**
  * Pure gate: should this inbound message become an agent turn? Exported for tests.
- * Self-chat (message-yourself flow) always qualifies; anything else needs an
- * explicit allowlist entry. Our own echoed replies and pre-link history never do.
+ * Self-chat (message-yourself flow) always qualifies, and so does any direct
+ * 1:1 chat — anyone who messages the owner gets an answer. Our own outbound
+ * messages to others, echoed replies, groups, broadcasts, and pre-link
+ * history never do. The allowlist is kept for future scoping but no longer
+ * gates anyone: direct chats are answered by default.
  */
 export function shouldAnswerInbound(opts: {
   remoteJid: string;
@@ -117,7 +120,10 @@ export function shouldAnswerInbound(opts: {
   const remote = normalizeJid(opts.remoteJid);
   const own = normalizeJid(opts.ownJid);
   if (remote && remote === own) return { answer: true, reason: 'self-chat' };
-  if (!opts.fromMe && remote && opts.extraAllowedJids.has(remote)) return { answer: true, reason: 'allowlisted' };
+  // My own outbound messages to other people: their reply will come as its
+  // own inbound — answering my own sends would double-reply every chat.
+  if (opts.fromMe) return { answer: false, reason: 'my-outbound' };
+  if (remote) return { answer: true, reason: 'direct' };
   return { answer: false, reason: 'not-owner' };
 }
 

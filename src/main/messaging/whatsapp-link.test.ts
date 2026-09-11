@@ -52,7 +52,7 @@ describe('whatsapp link gating', () => {
     expect(
       shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', messageTimeMs: Date.now() - 3600_000 }).reason,
     ).toBe('history');
-    expect(shouldAnswerInbound({ ...base, remoteJid: '19998887777@s.whatsapp.net' }).reason).toBe('not-owner');
+    expect(shouldAnswerInbound({ ...base, remoteJid: '19998887777@s.whatsapp.net' }).reason).toBe('direct');
     expect(
       shouldAnswerInbound({
         ...base,
@@ -60,5 +60,13 @@ describe('whatsapp link gating', () => {
         extraAllowedJids: new Set(['19998887777@s.whatsapp.net']),
       }).answer,
     ).toBe(true);
+    // My own outbound messages to other people are never answered (their
+    // reply arrives as its own inbound); self-chat still qualifies.
+    expect(
+      shouldAnswerInbound({ ...base, remoteJid: '19998887777@s.whatsapp.net', fromMe: true, messageId: 'msg-9' }).reason,
+    ).toBe('my-outbound');
+    expect(
+      shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', fromMe: true, messageId: 'msg-10' }).reason,
+    ).toBe('self-chat');
   });
 });
