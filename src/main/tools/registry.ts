@@ -114,6 +114,7 @@ import { colorTool } from './color.js';
 import { verifyTool } from './verify.js';
 import { snapshotTool } from './snapshot.js';
 import { appointmentsTool } from './appointments.js';
+import { enterpriseCompanyTool } from './enterprise-company.js';
 import { pcLiveMapTool } from './pc-live-map.js';
 
 export function registerBuiltinTools(): void {
@@ -239,6 +240,7 @@ export function registerBuiltinTools(): void {
     verifyTool,
     snapshotTool,
     appointmentsTool,
+    enterpriseCompanyTool,
     pcLiveMapTool,
   ]) {
     toolRegistry.register(t);

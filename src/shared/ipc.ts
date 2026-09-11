@@ -372,6 +372,13 @@ export const IPC = {
   ENTERPRISE_COMPLIANCE_RULES: 'enterprise:compliance-rules',
   ENTERPRISE_COMPLIANCE_STATUS: 'enterprise:compliance-status',
   ENTERPRISE_EXPORT_AUDIT: 'enterprise:export-audit',
+  ENTERPRISE_COMPANY_GET: 'enterprise:company-get',
+  ENTERPRISE_COMPANY_UPDATE: 'enterprise:company-update',
+  ENTERPRISE_COMPANY_ADD_NOTE: 'enterprise:company-add-note',
+  ENTERPRISE_COMPANY_DELETE_NOTE: 'enterprise:company-delete-note',
+  KNOWLEDGE_LIST: 'knowledge:list',
+  KNOWLEDGE_SAVE: 'knowledge:save',
+  KNOWLEDGE_DELETE: 'knowledge:delete',
 
   // Call Center
   CALL_CREATE: 'call:create',

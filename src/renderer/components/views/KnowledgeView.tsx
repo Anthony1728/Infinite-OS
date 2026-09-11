@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   BookOpen,
   Plus,
@@ -44,10 +44,6 @@ const CATEGORY_TEXT: Record<Category, string> = {
   Personal: 'text-violet-400',
   General: 'text-slate-400',
 };
-
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
 
 function SimpleMarkdown({ content }: { content: string }) {
   const blocks = useMemo(() => {
@@ -118,6 +114,7 @@ function renderInline(text: string) {
 
 export function KnowledgeView() {
   const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -128,6 +125,30 @@ export function KnowledgeView() {
   const [formCategory, setFormCategory] = useState<Category>('General');
   const [formTags, setFormTags] = useState('');
   const [formContent, setFormContent] = useState('');
+
+  // Shared store: the same memory the agent's Knowledge tool reads and writes,
+  // so user-added business knowledge is picked up by the agent and vice versa.
+  const reload = async () => {
+    try {
+      const rows = (await window.api.knowledgeList()) as Array<{
+        id: string; title: string; category: string; tags: string[]; content: string; createdAt: number; updatedAt: number;
+      }>;
+      setEntries(
+        (Array.isArray(rows) ? rows : []).map((r) => ({
+          id: String(r.id),
+          title: r.title ?? 'Untitled',
+          category: (CATEGORIES as string[]).includes(r.category) ? (r.category as Category) : 'General',
+          tags: Array.isArray(r.tags) ? r.tags : [],
+          content: r.content ?? '',
+          createdAt: r.createdAt ?? Date.now(),
+          updatedAt: r.updatedAt ?? Date.now(),
+        })),
+      );
+    } catch { /* store unavailable — view stays empty */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { void reload(); }, []);
 
   const filteredEntries = useMemo(() => {
     let list = entries;
@@ -163,7 +184,7 @@ export function KnowledgeView() {
     setShowCreate(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formTitle.trim()) return;
 
     const tags = formTags
@@ -171,33 +192,24 @@ export function KnowledgeView() {
       .map((t) => t.trim())
       .filter(Boolean);
 
-    if (editingId) {
-      setEntries((prev) =>
-        prev.map((e) =>
-          e.id === editingId
-            ? { ...e, title: formTitle.trim(), category: formCategory, tags, content: formContent, updatedAt: Date.now() }
-            : e
-        )
-      );
-    } else {
-      const newEntry: KnowledgeEntry = {
-        id: generateId(),
-        title: formTitle.trim(),
-        category: formCategory,
-        tags,
-        content: formContent,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      setEntries((prev) => [newEntry, ...prev]);
-      setSelectedId(newEntry.id);
-    }
+    try {
+      if (editingId) {
+        await window.api.knowledgeSave({ id: editingId, title: formTitle.trim(), category: formCategory, tags, content: formContent });
+      } else {
+        const saved = (await window.api.knowledgeSave({ title: formTitle.trim(), category: formCategory, tags, content: formContent })) as { id?: string } | null;
+        if (saved && typeof saved.id === 'string') setSelectedId(saved.id);
+      }
+      await reload();
+    } catch { /* keep the form open on failure */ return; }
 
     setShowCreate(false);
     setEditingId(null);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    try {
+      await window.api.knowledgeDelete({ id });
+    } catch { /* fall through to local removal */ }
     setEntries((prev) => prev.filter((e) => e.id !== id));
     if (selectedId === id) {
       setSelectedId(null);
@@ -272,7 +284,7 @@ export function KnowledgeView() {
             <div className="p-4 text-center">
               <FileText size={24} className="mx-auto mb-2 text-textMuted opacity-30" />
               <p className="text-xs text-textMuted">
-                {searchQuery ? 'No matching entries' : 'No entries yet'}
+                {loading ? 'Loading knowledge…' : searchQuery ? 'No matching entries' : 'No entries yet'}
               </p>
             </div>
           ) : (

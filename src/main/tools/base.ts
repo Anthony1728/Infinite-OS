@@ -242,7 +242,7 @@ export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'PCLiveMap', 'Computer', 'browser_extension', 'Operator', 'Verify',
   'FileOps', 'Knowledge', 'System',
   'Git', 'CreateTab', 'BuildFeature',
-  'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot', 'Appointments',
+  'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot', 'Appointments', 'EnterpriseCompany',
 ]);
 
 /**

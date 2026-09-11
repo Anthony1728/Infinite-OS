@@ -1126,6 +1126,58 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.ENTERPRISE_COMPLIANCE_STATUS, async () => enterpriseManager.getComplianceStatus());
   ipcMain.handle(IPC.ENTERPRISE_EXPORT_AUDIT, async () => enterpriseManager.exportAuditLog());
 
+  // Company board (Enterprise tab — shared by the user UI and the agent tool)
+  ipcMain.handle(IPC.ENTERPRISE_COMPANY_GET, async () => {
+    const { getCompany } = await import('../enterprise/company.js');
+    return getCompany();
+  });
+  ipcMain.handle(IPC.ENTERPRISE_COMPANY_UPDATE, async (_e, { name, industry, website }) => {
+    const { updateCompany } = await import('../enterprise/company.js');
+    return updateCompany({ ...(typeof name === 'string' ? { name } : {}), ...(typeof industry === 'string' ? { industry } : {}), ...(typeof website === 'string' ? { website } : {}) });
+  });
+  ipcMain.handle(IPC.ENTERPRISE_COMPANY_ADD_NOTE, async (_e, { text, kind }) => {
+    const { addCompanyNote } = await import('../enterprise/company.js');
+    if (typeof text !== 'string' || !text.trim()) throw new Error('text is required');
+    const valid = ['note', 'complaint', 'decision', 'contact'] as const;
+    return addCompanyNote(text.trim(), valid.includes(kind) ? kind : 'note', 'user');
+  });
+  ipcMain.handle(IPC.ENTERPRISE_COMPANY_DELETE_NOTE, async (_e, { id }) => {
+    const { deleteCompanyNote } = await import('../enterprise/company.js');
+    return deleteCompanyNote(id);
+  });
+
+  // Knowledge (Knowledge view — the same memory store the agent's Knowledge tool reads)
+  function categoryFromTags(tags: string[]): string {
+    const cat = tags.find((t) => t.startsWith('cat:'))?.slice(4);
+    return cat && cat.length > 0 ? cat : 'General';
+  }
+  ipcMain.handle(IPC.KNOWLEDGE_LIST, async (_e, { search }: { search?: string } = {}) => {
+    const memory = await import('../memory/store.js');
+    const rows = search?.trim() ? memory.searchMemories(search.trim()) : memory.listMemories();
+    return rows.slice(0, 200).map((m) => ({
+      id: m.id,
+      title: m.title,
+      category: categoryFromTags(m.tags),
+      tags: m.tags.filter((t) => !t.startsWith('cat:')),
+      content: m.content,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+    }));
+  });
+  ipcMain.handle(IPC.KNOWLEDGE_SAVE, async (_e, { id, title, category, tags, content }) => {
+    const memory = await import('../memory/store.js');
+    if (typeof title !== 'string' || !title.trim()) throw new Error('title is required');
+    const merged = [...(Array.isArray(tags) ? tags.filter((t) => typeof t === 'string') : []), `cat:${typeof category === 'string' && category ? category : 'General'}`];
+    if (typeof id === 'string' && id) {
+      return memory.updateMemory(id, { title: title.trim(), content: typeof content === 'string' ? content : '', tags: merged, tier: 'semantic', importance: 0.8 });
+    }
+    return memory.createMemory({ type: 'note', title: title.trim(), content: typeof content === 'string' ? content : '', tags: merged, tier: 'semantic', importance: 0.8 });
+  });
+  ipcMain.handle(IPC.KNOWLEDGE_DELETE, async (_e, { id }) => {
+    const memory = await import('../memory/store.js');
+    return memory.deleteMemory(id);
+  });
+
   // Call Center IPC
   ipcMain.handle(IPC.CALL_CREATE, async (_e, { callerId, direction, options }) =>
     callCenter.createCall(callerId, direction, options),

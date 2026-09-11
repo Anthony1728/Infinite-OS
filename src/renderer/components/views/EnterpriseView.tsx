@@ -20,7 +20,7 @@ interface TeamProject {
 }
 
 export function EnterpriseView() {
-  const [tab, setTab] = useState<'members' | 'projects' | 'audit' | 'compliance'>('members');
+  const [tab, setTab] = useState<'company' | 'members' | 'projects' | 'audit' | 'compliance'>('company');
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [projects, setProjects] = useState<TeamProject[]>([]);
   const [auditLog, setAuditLog] = useState<Array<{ id: string; action: string; userId: string; timestamp: number; details?: string; resource?: string }>>([]);
@@ -40,7 +40,38 @@ export function EnterpriseView() {
   const [ruleSeverity, setRuleSeverity] = useState('medium');
   const [ruleCheck, setRuleCheck] = useState('');
 
-  useEffect(() => { loadAll(); }, []);
+  // Company board (shared with the agent's EnterpriseCompany tool)
+  const [company, setCompany] = useState<{ name: string; industry: string; website: string; notes: Array<{ id: string; kind: string; text: string; by: string; createdAt: number }> }>({ name: '', industry: '', website: '', notes: [] });
+  const [companyForm, setCompanyForm] = useState({ name: '', industry: '', website: '' });
+  const [noteText, setNoteText] = useState('');
+  const [noteKind, setNoteKind] = useState('note');
+
+  const loadCompany = async () => {
+    try {
+      const c = await window.api.enterpriseCompanyGet();
+      setCompany({ name: c.name ?? '', industry: c.industry ?? '', website: c.website ?? '', notes: Array.isArray(c.notes) ? c.notes : [] });
+      setCompanyForm({ name: c.name ?? '', industry: c.industry ?? '', website: c.website ?? '' });
+    } catch { /* board starts empty */ }
+  };
+
+  const saveCompany = async () => {
+    await window.api.enterpriseCompanyUpdate(companyForm);
+    loadCompany();
+  };
+
+  const addNote = async () => {
+    if (!noteText.trim()) return;
+    await window.api.enterpriseCompanyAddNote({ text: noteText.trim(), kind: noteKind });
+    setNoteText('');
+    loadCompany();
+  };
+
+  const removeNote = async (id: string) => {
+    await window.api.enterpriseCompanyDeleteNote({ id });
+    loadCompany();
+  };
+
+  useEffect(() => { loadAll(); loadCompany(); }, []);
 
   const loadAll = async () => {
     try { setMembers(await window.api.enterpriseListMembers()); } catch { /* silent */ }
@@ -125,7 +156,7 @@ export function EnterpriseView() {
           <h2 className="text-lg font-semibold">Enterprise</h2>
         </div>
         <div className="flex gap-1">
-          {(['members', 'projects', 'audit', 'compliance'] as const).map((t) => (
+          {(['company', 'members', 'projects', 'audit', 'compliance'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-3 py-1.5 rounded text-sm capitalize ${
                 tab === t ? 'bg-[var(--accent)] text-white' : 'hover:bg-[var(--bg-tertiary)]'}`}>
@@ -136,6 +167,51 @@ export function EnterpriseView() {
       </div>
 
       <div className="flex-1 overflow-auto p-4">
+        {tab === 'company' && (
+          <div className="space-y-4 max-w-2xl">
+            <div className="p-3 bg-[var(--bg-secondary)] rounded space-y-2">
+              <h3 className="text-sm font-medium">Company profile</h3>
+              <p className="text-xs text-[var(--text-secondary)]">Infinite AI reads and updates this — tell it about your company once and it works with it everywhere.</p>
+              <input value={companyForm.name} onChange={(e) => setCompanyForm({ ...companyForm, name: e.target.value })}
+                placeholder="Company name" className="w-full p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-sm" />
+              <input value={companyForm.industry} onChange={(e) => setCompanyForm({ ...companyForm, industry: e.target.value })}
+                placeholder="Industry (e.g. plumbing, salon, logistics)" className="w-full p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-sm" />
+              <input value={companyForm.website} onChange={(e) => setCompanyForm({ ...companyForm, website: e.target.value })}
+                placeholder="Website (optional)" className="w-full p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-sm" />
+              <button onClick={saveCompany} className="px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm">Save profile</button>
+            </div>
+            <div className="p-3 bg-[var(--bg-secondary)] rounded space-y-2">
+              <h3 className="text-sm font-medium">Board ({company.notes.length})</h3>
+              <div className="flex gap-2">
+                <input value={noteText} onChange={(e) => setNoteText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addNote(); }}
+                  placeholder="Add a note, complaint, decision, contact…" className="flex-1 p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-sm" />
+                <select value={noteKind} onChange={(e) => setNoteKind(e.target.value)}
+                  className="p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)] text-sm">
+                  <option value="note">note</option>
+                  <option value="complaint">complaint</option>
+                  <option value="decision">decision</option>
+                  <option value="contact">contact</option>
+                </select>
+                <button onClick={addNote} className="px-3 py-1.5 rounded bg-[var(--accent)] text-white text-sm">Add</button>
+              </div>
+              <div className="space-y-2">
+                {company.notes.map((n) => (
+                  <div key={n.id} className="p-2 rounded bg-[var(--bg-primary)] border border-[var(--border)]">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-px rounded bg-[var(--bg-tertiary)]">{n.kind}</span>
+                      <span className="text-[10px] text-[var(--text-secondary)]">{n.by === 'agent' ? 'added by Infinite AI' : 'added by you'}</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{new Date(n.createdAt).toLocaleString()}</span>
+                      <button onClick={() => removeNote(n.id)} className="text-[var(--text-secondary)] hover:text-red-400"><Trash2 size={12} /></button>
+                    </div>
+                    <p className="text-sm">{n.text}</p>
+                  </div>
+                ))}
+                {company.notes.length === 0 && <p className="text-xs text-[var(--text-secondary)]">Nothing on the board yet.</p>}
+              </div>
+            </div>
+          </div>
+        )}
         {tab === 'members' && (
           <div>
             <div className="flex items-center justify-between mb-4">

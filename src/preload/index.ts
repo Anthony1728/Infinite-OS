@@ -466,6 +466,17 @@ const api = {
   enterpriseRemoveFromProject: (args: { projectId: string; memberId: string }) =>
     ipcRenderer.invoke(IPC.ENTERPRISE_REMOVE_MEMBER_FROM_PROJECT, args),
   enterpriseAuditLog: (args?: { filters?: unknown }) => ipcRenderer.invoke(IPC.ENTERPRISE_AUDIT_LOG, args ?? {}),
+  enterpriseCompanyGet: () => ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_GET),
+  enterpriseCompanyUpdate: (args: { name?: string; industry?: string; website?: string }) =>
+    ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_UPDATE, args),
+  enterpriseCompanyAddNote: (args: { text: string; kind?: string }) =>
+    ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_ADD_NOTE, args),
+  enterpriseCompanyDeleteNote: (args: { id: string }) =>
+    ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_DELETE_NOTE, args),
+  knowledgeList: (args?: { search?: string }) => ipcRenderer.invoke(IPC.KNOWLEDGE_LIST, args ?? {}),
+  knowledgeSave: (args: { id?: string; title: string; category?: string; tags?: string[]; content: string }) =>
+    ipcRenderer.invoke(IPC.KNOWLEDGE_SAVE, args),
+  knowledgeDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.KNOWLEDGE_DELETE, args),
   enterpriseAddComplianceRule: (args: {
     name: string;
     description: string;
