@@ -1,5 +1,8 @@
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { infiniteHome } from '../profiles/home.js';
 
 export interface TeamMember {
   id: string;
@@ -47,11 +50,46 @@ export interface ComplianceRule {
   status: 'compliant' | 'non-compliant' | 'unknown';
 }
 
-class EnterpriseManager extends EventEmitter {
+export class EnterpriseManager extends EventEmitter {
   private members: Map<string, TeamMember> = new Map();
   private projects: Map<string, TeamProject> = new Map();
   private auditLog: AuditLogEntry[] = [];
   private complianceRules: Map<string, ComplianceRule> = new Map();
+  private dataDir: string;
+
+  constructor(dataDir?: string) {
+    super();
+    this.dataDir = dataDir ?? join(infiniteHome(), 'enterprise');
+    this.loadData();
+  }
+
+  private loadData(): void {
+    try {
+      if (!existsSync(this.dataDir)) return;
+      const load = (name: string): Array<[string, unknown]> | unknown[] => {
+        const p = join(this.dataDir, `${name}.json`);
+        if (!existsSync(p)) return [];
+        return JSON.parse(readFileSync(p, 'utf-8')) as Array<[string, unknown]>;
+      };
+      this.members = new Map(load('members') as Array<[string, TeamMember]>);
+      this.projects = new Map(load('projects') as Array<[string, TeamProject]>);
+      const audit = load('audit');
+      this.auditLog = (Array.isArray(audit) ? audit : []) as AuditLogEntry[];
+      this.complianceRules = new Map(load('compliance') as Array<[string, ComplianceRule]>);
+    } catch { /* corrupt data — start empty, never crash boot */ }
+  }
+
+  private saveData(): void {
+    try {
+      mkdirSync(this.dataDir, { recursive: true });
+      const save = (name: string, data: unknown) =>
+        writeFileSync(join(this.dataDir, `${name}.json`), JSON.stringify(data, null, 2));
+      save('members', Array.from(this.members.entries()));
+      save('projects', Array.from(this.projects.entries()));
+      save('audit', this.auditLog.slice(-10000));
+      save('compliance', Array.from(this.complianceRules.entries()));
+    } catch { /* disk failure must not break the caller's flow */ }
+  }
 
   addMember(name: string, email: string, role: TeamMember['role'] = 'developer'): TeamMember {
     const member: TeamMember = {
@@ -66,6 +104,7 @@ class EnterpriseManager extends EventEmitter {
     this.members.set(member.id, member);
     this.logAudit(member.id, 'member.added', 'team', member.id, { name, role });
     this.emit('memberAdded', member);
+    this.saveData();
     return member;
   }
 
@@ -83,12 +122,14 @@ class EnterpriseManager extends EventEmitter {
     member.role = role;
     member.permissions = this.getPermissionsForRole(role);
     this.emit('memberUpdated', member);
+    this.saveData();
     return true;
   }
 
   removeMember(id: string): boolean {
     const deleted = this.members.delete(id);
     if (deleted) this.emit('memberRemoved', id);
+    if (deleted) this.saveData();
     return deleted;
   }
 
@@ -106,6 +147,7 @@ class EnterpriseManager extends EventEmitter {
     };
     this.projects.set(project.id, project);
     this.logAudit(ownerId, 'project.created', 'project', project.id, { name });
+    this.saveData();
     return project;
   }
 
@@ -122,6 +164,7 @@ class EnterpriseManager extends EventEmitter {
     if (!project || project.members.includes(memberId)) return false;
     project.members.push(memberId);
     project.updatedAt = Date.now();
+    this.saveData();
     return true;
   }
 
@@ -130,6 +173,7 @@ class EnterpriseManager extends EventEmitter {
     if (!project) return false;
     project.members = project.members.filter((m) => m !== memberId);
     project.updatedAt = Date.now();
+    this.saveData();
     return true;
   }
 
@@ -146,6 +190,7 @@ class EnterpriseManager extends EventEmitter {
     this.auditLog.push(entry);
     if (this.auditLog.length > 10000) this.auditLog.shift();
     this.emit('auditEntry', entry);
+    this.saveData();
   }
 
   getAuditLog(filters?: { userId?: string; action?: string; since?: number }): AuditLogEntry[] {
@@ -168,6 +213,7 @@ class EnterpriseManager extends EventEmitter {
       status: 'unknown',
     };
     this.complianceRules.set(rule.id, rule);
+    this.saveData();
     return rule;
   }
 

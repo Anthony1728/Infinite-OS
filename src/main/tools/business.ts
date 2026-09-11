@@ -4,7 +4,11 @@ import { BusinessOS } from '../business/crm.js';
 let businessOS: BusinessOS | null = null;
 
 function getBusinessOS(): BusinessOS {
-  if (!businessOS) businessOS = new BusinessOS();
+  // Fresh instance per call: the BusinessOS view holds its own singleton on the
+  // same on-disk store, so a cached copy here would serve stale reads and
+  // clobber the view's writes. Construction reloads from disk; every mutation
+  // saves, so per-call instances are always consistent with the UI.
+  businessOS = new BusinessOS();
   return businessOS;
 }
 
