@@ -34,7 +34,8 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
 
 const NAV_BUSINESS: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'business', label: 'Business OS', icon: 'home.business' },
-  { id: 'app-builder', label: 'App Builder', icon: 'tab.feature' },
+  { id: 'creations', label: 'AI Creations', icon: 'tab.feature' },
+  { id: 'app-builder', label: 'App Builder', icon: 'nav.projects' },
   { id: 'website-builder', label: 'Website Builder', icon: 'tab.summary' },
   { id: 'callcenter', label: 'Call Center', icon: 'home.chat' },
   { id: 'enterprise', label: 'Enterprise', icon: 'nav.projects' },

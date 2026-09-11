@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { infiniteHome } from '../profiles/home.js';
+import { creationsWebsitesDir, migrateCreations } from '../creations/home.js';
 
 export interface WebsiteBuilderConfig {
   dataDir: string;
@@ -78,9 +78,10 @@ export class WebsiteBuilder {
   private outputDir: string;
 
   constructor(config?: Partial<WebsiteBuilderConfig>) {
+    if (!config?.dataDir && !config?.outputDir) migrateCreations();
     this.config = {
-      dataDir: config?.dataDir ?? join(infiniteHome(), 'websites'),
-      outputDir: config?.outputDir ?? join(infiniteHome(), 'websites', 'output'),
+      dataDir: config?.dataDir ?? creationsWebsitesDir(),
+      outputDir: config?.outputDir ?? join(creationsWebsitesDir(), 'output'),
       defaultFramework: config?.defaultFramework ?? 'react',
     };
     this.dataDir = this.config.dataDir;

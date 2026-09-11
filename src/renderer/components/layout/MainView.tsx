@@ -37,6 +37,7 @@ const MessagingView = lazy(() => import('../views/MessagingView').then(m => ({ d
 const CanvasBoard = lazy(() => import('../workspace/InfiniteCanvas').then(m => ({ default: m.InfiniteCanvas })));
 const TerminalView = lazy(() => import('../views/TerminalView').then(m => ({ default: m.TerminalView })));
 const PowerCenterView = lazy(() => import('../views/PowerCenterView').then(m => ({ default: m.PowerCenterView })));
+const CreationsView = lazy(() => import('../views/CreationsView').then(m => ({ default: m.CreationsView })));
 const BusinessOSView = lazy(() => import('../views/BusinessOSView').then(m => ({ default: m.BusinessOSView })));
 const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ default: m.KnowledgeView })));
 
@@ -125,6 +126,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <BusinessOSView />;
       case 'knowledge':
         return <KnowledgeView />;
+      case 'creations':
+        return <CreationsView />;
       case 'capabilities':
         return <CapabilitiesView />;
       case 'bots':

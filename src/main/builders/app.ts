@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { infiniteHome } from '../profiles/home.js';
+import { creationsAppsDir, migrateCreations } from '../creations/home.js';
 import { execSync, spawn } from 'node:child_process';
 
 export interface AppBuilderConfig {
@@ -63,9 +63,10 @@ export class AppBuilder {
   private outputDir: string;
 
   constructor(config?: Partial<AppBuilderConfig>) {
+    if (!config?.dataDir && !config?.outputDir) migrateCreations();
     this.config = {
-      dataDir: config?.dataDir ?? join(infiniteHome(), 'apps'),
-      outputDir: config?.outputDir ?? join(infiniteHome(), 'apps', 'output'),
+      dataDir: config?.dataDir ?? creationsAppsDir(),
+      outputDir: config?.outputDir ?? join(creationsAppsDir(), 'output'),
     };
     this.dataDir = this.config.dataDir;
     this.outputDir = this.config.outputDir;
