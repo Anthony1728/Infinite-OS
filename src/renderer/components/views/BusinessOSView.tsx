@@ -137,14 +137,12 @@ export function BusinessOSView() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [contactsData, leadsData, invoicesData, dealsData] = await Promise.all([
+        const [contactsData, invoicesData, dealsData] = await Promise.all([
           api.listContacts(),
-          api.listLeads(),
           api.listInvoices(),
           api.listDeals(),
         ]);
         if (contactsData) setContacts(contactsData);
-        if (leadsData) setDeals(leadsData);
         if (invoicesData) setInvoices(invoicesData);
         if (dealsData) setDeals(dealsData);
       } catch (e) {
