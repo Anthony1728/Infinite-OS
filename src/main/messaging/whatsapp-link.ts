@@ -22,6 +22,8 @@ export interface WhatsAppLinkStatus {
   qrDataUrl: string | null;
   lastError: string | null;
   startedAt: number | null;
+  lastInbound: { at: number; from: string; reason: string; answered: boolean } | null;
+  lastTurn: { at: number; ok: boolean; error: string | null } | null;
 }
 
 export interface WhatsAppLinkDeps {
@@ -59,8 +61,16 @@ export function isSelfChat(remoteJid: unknown, ownJid: unknown): boolean {
 
 /** Extract sendable text from a Baileys message (text, extended text, captions). */
 export function extractInboundText(message: unknown): string {
-  const msg = (message as Record<string, unknown> | null)?.message as Record<string, unknown> | undefined;
+  let msg = (message as Record<string, unknown> | null)?.message as Record<string, unknown> | undefined;
   if (!msg || typeof msg !== 'object') return '';
+  // Disappearing / view-once messages wrap the real payload one level deep.
+  for (let depth = 0; depth < 2; depth++) {
+    const ephemeral = msg.ephemeralMessage as Record<string, unknown> | undefined;
+    const viewOnce = (msg.viewOnceMessage ?? msg.viewOnceMessageV2) as Record<string, unknown> | undefined;
+    const inner = (ephemeral?.message ?? viewOnce?.message) as Record<string, unknown> | undefined;
+    if (!inner || typeof inner !== 'object') break;
+    msg = inner;
+  }
   const convo = msg.conversation;
   if (typeof convo === 'string' && convo.trim()) return convo.trim().slice(0, 4000);
   const extended = msg.extendedTextMessage as Record<string, unknown> | undefined;
@@ -132,9 +142,11 @@ class WhatsAppLink {
   private sentIds = new Set<string>();
   private wantOn = false;
   private starting: Promise<void> | null = null;
+  private lastInbound: WhatsAppLinkStatus['lastInbound'] = null;
+  private lastTurn: WhatsAppLinkStatus['lastTurn'] = null;
 
   status(): WhatsAppLinkStatus {
-    return { state: this.state, owner: this.owner, qrDataUrl: this.qrDataUrl, lastError: this.lastError, startedAt: this.startedAt };
+    return { state: this.state, owner: this.owner, qrDataUrl: this.qrDataUrl, lastError: this.lastError, startedAt: this.startedAt, lastInbound: this.lastInbound, lastTurn: this.lastTurn };
   }
 
   isOn(): boolean {
@@ -311,7 +323,11 @@ class WhatsAppLink {
         extraAllowedJids: extraAllowedJids(),
         hasText: text.length > 0,
       });
-      if (!decision.answer || !this.sock) continue;
+      if (!decision.answer || !this.sock) {
+        // Record drops too — a panel showing "dropped (history)" beats silence.
+        if (text) this.lastInbound = { at: now(), from: remoteJid, reason: this.sock ? decision.reason : 'no-socket', answered: false };
+        continue;
+      }
       // Claim the id BEFORE the turn so our own echo can never re-trigger.
       if (messageId) {
         this.sentIds.add(messageId);
@@ -320,20 +336,30 @@ class WhatsAppLink {
           if (!first.done) this.sentIds.delete(first.value);
         }
       }
+      this.lastInbound = { at: now(), from: remoteJid, reason: decision.reason, answered: true };
+      log('[whatsapp-link] answering', remoteJid, `(${decision.reason})`);
       try {
-        const answer = deps.runTurn ? await deps.runTurn(text, remoteJid) : await this.defaultRunTurn(text);
+        const answer = deps.runTurn ? await deps.runTurn(text, remoteJid) : await this.defaultRunTurn(text, log);
+        this.lastTurn = { at: now(), ok: true, error: null };
         const sent = await this.sock.sendMessage(remoteJid, { text: answer.slice(0, 4000) });
         const sentId = sent?.key?.id;
         if (sentId) this.sentIds.add(sentId);
       } catch (e) {
-        log('[whatsapp-link] turn failed:', (e as Error).message);
+        const err = (e as Error).message;
+        this.lastTurn = { at: now(), ok: false, error: err };
+        this.lastError = `Reply failed: ${err}`;
+        log('[whatsapp-link] turn failed:', err);
+        try {
+          await this.sock.sendMessage(remoteJid, { text: `Sorry — I tried to run that but hit an error: ${err.slice(0, 300)}` });
+        } catch { /* send itself broken; panel + logs carry it */ }
       }
     }
   }
 
-  private async defaultRunTurn(text: string): Promise<string> {
+  private async defaultRunTurn(text: string, log: (...args: unknown[]) => void = () => {}): Promise<string> {
     const provider = settings.get<string>('provider') ?? 'ollama';
     const model = settings.get<string>('model') ?? 'qwen3:4b';
+    log('[whatsapp-link] turn start via', `${provider}/${model}`);
     const { runAgent } = await import('../agent/loop.js');
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 4 * 60_000);
@@ -355,6 +381,7 @@ class WhatsAppLink {
       const last = [...completed].reverse().find((m) => m.role === 'assistant');
       const blocks = (last?.content ?? []) as Array<{ type?: string; text?: string }>;
       const answer = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n\n').trim();
+      log('[whatsapp-link] turn done, answer chars:', answer.length);
       return answer || '(The agent finished with no text answer.)';
     } finally {
       clearTimeout(timer);

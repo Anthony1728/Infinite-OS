@@ -31,6 +31,12 @@ describe('whatsapp link gating', () => {
     expect(extractInboundText(null)).toBe('');
   });
 
+  it('unwraps disappearing and view-once messages', () => {
+    expect(extractInboundText({ message: { ephemeralMessage: { message: { conversation: 'secret hi' } } } })).toBe('secret hi');
+    expect(extractInboundText({ message: { viewOnceMessage: { message: { extendedTextMessage: { text: 'once' } } } } })).toBe('once');
+    expect(extractInboundText({ message: { ephemeralMessage: { message: { audioMessage: {} } } } })).toBe('');
+  });
+
   it('answers the self-chat in both directions with echo protection', () => {
     expect(shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net' }).answer).toBe(true);
     expect(shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', fromMe: true, messageId: 'msg-2' }).answer).toBe(true);

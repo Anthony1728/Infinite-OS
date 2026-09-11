@@ -56,7 +56,7 @@ export function MessagingView() {
   const [inbound, setInbound] = useState<{ enabled: boolean; running: boolean; allowedChatIds: string[] } | null>(null);
   const [allowInput, setAllowInput] = useState('');
   const [inboundSaving, setInboundSaving] = useState(false);
-  const [waLink, setWaLink] = useState<{ state: string; owner?: string | null; qrDataUrl?: string | null; lastError?: string | null } | null>(null);
+  const [waLink, setWaLink] = useState<{ state: string; owner?: string | null; qrDataUrl?: string | null; lastError?: string | null; lastInbound?: { at: number; from: string; reason: string; answered: boolean } | null; lastTurn?: { at: number; ok: boolean; error: string | null } | null } | null>(null);
   const [waBusy, setWaBusy] = useState(false);
 
   const refreshWaLink = async () => {
@@ -67,8 +67,10 @@ export function MessagingView() {
         owner?: string | null;
         qrDataUrl?: string | null;
         lastError?: string | null;
+        lastInbound?: { at: number; from: string; reason: string; answered: boolean } | null;
+        lastTurn?: { at: number; ok: boolean; error: string | null } | null;
       };
-      if (res.ok) setWaLink({ state: res.state ?? 'off', owner: res.owner, qrDataUrl: res.qrDataUrl, lastError: res.lastError });
+      if (res.ok) setWaLink({ state: res.state ?? 'off', owner: res.owner, qrDataUrl: res.qrDataUrl, lastError: res.lastError, lastInbound: res.lastInbound, lastTurn: res.lastTurn });
     } catch {
       /* link panel is advisory */
     }
@@ -334,6 +336,15 @@ export function MessagingView() {
         )}
         {waLink?.lastError && (
           <p className="text-xs text-red-400/90 mb-3">{waLink.lastError}</p>
+        )}
+        {waLink?.state === 'open' && waLink.lastInbound && (
+          <p className="text-[11px] text-zinc-500 mb-3">
+            Last message {new Date(waLink.lastInbound.at).toLocaleTimeString()} — {waLink.lastInbound.answered ? 'answered' : `not answered (${waLink.lastInbound.reason})`}.
+            {waLink.lastTurn && !waLink.lastTurn.ok && waLink.lastTurn.error ? ` Turn failed: ${waLink.lastTurn.error.slice(0, 160)}` : ''}
+          </p>
+        )}
+        {waLink?.state === 'open' && !waLink.lastInbound && (
+          <p className="text-[11px] text-zinc-500 mb-3">Connected. Message yourself — nothing received yet.</p>
         )}
         <div className="flex gap-2">
           {(waLink?.state === 'off' || waLink?.state === 'closed') && (

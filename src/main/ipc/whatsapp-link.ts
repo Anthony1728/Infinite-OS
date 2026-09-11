@@ -18,7 +18,7 @@ export function registerWhatsAppLinkIpc(): void {
 
   ipcMain.handle(IPC.WHATSAPP_LINK_START, async () => {
     try {
-      const status = await whatsAppLink.start();
+      const status = await whatsAppLink.start({ log: (...args: unknown[]) => console.log('[whatsapp-link]', ...args) });
       return { ok: true, ...status };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
