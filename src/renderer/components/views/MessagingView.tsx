@@ -56,6 +56,23 @@ export function MessagingView() {
   const [inbound, setInbound] = useState<{ enabled: boolean; running: boolean; allowedChatIds: string[] } | null>(null);
   const [allowInput, setAllowInput] = useState('');
   const [inboundSaving, setInboundSaving] = useState(false);
+  const [waLink, setWaLink] = useState<{ state: string; owner?: string | null; qrDataUrl?: string | null; lastError?: string | null } | null>(null);
+  const [waBusy, setWaBusy] = useState(false);
+
+  const refreshWaLink = async () => {
+    try {
+      const res = (await window.api.whatsappLinkStatus()) as {
+        ok: boolean;
+        state?: string;
+        owner?: string | null;
+        qrDataUrl?: string | null;
+        lastError?: string | null;
+      };
+      if (res.ok) setWaLink({ state: res.state ?? 'off', owner: res.owner, qrDataUrl: res.qrDataUrl, lastError: res.lastError });
+    } catch {
+      /* link panel is advisory */
+    }
+  };
 
   const refreshInbound = async () => {
     try {
@@ -93,10 +110,33 @@ export function MessagingView() {
         /* status is advisory only */
       }
       void refreshInbound();
+      void refreshWaLink();
     })();
+    const waTimer = setInterval(() => void refreshWaLink(), 3000);
+    return () => clearInterval(waTimer);
   }, []);
 
   const active = CHANNELS.find((c) => c.id === channel)!;
+
+  const waAction = async (action: 'start' | 'stop' | 'unpair') => {
+    setWaBusy(true);
+    try {
+      const call = action === 'start'
+        ? window.api.whatsappLinkStart()
+        : action === 'stop'
+          ? window.api.whatsappLinkStop()
+          : window.api.whatsappLinkUnpair();
+      const res = (await call) as { ok: boolean; error?: string };
+      if (!res.ok) {
+        addToast({ title: 'WhatsApp link failed', message: res.error ?? 'Unknown error', type: 'error' });
+      }
+      await refreshWaLink();
+    } catch (e) {
+      addToast({ title: 'WhatsApp link failed', message: e instanceof Error ? e.message : 'Unknown error', type: 'error' });
+    } finally {
+      setWaBusy(false);
+    }
+  };
 
   const saveInbound = async (enabled: boolean) => {
     setInboundSaving(true);
@@ -258,6 +298,71 @@ export function MessagingView() {
               </button>
             )}
           </div>
+        </div>
+      </div>
+      {/* WhatsApp link (OpenClaw-style: scan QR, message yourself, agent replies) */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-semibold text-white">WhatsApp link → agent</h2>
+          <span className="text-[11px] text-zinc-500">
+            {waLink
+              ? waLink.state === 'open'
+                ? 'connected'
+                : waLink.state === 'qr'
+                  ? 'scan the code'
+                  : waLink.state === 'connecting'
+                    ? 'connecting…'
+                    : waLink.state === 'closed'
+                      ? 'disconnected'
+                      : 'off'
+              : 'loading…'}
+          </span>
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">
+          Link your number as a companion device, then message yourself — the agent runs the turn on this PC and replies in that chat. Only your self-chat (plus allowlisted numbers) is ever answered.
+        </p>
+        {waLink?.state === 'qr' && waLink.qrDataUrl && (
+          <div className="mb-3 flex justify-center">
+            <img src={waLink.qrDataUrl} alt="Scan with WhatsApp → Linked devices" className="w-56 h-56 rounded-xl border border-white/10 bg-white p-1" />
+          </div>
+        )}
+        {waLink?.state === 'qr' && !waLink.qrDataUrl && (
+          <p className="text-xs text-zinc-500 mb-3">Preparing the QR code…</p>
+        )}
+        {waLink?.owner && (
+          <p className="text-xs text-zinc-400 mb-3">Linked number: <span className="text-zinc-200 font-mono">{waLink.owner}</span></p>
+        )}
+        {waLink?.lastError && (
+          <p className="text-xs text-red-400/90 mb-3">{waLink.lastError}</p>
+        )}
+        <div className="flex gap-2">
+          {(waLink?.state === 'off' || waLink?.state === 'closed') && (
+            <button
+              onClick={() => void waAction('start')}
+              disabled={waBusy}
+              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:from-violet-500 hover:to-cyan-400 disabled:opacity-50 transition-all"
+            >
+              {waBusy ? 'Starting…' : 'Link WhatsApp'}
+            </button>
+          )}
+          {(waLink?.state === 'qr' || waLink?.state === 'connecting' || waLink?.state === 'open') && (
+            <button
+              onClick={() => void waAction('stop')}
+              disabled={waBusy}
+              className="rounded-lg px-3 py-2 text-xs font-medium bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.07] disabled:opacity-50 transition-colors"
+            >
+              Disconnect
+            </button>
+          )}
+          {waLink && waLink.state !== 'off' && (
+            <button
+              onClick={() => void waAction('unpair')}
+              disabled={waBusy}
+              className="rounded-lg px-3 py-2 text-xs font-medium bg-white/[0.04] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.07] disabled:opacity-50 transition-colors"
+            >
+              Unpair
+            </button>
+          )}
         </div>
       </div>
     </div>

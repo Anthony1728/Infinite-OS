@@ -688,6 +688,12 @@ const api = {
   messagingInboundSet: (args: { enabled?: boolean; allowedChatIds?: string[] }) =>
     ipcRenderer.invoke(IPC.MESSAGING_INBOUND_SET, args),
 
+  // WhatsApp link (companion-device QR pairing, OpenClaw-style inbox)
+  whatsappLinkStatus: () => ipcRenderer.invoke(IPC.WHATSAPP_LINK_STATUS),
+  whatsappLinkStart: () => ipcRenderer.invoke(IPC.WHATSAPP_LINK_START),
+  whatsappLinkStop: () => ipcRenderer.invoke(IPC.WHATSAPP_LINK_STOP),
+  whatsappLinkUnpair: () => ipcRenderer.invoke(IPC.WHATSAPP_LINK_UNPAIR),
+
   // Custom slash commands (user-defined /commands from profile files)
   customCommandsList: () => ipcRenderer.invoke(IPC.COMMANDS_CUSTOM_LIST),
   customCommandSave: (args: { name: string; description?: string; template: string }) =>

@@ -113,6 +113,8 @@ import { translateTool } from './translate.js';
 import { colorTool } from './color.js';
 import { verifyTool } from './verify.js';
 import { snapshotTool } from './snapshot.js';
+import { appointmentsTool } from './appointments.js';
+import { pcLiveMapTool } from './pc-live-map.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -236,6 +238,8 @@ export function registerBuiltinTools(): void {
     colorTool,
     verifyTool,
     snapshotTool,
+    appointmentsTool,
+    pcLiveMapTool,
   ]) {
     toolRegistry.register(t);
   }

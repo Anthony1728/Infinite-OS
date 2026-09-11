@@ -22,6 +22,13 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders', color: 'text-violet-400' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins', color: 'text-emerald-400' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities', color: 'text-indigo-400' },
+  { id: 'business', label: 'Business OS', icon: 'home.business', color: 'text-emerald-400' },
+  { id: 'app-builder', label: 'App Builder', icon: 'tab.feature', color: 'text-violet-400' },
+  { id: 'website-builder', label: 'Website Builder', icon: 'tab.summary', color: 'text-cyan-400' },
+  { id: 'callcenter', label: 'Call Center', icon: 'home.chat', color: 'text-amber-400' },
+  { id: 'enterprise', label: 'Enterprise', icon: 'nav.projects', color: 'text-indigo-400' },
+  { id: 'deploy', label: 'Deploy', icon: 'nav.automations', color: 'text-lime-400' },
+  { id: 'knowledge', label: 'Knowledge', icon: 'nav.memory', color: 'text-teal-400' },
   { id: 'settings', label: 'Settings', icon: 'nav.settings', color: 'text-slate-400' },
 ];
 

@@ -12,6 +12,7 @@ import type { Session } from '../../../shared/types';
 // Flat, monochrome nav — icons inherit their color from the row state so the
 // whole rail reads as one system instead of a set of colored widgets.
 const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
+  { id: 'home', label: 'Home', icon: 'nav.workspace' },
   { id: 'chats', label: 'Chats', icon: 'nav.chats' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files' },
@@ -29,6 +30,16 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
+];
+
+const NAV_BUSINESS: { id: string; label: string; icon: AppIconName }[] = [
+  { id: 'business', label: 'Business OS', icon: 'home.business' },
+  { id: 'app-builder', label: 'App Builder', icon: 'tab.feature' },
+  { id: 'website-builder', label: 'Website Builder', icon: 'tab.summary' },
+  { id: 'callcenter', label: 'Call Center', icon: 'home.chat' },
+  { id: 'enterprise', label: 'Enterprise', icon: 'nav.projects' },
+  { id: 'deploy', label: 'Deploy', icon: 'nav.automations' },
+  { id: 'knowledge', label: 'Knowledge', icon: 'nav.memory' },
 ];
 
 function groupSessionsByDate(sessions: Session[]): { label: string; sessions: Session[] }[] {
@@ -380,6 +391,15 @@ export function Sidebar({
         )}
         <div className="space-y-0.5">
           {NAV_SECONDARY.map(renderNavItem)}
+        </div>
+
+        {!collapsed && (
+          <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
+            Business
+          </div>
+        )}
+        <div className="space-y-0.5">
+          {NAV_BUSINESS.map(renderNavItem)}
         </div>
 
         {/* Tabs — unified dropdown for all AI-created tabs */}

@@ -96,8 +96,8 @@ export async function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptio
     '- HARD RULE: NEVER open a new Chrome window. NEVER use Computer action=launch_app app=chrome. Use the existing browser via browser_extension (list_tabs, new_tab, navigate).',
     '- If browser_extension fails → fix it yourself: auto-retry once, then fall back to Operator (CDP), then Computer mouse/keyboard. Do NOT ask the user to reload the extension — handle the fallback silently.',
     '- Only if every fallback also fails, briefly note the limitation — never block waiting for the user to fix things.',
-    '- Desktop app tasks (Notepad, VS Code, File Explorer, etc.) → Computer visual_observe first, then visual_click/visual_type.',
-    '- Terminal/system task -> Bash or System. Use PowerShell syntax on Windows unless CMD is explicitly requested. Check the exit code and output.',
+     '- Desktop app tasks (Notepad, VS Code, File Explorer, etc.) → PCLiveMap FIRST: call PCLiveMap action=live (or agent) to get screenshot-free vectors (mouse, windows, 50 UIA elements with bounds, focused control). Use PCLiveMap action=click_name to click by name with no coords, or PCLiveMap action=click with norm 0-1000 coords. Verify with another PCLiveMap live (check seq advanced). Only fall back to Computer visual_observe/visual_click when PCLiveMap health shows tracker:waiting or vectors cannot see (canvas/game/scanned PDF with no UIA) — and say why in one line.',
+     '- Terminal/system task -> Bash or System. Use PowerShell syntax on Windows unless CMD is explicitly requested. Check the exit code and output.',
     '- File task -> Glob/Grep/Read to inspect, then Write/Edit/FileOps/Delete as required, followed by Read or listing to verify.',
     '- Coding task -> inspect the repository, write a short TodoWrite plan for multi-step work, edit the real files, run targeted tests/typecheck/lint/build, repair failures, and report changed files.',
     '- Email task -> Ask the user first: "Which email account/profile should I use?" Then use browser_extension to navigate to Gmail in the correct tab. Never assume or use a random email.',
@@ -113,9 +113,10 @@ export async function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptio
     'AUTOMATIONS: You can create, list, enable/disable, delete workflows. Workflows run on schedule or triggers. Use AutomationManager.',
     'SKILLS: Invoke skills by name with Skills tool action=invoke. Author new skills with SkillManage. Skills are reusable agent workflows.',
     'BUSINESS OS: Manage contacts, leads, deals, revenue. Use BusinessManager tools for CRM operations.',
-    'COMPUTER CONTROL: Full desktop access via Computer tool. Observe screen, click, type, launch apps, manage windows.',
-    'MULTI-AGENT: Spawn specialists with Agent tool. Crew mode for parallel work. Orchestrator for complex multi-phase tasks.',
-    'MEMORY: Read/write INFINITE.md files for project instructions. Auto-memory persists across sessions. Use for context.',
+     'COMPUTER CONTROL: Full desktop access via Computer tool. Observe screen, click, type, launch apps, manage windows. BUT Infinite OS owns PC Live Map (PCLiveMap tool) — screenshot-free vectors that are 13-15x cheaper and 50x faster than screenshots. Every desktop task must try PCLiveMap action=live/agent first; screenshot only when vectors cannot see.',
+     'PC LIVE MAP (Infinite OS tool, localhost:3799): vectors (mouse, All windows, 50 UIA elements with name/role/bounds, focused control, clipboard, seq) + hands (click_name/click/move/drag/scroll/type/keys/wait/focus). Coords ALWAYS norm 0-1000. One-click: pc-live-map/Start-LiveMap.ps1. Discovery: PCLiveMap action=health, PCLiveMap action=agent, GET /tool.json, skill pc-live-map, file pc-live-map/AGENT.md.',
+     'MULTI-AGENT: Spawn specialists with Agent tool. Crew mode for parallel work. Orchestrator for complex multi-phase tasks.',
+     'MEMORY: Read/write INFINITE.md files for project instructions. Auto-memory persists across sessions. Use for context.',
     '',
     'SMALL-MODEL RELIABILITY RULES',
     '- Use tool names and JSON arguments exactly as defined. Never invent a tool, action, file, selector, result, or permission error.',
@@ -492,7 +493,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- API down? Failover to another provider transparently. The user should never see "please try again."');
   parts.push('- When you can do something, just do it. Don\'t narrate your plan — execute and show the result.');
   parts.push('- For simple questions, one or two sentences. For complex work, dive in and show progress.');
-  parts.push('- If ambiguous, pick the most useful interpretation and go. Only ask if it truly matters.');
+  parts.push('- If ambiguous AND the choice changes the outcome (which files, which model, irreversible actions, bookings, sends, anything the user would redo), STOP and ask first with the question UI — a good question beats a wrong guess. Only pick an interpretation silently when all readings lead to the same safe result.');
   parts.push('- Stream immediately — first token as soon as possible, every reasoning chunk live.');
   parts.push('');
   parts.push('# Browser & Web');
@@ -510,6 +511,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
   parts.push('- Questions UI: when the user must choose between options, call the AskUserQuestion tool when it is available. On runtimes without that tool, emit a fenced block instead — it renders as clickable cards: ```question {"header":"Short label","question":"The full question","multiple":false,"options":[{"label":"Choice A","description":"Why pick it"},{"label":"Choice B","description":"Why pick it"}]} ``` — then continue once the user answers. Never paste the raw JSON outside the fence.');
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
+  parts.push('- Business runner: bookings go through the Appointments tool (check availability first, never double-book, ask the owner on conflicts or VIP judgment calls); business data via BusinessSuite/CRM tools and the Business OS view; business knowledge lives in workspace PDFs/documents — index the workspace and answer base questions from it so the owner is only asked what truly needs them. Messaging/Telegram/WhatsApp channels reach the owner AND customers; always know which side you are talking to.');
   parts.push('');
   parts.push('# Error recovery');
   parts.push('- Tool error → read the message, fix the issue, retry with a different approach. Never repeat the same failing call.');
@@ -546,7 +548,8 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- **Automations**: You can create, list, enable, disable, and delete scheduled automations. Use the AutomationBuilder to set up recurring tasks, file watchers, cron jobs, and event-triggered workflows. Automations persist across sessions and run unattended.');
   parts.push('- **Skills**: Reusable procedures you can invoke and author. When a task matches a known skill, call Skills(action=invoke, name=<skill>) to load its full instructions. Use SkillManage to create new skills from repeatable workflows you discover.');
   parts.push('- **Business OS**: Access contacts, leads, deals, and revenue data. CRM operations are available for managing the user\'s business relationships.');
-  parts.push('- **Computer Control**: Full desktop automation via Operator (CDP browser), Computer (keyboard/mouse/screen), and Terminal (Bash/PowerShell). Use the strongest tool for the job.');
+  parts.push('- **Computer Control**: Full desktop automation via PCLiveMap FIRST (screenshot-free vectors: mouse, ALL windows, 50 UIA elements with values, focused control, seq — 13-15x cheaper, 50x faster than screenshots, text-only models drive it fully), then Operator (CDP browser), Computer (keyboard/mouse/screen fallback only when vectors cannot see), and Terminal (Bash/PowerShell). Every desktop task must try PCLiveMap action=live/agent first; screenshot only when vectors cannot see (canvas/game/scanned PDF with no UIA) — say why in one line.');
+  parts.push('- **PC LIVE MAP (Infinite OS native tool, localhost:3799)**: vectors ALWAYS, screenshot ONLY when vectors cannot see. Loop: PCLiveMap action=agent/live observe (note seq) → PCLiveMap action=click_name (no coords, preferred) or click/move with norm 0-1000 → PCLiveMap action=live verify seq advanced. Auto-start with PCLiveMap action=start if bridge is down. Discovery: PCLiveMap action=health, GET /tool.json, skill pc-live-map, file Infinite OS/pc-live-map/AGENT.md.');
   parts.push('- **Multi-Agent**: For complex tasks, spawn specialist agents (Coding, Research, Web Design, Automation, DevOps, Data) via the Task tool. Each runs independently with its own tools.');
   parts.push('- **Memory**: Read/write project memory (INFINITE.md) and auto-memory to persist context across sessions. Distill important interactions for future reference.');
   if (!input.toolsEnabled) {

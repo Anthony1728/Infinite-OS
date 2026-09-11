@@ -92,6 +92,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   notify: 'Notification', sendnotification: 'Notification', send_notification: 'Notification', notifyprogress: 'NotificationProgress', notify_progress: 'NotificationProgress', notifyaction: 'NotificationAction', notify_action: 'NotificationAction', notifystatus: 'NotificationStatus', notify_status: 'NotificationStatus', notifyclear: 'NotificationClear', notify_clear: 'NotificationClear',
   // Git
   gitstatus: 'GitStatus', git_status: 'GitStatus', gitlog: 'GitLog', git_log: 'GitLog', gitcommit: 'GitCommit', git_commit: 'GitCommit', gitbranch: 'GitBranch', git_branch: 'GitBranch', gitpush: 'GitPush', git_push: 'GitPush', gitpull: 'GitPull', git_pull: 'GitPull', gitdiff: 'GitDiff', git_diff: 'GitDiff', gitcheckout: 'Git', git_checkout: 'Git', repostatus: 'GitStatus', repo_status: 'GitStatus',
+  pclivemap: 'PCLiveMap', pc_live_map: 'PCLiveMap', live_map: 'PCLiveMap', pcmap: 'PCLiveMap', live: 'PCLiveMap', // Infinite OS vector eyes+hands (preferred over Computer screenshots)
   // Misc
   sendemail: 'Email', send_email: 'Email', mail: 'Email', composeemail: 'Email', compose_email: 'Email',
   gettime: 'Time', get_time: 'Time', currenttime: 'Time', current_time: 'Time', timestamp: 'Time', datetime: 'Time', date_time: 'Time',
@@ -238,10 +239,10 @@ export const toolRegistry = new ToolRegistry();
 export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
   'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
-  'Computer', 'browser_extension', 'Operator', 'Verify',
+  'PCLiveMap', 'Computer', 'browser_extension', 'Operator', 'Verify',
   'FileOps', 'Knowledge', 'System',
   'Git', 'CreateTab', 'BuildFeature',
-  'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot',
+  'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot', 'Appointments',
 ]);
 
 /**

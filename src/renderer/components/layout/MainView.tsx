@@ -36,6 +36,9 @@ const ArtifactsView = lazy(() => import('../views/ArtifactsView').then(m => ({ d
 const MessagingView = lazy(() => import('../views/MessagingView').then(m => ({ default: m.MessagingView })));
 const CanvasBoard = lazy(() => import('../workspace/InfiniteCanvas').then(m => ({ default: m.InfiniteCanvas })));
 const TerminalView = lazy(() => import('../views/TerminalView').then(m => ({ default: m.TerminalView })));
+const PowerCenterView = lazy(() => import('../views/PowerCenterView').then(m => ({ default: m.PowerCenterView })));
+const BusinessOSView = lazy(() => import('../views/BusinessOSView').then(m => ({ default: m.BusinessOSView })));
+const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ default: m.KnowledgeView })));
 
 interface MainViewProps {
   activeView: string;
@@ -61,8 +64,7 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
 
     switch (activeView) {
       case 'home':
-        // Homepage removed per user 2026-09-01 v2 — redirect to AI Chat. File OSHomeView.tsx kept in .backups for restore.
-        return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
+        return <PowerCenterView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'chats':
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'projects':
@@ -119,6 +121,10 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <ActiveMemoryView />;
       case 'enterprise':
         return <EnterpriseView />;
+      case 'business':
+        return <BusinessOSView />;
+      case 'knowledge':
+        return <KnowledgeView />;
       case 'capabilities':
         return <CapabilitiesView />;
       case 'bots':

@@ -391,6 +391,11 @@ app.on('window-all-closed', () => {
       telegramInbound.stop();
     } catch { /* already stopped */ }
   }).catch(() => {});
+  void import('./messaging/whatsapp-link.js').then(({ whatsAppLink }) => {
+    try {
+      whatsAppLink.stop();
+    } catch { /* already stopped */ }
+  }).catch(() => {});
   void browserOperator.shutdown().finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });

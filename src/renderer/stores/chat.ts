@@ -23,6 +23,19 @@ const pendingSafetyTimers = new Map<
 // A watchdog abort is reported back by the main process as a stream error.
 // Track those sessions so the expected abort cannot render a second message.
 const safetyFallbackSessions = new Set<string>();
+// Fire-and-forget session appends are the classic vanishing-message race:
+// a transcript reload that lands before the writes commit drops just-sent
+// messages. Every append registers here; reloads flush first.
+const pendingPersists = new Set<Promise<unknown>>();
+function persistSessionMessage(sessionId: string, message: Message): void {
+  const pending = window.api.appendSessionMessage({ sessionId, message }).catch(() => undefined);
+  pendingPersists.add(pending);
+  void pending.finally(() => pendingPersists.delete(pending));
+}
+async function flushPersists(): Promise<void> {
+  if (pendingPersists.size === 0) return;
+  await Promise.allSettled([...pendingPersists]);
+}
 const activeChatTaskBySession = new Map<string, string>();
 const chatTaskByOrchestrator = new Map<string, string>();
 const orchestratorBySession = new Map<string, string>();
@@ -656,11 +669,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .filter((m): m is Message => Boolean(m));
         if (liveMsgs.length) {
           for (const m of liveMsgs) {
-            void window.api.appendSessionMessage({ sessionId: context.sessionId, message: m }).catch(() => undefined);
+            persistSessionMessage(context.sessionId, m);
           }
         }
         if (!successful || !liveMsgs.length) {
-          void window.api.appendSessionMessage({ sessionId: context.sessionId, message: assistantMessage }).catch(() => undefined);
+          persistSessionMessage(context.sessionId, assistantMessage);
         }
       }
       if (isBillingError || isVerifiedFail) {
@@ -672,7 +685,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const tried = currentSelectionLabel();
           const brainMsg: Message = { id: crypto.randomUUID(), role: 'assistant', content: [{ type: 'text', text: `🧠 **Infinite AI Brain (offline, no credits needed):**${tried ? `\n_${tried} didn't answer, so here's the local brain instead._` : ''}\n\n${brainText}` }], timestamp: Date.now(), provider: 'offline-brain', model: 'local-recovery' };
           if (context.sessionId === get().currentSessionId) set((s) => ({ messages: [...s.messages, brainMsg] }));
-          void window.api.appendSessionMessage({ sessionId: context.sessionId, message: brainMsg }).catch(() => undefined);
+          persistSessionMessage(context.sessionId, brainMsg);
         } catch { /* ignore */ }
       }
     });
@@ -722,7 +735,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         timestamp: Date.now(),
       };
       if (targetSessionId === get().currentSessionId) set((state) => ({ messages: [...state.messages, message] }));
-      void window.api.appendSessionMessage({ sessionId: targetSessionId, message }).catch(() => undefined);
+      persistSessionMessage(targetSessionId, message);
       if (complete) activeTeachingChatSessionId = null;
     });
 
@@ -807,14 +820,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           content: [{ type: 'text', text: `**Crew run failed.**\n\n${ev.data?.summary ?? 'Unknown crew error.'}\n\n**Try:** a different paired model, or turn **Pair model** off for a single-model run.` }],
           timestamp: Date.now(),
         };
-        void window.api.appendSessionMessage({ sessionId, message: errMsg }).catch(() => undefined);
+        persistSessionMessage(sessionId, errMsg);
         if (sessionId === get().currentSessionId) {
           set((state) => ({ messages: [...state.messages, errMsg], streaming: false }));
           return;
         }
       }
-      // Main persisted the final answer — reload the transcript.
+      // Main persisted the final answer — flush our appends first, then reload
+      // the transcript so just-sent messages can never vanish in the race.
       try {
+        await flushPersists();
         const messages = (await window.api.loadSession({ sessionId })) as Message[];
         if (sessionId === get().currentSessionId) set({ messages, streaming: false });
       } catch {
@@ -1051,6 +1066,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectSession: async (id) => {
     set({ loadingSession: true });
     try {
+      // Flush in-flight appends first: switching sessions mid-stream must not
+      // strand just-sent messages in a write the new transcript never sees.
+      await flushPersists();
       const messages = await window.api.loadSession({ sessionId: id });
       const orchestratedTaskId = orchestratorBySession.get(id) ?? null;
       set({
@@ -1098,6 +1116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   branchSession: async (id, messageId) => {
     const session = await window.api.branchSession({ sessionId: id, messageId });
+    await flushPersists();
     const messages = await window.api.loadSession({ sessionId: session.id });
     set((state) => ({ sessions: [session, ...state.sessions], currentSessionId: session.id, messages }));
   },
@@ -2714,7 +2733,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
             timestamp: Date.now(),
           };
           setState((s) => ({ messages: [...s.messages, questionMessage] }));
-          void window.api.appendSessionMessage({ sessionId, message: questionMessage }).catch(() => undefined);
+          persistSessionMessage(sessionId, questionMessage);
           // Mark activity done without adding a raw tool_result bubble
           setState((s) => ({
             activity: s.activity.map((a) => a.toolUseId === ev.tool_use_id && a.status === 'running' ? { ...a, status: 'done' as const } : a),

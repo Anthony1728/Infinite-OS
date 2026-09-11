@@ -479,6 +479,10 @@ export const IPC = {
   MESSAGING_SEND: 'messaging:send',
   MESSAGING_INBOUND_GET: 'messaging:inbound:get',
   MESSAGING_INBOUND_SET: 'messaging:inbound:set',
+  WHATSAPP_LINK_STATUS: 'whatsapp:link:status',
+  WHATSAPP_LINK_START: 'whatsapp:link:start',
+  WHATSAPP_LINK_STOP: 'whatsapp:link:stop',
+  WHATSAPP_LINK_UNPAIR: 'whatsapp:link:unpair',
 
   // Custom slash commands (user-defined /commands from files)
   COMMANDS_CUSTOM_LIST: 'commands:custom:list',
