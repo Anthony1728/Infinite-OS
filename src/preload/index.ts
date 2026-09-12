@@ -476,10 +476,14 @@ const api = {
     ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_ADD_NOTE, args),
   enterpriseCompanyDeleteNote: (args: { id: string }) =>
     ipcRenderer.invoke(IPC.ENTERPRISE_COMPANY_DELETE_NOTE, args),
-  knowledgeList: (args?: { search?: string }) => ipcRenderer.invoke(IPC.KNOWLEDGE_LIST, args ?? {}),
-  knowledgeSave: (args: { id?: string; title: string; category?: string; tags?: string[]; content: string }) =>
-    ipcRenderer.invoke(IPC.KNOWLEDGE_SAVE, args),
-  knowledgeDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.KNOWLEDGE_DELETE, args),
+  kbList: () => ipcRenderer.invoke(IPC.KB_LIST),
+  kbGet: (args: { id: string }) => ipcRenderer.invoke(IPC.KB_GET, args),
+  kbSave: (args: { id?: string; title: string; content?: string; tags?: string[] }) =>
+    ipcRenderer.invoke(IPC.KB_SAVE, args),
+  kbDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.KB_DELETE, args),
+  kbAttach: (args: { path: string; title?: string }) => ipcRenderer.invoke(IPC.KB_ATTACH, args),
+  pickFile: (args?: { filters?: Array<{ name: string; extensions: string[] }> }) =>
+    ipcRenderer.invoke(IPC.PICK_FILE, args ?? {}),
   enterpriseAddComplianceRule: (args: {
     name: string;
     description: string;

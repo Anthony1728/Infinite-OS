@@ -164,6 +164,25 @@ export interface AgentRunOptions {
   onEvent: (e: AgentEvent) => void;
 }
 
+/**
+ * A failed turn's partial assistant message keeps its streamed content instead
+ * of vanishing (failover used to pop the message and tell the UI to discard
+ * it, wiping everything the previous model had already shown). All tool_use
+ * blocks are dropped — the message is still last, so no results can exist for
+ * them, and orphan tool calls break strict providers. Returns true when
+ * anything worth keeping (visible text or media) remains; false means pop +
+ * discard as before.
+ */
+export function keepPartialAssistant(assistant: Message): boolean {
+  const content = assistant.content ?? [];
+  assistant.content = content.filter((block) => block.type !== 'tool_use');
+  return assistant.content.some((block) => {
+    if (block.type === 'text') return block.text.trim().length > 0;
+    if (block.type === 'tool_result') return false;
+    return true;
+  });
+}
+
 export async function runAgent(
   history: Message[],
   userMessage: Message,
@@ -253,8 +272,10 @@ export async function runAgent(
 
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
-    if (messages.at(-1) === assistant) messages.pop();
-    opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+    if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+      messages.pop();
+      opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+    }
     const remaining = failoverPlan.slice(failoverIndex + 1);
     const needsNativeTools = /remaining required (?:desktop )?actions?|does not support tool|did not execute the required tool/i.test(failure);
     const next = (needsNativeTools
@@ -548,8 +569,10 @@ export async function runAgent(
         // stay on the current model and retry with an appropriate backoff.
         if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
         performanceMetrics.retries++;
-        if (messages.at(-1) === assistant) messages.pop();
-        opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+        if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+          messages.pop();
+          opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+        }
         const delayMs = backoffForError(providerFailure, retryCounter);
         console.warn(`[agent] Transient failure on ${activeCandidate.label} (retry ${retryCounter + 1}/${maxRetries}, backoff ${delayMs}ms): ${providerFailure}`);
         if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
@@ -648,8 +671,10 @@ export async function runAgent(
         if (intentOnlyRetries < MAX_INTENT_ONLY_RETRIES) {
           intentOnlyRetries++;
           performanceMetrics.retries++;
-          if (messages.at(-1) === assistant) messages.pop();
-          opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+          if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+            messages.pop();
+            opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+          }
           messages.push({
             id: crypto.randomUUID(),
             role: 'user',
@@ -691,8 +716,10 @@ export async function runAgent(
           // retry the selected model once before failing over.
           emptyResponseRetries++;
           performanceMetrics.retries++;
-          if (messages.at(-1) === assistant) messages.pop();
-          opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+          if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+            messages.pop();
+            opts.onEvent({ type: 'message_discard', message_id: assistant.id });
+          }
           continue;
         }
         if (switchCandidate('The model returned no usable response.', assistant, 'final-answer generation')) continue;
@@ -910,7 +937,8 @@ function forcedToolForRequest(message: Message, history: Message[]): { name: str
   const asksForPhysicalControl = /\b(?:use|using|control|move|with)\b[\s\S]{0,80}\b(?:mouse|keyboard|computer|pc|desktop|screen)\b|\b(?:mouse|keyboard)\b[\s\S]{0,80}\b(?:use|control|move|click|type)\b/i.test(text);
   const affirmativeContinuation = /^(?:yes|yes anything|anything|go ahead|continue|do it)[.!]?$/i.test(text) && computerContext;
   if (asksForPhysicalControl || affirmativeContinuation) {
-    return { name: 'Computer', input: { action: 'visual_observe' } };
+    // Infinite OS vector-first rule: PCLiveMap is 50x faster than screenshots. Computer visual_observe only when vectors cannot see.
+    return { name: 'PCLiveMap', input: { action: 'live' } };
   }
   return null;
 }

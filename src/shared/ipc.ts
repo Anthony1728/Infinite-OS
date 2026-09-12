@@ -379,9 +379,12 @@ export const IPC = {
   ENTERPRISE_COMPANY_UPDATE: 'enterprise:company-update',
   ENTERPRISE_COMPANY_ADD_NOTE: 'enterprise:company-add-note',
   ENTERPRISE_COMPANY_DELETE_NOTE: 'enterprise:company-delete-note',
-  KNOWLEDGE_LIST: 'knowledge:list',
-  KNOWLEDGE_SAVE: 'knowledge:save',
-  KNOWLEDGE_DELETE: 'knowledge:delete',
+  KB_LIST: 'kb:list',
+  KB_GET: 'kb:get',
+  KB_SAVE: 'kb:save',
+  KB_DELETE: 'kb:delete',
+  KB_ATTACH: 'kb:attach',
+  PICK_FILE: 'file:pick-file',
 
   // Call Center
   CALL_CREATE: 'call:create',

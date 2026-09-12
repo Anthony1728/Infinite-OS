@@ -506,7 +506,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
   parts.push('- Questions UI: when the user must choose between options, call the AskUserQuestion tool when it is available. On runtimes without that tool, emit a fenced block instead — it renders as clickable cards: ```question {"header":"Short label","question":"The full question","multiple":false,"options":[{"label":"Choice A","description":"Why pick it"},{"label":"Choice B","description":"Why pick it"}]} ``` — then continue once the user answers. Never paste the raw JSON outside the fence.');
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
-  parts.push('- Business runner: bookings go through the Appointments tool (check availability first, never double-book, ask the owner on conflicts or VIP judgment calls); business data via BusinessSuite/CRM tools and the Business OS view; business knowledge lives in workspace PDFs/documents — index the workspace and answer base questions from it so the owner is only asked what truly needs them. Messaging/Telegram/WhatsApp channels reach the owner AND customers; always know which side you are talking to. Company truth lives in two places you must use: the EnterpriseCompany tool (company profile + board — get it before business answers, add_note for complaints/decisions/contacts) and the Knowledge store (recall/list it for business facts the user saved; remember lasting business facts there so they persist).');
+  parts.push('- Business runner: bookings via Appointments (check availability first, never double-book, ask the owner on conflicts or VIP judgment calls); company profile + board via EnterpriseCompany (get before business answers; add_note for complaints/decisions); business facts + uploaded PDF/Excel/CSV via BusinessKnowledge (search before business answers; add lasting facts); workspace PDFs/documents via the workspace index. Answer base questions from these so the owner is only asked what truly needs them. Messaging/Telegram/WhatsApp reach owner AND customers — always know which side you are talking to.');
   parts.push('');
   parts.push('# Error recovery');
   parts.push('- Tool error → read the message, fix the issue, retry with a different approach. Never repeat the same failing call.');
@@ -666,7 +666,20 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
   const lessons = getBrainTeachingManager().searchLessons(latestText, 3);
   const learnedContext = retrieveLearningContext(latestText, { limit: 3, minConfidence: 0.5 });
   const preferences = retrieveLearningContext('', { kinds: ['preference'], limit: 2, minConfidence: 0.5 });
-  if (!lessons.length && !learnedContext && !preferences) return trimmed;
+  // Business knowledge base: the Knowledge tab's company facts + uploaded
+  // files. Brain answers from both memory and the KB.
+  let kbContext = '';
+  try {
+    const { searchKb } = await import('../knowledge/business-kb.js');
+    const hits = searchKb(latestText, 3);
+    if (hits.length) {
+      kbContext = hits.map((h) => {
+        const snippet = h.content.length > 500 ? `${h.content.slice(0, 500)}…` : h.content;
+        return `• ${h.title}${h.fileName ? ` (from ${h.fileName})` : ''}: ${snippet}`;
+      }).join('\n').slice(0, 1_500);
+    }
+  } catch { /* KB is advisory — memory recall still works */ }
+  if (!lessons.length && !learnedContext && !preferences && !kbContext) return trimmed;
   const recall: Message = {
     id: `brain-recall-${Date.now()}`,
     role: 'user',
@@ -677,6 +690,7 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
         '[Infinite Brain recall — internal learned context; use only when relevant and never claim it is a fresh web source]',
         preferences ? `User preferences learned from prior interactions:\n${preferences}` : '',
         learnedContext ? `Relevant verified learning memory:\n${learnedContext}` : '',
+        kbContext ? `Business knowledge base (company facts + uploaded files):\n${kbContext}` : '',
         ...lessons.map((lesson, index) => [
           `Lesson ${index + 1}: ${lesson.title}`,
           lesson.answer.slice(0, 500),

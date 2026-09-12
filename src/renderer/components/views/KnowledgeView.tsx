@@ -21,6 +21,7 @@ interface KnowledgeEntry {
   category: Category;
   tags: string[];
   content: string;
+  fileName: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -126,24 +127,32 @@ export function KnowledgeView() {
   const [formTags, setFormTags] = useState('');
   const [formContent, setFormContent] = useState('');
 
-  // Shared store: the same memory the agent's Knowledge tool reads and writes,
-  // so user-added business knowledge is picked up by the agent and vice versa.
+  // Business knowledge base: company facts + uploaded files (PDF/Excel/CSV).
+  // Separate from the Memory tab (the agent's own memory). The agent reads
+  // this through the BusinessKnowledge tool; Brain recall includes top hits.
+  const toEntry = (r: {
+    id: unknown; title: unknown; tags: unknown; content: unknown; fileName: unknown; createdAt: unknown; updatedAt: unknown;
+  }): KnowledgeEntry => {
+    const tags = Array.isArray(r.tags) ? (r.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [];
+    const cat = tags.find((t) => t.startsWith('cat:'))?.slice(4);
+    return {
+      id: String(r.id),
+      title: typeof r.title === 'string' && r.title ? r.title : 'Untitled',
+      category: (CATEGORIES as string[]).includes(cat ?? '') ? (cat as Category) : 'General',
+      tags: tags.filter((t) => !t.startsWith('cat:')),
+      content: typeof r.content === 'string' ? r.content : '',
+      fileName: typeof r.fileName === 'string' ? r.fileName : null,
+      createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
+      updatedAt: typeof r.updatedAt === 'number' ? r.updatedAt : Date.now(),
+    };
+  };
+
   const reload = async () => {
     try {
-      const rows = (await window.api.knowledgeList()) as Array<{
-        id: string; title: string; category: string; tags: string[]; content: string; createdAt: number; updatedAt: number;
+      const rows = (await window.api.kbList()) as Array<{
+        id: unknown; title: unknown; tags: unknown; content: unknown; fileName: unknown; createdAt: unknown; updatedAt: unknown;
       }>;
-      setEntries(
-        (Array.isArray(rows) ? rows : []).map((r) => ({
-          id: String(r.id),
-          title: r.title ?? 'Untitled',
-          category: (CATEGORIES as string[]).includes(r.category) ? (r.category as Category) : 'General',
-          tags: Array.isArray(r.tags) ? r.tags : [],
-          content: r.content ?? '',
-          createdAt: r.createdAt ?? Date.now(),
-          updatedAt: r.updatedAt ?? Date.now(),
-        })),
-      );
+      setEntries((Array.isArray(rows) ? rows : []).map(toEntry));
     } catch { /* store unavailable — view stays empty */ }
     finally { setLoading(false); }
   };
@@ -191,12 +200,13 @@ export function KnowledgeView() {
       .split(',')
       .map((t) => t.trim())
       .filter(Boolean);
+    const mergedTags = [...tags.filter((t) => !t.startsWith('cat:')), `cat:${formCategory}`];
 
     try {
       if (editingId) {
-        await window.api.knowledgeSave({ id: editingId, title: formTitle.trim(), category: formCategory, tags, content: formContent });
+        await window.api.kbSave({ id: editingId, title: formTitle.trim(), tags: mergedTags, content: formContent });
       } else {
-        const saved = (await window.api.knowledgeSave({ title: formTitle.trim(), category: formCategory, tags, content: formContent })) as { id?: string } | null;
+        const saved = (await window.api.kbSave({ title: formTitle.trim(), tags: mergedTags, content: formContent })) as { id?: string } | null;
         if (saved && typeof saved.id === 'string') setSelectedId(saved.id);
       }
       await reload();
@@ -208,11 +218,24 @@ export function KnowledgeView() {
 
   const handleDelete = async (id: string) => {
     try {
-      await window.api.knowledgeDelete({ id });
+      await window.api.kbDelete({ id });
     } catch { /* fall through to local removal */ }
     setEntries((prev) => prev.filter((e) => e.id !== id));
     if (selectedId === id) {
       setSelectedId(null);
+    }
+  };
+
+  const handleAttach = async () => {
+    try {
+      const picked = (await window.api.pickFile()) as string | null;
+      if (!picked) return;
+      setLoading(true);
+      const saved = (await window.api.kbAttach({ path: picked })) as { id?: string } | null;
+      await reload();
+      if (saved && typeof saved.id === 'string') setSelectedId(saved.id);
+    } catch {
+      setLoading(false);
     }
   };
 
@@ -233,12 +256,22 @@ export function KnowledgeView() {
               <BookOpen size={14} className="text-textMuted" />
               <span className="text-xs font-semibold text-textMuted uppercase tracking-wider">Knowledge</span>
             </div>
-            <button
-              onClick={openCreate}
-              className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 hover:bg-indigo-500/30 transition-all"
-            >
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleAttach}
+                title="Attach PDF, Excel, CSV, or text file"
+                className="h-7 px-2 rounded-lg bg-white/[0.04] border border-white/10 flex items-center gap-1 text-zinc-300 hover:bg-white/[0.08] transition-all text-[11px]"
+              >
+                <FolderOpen size={13} /> Attach file
+              </button>
+              <button
+                onClick={openCreate}
+                title="New knowledge entry"
+                className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 hover:bg-indigo-500/30 transition-all"
+              >
               <Plus size={14} />
-            </button>
+              </button>
+            </div>
           </div>
 
           <div className="relative mb-3">
@@ -426,6 +459,11 @@ export function KnowledgeView() {
                     </span>
                   </div>
                   <h1 className="text-xl font-bold text-textMain">{selectedEntry.title}</h1>
+                  {selectedEntry.fileName && (
+                    <div className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 rounded-md px-2 py-0.5">
+                      <FileText size={11} /> {selectedEntry.fileName}
+                    </div>
+                  )}
                   <div className="text-xs text-textMuted mt-1">
                     Created {new Date(selectedEntry.createdAt).toLocaleString()}
                     {selectedEntry.updatedAt !== selectedEntry.createdAt && (

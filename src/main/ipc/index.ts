@@ -1146,36 +1146,40 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     return deleteCompanyNote(id);
   });
 
-  // Knowledge (Knowledge view — the same memory store the agent's Knowledge tool reads)
-  function categoryFromTags(tags: string[]): string {
-    const cat = tags.find((t) => t.startsWith('cat:'))?.slice(4);
-    return cat && cat.length > 0 ? cat : 'General';
-  }
-  ipcMain.handle(IPC.KNOWLEDGE_LIST, async (_e, { search }: { search?: string } = {}) => {
-    const memory = await import('../memory/store.js');
-    const rows = search?.trim() ? memory.searchMemories(search.trim()) : memory.listMemories();
-    return rows.slice(0, 200).map((m) => ({
-      id: m.id,
-      title: m.title,
-      category: categoryFromTags(m.tags),
-      tags: m.tags.filter((t) => !t.startsWith('cat:')),
-      content: m.content,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-    }));
+  // Business knowledge base (Knowledge tab — separate from agent memory)
+  ipcMain.handle(IPC.KB_LIST, async () => {
+    const kb = await import('../knowledge/business-kb.js');
+    return kb.listKb();
   });
-  ipcMain.handle(IPC.KNOWLEDGE_SAVE, async (_e, { id, title, category, tags, content }) => {
-    const memory = await import('../memory/store.js');
+  ipcMain.handle(IPC.KB_GET, async (_e, { id }) => {
+    const kb = await import('../knowledge/business-kb.js');
+    return kb.getKb(id);
+  });
+  ipcMain.handle(IPC.KB_SAVE, async (_e, { id, title, content, tags }) => {
+    const kb = await import('../knowledge/business-kb.js');
     if (typeof title !== 'string' || !title.trim()) throw new Error('title is required');
-    const merged = [...(Array.isArray(tags) ? tags.filter((t) => typeof t === 'string') : []), `cat:${typeof category === 'string' && category ? category : 'General'}`];
-    if (typeof id === 'string' && id) {
-      return memory.updateMemory(id, { title: title.trim(), content: typeof content === 'string' ? content : '', tags: merged, tier: 'semantic', importance: 0.8 });
-    }
-    return memory.createMemory({ type: 'note', title: title.trim(), content: typeof content === 'string' ? content : '', tags: merged, tier: 'semantic', importance: 0.8 });
+    return kb.saveKb({
+      ...(typeof id === 'string' && id ? { id } : {}),
+      title,
+      content: typeof content === 'string' ? content : '',
+      tags: Array.isArray(tags) ? tags.filter((t) => typeof t === 'string') : [],
+    });
   });
-  ipcMain.handle(IPC.KNOWLEDGE_DELETE, async (_e, { id }) => {
-    const memory = await import('../memory/store.js');
-    return memory.deleteMemory(id);
+  ipcMain.handle(IPC.KB_DELETE, async (_e, { id }) => {
+    const kb = await import('../knowledge/business-kb.js');
+    return kb.deleteKb(id);
+  });
+  ipcMain.handle(IPC.KB_ATTACH, async (_e, { path: filePath, title }) => {
+    const kb = await import('../knowledge/business-kb.js');
+    if (typeof filePath !== 'string' || !filePath) throw new Error('path is required');
+    return kb.attachKbFile(filePath, typeof title === 'string' ? title : undefined);
+  });
+  ipcMain.handle(IPC.PICK_FILE, async (_e, { filters }: { filters?: Array<{ name: string; extensions: string[] }> } = {}) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: filters?.length ? filters : [{ name: 'Documents', extensions: ['pdf', 'xlsx', 'xls', 'csv', 'txt', 'md'] }],
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
   // Call Center IPC

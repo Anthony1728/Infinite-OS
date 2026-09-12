@@ -41,7 +41,7 @@ vi.mock('../brain/router.js', () => ({ DecisionRouter: vi.fn().mockImplementatio
 vi.mock('./browser-routing.js', () => ({ routeForcedBrowserTool: mocks.routeForcedBrowserTool }));
 vi.mock('./learning-adapter.js', () => ({ learnFromToolResult: mocks.learnFromToolResult, learnFromCompletedResponse: vi.fn() }));
 
-import { runAgent, setLoopStallTimeout } from './loop.js';
+import { keepPartialAssistant, runAgent, setLoopStallTimeout } from './loop.js';
 
 function msg(text: string): Message {
   return { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
@@ -188,4 +188,27 @@ describe('Agent loop stall timeout', () => {
     // After completing, advancing time should not cause errors (interval cleared)
     await vi.advanceTimersByTimeAsync(1000);
   }, 10_000);
+});
+
+describe('keepPartialAssistant', () => {
+  const assistant = (content: Message['content']): Message => ({
+    id: 'a1', role: 'assistant', content, timestamp: Date.now(),
+  });
+
+  it('keeps streamed text and drops orphan tool_use blocks', () => {
+    const m = assistant([
+      { type: 'text', text: 'Working on it — found ' },
+      { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'x' } },
+    ]);
+    expect(keepPartialAssistant(m)).toBe(true);
+    expect(m.content).toEqual([{ type: 'text', text: 'Working on it — found ' }]);
+  });
+
+  it('returns false for empty or tool-only partials', () => {
+    const empty = assistant([{ type: 'text', text: '   ' }]);
+    expect(keepPartialAssistant(empty)).toBe(false);
+    const toolOnly = assistant([{ type: 'tool_use', id: 't1', name: 'Read', input: {} }]);
+    expect(keepPartialAssistant(toolOnly)).toBe(false);
+    expect(toolOnly.content).toEqual([]);
+  });
 });
