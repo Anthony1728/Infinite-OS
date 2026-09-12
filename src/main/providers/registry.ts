@@ -7,6 +7,7 @@ import { anthropic } from './anthropic.js';
 import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 import { opencode } from './opencode.js';
+import { cloudflare } from './cloudflare.js';
 import type { Message } from '../../shared/types.js';
 import { ensureOllamaRunning, OLLAMA_URL, resolveOllamaModel } from '../ollama/utils.js';
 
@@ -343,6 +344,21 @@ const REGISTRY: Record<string, ProviderAdapter> = {
     ],
     homepage: 'https://console.groq.com',
   }),
+  apinex: openaiCompatible({
+    id: 'apinex',
+    label: 'APInex',
+    defaultBaseUrl: 'https://api.apinex.bond/v1',
+    defaultModel: 'free/muse-spark-1.3',
+    freeModels: [
+      { id: 'free/muse-spark-1.3', label: 'Muse Spark 1.3 (free)', provider: 'apinex', free: true, supports_tools: true },
+      { id: 'free/gemini-3.8-flash', label: 'Gemini 3.8 Flash (free)', provider: 'apinex', free: true, supports_tools: true },
+      { id: 'free/glm-5.3-flash', label: 'GLM 5.3 Flash (free)', provider: 'apinex', free: true, supports_tools: true },
+      { id: 'free/gemini-3.1-pro', label: 'Gemini 3.1 Pro (free)', provider: 'apinex', free: true, supports_tools: true },
+      { id: 'free/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro (free)', provider: 'apinex', free: true, supports_tools: true },
+    ],
+    homepage: 'https://apinex.bond',
+  }),
+  cloudflare,
   ollama: ollamaAdapter,
   opencode,
   gemini,

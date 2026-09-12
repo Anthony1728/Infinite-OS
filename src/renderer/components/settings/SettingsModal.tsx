@@ -113,6 +113,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [statusMessage, setStatusMessage] = useState('');
   const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
@@ -124,6 +125,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setProviders(p);
       setActiveProvider(loadCurrent().provider);
     });
+    window.api
+      .getSetting({ key: 'cloudflareAccountId' })
+      .then((value: unknown) => {
+        if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
     window.api
       .getSetting({ key: 'permissionProfile' })
       .then((value: unknown) => {
@@ -309,6 +316,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setSelectedModelName(id);
     // Dispatch storage event so other components update immediately
     window.dispatchEvent(new Event('storage'));
+  };
+
+  const saveCloudflareAccountId = async () => {
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'cloudflareAccountId',
+      value: cloudflareAccountId.trim(),
+      cwd: loadCurrent().cwd || '.',
+    }).catch(() => undefined);
   };
 
   const pickPermissionProfile = async (id: PermissionProfile) => {
@@ -593,6 +609,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
                 {(provider?.requiresApiKey || provider?.acceptsApiKey) && (
                   <div className="mb-3">
+                    {activeProvider === 'cloudflare' && (
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={cloudflareAccountId}
+                          onChange={(e) => setCloudflareAccountId(e.target.value)}
+                          onBlur={() => void saveCloudflareAccountId()}
+                          placeholder="Cloudflare account ID (from your dashboard URL)"
+                          className="flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-white/[0.25] transition-colors placeholder:text-zinc-600"
+                        />
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <input
                         type="password"
