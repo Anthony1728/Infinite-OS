@@ -2393,12 +2393,17 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
     }
     case 'provider_start': {
       const modelLabel = ev.model || 'model';
+      // Some providers prefix their own id into model ids
+      // (nvidia/nemotron-...) — strip it so the label never stutters.
+      const shortLabel = ev.provider && modelLabel.startsWith(`${ev.provider}/`)
+        ? modelLabel.slice(ev.provider.length + 1)
+        : modelLabel;
       set((s) => ({
         messages: liveId && target.transcript
           ? s.messages.map((m) => (m.id === liveId ? { ...m, provider: ev.provider, model: ev.model } : m))
           : s.messages,
         providerStatus: {
-          label: `Calling ${ev.provider ?? target.agentName}/${modelLabel}`,
+          label: `Calling ${ev.provider ?? target.agentName}/${shortLabel}`,
           detail: typeof ev.turn === 'number' && ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the request…',
           receivedAt: Date.now(),
         },
@@ -2798,8 +2803,11 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
     case 'provider_start': {
       // The agent loop told us it's about to call the model. Show that in
       // the Thinking bubble so the user sees real progress before any token
-      // arrives ΓÇö important for slow free-tier providers that can take 10-30s.
+      // arrives — important for slow free-tier providers that can take 10-30s.
       const modelLabel = ev.model || 'model';
+      const shortLabel = ev.provider && modelLabel.startsWith(`${ev.provider}/`)
+        ? modelLabel.slice(ev.provider.length + 1)
+        : modelLabel;
       setState((state) => ({
         messages: state.messages.map((message) =>
           message.id === ev.message_id
@@ -2813,8 +2821,8 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
             : message,
         ),
         providerStatus: {
-          label: `Calling ${ev.provider}/${modelLabel}`,
-          detail: ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the requestΓÇª',
+          label: `Calling ${ev.provider}/${shortLabel}`,
+          detail: ev.turn > 0 ? `Retry turn ${ev.turn + 1}` : 'Preparing the request…',
           receivedAt: Date.now(),
         },
       }));
