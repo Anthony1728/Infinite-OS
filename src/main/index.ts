@@ -257,6 +257,12 @@ app.whenReady().then(async () => {
     if (stdinPrompt) parsed.prompt = stdinPrompt;
     registerBuiltinTools();
     const code = await runExec(parsed);
+    // Flush stdio before exiting: Electron's app.exit() on Windows can
+    // truncate buffered stdout, silently eating the answer/JSONL tail.
+    await Promise.all([
+      new Promise<void>((r) => process.stdout.write('', () => r())),
+      new Promise<void>((r) => process.stderr.write('', () => r())),
+    ]);
     app.exit(code);
     return;
   }

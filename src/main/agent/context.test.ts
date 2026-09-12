@@ -47,7 +47,7 @@ describe('local model operating prompt', () => {
       attachedToolNames: ['Computer', 'WebSearch'],
     });
 
-    expect(prompt).toContain('Computer visual_observe first');
+    expect(prompt).toContain('PCLiveMap FIRST');
     expect(prompt).toContain('browser_extension FIRST');
     expect(prompt).toContain('run targeted tests/typecheck/lint/build');
     expect(prompt).toContain('Use tool names and JSON arguments exactly as defined');
@@ -143,7 +143,14 @@ describe('skills catalog (progressive disclosure)', () => {
     const many = Array.from({ length: 90 }, (_, i) => ({ name: `skill-${i}`, description: 'd', category: 'c' }));
     const catalog = renderSkillsCatalog(many);
     expect(catalog).toContain('90 reusable skills are available');
-    expect(catalog).toContain('... and 10 more');
+    expect(catalog).toContain('... and 50 more');
+  });
+
+  it('truncates long skill descriptions', () => {
+    const long = 'x'.repeat(200);
+    const catalog = renderSkillsCatalog([{ name: 's', description: long, category: 'c' }]);
+    expect(catalog).not.toContain(long);
+    expect(catalog).toContain('s —');
   });
 
   it('returns an empty string for no skills', () => {

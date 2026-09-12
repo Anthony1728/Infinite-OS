@@ -273,10 +273,11 @@ function quarantineFailure(selected: { providerID: string; modelID: string }, fa
 }
 
 function transcript(messages: Message[]): string {
-  // Bounded context: the last 120 messages / 300k chars. Full turns were
-  // observed shipping 44k+ input tokens to shared free-tier models, which is
-  // the dominant first-token latency driver. Tool results stay verbatim.
-  return messages.slice(-120).map((message) => {
+  // Lean budget for the local runtime: it injects ~40k+ tokens of its own
+  // project context, so our full 300k-char history + 18k system prompt tips
+  // small free-tier models into 500s. Last 40 messages / 40k chars keeps the
+  // task context without drowning the model. Tool results stay verbatim.
+  return messages.slice(-40).map((message) => {
     const content = message.content.map((block) => {
       if (block.type === 'text') return block.text;
       if (block.type === 'tool_result') {
@@ -287,7 +288,33 @@ function transcript(messages: Message[]): string {
       return '';
     }).filter(Boolean).join('\n');
     return `${message.role.toUpperCase()}: ${content}`;
-  }).join('\n\n').slice(-300_000);
+  }).join('\n\n').slice(-40_000);
+}
+
+/** The local runtime brings its own agent, tools, and ~40k tokens of project
+ * context — it needs the task, not our 18k-char operating bible (which 500s
+ * small free-tier models). Keep identity + autonomy + the sharp edges. */
+function localRuntimeSystem(fullSystem: string | undefined): string {
+  const head = (fullSystem ?? '').split('\n').filter((l) => /uncensored|permission|profile/i.test(l)).slice(0, 4).join('\n');
+  return [
+    'You are Infinite AI inside Infinite OS, acting on the user\'s own PC with their full permission. Follow the user request; be concise; act with your tools and verify results.',
+    head,
+  ].filter(Boolean).join('\n');
+}
+
+/** Test seam: resolve a requested OpenCode model against the live catalog.
+ * Server-side retirements (e.g. big-pickle) fall back to a live model instead
+ * of bricking the installed-CLI path; returns switched=false when exact. */
+export function resolveLiveOpenCodeModel(reqModel: string, allowed: Array<{ id: string; free?: boolean }>): { providerID: string; modelID: string; switched: boolean; fallbackId: string | null } {
+  const selected = decodeModel(reqModel);
+  if (allowed.some((model) => model.id === `${selected.providerID}::${selected.modelID}`)) {
+    return { ...selected, switched: false, fallbackId: null };
+  }
+  const fallback = allowed.find((model) => model.id.startsWith('opencode::'))
+    ?? allowed.find((model) => model.free);
+  if (!fallback) return { ...selected, switched: false, fallbackId: null };
+  const fallbackModelID = fallback.id.includes('::') ? fallback.id.split('::').slice(1).join('::') : fallback.id;
+  return { providerID: 'opencode', modelID: fallbackModelID, switched: true, fallbackId: fallback.id };
 }
 
 async function providerData(baseUrl: string): Promise<ProviderResponse> {
@@ -608,7 +635,7 @@ async function* streamSessionMessage(args: {
           body: JSON.stringify({
             model: args.selected,
             agent: 'build',
-            system: args.request.system,
+            system: localRuntimeSystem(args.request.system),
             parts: [{ type: 'text', text: transcript(args.request.messages) }],
           }),
           signal,
@@ -1059,8 +1086,8 @@ export const opencode: ProviderAdapter = {
 
   async *streamChat(req: ChatRequest, apiKey: string, baseUrl?: string): AsyncIterable<StreamChunk> {
     const url = cleanUrl(baseUrl);
-    const selected = decodeModel(req.model);
-    const modelId = `${selected.providerID}::${selected.modelID}`;
+    let selected = decodeModel(req.model);
+    let modelId = `${selected.providerID}::${selected.modelID}`;
     const tier = modelTiers.get(modelId) ?? 'zen';
     const freeTier = selected.modelID === 'big-pickle' || /(?:^|[-_])free$/i.test(selected.modelID);
     if (apiKey && selected.providerID === 'opencode') {
@@ -1116,11 +1143,23 @@ export const opencode: ProviderAdapter = {
           selected.providerID === 'opencode' && (data.connected ?? []).includes('opencode'),
         );
         if (!allowed.some((model) => model.id === `${selected.providerID}::${selected.modelID}`)) {
-          throw new Error(`The selected OpenCode model is not currently available: ${req.model}`);
+          // Server-side retirements (e.g. big-pickle) must not brick the
+          // installed-CLI path: fall back to a live catalog model instead of
+          // failing the turn. The user sees which model actually answered.
+          const resolved = resolveLiveOpenCodeModel(req.model, allowed);
+          if (!resolved.switched || !resolved.fallbackId) throw new Error(`The selected OpenCode model is not currently available: ${req.model}`);
+          console.info(`[opencode] ${req.model} not in live catalog; falling back to ${resolved.fallbackId}`);
+          yield { type: 'provider_status', status: 'failover', provider: 'opencode', model: resolved.fallbackId, from: req.model, to: resolved.fallbackId, reason: `${req.model} is no longer offered — using ${resolved.fallbackId} instead.` };
+          selected = { providerID: resolved.providerID, modelID: resolved.modelID };
+          modelId = `${selected.providerID}::${selected.modelID}`;
         }
       } catch (error) {
-        yield { type: 'error', error: `OpenCode: ${(error as Error).message}` };
-        return;
+        // A fallback switch already yielded a status above — only hard-fail
+        // when there is genuinely nothing to fall back to.
+        if (modelId === `${decodeModel(req.model).providerID}::${decodeModel(req.model).modelID}`) {
+          yield { type: 'error', error: `OpenCode: ${(error as Error).message}` };
+          return;
+        }
       }
     }
     const directoryPath = req.cwd ?? '';

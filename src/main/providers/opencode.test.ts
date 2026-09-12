@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeZenModels, opencode, otherTier, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
+import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeZenModels, opencode, otherTier, resolveLiveOpenCodeModel, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
 import type { ChatRequest, StreamChunk } from './base.js';
 import type { Message } from '../../shared/types.js';
 
@@ -736,5 +736,50 @@ describe('OpenCode stall watchdog', () => {
     expect(chunks.some((c) => c.type === 'error')).toBe(false);
     expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
     expect(runtime.sessionCreations()).toBe(1);
+  });
+});
+
+describe('OpenCode retired-model fallback', () => {
+  it('keeps an exact catalog match without switching', () => {
+    const r = resolveLiveOpenCodeModel('opencode::chat', [{ id: 'opencode::chat' }]);
+    expect(r).toEqual({ providerID: 'opencode', modelID: 'chat', switched: false, fallbackId: null });
+  });
+
+  it('falls back to a live opencode model when the selected id retired', () => {
+    const r = resolveLiveOpenCodeModel('opencode::big-pickle', [{ id: 'opencode::chat' }]);
+    expect(r.switched).toBe(true);
+    expect(r.fallbackId).toBe('opencode::chat');
+    expect(r.modelID).toBe('chat');
+  });
+
+  it('prefers free models when no opencode-subscription model exists', () => {
+    const r = resolveLiveOpenCodeModel('opencode::big-pickle', [{ id: 'other::m', free: true }]);
+    expect(r.switched).toBe(true);
+    expect(r.fallbackId).toBe('other::m');
+  });
+
+  it('reports no-switch when the catalog is empty', () => {
+    const r = resolveLiveOpenCodeModel('opencode::big-pickle', []);
+    expect(r.switched).toBe(false);
+    expect(r.fallbackId).toBe(null);
+  });
+
+  it('switches models mid-stream instead of failing the turn', async () => {
+    // Mock catalog offers only `chat`; requesting retired `big-pickle` must
+    // yield a failover notice and still complete the turn.
+    const rt = startMockRuntime('instant');
+    await new Promise<void>((resolve) => rt.server.listen(0, '127.0.0.1', resolve));
+    const port = (rt.server.address() as AddressInfo).port;
+    try {
+      const chunks = await collect(`http://127.0.0.1:${port}`, { ...chatRequest('hi'), model: 'opencode::big-pickle' });
+      const failover = chunks.find((c) => c.type === 'provider_status' && (c as { status?: string }).status === 'failover');
+      expect(failover).toBeTruthy();
+      expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
+      expect(chunks.some((c) => c.type === 'error')).toBe(false);
+      expect(rt.sessionCreations()).toBe(1);
+    } finally {
+      rt.server.closeAllConnections();
+      rt.server.close();
+    }
   });
 });
