@@ -357,6 +357,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
       { id: 'free/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro (free)', provider: 'apinex', free: true, supports_tools: true },
     ],
     homepage: 'https://apinex.bond',
+    gatewayCatalog: true,
   }),
   cloudflare,
   bluesminds: openaiCompatible({
@@ -373,6 +374,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
       { id: 'gpt-4o', label: 'GPT-4o', provider: 'bluesminds', free: true, supports_tools: true },
     ],
     homepage: 'https://api.bluesminds.com',
+    gatewayCatalog: true,
   }),
   ollama: ollamaAdapter,
   opencode,

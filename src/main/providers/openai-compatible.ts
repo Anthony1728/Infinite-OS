@@ -14,6 +14,12 @@ interface Opts {
   freeModels: ModelInfo[];
   requiresApiKey?: boolean;
   homepage?: string;
+  /**
+   * Gateway catalogs (BlueSminds, APInex) are key-metered without per-model
+   * pricing: every listed model is usable on the key, so live entries without
+   * pricing default to free instead of landing in the Paid section.
+   */
+  gatewayCatalog?: boolean;
 }
 
 export function openaiCompatible(opts: Opts): ProviderAdapter {
@@ -138,7 +144,9 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
-          if (opts.id === 'openrouter' && res.status === 402 && isInsufficientCreditsError(errText) && attempt < maxRetries) {
+          // Out of credits / insufficient balance: any provider with a free
+          // fallback model switches to it instead of dying (was openrouter-only).
+          if (res.status === 402 && isInsufficientCreditsError(errText) && attempt < maxRetries) {
             const freeModel = opts.freeModels.find((model) => model.free)?.id;
             if (freeModel && freeModel !== activeModel) {
               activeModel = freeModel;
@@ -286,8 +294,9 @@ function normalizeModel(entry: unknown, opts: Opts): ModelInfo | null {
       const prompt = Number(e.pricing.prompt ?? e.pricing.input ?? 0);
       const completion = Number(e.pricing.completion ?? e.pricing.output ?? 0);
       free = prompt === 0 && completion === 0;
-    } else if (opts.id === 'nvidia' || opts.id === 'groq') {
+    } else if (opts.id === 'nvidia' || opts.id === 'groq' || opts.gatewayCatalog) {
       // NVIDIA NIM and Groq expose no pricing — their catalog is free-tier.
+      // Gateway catalogs (key-metered, no per-model prices) are usable too.
       free = true;
     }
   }

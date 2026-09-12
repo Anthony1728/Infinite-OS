@@ -86,3 +86,62 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
   for await (const chunk of stream) chunks.push(chunk);
   return chunks;
 }
+
+describe('gateway catalogs and credit recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function gatewayAdapter() {
+    return openaiCompatible({
+      id: 'test-gateway',
+      label: 'Test Gateway',
+      defaultBaseUrl: 'https://example.test/v1',
+      defaultModel: 'model-a',
+      freeModels: [{ id: 'model-a', label: 'A', provider: 'test-gateway', free: true, supports_tools: true }],
+      gatewayCatalog: true,
+    });
+  }
+
+  it('marks priceless live catalog entries as usable (free section)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'model-z', name: 'Zed' }] }), { status: 200 }),
+    );
+    const models = await gatewayAdapter().listModels('k');
+    expect(models.some((m) => m.id === 'model-z' && m.free)).toBe(true);
+  });
+
+  it('still honors explicit pricing when present', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ id: 'model-p', pricing: { prompt: 1, completion: 2 } }] }),
+        { status: 200 },
+      ),
+    );
+    const models = await gatewayAdapter().listModels('k');
+    expect(models.find((m) => m.id === 'model-p')?.free).toBe(false);
+  });
+
+  it('switches to the free fallback on insufficient credits for any provider', async () => {
+    const encoder = new TextEncoder();
+    const okStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"recovered"}}]}\n\n'));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('insufficient credits', { status: 402 }))
+      .mockResolvedValueOnce(new Response(okStream, { status: 200 }));
+    const request: ChatRequest = {
+      model: 'model-paid',
+      messages: [{ id: 'm1', role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: Date.now() }],
+      stream: true,
+    };
+    const chunks = await collect(gatewayAdapter().streamChat(request, 'k'));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(chunks.some((c) => c.type === 'text_delta' && c.text === 'recovered')).toBe(true);
+  });
+});
