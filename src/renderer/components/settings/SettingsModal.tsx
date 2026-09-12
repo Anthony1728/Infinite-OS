@@ -109,11 +109,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [activeProvider, setActiveProvider] = useState<string>(() => loadCurrent().provider);
   const [apiKey, setApiKey] = useState('');
   const [apiKeyLoaded, setApiKeyLoaded] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail' | 'warn'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
+  const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
@@ -129,6 +130,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       .getSetting({ key: 'cloudflareAccountId' })
       .then((value: unknown) => {
         if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
+    window.api
+      .getSetting({ key: 'failoverEnabled' })
+      .then((value: unknown) => {
+        if (typeof value === 'boolean') setFailoverEnabled(value);
       })
       .catch(() => undefined);
     window.api
@@ -300,12 +307,34 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const [selectedModelName, setSelectedModelName] = useState('');
 
-  const pickModel = (id: string) => {
+  const pickModel = async (id: string) => {
     saveCurrent({ provider: activeProvider, model: id });
     setCurrentModel(id);
     setSelectedModelName(id);
+    // Warn at selection time when the provider has no key: otherwise the
+    // chat silently answers from a fallback model and nobody knows why.
+    try {
+      if (provider?.requiresApiKey) {
+        const has = (await window.api.hasProviderKey({ provider: activeProvider })) as boolean;
+        if (!has && !apiKey.trim()) {
+          setStatus('warn');
+          setStatusMessage(`Heads-up: no API key saved for ${provider.label ?? activeProvider} — add one and Test & Save, or turns will fall back to other models.`);
+        }
+      }
+    } catch { /* advisory only */ }
     // Dispatch storage event so other components update immediately
     window.dispatchEvent(new Event('storage'));
+  };
+
+  const toggleFailover = async () => {
+    const next = !failoverEnabled;
+    setFailoverEnabled(next);
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'failoverEnabled',
+      value: next,
+      cwd: loadCurrent().cwd || '.',
+    }).catch(() => undefined);
   };
 
   const saveCloudflareAccountId = async () => {
@@ -573,6 +602,20 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div className="mb-5 pr-8">
                   <h3 className="text-sm font-semibold text-zinc-100">Provider</h3>
                   <p className="mt-1 text-xs text-zinc-500">Choose where Infinite AI routes chat and agent requests.</p>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={failoverEnabled}
+                    onClick={() => void toggleFailover()}
+                    title={failoverEnabled ? 'Turn OFF to make the selected model answer or fail plainly (diagnosing)' : 'Turn ON to let failing models hand over to backups'}
+                    className="mt-2.5 flex items-center gap-2 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${failoverEnabled ? 'bg-emerald-500/70' : 'bg-white/10'}`}>
+                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${failoverEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                    </span>
+                    Model fallback {failoverEnabled ? 'on' : 'off'}
+                    {!failoverEnabled && <span className="text-amber-400/90">— selected model answers or fails plainly</span>}
+                  </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   {providers.map((p) => (
@@ -650,6 +693,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 )}
                 {status === 'fail' && (
                   <div className="mb-3 text-sm text-red-400">{statusMessage || 'Connection failed'}</div>
+                )}
+                {status === 'warn' && (
+                  <div className="mb-3 text-sm text-amber-400">{statusMessage}</div>
                 )}
 
                 {models.length > 0 && (

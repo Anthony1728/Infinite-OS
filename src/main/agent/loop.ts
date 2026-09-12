@@ -189,7 +189,13 @@ export async function runAgent(
   opts: AgentRunOptions,
 ): Promise<Message[]> {
   const messages = [...history, userMessage];
-  const failoverPlan = await buildProviderFailoverPlan({ provider: opts.provider, model: opts.model });
+  // Failover kill-switch (Settings → Providers): when OFF, only the selected
+  // model is ever tried — its real error surfaces instead of a substitution.
+  const failoverEnabled = settings.get('failoverEnabled') !== false;
+  let failoverPlan = await buildProviderFailoverPlan({ provider: opts.provider, model: opts.model });
+  if (!failoverEnabled && failoverPlan.length > 1) {
+    failoverPlan = failoverPlan.slice(0, 1);
+  }
   if (failoverPlan.length === 0) {
     opts.onEvent({ type: 'fallback_required' });
     return messages;
@@ -201,16 +207,27 @@ export async function runAgent(
     const { getProvider } = await import('../providers/registry.js');
     const selected = getProvider(opts.provider);
     const needsKey = selected?.requiresApiKey ?? false;
+    const reason = needsKey
+      ? `No API key saved for ${selected?.label ?? opts.provider} — add one in Settings → Providers${failoverEnabled ? `, or keep chatting on ${failoverPlan[0].label}` : ' and try again (model fallback is OFF)'}.`
+      : `${opts.provider}/${opts.model} is not available${failoverEnabled ? ` — using ${failoverPlan[0].label} instead` : ' and model fallback is OFF'}.`;
     opts.onEvent({
       type: 'provider_status',
       status: 'failover',
       from: `${opts.provider}/${opts.model}`,
       to: failoverPlan[0].label,
-      reason: needsKey
-        ? `No API key saved for ${selected?.label ?? opts.provider} — add one in Settings → Providers, or keep chatting on ${failoverPlan[0].label}.`
-        : `${opts.provider}/${opts.model} is not available — using ${failoverPlan[0].label} instead.`,
+      reason,
     });
     console.warn(`[agent] Selected ${opts.provider}/${opts.model} unavailable at plan time; starting on ${failoverPlan[0].label}`);
+    if (!failoverEnabled) {
+      // No silent substitution: surface the real problem as the turn result.
+      const errMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: [{ type: 'text', text: `**${selected?.label ?? opts.provider} is not usable right now.**\n\n${reason}` }],
+        timestamp: Date.now(),
+      };
+      return [...messages, errMsg];
+    }
   }
   let activeCandidate: ProviderCandidate = failoverPlan[0];
   let failoverIndex = 0;
@@ -290,6 +307,9 @@ export async function runAgent(
 
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
+    // Kill-switch: never leave the selected model. The caller surfaces the
+    // real error instead of substituting another model.
+    if (!failoverEnabled) return false;
     if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
       messages.pop();
       opts.onEvent({ type: 'message_discard', message_id: assistant.id });
