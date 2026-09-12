@@ -232,16 +232,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const test = async () => {
     setStatus('testing');
     setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models...' : 'Checking provider connection...');
+    // Pasted keys routinely carry stray whitespace/newlines — trim before
+    // testing AND saving, or every provider 401s a perfectly good key.
+    const trimmedKey = apiKey.trim();
     try {
-      const res = await window.api.testProvider({ provider: activeProvider, apiKey });
+      const res = await window.api.testProvider({ provider: activeProvider, apiKey: trimmedKey });
       if (res.ok) {
-        if (apiKey.trim()) {
-          await window.api.setProviderKey({ provider: activeProvider, key: apiKey.trim() });
+        if (trimmedKey) {
+          await window.api.setProviderKey({ provider: activeProvider, key: trimmedKey });
           setApiKeyLoaded(true);
           setApiKey('');
         }
         setStatus('ok');
-        const list = await window.api.listProviderModels({ provider: activeProvider, apiKey });
+        const list = await window.api.listProviderModels({ provider: activeProvider, apiKey: trimmedKey });
         const nextModels = list as { id: string; label: string; free: boolean }[];
         setModels(nextModels);
 

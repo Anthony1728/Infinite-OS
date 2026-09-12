@@ -47,7 +47,17 @@ export const cloudflare = {
         signal: AbortSignal.timeout(20000),
       });
       if (res.status === 404) return { ok: false, error: 'HTTP 404 — check the account ID.' };
-      if (res.status === 401 || res.status === 403) return { ok: false, error: `HTTP ${res.status} — API token rejected.` };
+      if (res.status === 401 || res.status === 403) {
+        // Cloudflare names the real cause in the body (wrong token vs wrong
+        // account vs missing permission) — surface it instead of a bare 401.
+        let detail = '';
+        try {
+          const body = (await res.json()) as { errors?: Array<{ code?: number; message?: string }> };
+          const first = body?.errors?.[0]?.message;
+          if (first) detail = ` — ${first.slice(0, 160)}`;
+        } catch { /* fall back to the status-only message */ }
+        return { ok: false, error: `HTTP ${res.status} — API token rejected.${detail}` };
+      }
       if (res.status === 429) return { ok: false, error: 'HTTP 429 — daily Neurons cap reached, retries tomorrow.' };
       return { ok: res.ok, error: res.ok ? undefined : `HTTP ${res.status}` };
     } catch (e) {
