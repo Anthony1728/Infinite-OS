@@ -3,7 +3,7 @@ import { getProvider } from './registry.js';
 
 export interface ProviderCandidate { provider: string; model: string; apiKey: string; label: string; }
 
-const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'cloudflare', 'ollama', 'opencode', 'gemini', 'anthropic', 'openai'];
+const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'ollama', 'opencode', 'gemini', 'anthropic', 'openai'];
 const unhealthyUntil = new Map<string, number>();
 const lastSuccessfulAt = new Map<string, number>();
 

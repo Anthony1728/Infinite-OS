@@ -18,6 +18,10 @@ describe('new providers', () => {
     const cf = getProvider('cloudflare');
     expect(cf?.label).toBe('Cloudflare Workers AI');
     expect(cloudflare.id).toBe('cloudflare');
+    const bm = getProvider('bluesminds');
+    expect(bm?.label).toBe('BlueSminds');
+    expect(bm?.defaultBaseUrl).toBe('https://api.bluesminds.com/v1');
+    expect(bm?.freeModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(true);
   });
 
   it('builds the account-scoped Workers AI URL', async () => {
