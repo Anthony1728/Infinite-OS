@@ -186,17 +186,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           const list = await window.api.listProviderModels({ provider: activeProvider });
           if (cancelled) return;
           const nextModels = list as { id: string; label: string; free: boolean }[];
-          const saved = loadCurrent();
-          const nextModel =
-            saved.provider === activeProvider && nextModels.some((model) => model.id === saved.model)
-              ? saved.model
-              : nextModels[0]?.id;
+          // Display only: opening Settings must never hijack the chat's
+          // provider/model — selection happens via Test or model pick.
           setModels(nextModels);
-          saveCurrent({ provider: activeProvider, model: nextModel, hasApiKey: has });
-          if (nextModel) setCurrentModel(nextModel);
           setStatus('ok');
-          setStatusMessage(nextModel ? `Connected - ${nextModel}` : 'Connected');
-          window.dispatchEvent(new Event('storage'));
+          setStatusMessage(`Connected - ${nextModels.length} model${nextModels.length === 1 ? '' : 's'}`);
         })
         .catch((error: unknown) => {
           if (!cancelled) {
@@ -218,18 +212,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         const list = await window.api.listProviderModels({ provider: activeProvider });
         if (cancelled) return;
         const nextModels = list as { id: string; label: string; free: boolean }[];
-        const saved = loadCurrent();
-        const nextModel =
-          saved.provider === activeProvider && nextModels.some((model) => model.id === saved.model)
-            ? saved.model
-            : nextModels[0]?.id ?? providers.find((item) => item.id === activeProvider)?.freeModels[0]?.id;
+        // Display only (see above): never rewrite the chat selection here.
         setModels(nextModels);
-        if (nextModel) {
-          saveCurrent({ provider: activeProvider, model: nextModel, hasApiKey: true });
-          setCurrentModel(nextModel);
-        }
+        if (nextModels.length && !currentModel) setCurrentModel(nextModels[0].id);
         setStatus('ok');
-        setStatusMessage(nextModel ? `API key saved - ${nextModel}` : 'API key saved');
+        setStatusMessage(`API key saved - ${nextModels.length} model${nextModels.length === 1 ? '' : 's'}`);
       })
       .catch(() => {
         if (!cancelled) {
