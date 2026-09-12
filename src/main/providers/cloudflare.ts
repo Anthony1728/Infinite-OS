@@ -35,8 +35,24 @@ const base = openaiCompatible({
 
 export const cloudflare = {
   ...base,
+  // Workers AI has no GET /models route (405) — prove the token + account
+  // with a 1-token completion instead.
   async testConnection(apiKey: string) {
-    return base.testConnection(apiKey, await cloudflareBaseUrl());
+    try {
+      const url = `${await cloudflareBaseUrl()}/chat/completions`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: '@cf/meta/llama-3.1-8b-instruct', messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.status === 404) return { ok: false, error: 'HTTP 404 — check the account ID.' };
+      if (res.status === 401 || res.status === 403) return { ok: false, error: `HTTP ${res.status} — API token rejected.` };
+      if (res.status === 429) return { ok: false, error: 'HTTP 429 — daily Neurons cap reached, retries tomorrow.' };
+      return { ok: res.ok, error: res.ok ? undefined : `HTTP ${res.status}` };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   },
   async listModels(apiKey: string) {
     try {
