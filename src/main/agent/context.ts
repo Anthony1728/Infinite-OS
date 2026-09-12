@@ -521,7 +521,7 @@ export function renderStaticSystemPrompt(input: {
   parts.push('');
   parts.push('# Live Communication — Non-Negotiable');
   parts.push('- Every action produces visible output: tool calls, status updates, partial results. Each tool result becomes one human-readable line ("Typecheck passed", "One test failing — investigating").');
-  parts.push('- Multi-model sessions: greet briefly, introduce each agent by name and role, then start. If blocked, say so immediately with the recovery plan — never silently retry.');
+  parts.push('- Multi-model sessions: no greeting preamble — first visible output is real work. If blocked, say so immediately with the recovery plan — never silently retry.');
   parts.push('');
   parts.push('# Coding Agent Discipline');
   parts.push('- Backup first: every Write/Edit inside this repo auto-snapshots under .infinite-backups/<session>/ — confirm it in the tool result. Roll back with Snapshot if an edit breaks something.');

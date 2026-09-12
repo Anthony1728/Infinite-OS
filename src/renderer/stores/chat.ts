@@ -518,18 +518,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const context = selectedAgentRuns.get(event.runId);
       if (!context) return;
 
-      // Welcome event — insert an assistant message introducing the agent
+      // Welcome event — activity row only, never a canned bubble. The first
+      // visible output must be the agent's own live stream, not "X ready".
       if (event.type === 'welcome' && event.message) {
-        if (context.sessionId === get().currentSessionId) {
-          const welcomeMsg: Message = {
-            id: `welcome-${event.runId}-${Date.now()}`,
-            role: 'assistant',
-            content: [{ type: 'text', text: event.message }],
-            timestamp: Date.now(),
-            model: event.model,
-          };
+        if (context.sessionId === get().currentSessionId && event.agentName) {
+          const wName = event.agentName;
           set((state) => ({
-            messages: [...state.messages, welcomeMsg],
+            activity: state.activity.map((item) =>
+              item.name === wName && item.status === 'running'
+                ? { ...item, detail: event.role || item.detail }
+                : item,
+            ),
           }));
         }
         return;

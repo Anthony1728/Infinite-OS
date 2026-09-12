@@ -402,7 +402,13 @@ function initialChatMode(): ChatExecutionMode {
 }
 
 function initialChatAgent(): string {
-  return localStorage.getItem(CHAT_AGENT_STORAGE_KEY) ?? 'auto';
+  const stored = localStorage.getItem(CHAT_AGENT_STORAGE_KEY);
+  // General is the default operator; migrate the legacy 'auto' default once.
+  if (stored === null || stored === 'auto') {
+    localStorage.setItem(CHAT_AGENT_STORAGE_KEY, 'general');
+    return 'general';
+  }
+  return stored;
 }
 
 function workspaceTabForPrompt(text: string): { kind: AiTabKind; title: string } | null {
