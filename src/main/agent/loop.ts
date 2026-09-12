@@ -194,6 +194,24 @@ export async function runAgent(
     opts.onEvent({ type: 'fallback_required' });
     return messages;
   }
+  // Honest routing: if the selected provider never made the plan (no saved
+  // key), say so up front instead of silently answering from another model.
+  // This is the "I picked X but Y answered" confusion.
+  if (failoverPlan[0].provider !== opts.provider) {
+    const { getProvider } = await import('../providers/registry.js');
+    const selected = getProvider(opts.provider);
+    const needsKey = selected?.requiresApiKey ?? false;
+    opts.onEvent({
+      type: 'provider_status',
+      status: 'failover',
+      from: `${opts.provider}/${opts.model}`,
+      to: failoverPlan[0].label,
+      reason: needsKey
+        ? `No API key saved for ${selected?.label ?? opts.provider} — add one in Settings → Providers, or keep chatting on ${failoverPlan[0].label}.`
+        : `${opts.provider}/${opts.model} is not available — using ${failoverPlan[0].label} instead.`,
+    });
+    console.warn(`[agent] Selected ${opts.provider}/${opts.model} unavailable at plan time; starting on ${failoverPlan[0].label}`);
+  }
   let activeCandidate: ProviderCandidate = failoverPlan[0];
   let failoverIndex = 0;
   // Bounded by default so a stuck model cannot loop for hours. The setting

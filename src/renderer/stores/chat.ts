@@ -2546,7 +2546,7 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
         set({
           providerStatus: {
             label: 'Switching providers',
-            detail: `${ev.from ?? '?'} → ${ev.to ?? '?'}${typeof ev.reason === 'string' && ev.reason ? ` (${ev.reason.slice(0, 80)})` : ''}`,
+            detail: `${ev.from ?? '?'} → ${ev.to ?? '?'}${typeof ev.reason === 'string' && ev.reason ? ` (${ev.reason.slice(0, 220)})` : ''}`,
             receivedAt: Date.now(),
           },
         });
@@ -2836,7 +2836,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
           break;
         case 'failover':
           label = `Switching providers`;
-          detail = `${ev.from} ΓåÆ ${ev.to}${ev.reason ? ` (${ev.reason.slice(0, 80)})` : ''}`;
+          detail = `${ev.from} → ${ev.to}${ev.reason ? ` (${ev.reason.slice(0, 220)})` : ''}`;
           break;
         case 'cold_start':
           label = 'Provider is cold-starting';
