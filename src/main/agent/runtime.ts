@@ -601,9 +601,19 @@ export async function runSubagent(
         const retryCounter = isSelectedModel ? sameModelStreamRetries : failoverCandidateRetries;
         if (retryCounter < maxRetries) {
           // Transient hiccup: stay on the current model and retry with backoff.
+          // Announced (not console-only) so the run never looks silently stuck.
+          const attempt = retryCounter + 1;
           if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
           if (messages.at(-1) === assistant) messages.pop();
           opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
+          opts.sink({
+            type: 'provider_status',
+            runId: state.id,
+            status: 'retrying',
+            provider: activeCandidate.provider,
+            model: activeCandidate.model,
+            reason: `Attempt ${attempt}/${maxRetries} on ${activeCandidate.label} after: ${providerFailure}`,
+          });
           const delayMs = backoffForError(providerFailure, retryCounter);
           console.warn(`[agent] Subagent transient failure on ${activeCandidate.label} (retry ${retryCounter + 1}/${maxRetries}, backoff ${delayMs}ms): ${providerFailure}`);
           if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));

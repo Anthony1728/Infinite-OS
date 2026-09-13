@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordProviderFailure: vi.fn(),
   recordProviderSuccess: vi.fn(),
   selectNextProviderCandidate: vi.fn().mockReturnValue(null),
+  isTransientStreamFailure: vi.fn().mockReturnValue(false),
   learnFromToolResult: vi.fn(),
   routeForcedBrowserTool: vi.fn().mockReturnValue(null),
 }));
@@ -23,7 +24,7 @@ vi.mock('../providers/failover.js', () => ({
   recordProviderFailure: mocks.recordProviderFailure,
   recordProviderSuccess: mocks.recordProviderSuccess,
   selectNextProviderCandidate: mocks.selectNextProviderCandidate,
-  isTransientStreamFailure: () => false,
+  isTransientStreamFailure: mocks.isTransientStreamFailure,
   backoffForError: () => 0,
   classifyError: () => 'unknown',
   SAME_MODEL_STREAM_RETRIES: 3,
@@ -61,6 +62,8 @@ beforeEach(() => {
   ]);
   mocks.buildSystemPrompt.mockResolvedValue('system');
   mocks.buildContext.mockResolvedValue('');
+  mocks.isTransientStreamFailure.mockReturnValue(false);
+  mocks.selectNextProviderCandidate.mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -187,6 +190,91 @@ describe('Agent loop stall timeout', () => {
 
     // After completing, advancing time should not cause errors (interval cleared)
     await vi.advanceTimersByTimeAsync(1000);
+  }, 10_000);
+});
+
+describe('Selected-model honesty', () => {
+  function providerWith(script: Array<'error' | 'ok'>, failure: string) {
+    let calls = 0;
+    const seenModels: string[] = [];
+    const streamChat = vi.fn().mockImplementation((req: { model?: string }) => {
+      seenModels.push(req.model ?? '');
+      const step = script[Math.min(calls++, script.length - 1)];
+      if (step === 'error') {
+        return (async function* () {
+          yield { type: 'error' as const, error: failure };
+        })();
+      }
+      return (async function* () {
+        yield { type: 'text_delta' as const, text: 'done' };
+        yield { type: 'message_end' as const, stop_reason: 'end_turn', usage: null };
+      })();
+    });
+    mocks.getProvider.mockReturnValue({
+      id: 'test',
+      label: 'Test',
+      requiresApiKey: false,
+      // Both models known with tools off: the turns stay tool-free so wiped
+      // registry mocks from earlier tests can never break these runs.
+      freeModels: [
+        { id: 'selected-model', supports_tools: false },
+        { id: 'backup-model', supports_tools: false },
+      ],
+      streamChat,
+    });
+    return { streamChat, seenModels };
+  }
+
+  it('announces the real error when leaving the selected model', async () => {
+    const selected = { provider: 'test', model: 'selected-model', label: 'Test / selected-model', apiKey: 'k' };
+    const backup = { provider: 'test', model: 'backup-model', label: 'Test / backup-model', apiKey: 'k' };
+    mocks.buildProviderFailoverPlan.mockResolvedValue([selected, backup]);
+    mocks.selectNextProviderCandidate.mockReturnValue(backup);
+    // 401 is NOT transient: no same-model retry, straight to a named switch.
+    mocks.isTransientStreamFailure.mockReturnValue(false);
+    const { streamChat, seenModels } = providerWith(['error', 'ok'], 'API error (401): bad key');
+
+    const events: Array<{ type: string; status?: string; reason?: string; from?: string; to?: string }> = [];
+    await runAgent([], msg('hello'), {
+      sessionId: 's1', cwd: '/tmp', provider: 'test', model: 'selected-model',
+      signal: new AbortController().signal, onEvent: (e) => events.push(e as never),
+    });
+
+    // The selection was genuinely attempted first…
+    expect(seenModels[0]).toBe('selected-model');
+    // …and the switch names the real failure instead of going quiet.
+    const failover = events.find((e) => e.type === 'provider_status' && e.status === 'failover');
+    expect(failover?.from).toBe('Test / selected-model');
+    expect(failover?.to).toBe('Test / backup-model');
+    expect(failover?.reason).toMatch(/401/);
+    expect(streamChat).toHaveBeenCalledTimes(2);
+  }, 10_000);
+
+  it('visibly retries the selected model on transient failures before switching', async () => {
+    const selected = { provider: 'test', model: 'selected-model', label: 'Test / selected-model', apiKey: 'k' };
+    const backup = { provider: 'test', model: 'backup-model', label: 'Test / backup-model', apiKey: 'k' };
+    mocks.buildProviderFailoverPlan.mockResolvedValue([selected, backup]);
+    mocks.selectNextProviderCandidate.mockReturnValue(backup);
+    mocks.isTransientStreamFailure.mockReturnValue(true);
+    const { streamChat, seenModels } = providerWith(['error', 'error', 'error', 'error', 'ok'], 'Network error: socket hang up');
+
+    const events: Array<{ type: string; status?: string; reason?: string; provider?: string; model?: string }> = [];
+    await runAgent([], msg('hello'), {
+      sessionId: 's1', cwd: '/tmp', provider: 'test', model: 'selected-model',
+      signal: new AbortController().signal, onEvent: (e) => events.push(e as never),
+    });
+
+    // SAME_MODEL_STREAM_RETRIES (3) all stay on the selection…
+    expect(seenModels.slice(0, 4)).toEqual(['selected-model', 'selected-model', 'selected-model', 'selected-model']);
+    // …each retry is announced with model + cause…
+    const retries = events.filter((e) => e.type === 'provider_status' && e.status === 'retrying');
+    expect(retries.length).toBe(3);
+    expect(retries[0]?.model).toBe('selected-model');
+    expect(retries[0]?.reason).toMatch(/socket hang up/);
+    // …and only then does it switch, carrying the last error.
+    const failover = events.find((e) => e.type === 'provider_status' && e.status === 'failover');
+    expect(failover?.reason).toMatch(/socket hang up/);
+    expect(streamChat).toHaveBeenCalledTimes(5);
   }, 10_000);
 });
 

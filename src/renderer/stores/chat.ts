@@ -184,7 +184,7 @@ export type StreamEvent =
     }
   | {
       type: 'provider_status';
-      status: 'connecting' | 'streaming' | 'failover' | 'cold_start' | 'rate_limited';
+      status: 'connecting' | 'streaming' | 'failover' | 'cold_start' | 'rate_limited' | 'retrying';
       provider?: string;
       model?: string;
       from?: string;
@@ -193,7 +193,7 @@ export type StreamEvent =
     }
   | { type: 'message_end'; message_id: string; stop_reason: string; usage?: { input: number; output: number } }
   | { type: 'error'; error: string }
-  | { type: 'fallback_required' }
+  | { type: 'fallback_required'; error?: string }
   | { type: 'done'; success?: boolean; reason?: string };
 
 export interface ActivityItem {
@@ -2555,6 +2555,17 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
             receivedAt: Date.now(),
           },
         });
+      } else if (ev.status === 'retrying') {
+        // Same-model retry: the selection IS being tried — show which model
+        // and why, so a retry never looks like a silent stall or skip.
+        const who = ev.model ? `${ev.provider ?? 'provider'}/${ev.model}` : (ev.provider ?? 'provider');
+        set({
+          providerStatus: {
+            label: `Retrying ${who}`,
+            detail: typeof ev.reason === 'string' ? ev.reason.slice(0, 300) : '',
+            receivedAt: Date.now(),
+          },
+        });
       } else if (typeof ev.status === 'string' && ev.status) {
         set({
           providerStatus: {
@@ -2852,8 +2863,14 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
           break;
         case 'rate_limited':
           label = 'Rate limited';
-          detail = 'Waiting for the provider to allow the next requestΓÇª';
+          detail = 'Waiting for the provider to allow the next request…';
           break;
+        case 'retrying': {
+          const who = ev.model ? `${ev.provider ?? 'Provider'}/${ev.model}` : (ev.provider ?? 'Provider');
+          label = `Retrying ${who}`;
+          detail = typeof ev.reason === 'string' ? ev.reason.slice(0, 300) : 'Trying the same model again…';
+          break;
+        }
       }
       if (label) {
         setState({ providerStatus: { label, detail, receivedAt: Date.now() } });
@@ -2946,9 +2963,43 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       break;
     case 'fallback_required':
     case 'error': {
-      // Provider details stay in logs. If every configured model is exhausted,
-      // return a useful local result instead of exposing transport failures.
+      // The agent loop attaches the real diagnosis (models tried + last
+      // error) as ev.error. That must reach the user verbatim — never hide
+      // a model failure behind a substituted local answer.
       clearSafetyTimer(sessionId);
+      const realError = typeof ev.error === 'string' && ev.error.trim() ? ev.error.trim() : '';
+      if (ev.type === 'error' && !realError) console.error('[stream] Background recovery exhausted:', ev.error);
+      if (realError) {
+        const errorMessage: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: [{ type: 'text', text: `**The selected model could not complete this request.**\n\n${realError}` }],
+          timestamp: Date.now(),
+          provider: 'error',
+          model: 'provider-failure',
+        };
+        const currentMessages = getState().messages;
+        const lastMessage = currentMessages.at(-1);
+        const cleanMessages = lastMessage?.role === 'assistant'
+          ? currentMessages.slice(0, -1)
+          : currentMessages;
+        setState({
+          streaming: false,
+          providerStatus: null,
+          messages: [...cleanMessages, errorMessage],
+          activity: getState().activity.map((item) =>
+            item.status === 'running' ? { ...item, status: 'done' as const } : item,
+          ),
+        });
+        await window.api.appendSessionMessage({ sessionId, message: errorMessage }).catch(() => undefined);
+        const chatTaskId = activeChatTaskBySession.get(sessionId);
+        if (chatTaskId) {
+          useAgentsStore.getState().failChatTask(chatTaskId, realError);
+          filesByChatTask.delete(chatTaskId);
+          activeChatTaskBySession.delete(sessionId);
+        }
+        break;
+      }
       if (ev.type === 'error') console.error('[stream] Background recovery exhausted:', ev.error);
       const currentMessages = getState().messages;
       const lastUserMsg = [...currentMessages].reverse().find((message) => message.role === 'user');

@@ -327,11 +327,15 @@ export async function runAgent(
       failure,
     };
     failoverIndex = failoverPlan.indexOf(next);
+    // The user must see WHY their selected model is being left: the real
+    // provider error travels in `reason` (the UI renders it). A switch
+    // without a reason looks like the selection was never tried.
     opts.onEvent({
       type: 'provider_status',
       status: 'failover',
       from: activeCandidate.label,
       to: next.label,
+      reason: failure,
     });
     console.warn(`[agent] Recovering in background: ${activeCandidate.label} -> ${next.label}: ${failure}`);
     performanceMetrics.failovers++;
@@ -605,8 +609,18 @@ export async function runAgent(
       if (isTransientStreamFailure(providerFailure) && retryCounter < maxRetries) {
         // Transient hiccup (stall, 5xx, network blip, overload, rate limit):
         // stay on the current model and retry with an appropriate backoff.
+        // The retry is announced (not console-only) so "Calling X…" never
+        // looks stuck and the user sees the model genuinely being retried.
+        const attempt = retryCounter + 1;
         if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
         performanceMetrics.retries++;
+        opts.onEvent({
+          type: 'provider_status',
+          status: 'retrying',
+          provider: activeCandidate.provider,
+          model: activeCandidate.model,
+          reason: `Attempt ${attempt}/${maxRetries} on ${activeCandidate.label} after: ${providerFailure}`,
+        });
         if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
           messages.pop();
           opts.onEvent({ type: 'message_discard', message_id: assistant.id });
@@ -617,10 +631,12 @@ export async function runAgent(
         continue;
       }
       if (switchCandidate(providerFailure, assistant, 'model response stream')) continue;
-      // All candidates exhausted — notify the user with a clear message.
+      // All candidates exhausted — the full diagnosis (models tried + last
+      // error) travels on the event so the UI shows the real problem
+      // instead of silently substituting another answer.
       const errorMsg = buildExhaustedMessage(failoverPlan, providerFailure, capTracker);
       opts.onEvent({ type: 'provider_status', status: errorMsg });
-      opts.onEvent({ type: 'fallback_required' });
+      opts.onEvent({ type: 'fallback_required', error: errorMsg });
       return messages;
     }
     // A clean turn resets the retry budgets.
@@ -725,7 +741,7 @@ export async function runAgent(
           intentOnlyRetries = 0;
           continue;
         }
-        opts.onEvent({ type: 'fallback_required' });
+        opts.onEvent({ type: 'fallback_required', error: `${activeCandidate.label} did not execute the required tool for this task.` });
         return messages;
       }
       if (isExplicitActionFailure(originalRequest, assistantText)) {
@@ -745,7 +761,7 @@ export async function runAgent(
         }
 
         if (switchCandidate('The model could not complete the requested action.', assistant, 'completion verification')) continue;
-        opts.onEvent({ type: 'fallback_required' });
+        opts.onEvent({ type: 'fallback_required', error: `${activeCandidate.label} could not complete the requested action.` });
         return messages;
       }
       if (!assistantText.trim()) {
@@ -761,7 +777,7 @@ export async function runAgent(
           continue;
         }
         if (switchCandidate('The model returned no usable response.', assistant, 'final-answer generation')) continue;
-        opts.onEvent({ type: 'fallback_required' });
+        opts.onEvent({ type: 'fallback_required', error: `${activeCandidate.label} returned no usable response.` });
         return messages;
       }
       if (lastToolBatchHadError) {
@@ -782,7 +798,7 @@ export async function runAgent(
         }
 
         if (switchCandidate('The model did not recover from a failed tool attempt.', assistant, 'tool-result recovery')) continue;
-        opts.onEvent({ type: 'fallback_required' });
+        opts.onEvent({ type: 'fallback_required', error: `${activeCandidate.label} did not recover from a failed tool attempt.` });
         return messages;
       }
       decisionRouter.recordTask(activeCandidate.model, true);
