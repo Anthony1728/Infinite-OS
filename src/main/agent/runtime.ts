@@ -33,6 +33,7 @@ import { buildRecoveryHandoff, type RecoveryHandoffOptions } from './recovery-ha
 import { buildToolRecoveryDirective, toolAttemptSignature, type FailedToolAttempt } from './tool-recovery.js';
 import { LOOP_STREAM_STALL_TIMEOUT_MS } from './loop.js';
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
+import { settings } from '../settings/store.js';
 
 type EventSink = (e: AgentEvent) => void;
 
@@ -328,12 +329,33 @@ export async function runSubagent(
     },
   ];
 
-  const failoverPlan = await buildProviderFailoverPlan({ provider: opts.provider, model: preferredModel });
+  const failoverEnabled = settings.get('failoverEnabled') !== false;
+  let failoverPlan = await buildProviderFailoverPlan({ provider: opts.provider, model: preferredModel });
+  if (!failoverEnabled && failoverPlan.length > 1) {
+    failoverPlan = failoverPlan.slice(0, 1);
+  }
   if (failoverPlan.length === 0) {
     state.status = 'failed';
     state.error = 'No configured AI provider is available for this agent run.';
     opts.sink({ type: 'fail', runId: state.id, error: state.error });
     return '';
+  }
+  // Honest routing (mirrors loop.ts): with no saved key the selected provider
+  // never makes the plan — fail plainly instead of silently answering from
+  // another model, especially when the fallback kill-switch is OFF.
+  if (failoverPlan[0].provider !== opts.provider) {
+    const selected = getProvider(opts.provider);
+    const reason = (selected?.requiresApiKey ?? false)
+      ? `No API key saved for ${selected?.label ?? opts.provider} — add one in Settings → Providers${failoverEnabled ? `, or keep chatting on ${failoverPlan[0].label}` : ' and try again (model fallback is OFF)'}.`
+      : `${opts.provider}/${preferredModel} is not available${failoverEnabled ? ` — using ${failoverPlan[0].label} instead` : ' and model fallback is OFF'}.`;
+    console.warn(`[agent] Subagent selected ${opts.provider}/${preferredModel} unavailable at plan time; starting on ${failoverPlan[0].label}`);
+    if (!failoverEnabled) {
+      state.status = 'failed';
+      state.error = reason;
+      opts.sink({ type: 'fail', runId: state.id, error: state.error });
+      return '';
+    }
+    opts.sink({ type: 'provider_status', runId: state.id, status: 'failover', from: `${opts.provider}/${preferredModel}`, to: failoverPlan[0].label, reason });
   }
   let activeCandidate: ProviderCandidate = failoverPlan[0];
   activity(state, opts.sink, 'status', 'Model connected', `${activeCandidate.provider} / ${activeCandidate.model}`);
@@ -360,6 +382,8 @@ export async function runSubagent(
   const runSystemPrompts = new Map<string, string>();
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
+    // Kill-switch (mirrors loop.ts): never leave the selected model.
+    if (!failoverEnabled) return false;
     const next = selectNextProviderCandidate(failoverPlan, failoverIndex, activeCandidate, failure);
     if (messages.at(-1) === assistant) messages.pop();
     opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
