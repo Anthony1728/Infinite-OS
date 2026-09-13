@@ -103,6 +103,7 @@ export function SettingsView() {
   const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
+  const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [cwd, setCwd] = useState(() => loadCurrent().cwd);
   const [brainMode, setBrainMode] = useState(() => loadCurrent().brainMode ?? true);
   const currentSettings = loadCurrent();
@@ -126,6 +127,12 @@ export function SettingsView() {
       .getSetting({ key: 'cloudflareAccountId' })
       .then((value: unknown) => {
         if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
+    window.api
+      .getSetting({ key: 'failoverEnabled' })
+      .then((value: unknown) => {
+        if (typeof value === 'boolean') setFailoverEnabled(value);
       })
       .catch(() => undefined);
 
@@ -304,6 +311,18 @@ export function SettingsView() {
     addToast({ type: 'success', title: newVal ? 'InfiniteAI Brain Mode enabled — all chats use the Brain' : 'InfiniteAI Brain Mode disabled — using connected API' });
   };
 
+  const toggleFailover = async () => {
+    const next = !failoverEnabled;
+    setFailoverEnabled(next);
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'failoverEnabled',
+      value: next,
+      cwd: loadCurrent().cwd || '.',
+    }).catch(() => undefined);
+    addToast({ type: 'success', title: next ? 'Model fallback on — failing models hand over to backups' : 'Model fallback off — the selected model answers or fails plainly' });
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
       <h1 className="text-2xl font-bold mb-2 text-textMain">Settings</h1>
@@ -472,7 +491,28 @@ export function SettingsView() {
 
         {/* AI Provider */}
         <div className="card-premium">
-          <h3 className="font-medium mb-3 text-textMain">AI Provider</h3>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <div>
+              <h3 className="font-medium text-textMain">AI Provider</h3>
+              <p className="mt-1 text-xs text-textMuted">Choose where Infinite AI routes chat and agent requests.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={failoverEnabled}
+              onClick={() => void toggleFailover()}
+              title={failoverEnabled ? 'Turn OFF to make the selected model answer or fail plainly (diagnosing)' : 'Turn ON to let failing models hand over to backups'}
+              className="flex shrink-0 items-center gap-2 text-xs text-textMuted hover:text-textMain transition-colors"
+            >
+              <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${failoverEnabled ? 'bg-emerald-500/70' : 'bg-white/10'}`}>
+                <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${failoverEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </span>
+              Model fallback {failoverEnabled ? 'on' : 'off'}
+            </button>
+          </div>
+          {!failoverEnabled && (
+            <p className="text-[11px] text-amber-400/90 mb-3">Fallback off — the selected model answers or fails plainly. Turn it on to let failing models hand over to backups.</p>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
             {providers.map((p) => (
               <button

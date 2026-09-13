@@ -89,6 +89,7 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
   const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
+  const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
@@ -104,6 +105,12 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
       .getSetting({ key: 'cloudflareAccountId' })
       .then((value: unknown) => {
         if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
+    window.api
+      .getSetting({ key: 'failoverEnabled' })
+      .then((value: unknown) => {
+        if (typeof value === 'boolean') setFailoverEnabled(value);
       })
       .catch(() => undefined);
     window.api
@@ -215,6 +222,17 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
       .setSetting({ scope: 'user', key: 'cloudflareAccountId', value: next, cwd: loadCurrent().cwd || '.' })
       .catch(() => undefined);
     if (value === undefined) setCloudflareAccountId(next);
+  };
+
+  const toggleFailover = async () => {
+    const next = !failoverEnabled;
+    setFailoverEnabled(next);
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'failoverEnabled',
+      value: next,
+      cwd: loadCurrent().cwd || '.',
+    }).catch(() => undefined);
   };
 
   const test = async () => {
@@ -473,7 +491,28 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold text-white mb-3">Provider</h3>
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Provider</h3>
+                <p className="mt-1 text-xs text-gray-500">Choose where Infinite AI routes chat and agent requests.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={failoverEnabled}
+                onClick={() => void toggleFailover()}
+                title={failoverEnabled ? 'Turn OFF to make the selected model answer or fail plainly (diagnosing)' : 'Turn ON to let failing models hand over to backups'}
+                className="flex shrink-0 items-center gap-2 text-xs text-gray-400 hover:text-white transition-colors"
+              >
+                <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${failoverEnabled ? 'bg-emerald-500/70' : 'bg-white/10'}`}>
+                  <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${failoverEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                </span>
+                Model fallback {failoverEnabled ? 'on' : 'off'}
+              </button>
+            </div>
+            {!failoverEnabled && (
+              <p className="text-[11px] text-amber-400/90 mb-3">Fallback off — the selected model answers or fails plainly.</p>
+            )}
             <div className="grid grid-cols-2 gap-2 mb-4">
               {providers.map((p) => (
                 <button
