@@ -86,8 +86,9 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
   const [apiKeyLoaded, setApiKeyLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
-  const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
+  const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
@@ -99,6 +100,12 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
       setProviders(p);
       setActiveProvider(loadCurrent().provider);
     });
+    window.api
+      .getSetting({ key: 'cloudflareAccountId' })
+      .then((value: unknown) => {
+        if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
     window.api
       .getSetting({ key: 'permissionProfile' })
       .then((value: unknown) => {
@@ -139,13 +146,13 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
             setStatusMessage(result.error || 'Local provider is unavailable.');
             if (selectedProvider.acceptsApiKey) {
               const fallbackList = await window.api.listProviderModels({ provider: activeProvider });
-              if (!cancelled) setModels(fallbackList as { id: string; label: string; free: boolean }[]);
+              if (!cancelled) setModels((fallbackList as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider));
             }
             return;
           }
           const list = await window.api.listProviderModels({ provider: activeProvider });
           if (cancelled) return;
-          const nextModels = list as { id: string; label: string; free: boolean }[];
+          const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider);
           const saved = loadCurrent();
           const nextModel =
             saved.provider === activeProvider && nextModels.some((model) => model.id === saved.model)
@@ -177,7 +184,7 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
         if (!has) return;
         const list = await window.api.listProviderModels({ provider: activeProvider });
         if (cancelled) return;
-        const nextModels = list as { id: string; label: string; free: boolean }[];
+        const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider);
         const saved = loadCurrent();
         const nextModel =
           saved.provider === activeProvider && nextModels.some((model) => model.id === saved.model)
@@ -202,10 +209,19 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
     };
   }, [activeProvider, providers]);
 
+  const saveCloudflareAccountId = async (value?: string) => {
+    const next = (value ?? cloudflareAccountId).trim();
+    await window.api
+      .setSetting({ scope: 'user', key: 'cloudflareAccountId', value: next, cwd: loadCurrent().cwd || '.' })
+      .catch(() => undefined);
+    if (value === undefined) setCloudflareAccountId(next);
+  };
+
   const test = async () => {
     setStatus('testing');
     setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models...' : 'Checking provider connection...');
     try {
+      if (activeProvider === 'cloudflare') await saveCloudflareAccountId();
       const res = await window.api.testProvider({ provider: activeProvider, apiKey });
       if (res.ok) {
         if (apiKey.trim()) {
@@ -215,7 +231,8 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
         }
         setStatus('ok');
         const list = await window.api.listProviderModels({ provider: activeProvider, apiKey });
-        const nextModels = list as { id: string; label: string; free: boolean }[];
+        const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[])
+          .filter((model) => !model.provider || model.provider === activeProvider);
         setModels(nextModels);
 
         const saved = loadCurrent();
@@ -253,7 +270,7 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
       setApiKeyLoaded(false);
       const result = await window.api.testProvider({ provider: 'opencode', apiKey: '' });
       const list = await window.api.listProviderModels({ provider: 'opencode', apiKey: '' });
-      const nextModels = list as { id: string; label: string; free: boolean }[];
+      const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === 'opencode');
       setModels(nextModels);
       const saved = loadCurrent();
       const nextModel = nextModels.some((model) => model.id === saved.model) ? saved.model : nextModels[0]?.id;
@@ -372,8 +389,12 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
   const provider = providers.find((p) => p.id === activeProvider);
   const { theme: uiTheme, setTheme: setUiTheme } = useUiTheme();
 
-  const freeModelList = models.filter((m) => m.free);
-  const paidModelList = models.filter((m) => !m.free);
+  // Strict per-provider scoping: this pane only ever shows the active
+  // provider's own models — never another provider's catalog.
+  const scopedModels = models.filter((m) => !m.provider || m.provider === activeProvider);
+  const scopedFreeModels = (provider?.freeModels ?? []).filter((m) => !m.provider || m.provider === activeProvider);
+  const freeModelList = scopedModels.filter((m) => m.free);
+  const paidModelList = scopedModels.filter((m) => !m.free);
 
   const renderModelSection = (heading: string, items: { id: string; label: string; free: boolean }[]) =>
     items.length === 0 ? null : (
@@ -478,6 +499,18 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
 
             {(provider?.requiresApiKey || provider?.acceptsApiKey) && (
               <div className="mb-3">
+                {activeProvider === 'cloudflare' && (
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={cloudflareAccountId}
+                      onChange={(e) => setCloudflareAccountId(e.target.value)}
+                      onBlur={() => void saveCloudflareAccountId()}
+                      placeholder="Cloudflare account ID (from your dashboard URL)"
+                      className="flex-1 rounded-xl border border-white/[0.08] bg-[#0d0d11] px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50 transition-colors placeholder:text-gray-600"
+                    />
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input
                     type="password"
@@ -516,7 +549,7 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
               <div className="text-sm text-red-400 mb-2">{statusMessage || 'Connection failed'}</div>
             )}
 
-            {models.length > 0 && (
+            {scopedModels.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-white mb-2">Models</h4>
                 {selectedModelName && (
@@ -532,11 +565,11 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
-            {models.length === 0 && provider?.freeModels && provider.freeModels.length > 0 && (
+            {scopedModels.length === 0 && scopedFreeModels.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-white mb-2">Free Models</h4>
                 <ul className="space-y-1 max-h-64 overflow-y-auto custom-scrollbar">
-                  {provider.freeModels.map((m) => (
+                  {scopedFreeModels.map((m) => (
                     <li key={m.id}>
                       <button
                         onClick={() => pickModel(m.id)}

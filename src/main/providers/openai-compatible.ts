@@ -33,13 +33,34 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
     homepage: opts.homepage,
 
     async testConnection(apiKey, baseUrl) {
+      const root = baseUrl ?? opts.defaultBaseUrl;
       try {
-        const url = `${baseUrl ?? opts.defaultBaseUrl}/models`;
-        const res = await fetch(url, {
-          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+        const res = await fetch(`${root}/models`, {
+          headers: { Accept: 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+          signal: AbortSignal.timeout(15000),
         });
-        return { ok: res.ok, error: res.ok ? undefined : `HTTP ${res.status}` };
+        if (res.ok) return { ok: true };
+        if (res.status === 401 || res.status === 403) {
+          return { ok: false, error: `HTTP ${res.status} — API key rejected. Paste a current key and try again.` };
+        }
+        if (res.status === 402) {
+          return { ok: false, error: 'HTTP 402 — this key is out of credits.' };
+        }
+        // No catalog route (404/405) on this gateway: prove the key with a
+        // 1-token completion instead of failing a working credential.
+        if (res.status === 404 || res.status === 405) {
+          return probeChatCompletion(root, apiKey, opts.defaultModel);
+        }
+        return { ok: false, error: `HTTP ${res.status}` };
       } catch (e) {
+        // Catalog endpoint unreachable (DNS/TLS/timeout): one attempt against
+        // the chat endpoint before reporting the network failure, so a key
+        // for a catalog-less gateway can still validate.
+        if (apiKey) {
+          try {
+            return await probeChatCompletion(root, apiKey, opts.defaultModel);
+          } catch { /* fall through to the network error */ }
+        }
         return { ok: false, error: (e as Error).message };
       }
     },
@@ -48,12 +69,12 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
       const url = `${baseUrl ?? opts.defaultBaseUrl}/models`;
       try {
         const res = await fetch(url, {
-          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-          signal: AbortSignal.timeout(10000),
+          headers: { Accept: 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+          signal: AbortSignal.timeout(15000),
         });
         if (!res.ok) return opts.freeModels;
-        const raw = (await res.json()) as { data?: unknown[] };
-        const list = Array.isArray(raw?.data) ? raw.data : [];
+        const raw: unknown = await res.json();
+        const list = extractCatalogEntries(raw);
         if (list.length === 0) return opts.freeModels;
         const models = list
           .map((entry) => normalizeModel(entry, opts))
@@ -266,6 +287,63 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
 
 function isDegradedFunctionError(text: string): boolean {
   return /\bDEGRADED\b/i.test(text) && /\bfunction\b/i.test(text);
+}
+
+/**
+ * Gateways disagree on the catalog envelope: OpenAI uses `{ data: [] }`,
+ * others use `{ models: [] }`, `{ result: [] }`, or a bare array. Accept
+ * them all so a key always unlocks the account's real model list.
+ */
+export function extractCatalogEntries(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    for (const key of ['data', 'models', 'result']) {
+      if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    }
+    const nested = obj['data'];
+    if (nested && typeof nested === 'object' && Array.isArray((nested as Record<string, unknown>)['models'])) {
+      return (nested as Record<string, unknown>)['models'] as unknown[];
+    }
+  }
+  return [];
+}
+
+/**
+ * Validate a key against POST /chat/completions with a 1-token probe when
+ * the provider exposes no GET /models catalog route. A 404 that names the
+ * model means auth already passed — the credential itself is good.
+ */
+export async function probeChatCompletion(
+  root: string,
+  apiKey: string | undefined,
+  model: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!apiKey) {
+    return { ok: false, error: 'This provider exposes no model catalog — add an API key so the key itself can be validated.' };
+  }
+  try {
+    const res = await fetch(`${root}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 1, stream: false }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (res.ok) return { ok: true };
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: `HTTP ${res.status} — API key rejected. Paste a current key and try again.` };
+    }
+    if (res.status === 402) return { ok: false, error: 'HTTP 402 — this key is out of credits.' };
+    if (res.status === 429) {
+      return { ok: false, error: 'HTTP 429 — the key works but the account is rate-limited right now. Try again shortly.' };
+    }
+    const body = await res.text().catch(() => '');
+    if (res.status === 404 && /model/i.test(body)) return { ok: true };
+    if (res.status === 404) return { ok: false, error: 'HTTP 404 — endpoint not found. Check the provider base URL.' };
+    return { ok: false, error: `HTTP ${res.status}${body ? ` — ${body.slice(0, 160)}` : ''}` };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 interface RawModel {

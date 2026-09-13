@@ -111,7 +111,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [apiKeyLoaded, setApiKeyLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail' | 'warn'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
-  const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
+  const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [failoverEnabled, setFailoverEnabled] = useState(true);
@@ -186,13 +186,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             setStatusMessage(result.error || 'Local provider is unavailable.');
             if (selectedProvider.acceptsApiKey) {
               const fallbackList = await window.api.listProviderModels({ provider: activeProvider });
-              if (!cancelled) setModels(fallbackList as { id: string; label: string; free: boolean }[]);
+              if (!cancelled) setModels((fallbackList as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider));
             }
             return;
           }
           const list = await window.api.listProviderModels({ provider: activeProvider });
           if (cancelled) return;
-          const nextModels = list as { id: string; label: string; free: boolean }[];
+          const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider);
           // Display only: opening Settings must never hijack the chat's
           // provider/model — selection happens via Test or model pick.
           setModels(nextModels);
@@ -218,7 +218,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         if (!has) return;
         const list = await window.api.listProviderModels({ provider: activeProvider });
         if (cancelled) return;
-        const nextModels = list as { id: string; label: string; free: boolean }[];
+        const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider);
         // Display only (see above): never rewrite the chat selection here.
         setModels(nextModels);
         if (nextModels.length && !currentModel) setCurrentModel(nextModels[0].id);
@@ -252,7 +252,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }
         setStatus('ok');
         const list = await window.api.listProviderModels({ provider: activeProvider, apiKey: trimmedKey });
-        const nextModels = list as { id: string; label: string; free: boolean }[];
+        const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider);
         setModels(nextModels);
 
         const saved = loadCurrent();
@@ -290,7 +290,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setApiKeyLoaded(false);
       const result = await window.api.testProvider({ provider: 'opencode', apiKey: '' });
       const list = await window.api.listProviderModels({ provider: 'opencode', apiKey: '' });
-      const nextModels = list as { id: string; label: string; free: boolean }[];
+      const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === 'opencode');
       setModels(nextModels);
       const saved = loadCurrent();
       const nextModel = nextModels.some((model) => model.id === saved.model) ? saved.model : nextModels[0]?.id;
@@ -439,8 +439,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const provider = providers.find((p) => p.id === activeProvider);
 
-  const freeModelList = models.filter((m) => m.free);
-  const paidModelList = models.filter((m) => !m.free);
+  // Strict per-provider scoping: this pane only ever shows the active
+  // provider's own models — never another provider's catalog.
+  const scopedModels = models.filter((m) => !m.provider || m.provider === activeProvider);
+  const scopedFreeModels = (provider?.freeModels ?? []).filter((m) => !m.provider || m.provider === activeProvider);
+  const freeModelList = scopedModels.filter((m) => m.free);
+  const paidModelList = scopedModels.filter((m) => !m.free);
 
   const renderModelSection = (heading: string, items: { id: string; label: string; free: boolean }[]) =>
     items.length === 0 ? null : (
@@ -698,7 +702,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div className="mb-3 text-sm text-amber-400">{statusMessage}</div>
                 )}
 
-                {models.length > 0 && (
+                {scopedModels.length > 0 && (
                   <div>
                     <h4 className="text-sm font-semibold text-zinc-100 mb-3">Models</h4>
                     {selectedModelName && (
@@ -714,11 +718,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
 
-                {models.length === 0 && provider?.freeModels && provider.freeModels.length > 0 && (
+                {scopedModels.length === 0 && scopedFreeModels.length > 0 && (
                   <div>
                     <h4 className="text-xs font-medium uppercase tracking-wide text-zinc-500 mb-2">Free Models</h4>
                     <ul className="space-y-1 max-h-64 overflow-y-auto custom-scrollbar">
-                      {provider.freeModels.map((m) => (
+                      {scopedFreeModels.map((m) => (
                         <li key={m.id}>
                           <button
                             onClick={() => pickModel(m.id)}

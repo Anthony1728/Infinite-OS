@@ -534,8 +534,10 @@ function BotDialog({
     }
     void (async () => {
       try {
-        const m = (await window.api.listProviderModels({ provider })) as Array<{ id: string; label?: string }>;
-        setModels(Array.isArray(m) ? m : []);
+        const m = (await window.api.listProviderModels({ provider })) as Array<{ id: string; label?: string; provider?: string }>;
+        // Strict per-provider scoping: a bot bound to this provider only ever
+        // offers this provider's own models.
+        setModels(Array.isArray(m) ? m.filter((model) => !model.provider || model.provider === provider) : []);
       } catch {
         setModels([]);
       }

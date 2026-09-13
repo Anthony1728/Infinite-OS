@@ -100,8 +100,9 @@ export function SettingsView() {
   const [apiKeyLoaded, setApiKeyLoaded] = useState(false);
   const [status, setStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
-  const [models, setModels] = useState<{ id: string; label: string; free: boolean }[]>([]);
+  const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
+  const [cloudflareAccountId, setCloudflareAccountId] = useState('');
   const [cwd, setCwd] = useState(() => loadCurrent().cwd);
   const [brainMode, setBrainMode] = useState(() => loadCurrent().brainMode ?? true);
   const currentSettings = loadCurrent();
@@ -121,6 +122,12 @@ export function SettingsView() {
       setCwd(cur.cwd);
       setBrainMode(cur.brainMode ?? true);
     });
+    window.api
+      .getSetting({ key: 'cloudflareAccountId' })
+      .then((value: unknown) => {
+        if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
 
     return () => window.removeEventListener('storage', syncFromStorage);
   }, []);
@@ -147,7 +154,8 @@ export function SettingsView() {
       if (cancelled) return;
       const list = await window.api.listProviderModels({ provider: activeProvider });
       if (cancelled) return;
-      const modelList = list as { id: string; label: string; free: boolean }[];
+      const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
+        .filter((model) => !model.provider || model.provider === activeProvider);
       setModels(modelList);
       setStatus(result.ok ? 'ok' : 'fail');
       setStatusMessage(result.ok ? `${modelList.length} models available` : result.error || 'Connection failed');
@@ -177,6 +185,7 @@ export function SettingsView() {
     setStatus('testing');
     setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models…' : 'Checking provider connection…');
     try {
+      if (activeProvider === 'cloudflare') await saveCloudflareAccountId();
       const enteredKey = apiKey.trim();
       const res = await window.api.testProvider({ provider: activeProvider, apiKey: enteredKey });
       if (res.ok) {
@@ -187,7 +196,8 @@ export function SettingsView() {
           setApiKey('');
         }
         const list = await window.api.listProviderModels({ provider: activeProvider, apiKey: enteredKey });
-        const modelList = list as { id: string; label: string; free: boolean }[];
+        const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
+          .filter((model) => !model.provider || model.provider === activeProvider);
         setModels(modelList);
 
         // A model id from the previously selected provider is not usable here.
@@ -237,7 +247,8 @@ export function SettingsView() {
       setApiKeyLoaded(false);
       const result = await window.api.testProvider({ provider: 'opencode', apiKey: '' });
       const list = await window.api.listProviderModels({ provider: 'opencode', apiKey: '' });
-      const modelList = list as { id: string; label: string; free: boolean }[];
+      const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
+        .filter((model) => !model.provider || model.provider === 'opencode');
       setModels(modelList);
       setStatus(result.ok ? 'ok' : 'fail');
       setStatusMessage(result.ok ? `${modelList.length} CLI models available` : result.error || 'OpenCode CLI connection failed');
@@ -272,6 +283,19 @@ export function SettingsView() {
   };
 
   const provider = providers.find((p) => p.id === activeProvider);
+
+  // Strict per-provider scoping: this pane only ever shows the active
+  // provider's own models — never another provider's catalog.
+  const scopedModels = models.filter((m) => !m.provider || m.provider === activeProvider);
+  const scopedFreeModels = (provider?.freeModels ?? []).filter((m) => !m.provider || m.provider === activeProvider);
+
+  const saveCloudflareAccountId = async (value?: string) => {
+    const next = (value ?? cloudflareAccountId).trim();
+    await window.api
+      .setSetting({ scope: 'user', key: 'cloudflareAccountId', value: next, cwd: loadCurrent().cwd || '.' })
+      .catch(() => undefined);
+    if (value === undefined) setCloudflareAccountId(next);
+  };
 
   const toggleBrainMode = () => {
     const newVal = !brainMode;
@@ -479,6 +503,18 @@ export function SettingsView() {
 
           {(provider?.requiresApiKey || provider?.acceptsApiKey) && (
             <div className="mb-4">
+              {activeProvider === 'cloudflare' && (
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={cloudflareAccountId}
+                    onChange={(e) => setCloudflareAccountId(e.target.value)}
+                    onBlur={() => void saveCloudflareAccountId()}
+                    placeholder="Cloudflare account ID (from your dashboard URL)"
+                    className="input-premium flex-1"
+                  />
+                </div>
+              )}
               <div className="flex gap-2">
                 <input
                   type="password"
@@ -529,11 +565,11 @@ export function SettingsView() {
           {status === 'fail' && <div className="text-sm text-red-400 mb-4 bg-red-400/10 px-3 py-2 rounded-lg inline-block">{statusMessage || 'Connection failed'}</div>}
 
           {/* Show free models even without API key test */}
-          {models.length === 0 && provider?.freeModels && provider.freeModels.length > 0 && (
+          {scopedModels.length === 0 && scopedFreeModels.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold mb-2 text-textMain">Free Models</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-                {provider.freeModels.map((m) => (
+                {scopedFreeModels.map((m) => (
                   <button
                     key={m.id}
                     onClick={() => pickModel(m.id)}
@@ -551,11 +587,11 @@ export function SettingsView() {
             </div>
           )}
 
-          {models.length > 0 && (
+          {scopedModels.length > 0 && (
             <div>
               <h4 className="text-sm font-semibold mb-2 text-textMain">Available Models</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-64 overflow-y-auto custom-scrollbar pr-2">
-                {models.map((m) => (
+                {scopedModels.map((m) => (
                   <button
                     key={m.id}
                     onClick={() => pickModel(m.id)}
