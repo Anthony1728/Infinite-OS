@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Command } from 'cmdk';
 
 const COMMANDS = [
+  { id: 'home', label: 'Home — Power Center', icon: 'HC', category: 'Power', shortcut: '⌘K → home' },
   { id: 'new-chat', label: 'New Chat', icon: 'AI', category: 'Chat', shortcut: 'Ctrl+N' },
   { id: 'open-canvas', label: 'Open Canvas', icon: 'CN', category: 'Workspace' },
   { id: 'open-code', label: 'Open Code Editor', icon: 'CD', category: 'Workspace' },
@@ -28,6 +29,18 @@ const COMMANDS = [
   { id: 'quick-capture', label: 'Quick Capture (append note)', icon: 'QC', category: 'Actions', shortcut: 'Ctrl+Shift+Y' },
   { id: 'quick-capture-open', label: 'Open Quick Notes folder', icon: 'QN', category: 'Actions' },
 ];
+
+const RECENT_KEY = 'infinite:palette-recent';
+function getRecent(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); } catch { return []; }
+}
+function pushRecent(id: string) {
+  try {
+    const cur = getRecent().filter((x) => x !== id);
+    cur.unshift(id);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(cur.slice(0, 5)));
+  } catch { /* ignore */ }
+}
 
 interface CommandPaletteProps {
   open?: boolean;
@@ -59,13 +72,27 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
     return () => window.removeEventListener('keydown', handler);
   }, [open, setOpen, onCommand]);
 
-  const query = search.toLowerCase();
-  const filtered = COMMANDS.filter((c) => c.label.toLowerCase().includes(query) || c.category.toLowerCase().includes(query));
+  const query = search.toLowerCase().trim();
+  const tokens = query ? query.split(/\s+/).filter(Boolean) : [];
+  const match = (c: typeof COMMANDS[number]) => {
+    if (!query) return true;
+    const hay = `${c.label} ${c.category} ${c.id}`.toLowerCase();
+    return tokens.every((t) => hay.includes(t));
+  };
+  const filtered = COMMANDS.filter(match);
+  const recentIds = !query ? getRecent() : [];
+  const recentCommands = recentIds.map((id) => COMMANDS.find((c) => c.id === id)).filter(Boolean) as typeof COMMANDS;
 
   const grouped = filtered.reduce<Record<string, typeof COMMANDS>>((acc, cmd) => {
     (acc[cmd.category] ??= []).push(cmd);
     return acc;
   }, {});
+  // Power category first when no filter — makes Power Center instantly discoverable
+  const orderedGroups = Object.entries(grouped).sort(([a], [b]) => {
+    if (a === 'Power') return -1;
+    if (b === 'Power') return 1;
+    return a.localeCompare(b);
+  });
 
   if (!open) return null;
 
@@ -102,7 +129,28 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
         <Command.List className="max-h-[350px] overflow-y-auto p-2 custom-scrollbar">
           <Command.Empty className="text-center py-8 text-gray-500 text-sm">No results found.</Command.Empty>
 
-          {Object.entries(grouped).map(([category, commands]) => (
+          {!query && recentCommands.length > 0 && (
+            <Command.Group heading="Recent" className="mb-2">
+              {recentCommands.map((cmd) => (
+                <Command.Item
+                  key={`recent-${cmd.id}`}
+                  value={`recent-${cmd.id}`}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm cursor-pointer transition-colors data-[selected=true]:bg-white/[0.06] data-[selected=true]:text-white text-zinc-400 hover:bg-white/[0.04] hover:text-white"
+                  onSelect={() => {
+                    pushRecent(cmd.id);
+                    setOpen(false);
+                    onCommand?.(cmd.id);
+                  }}
+                >
+                  <span className="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/20 flex items-center justify-center text-[10px] font-semibold text-violet-300">↻</span>
+                  <span className="flex-1">{cmd.label}</span>
+                  <span className="text-[10px] text-zinc-600">recent</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
+
+          {orderedGroups.map(([category, commands]) => (
             <Command.Group key={category} heading={category} className="mb-2">
               {commands.map((cmd) => (
                 <Command.Item
@@ -110,6 +158,7 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
                   value={cmd.id}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm cursor-pointer transition-colors data-[selected=true]:bg-indigo-500/15 data-[selected=true]:text-white text-gray-400 hover:bg-white/[0.04] hover:text-white"
                   onSelect={() => {
+                    pushRecent(cmd.id);
                     setOpen(false);
                     onCommand?.(cmd.id);
                   }}
@@ -124,6 +173,10 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
             </Command.Group>
           ))}
         </Command.List>
+        <div className="border-t border-white/[0.06] px-3 py-2 flex items-center justify-between text-[10px] text-zinc-600">
+          <span><span className="font-mono text-zinc-400">↑↓</span> navigate · <span className="font-mono text-zinc-400">↵</span> select · <span className="font-mono text-zinc-400">ESC</span> close</span>
+          <span className="hidden sm:inline">Home is ⌘K → “home”</span>
+        </div>
       </Command>
     </motion.div>
   );

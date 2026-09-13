@@ -108,7 +108,6 @@ describe('cloudflare key validation', () => {
     vi.restoreAllMocks();
     values.delete('cloudflareAccountId');
   });
-
   it('walks past a retired model instead of failing a valid key', async () => {
     values.set('cloudflareAccountId', 'abc123');
     const seen: string[] = [];
@@ -131,5 +130,93 @@ describe('cloudflare key validation', () => {
     const result = await cloudflare.testConnection('some-token');
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/account ID/i);
+  });
+
+  it('fails a turn as a plain error chunk when the account ID is missing', async () => {
+    values.delete('cloudflareAccountId');
+    const chunks = [];
+    for await (const chunk of cloudflare.streamChat(
+      { model: '@cf/meta/llama-3.1-8b-instruct', messages: [], stream: true },
+      'some-token',
+    )) {
+      chunks.push(chunk);
+    }
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].type).toBe('error');
+    expect((chunks[0] as { error: string }).error).toMatch(/account ID is missing/i);
+  });
+});
+
+describe('gateway catalog honesty (apinex free/ vs paid)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function apinexAdapter() {
+    return openaiCompatible({
+      id: 'apinex',
+      label: 'APInex',
+      defaultBaseUrl: 'https://api.apinex.bond/v1',
+      defaultModel: 'free/muse-spark-1.3',
+      freeModels: [{ id: 'free/muse-spark-1.3', label: 'Muse Spark 1.3 (free)', provider: 'apinex', free: true, supports_tools: true }],
+      gatewayCatalog: true,
+      freePattern: /^free\//,
+    });
+  }
+
+  it('badges free/ ids free and lists paid ids without the badge', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ models: [
+        { id: 'free/muse-spark-1.3', name: 'Muse Spark 1.3', dollarsPer1M: 0.25 },
+        { id: 'deepseek-v4.1-flash', name: 'Deepseek V4.1 Flash', dollarsPer1M: 0.06 },
+        { id: 'free/unlisted-model', name: 'Unlisted Free Model' },
+        { id: 'paid-unlisted-model', name: 'Unlisted Paid Model' },
+      ] }), { status: 200 }),
+    );
+    const models = await apinexAdapter().listModels('k');
+    const spark = models.find((m) => m.id === 'free/muse-spark-1.3');
+    const deepseek = models.find((m) => m.id === 'deepseek-v4.1-flash');
+    // Both usable on the key: both list…
+    expect(spark).toBeDefined();
+    expect(deepseek).toBeDefined();
+    // …but only the free/ id wears the Free badge, and every entry is
+    // tagged with this provider's own id.
+    expect(spark?.free).toBe(true);
+    expect(deepseek?.free).toBe(false);
+    // No pricing info at all: the free/ pattern alone decides the badge.
+    expect(models.find((m) => m.id === 'free/unlisted-model')?.free).toBe(true);
+    expect(models.find((m) => m.id === 'paid-unlisted-model')?.free).toBe(false);
+    expect(models.every((m) => m.provider === 'apinex')).toBe(true);
+  });
+
+  it('parses the live public-catalog shape (contextWindow, dollarsPer1M)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ models: [
+        { id: 'free/gemini-3.8-flash', provider: 'Free', name: 'Gemini 3.8 Flash', contextWindow: '1M', weight: 4, dollarsPer1M: 1, tags: [], health: 'live' },
+      ] }), { status: 200 }),
+    );
+    const models = await apinexAdapter().listModels('k');
+    expect(models).toHaveLength(1);
+    expect(models[0].context_window).toBe(1_000_000);
+  });
+
+  it('accepts a `model` field as the id and skips display-name-only entries', async () => {
+    const adapter = openaiCompatible({
+      id: 'probe-gateway-2',
+      label: 'Probe',
+      defaultBaseUrl: 'https://example.test/v1',
+      defaultModel: 'probe-default',
+      freeModels: [{ id: 'probe-default', label: 'Default', provider: 'probe-gateway-2', free: true, supports_tools: true }],
+      gatewayCatalog: true,
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [
+        { model: 'alt-id-model' },
+        { name: 'Just A Display Name' },
+      ] }), { status: 200 }),
+    );
+    const models = await adapter.listModels('k');
+    expect(models.some((m) => m.id === 'alt-id-model')).toBe(true);
+    expect(models.some((m) => m.id === 'Just A Display Name')).toBe(false);
   });
 });

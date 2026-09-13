@@ -31,7 +31,7 @@ const ACTIONS = [
 export const computerTool: Tool = {
   name: 'Computer',
   description:
-    'Control the local computer. Use visual_observe before coordinate actions when screen context matters; it returns a fresh live frame plus active-window, cursor, focused-control, and visible Windows UI element labels/bounds. visual_click and visual_type capture before/after frames and verify target bounds/cursor state. Supports mouse, keyboard, applications, URLs, windows, processes, and clipboard operations.',
+    'Control the local computer — BUT prefer PCLiveMap first: PCLiveMap gives screenshot-free vectors (mouse, All windows, 50 UIA buttons/elements, focused control, clipboard) at ~500-900 tokens and 4 Hz — ~13-15x cheaper and ~50x faster than screenshots, and text-only models can use it. Always call PCLiveMap action=live (or agent) before visual_observe; use PCLiveMap action=click_name to click by UIA name with no coords. Fall back to Computer visual_observe/visual_click only when vectors cannot see (canvas/game/scanned PDF with no UIA names) and say why. Supports mouse, keyboard, applications, URLs, windows, processes, and clipboard operations.',
   inputSchema: {
     type: 'object',
     properties: {

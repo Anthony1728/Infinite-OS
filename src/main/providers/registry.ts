@@ -362,6 +362,9 @@ const REGISTRY: Record<string, ProviderAdapter> = {
     ],
     homepage: 'https://apinex.bond',
     gatewayCatalog: true,
+    // APInex marks included models `free/…` — only those get the Free badge.
+    // Paid ids still list (selectable) without it.
+    freePattern: /^free\//,
   }),
   cloudflare,
   bluesminds: openaiCompatible({
@@ -374,6 +377,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
       { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', provider: 'bluesminds', free: true, supports_tools: true },
       { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'bluesminds', free: true, supports_tools: true },
       { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'bluesminds', free: true, supports_tools: true },
+      { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', provider: 'bluesminds', free: true, supports_tools: true },
       { id: 'grok-3', label: 'Grok 3', provider: 'bluesminds', free: true, supports_tools: true },
       { id: 'gpt-4o', label: 'GPT-4o', provider: 'bluesminds', free: true, supports_tools: true },
     ],

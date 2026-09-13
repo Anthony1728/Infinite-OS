@@ -131,7 +131,7 @@ export function App() {
   const uiTheme = useUiTheme((s) => s.theme);
   const { restoreSession } = useSessionStore();
   const [authView, setAuthView] = useState<AuthView>('login');
-  const [activeView, setActiveView] = useState('chats');
+  const [activeView, setActiveView] = useState('home');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const setActivityPanelOpen = useLayoutStore((s) => s.setActivityPanelOpen);

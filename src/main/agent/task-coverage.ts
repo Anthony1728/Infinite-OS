@@ -4,9 +4,14 @@ export interface SuccessfulToolAction {
 }
 
 function computerAction(item: SuccessfulToolAction): string {
-  if (item.name !== 'Computer' || !item.input || typeof item.input !== 'object') return '';
+  if (!item.input || typeof item.input !== 'object') return '';
   const action = (item.input as { action?: unknown }).action;
-  return typeof action === 'string' ? action : '';
+  if (typeof action !== 'string') return '';
+  // PCLiveMap is the preferred vector path — treat it as the modern equivalent of Computer observations/actions
+  if (item.name === 'PCLiveMap' && ['live', 'agent', 'elements', 'health', 'events'].includes(action)) return 'visual_observe';
+  if (item.name === 'PCLiveMap' && ['click', 'click_name', 'move', 'doubleclick', 'drag', 'type', 'keys', 'scroll', 'wait', 'focus'].includes(action)) return 'type_text';
+  if (item.name !== 'Computer') return '';
+  return action;
 }
 
 /** Required observable steps for common compound desktop requests. */

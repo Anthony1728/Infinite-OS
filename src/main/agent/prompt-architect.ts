@@ -38,9 +38,9 @@ const CATEGORY_KEYWORDS: Array<{ category: TaskCategory; re: RegExp; capabilitie
   },
   {
     category: 'computer_automation',
-    re: /\b(computer|desktop|window|app\b.*open|click|type|keyboard|mouse|screenshot|clipboard|notification|automate|control this pc)\b/i,
+    re: /\b(computer|desktop|window|app\b.*open|click|type|keyboard|mouse|screenshot|clipboard|notification|automate|control this pc|live map|pc live)\b/i,
     capabilities: [{ domain: 'computer_automation', reason: 'OS-level control and observation' }, { domain: 'terminal', reason: 'System inspection' }],
-    tools: ['Computer', 'Bash', 'System', 'Clipboard', 'ClipboardRead', 'ClipboardWrite', 'Notification', 'CreateTab'],
+    tools: ['PCLiveMap', 'Computer', 'Bash', 'System', 'Clipboard', 'ClipboardRead', 'ClipboardWrite', 'Notification', 'CreateTab'],
     skills: [],
   },
   {

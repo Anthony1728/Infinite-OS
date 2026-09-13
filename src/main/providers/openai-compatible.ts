@@ -18,8 +18,11 @@ interface Opts {
    * Gateway catalogs (BlueSminds, APInex) are key-metered without per-model
    * pricing: every listed model is usable on the key, so live entries without
    * pricing default to free instead of landing in the Paid section.
+   * When freePattern is set, only matching ids get the Free badge — the rest
+   * still list (selectable) without it. APInex marks included models `free/…`.
    */
   gatewayCatalog?: boolean;
+  freePattern?: RegExp;
 }
 
 export function openaiCompatible(opts: Opts): ProviderAdapter {
@@ -348,8 +351,11 @@ export async function probeChatCompletion(
 
 interface RawModel {
   id?: string;
+  model?: string;
   name?: string;
   context_length?: number;
+  contextWindow?: string | number;
+  dollarsPer1M?: string | number;
   pricing?: {
     prompt?: string | number;
     completion?: string | number;
@@ -360,10 +366,15 @@ interface RawModel {
 
 // Convert a provider's raw /models entry into our ModelInfo, categorizing
 // free vs paid from pricing data (OpenRouter) or free-tier platforms.
+// Entries are never dropped for a missing id when another model field names
+// one (some gateways use `model`); entries with no usable id are skipped.
 function normalizeModel(entry: unknown, opts: Opts): ModelInfo | null {
   const e = entry as RawModel;
-  if (!e?.id) return null;
-  const id = e.id;
+  // Catalog id shapes disagree across gateways (OpenAI `id`, some use
+  // `model`); a display `name` with spaces is never an id.
+  const rawId = e?.id || e?.model;
+  if (!rawId || /[\s]/.test(rawId)) return null;
+  const id = rawId;
   const known = opts.freeModels.find((fm) => fm.id === id);
   let free = known?.free ?? false;
 
@@ -372,22 +383,38 @@ function normalizeModel(entry: unknown, opts: Opts): ModelInfo | null {
       const prompt = Number(e.pricing.prompt ?? e.pricing.input ?? 0);
       const completion = Number(e.pricing.completion ?? e.pricing.output ?? 0);
       free = prompt === 0 && completion === 0;
+    } else if (e.dollarsPer1M !== undefined) {
+      // APInex-style catalogs carry dollars-per-1M instead of a pricing pair.
+      free = Number(e.dollarsPer1M) === 0;
     } else if (opts.id === 'nvidia' || opts.id === 'groq' || opts.gatewayCatalog) {
       // NVIDIA NIM and Groq expose no pricing — their catalog is free-tier.
-      // Gateway catalogs (key-metered, no per-model prices) are usable too.
-      free = true;
+      // Gateway catalogs (key-metered, no per-model prices) list everything
+      // the key can use; freePattern scopes the Free badge honestly (APInex
+      // `free/…`) while the rest still list as selectable.
+      free = opts.freePattern ? opts.freePattern.test(id) : true;
     }
   }
 
   const supportsTools = known?.supports_tools;
   return {
     id,
-    label: e.name || id,
+    label: known?.label || e.name || id,
     provider: opts.id,
     free,
-    ...(e.context_length ? { context_window: e.context_length } : {}),
+    ...(typeof e.context_length === 'number' ? { context_window: e.context_length } : {}),
+    ...(typeof e.context_length !== 'number' && e.contextWindow !== undefined ? { context_window: parseContextWindow(e.contextWindow) } : {}),
     ...(supportsTools !== undefined ? { supports_tools: supportsTools } : {}),
   };
+}
+
+/** Parse context sizes like "1M"/"500K"/131072 into tokens. */
+function parseContextWindow(value: string | number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const m = /^\s*([\d.]+)\s*([kKmM])?\s*$/.exec(String(value));
+  if (!m) return 0;
+  const base = Number(m[1]);
+  const mult = !m[2] ? 1 : m[2].toLowerCase() === 'm' ? 1_000_000 : 1_000;
+  return Math.round(base * mult);
 }
 
 function isInsufficientCreditsError(text: string): boolean {

@@ -80,7 +80,8 @@ export const cloudflare = {
             const first = body?.errors?.[0]?.message;
             if (first) detail = ` — ${first.slice(0, 160)}`;
           } catch { /* fall back to the status-only message */ }
-          return { ok: false, error: `HTTP ${res.status} — API token rejected.${detail}` };
+          const hint = detail ? '' : ' Check the token belongs to the same account as the account ID above, and that the token has the Workers AI Read permission (recreate it from the Workers AI setup template).';
+          return { ok: false, error: `HTTP ${res.status} — API token rejected.${detail}${hint}` };
         }
         if (res.status === 429) return { ok: false, error: 'HTTP 429 — daily Neurons cap reached, retries tomorrow.' };
         return { ok: false, error: `HTTP ${res.status}` };
@@ -98,6 +99,15 @@ export const cloudflare = {
     }
   },
   async *streamChat(req: Parameters<typeof base.streamChat>[0], apiKey: string) {
-    yield* base.streamChat(req, apiKey, await cloudflareBaseUrl());
+    // A missing account ID must fail as a plain chat error, never as a
+    // thrown exception that could wedge the turn.
+    let url: string;
+    try {
+      url = await cloudflareBaseUrl();
+    } catch (e) {
+      yield { type: 'error' as const, error: (e as Error).message };
+      return;
+    }
+    yield* base.streamChat(req, apiKey, url);
   },
 };

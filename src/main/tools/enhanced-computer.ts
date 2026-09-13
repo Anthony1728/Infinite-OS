@@ -5,7 +5,7 @@ import { getOCR } from '../ocr/index.js';
 export const enhancedComputerTool: Tool = {
   name: 'EnhancedComputer',
   description:
-    'Enhanced desktop control with OCR text recognition, visual element detection, multi-monitor support, clipboard history, window snapping, and screenshot analysis. Use when you need to read text from screen, find UI elements by text, or perform complex desktop workflows.',
+    'Enhanced desktop control with OCR text recognition, visual element detection, multi-monitor support, clipboard history, window snapping, and screenshot analysis. BUT prefer PCLiveMap first: PCLiveMap gives screenshot-free vectors (50 UIA elements with values, focused control, ALL windows) at ~500-950 tokens — 13-15x cheaper and 50x faster than screenshots. Only use EnhancedComputer read_screen/find_element/screenshot_ocr when PCLiveMap vectors cannot see (canvas/game/3D/scanned PDF with no UIA names) — and say why in one line.',
   permission: 'ask',
   inputSchema: {
     type: 'object',
