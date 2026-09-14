@@ -219,4 +219,33 @@ describe('gateway catalog honesty (apinex free/ vs paid)', () => {
     expect(models.some((m) => m.id === 'alt-id-model')).toBe(true);
     expect(models.some((m) => m.id === 'Just A Display Name')).toBe(false);
   });
+
+  it('accepts doubly-nested catalog envelopes', async () => {
+    const { extractCatalogEntries } = await import('./openai-compatible.js');
+    expect(extractCatalogEntries({ data: { data: [{ id: 'a' }] } })).toHaveLength(1);
+    expect(extractCatalogEntries({ data: { result: [{ id: 'b' }] } })).toHaveLength(1);
+    expect(extractCatalogEntries({ data: { models: [{ id: 'c' }] } })).toHaveLength(1);
+  });
+
+  it('suffixes gateway-routed models with their upstream vendor', async () => {
+    const adapter = openaiCompatible({
+      id: 'bluesminds',
+      label: 'BlueSminds',
+      defaultBaseUrl: 'https://api.bluesminds.com/v1',
+      defaultModel: 'gpt-4o',
+      freeModels: [{ id: 'gpt-4o', label: 'GPT-4o', provider: 'bluesminds', free: true, supports_tools: true }],
+      gatewayCatalog: true,
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [
+        { id: 'gpt-4o', provider: 'OpenAI' },
+        { id: 'own-model', provider: 'bluesminds' },
+      ] }), { status: 200 }),
+    );
+    const models = await adapter.listModels('k');
+    const routed = models.find((m) => m.id === 'gpt-4o');
+    expect(routed?.provider).toBe('bluesminds');
+    expect(routed?.label).toMatch(/OpenAI/);
+    expect(models.find((m) => m.id === 'own-model')?.label).toBe('own-model');
+  });
 });

@@ -75,9 +75,13 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
           headers: { Accept: 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
           signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) return opts.freeModels;
+        if (!res.ok) {
+          console.info(`[catalog] ${opts.id} /models HTTP ${res.status} — showing built-in list.`);
+          return opts.freeModels;
+        }
         const raw: unknown = await res.json();
         const list = extractCatalogEntries(raw);
+        console.info(`[catalog] ${opts.id} envelope=[${envelopeKeys(raw).join(',') || 'array'}] raw=${list.length}`);
         if (list.length === 0) return opts.freeModels;
         const models = list
           .map((entry) => normalizeModel(entry, opts))
@@ -294,8 +298,9 @@ function isDegradedFunctionError(text: string): boolean {
 
 /**
  * Gateways disagree on the catalog envelope: OpenAI uses `{ data: [] }`,
- * others use `{ models: [] }`, `{ result: [] }`, or a bare array. Accept
- * them all so a key always unlocks the account's real model list.
+ * others use `{ models: [] }`, `{ result: [] }`, nested `{ data: { models |
+ * data: [] } }`, or a bare array. Accept them all so a key always unlocks
+ * the account's real model list.
  */
 export function extractCatalogEntries(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw;
@@ -305,10 +310,20 @@ export function extractCatalogEntries(raw: unknown): unknown[] {
       if (Array.isArray(obj[key])) return obj[key] as unknown[];
     }
     const nested = obj['data'];
-    if (nested && typeof nested === 'object' && Array.isArray((nested as Record<string, unknown>)['models'])) {
-      return (nested as Record<string, unknown>)['models'] as unknown[];
+    if (nested && typeof nested === 'object') {
+      const inner = nested as Record<string, unknown>;
+      for (const key of ['models', 'data', 'result']) {
+        if (Array.isArray(inner[key])) return inner[key] as unknown[];
+      }
     }
   }
+  return [];
+}
+
+/** Top-level keys of a catalog payload, for the `[catalog]` diagnostic line. */
+export function envelopeKeys(raw: unknown): string[] {
+  if (Array.isArray(raw)) return [];
+  if (raw && typeof raw === 'object') return Object.keys(raw as Record<string, unknown>);
   return [];
 }
 
@@ -353,6 +368,9 @@ interface RawModel {
   id?: string;
   model?: string;
   name?: string;
+  provider?: string;
+  vendor?: string;
+  owned_by?: string;
   context_length?: number;
   contextWindow?: string | number;
   dollarsPer1M?: string | number;
@@ -396,9 +414,19 @@ function normalizeModel(entry: unknown, opts: Opts): ModelInfo | null {
   }
 
   const supportsTools = known?.supports_tools;
+  // Gateway catalogs route to upstream vendors (APInex entries carry
+  // `provider: "OpenAI"`, OpenAI catalogs `owned_by`). Surfacing the vendor
+  // in the label proves the model is served through THIS provider's key —
+  // a `gpt-4o` under BlueSminds is BlueSminds-routed, not another account.
+  const vendorRaw = e.vendor ?? e.owned_by ?? e.provider;
+  const vendor = typeof vendorRaw === 'string' && vendorRaw.trim() ? vendorRaw.trim() : '';
+  const baseLabel = known?.label || e.name || id;
+  const label = vendor && !baseLabel.toLowerCase().includes(vendor.toLowerCase()) && vendor.toLowerCase() !== opts.id.toLowerCase()
+    ? `${baseLabel} (${vendor})`
+    : baseLabel;
   return {
     id,
-    label: known?.label || e.name || id,
+    label,
     provider: opts.id,
     free,
     ...(typeof e.context_length === 'number' ? { context_window: e.context_length } : {}),
