@@ -61,6 +61,7 @@ import { registerWhatsAppLinkIpc } from './whatsapp-link.js';
 import { registerCommandsIpc } from './commands.js';
 import { registerWindowIpc } from './window.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
+import { SelfEvolutionEngine } from '../brain/self-evolution.js';
 import { getEngine } from '../engine/intelligence.js';
 import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
@@ -718,6 +719,30 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('self-improvement:status', async (_e, { cwd }: { cwd: string }) => {
     const agent = new SelfImprovementAgent(cwd);
     return agent.getLastReport();
+  });
+
+  // Self-Evolution Engine IPC
+  const selfEvolutionEngine = new SelfEvolutionEngine();
+  ipcMain.handle(IPC.SELF_EVOLVE_ANALYZE, async () => {
+    return selfEvolutionEngine.analyzePatterns();
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_SUGGESTIONS, async (_e, { status }: { status?: string }) => {
+    return selfEvolutionEngine.getSuggestions(status as any);
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_ACCEPT, async (_e, { id }: { id: string }, autoCreate: boolean = true) => {
+    return selfEvolutionEngine.acceptSuggestion(id, autoCreate);
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_DISMISS, async (_e, { id }: { id: string }) => {
+    return selfEvolutionEngine.dismissSuggestion(id);
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_STATUS, async () => {
+    return selfEvolutionEngine.getStatus();
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_PROMPT, async () => {
+    return selfEvolutionEngine.getAutomationPrompt();
+  });
+  ipcMain.handle(IPC.SELF_EVOLVE_EVOLVE, async () => {
+    return selfEvolutionEngine.evolve();
   });
 
   // Skills IPC

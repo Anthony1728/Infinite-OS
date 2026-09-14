@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/auth';
 import { useChatStore } from '../../stores/chat';
+import { AgentBuddy } from '../brand/AgentBuddy';
 
 // Bottom status bar — Hermes' "Gateway ready" strip in Infinite glass:
 // provider/model, engine pulse, session count, version, user.
 export function StatusBar() {
   const user = useAuthStore((s) => s.user);
   const sessionCount = useChatStore((s) => s.sessions.length);
+  const streaming = useChatStore((s) => s.streaming);
   const [provider, setProvider] = useState('…');
   const [model, setModel] = useState('');
   const [version, setVersion] = useState('');
@@ -51,6 +53,7 @@ export function StatusBar() {
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-white/[0.06] bg-[#0a0a0e]/90 px-3 text-[11px] text-zinc-500 select-none">
+      <AgentBuddy working={streaming} />
       <span className="inline-flex items-center gap-1.5" title={engineOk === false ? 'Engine issue' : 'Engine status'}>
         <span
           className={`h-1.5 w-1.5 rounded-full ${

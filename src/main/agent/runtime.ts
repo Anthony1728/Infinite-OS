@@ -32,6 +32,7 @@ import { getAutomationDisplayState, restoreInfiniteOsFocus } from '../automation
 import { buildRecoveryHandoff, type RecoveryHandoffOptions } from './recovery-handoff.js';
 import { buildToolRecoveryDirective, toolAttemptSignature, type FailedToolAttempt } from './tool-recovery.js';
 import { LOOP_STREAM_STALL_TIMEOUT_MS } from './loop.js';
+import { keepPartialAssistant } from './loop.js';
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
 import { settings } from '../settings/store.js';
 
@@ -384,9 +385,13 @@ export async function runSubagent(
     recordProviderFailure(activeCandidate, failure);
     // Kill-switch (mirrors loop.ts): never leave the selected model.
     if (!failoverEnabled) return false;
+    // Every attempt keeps its own bubble: only discard a partial with
+    // nothing worth showing, so old streams never vanish mid-run.
+    if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+      messages.pop();
+      opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
+    }
     const next = selectNextProviderCandidate(failoverPlan, failoverIndex, activeCandidate, failure);
-    if (messages.at(-1) === assistant) messages.pop();
-    opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
     if (!next) return false;
     recoveryContext = {
       failedProvider: activeCandidate.provider,
@@ -630,8 +635,11 @@ export async function runSubagent(
           // Announced (not console-only) so the run never looks silently stuck.
           const attempt = retryCounter + 1;
           if (isSelectedModel) sameModelStreamRetries++; else failoverCandidateRetries++;
-          if (messages.at(-1) === assistant) messages.pop();
-          opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
+          // Same bubble rule as failover: keep visible text, drop only empties.
+          if (messages.at(-1) === assistant && !keepPartialAssistant(assistant)) {
+            messages.pop();
+            opts.sink({ type: 'message_discard', runId: state.id, message_id: assistant.id });
+          }
           opts.sink({
             type: 'provider_status',
             runId: state.id,

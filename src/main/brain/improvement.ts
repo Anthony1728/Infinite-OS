@@ -363,5 +363,25 @@ export class SelfImprovementEngine {
   getActions(): ImprovementAction[] {
     return this.actions;
   }
+
+  /**
+   * Auto-generate skills from low-success-rate patterns.
+   * Returns skill drafts that can be fed to SkillsManager.
+   */
+  autoGenerateSkills(): Array<{ name: string; description: string; instructions: string; category: string; triggers: string[] }> {
+    const skills = [];
+    for (const [, pattern] of this.patterns) {
+      if (pattern.successRate < 0.7 && pattern.examples > 5) {
+        skills.push({
+          name: `${pattern.taskType} auto-fix`,
+          description: `Automate ${pattern.taskType} using best approach`,
+          instructions: `Use the following approach for ${pattern.taskType}: ${pattern.bestApproach}. Model: ${pattern.bestModel}.`,
+          category: 'automation',
+          triggers: [pattern.taskType, ...pattern.pattern.toLowerCase().split(' ').slice(0, 3)],
+        });
+      }
+    }
+    return skills;
+  }
 }
 

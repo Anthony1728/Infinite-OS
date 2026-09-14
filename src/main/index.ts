@@ -45,6 +45,7 @@ import { SystemMonitor } from './brain/monitor.js';
 import { SelfImprovementEngine } from './brain/improvement.js';
 import { ToolMarketplace } from './brain/marketplace.js';
 import { DeveloperSDK } from './brain/sdk.js';
+import { SelfEvolutionEngine } from './brain/self-evolution.js';
 import { BrowserAgent } from './agent/browser.js';
 import { bridgeServer } from './bridge/server.js';
 import { automationScheduler } from './automation/scheduler.js';
@@ -99,6 +100,7 @@ export const monitor = new SystemMonitor();
 export const improvement = new SelfImprovementEngine();
 export const marketplace = new ToolMarketplace();
 export const sdk = new DeveloperSDK();
+export const selfEvolution = new SelfEvolutionEngine();
 
 // Phase 2 instances
 export const browserAgent = new BrowserAgent();
@@ -382,6 +384,22 @@ app.whenReady().then(async () => {
     }
   }, 300_000);
 
+  // Start self-evolution loop (every 10 min) — analyze patterns, auto-create skills
+  setInterval(() => {
+    try {
+      const result = selfEvolution.evolve();
+      if (result.newSkills > 0) {
+        logger.info({ newSkills: result.newSkills }, 'Self-evolution auto-created skills');
+      }
+      const prompt = selfEvolution.getAutomationPrompt();
+      if (prompt) {
+        logger.info({ prompt }, 'Self-evolution suggestion available');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Self-evolution cycle failed');
+    }
+  }, 600_000);
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -405,6 +423,7 @@ app.on('window-all-closed', () => {
   void browserOperator.shutdown().finally(() => {
     if (process.platform !== 'darwin') app.quit();
   });
+  selfEvolution.getStatus();
 });
 
 // Prevent crashes from unhandled promise rejections

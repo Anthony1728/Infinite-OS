@@ -1,6 +1,6 @@
 /**
  * Brain Module Barrel Export
- * 
+ *
  * Central export for all brain subsystems.
  */
 
@@ -24,3 +24,5 @@ export { ToolMarketplace } from './marketplace.js';
 
 export { DeveloperSDK } from './sdk.js';
 
+export { SelfEvolutionEngine, getSelfEvolutionEngine } from './self-evolution.js';
+export type { PatternSuggestion, SkillDraft, EvolutionStatus } from './self-evolution.js';

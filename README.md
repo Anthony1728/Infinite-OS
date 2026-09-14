@@ -46,16 +46,45 @@ Requirements: Node >= 20. Ollama optional but recommended for local models
 | `Ctrl/⌘ /` | Shortcuts |
 | `Ctrl/⌘ Shift Y` | Quick Capture append |
 
+## Self-Evolution Engine
+
+Infinite OS's biggest moat — turns user behavior into automated skills.
+
+- **Pattern Memory**: Detects recurring actions from the Activity Tracker. When you repeat a task 3+ times, it generates an automation suggestion: *"You do X 3x per week — want me to automate it?"*
+- **Auto-Skill Generation**: High-confidence patterns (≥0.8) auto-create skills that can be triggered on demand
+- **Improvement Integration**: The `SelfImprovementEngine` feeds low-success-rate patterns into the evolution pipeline
+- **IPC Channels**: `self-evolve:analyze`, `self-evolve:suggestions`, `self-evolve:accept`, `self-evolve:evolve`, `self-evolve:prompt`
+
+### How it works
+
+```
+ActivityTracker → detects recurring patterns (frequency ≥ 3, confidence ≥ 0.5)
+     ↓
+SelfEvolutionEngine → creates PatternSuggestion objects
+     ↓
+User accepts → skill is created via SkillsManager
+     ↓
+Auto-evolve loop (every 10 min) → automatically creates high-confidence skills
+```
+
+### Files
+
+- `src/main/brain/self-evolution.ts` — Core engine: pattern detection, suggestion generation, auto-skill creation
+- `src/main/brain/self-evolution.test.ts` — Full test suite (10 tests)
+- `src/main/brain/improvement.ts` — `autoGenerateSkills()` method added for pattern-to-skill conversion
+- `src/main/ipc/index.ts` — 7 new IPC channels for self-evolution
+- `src/shared/ipc.ts` — `SELF_EVOLVE_*` channel constants
+
 ## Architecture
 
 ```
 src/main/       Electron main: brain/, agent/, automation/, builders/,
-                business/, providers/, tools/, bridge/, messaging/,
-                orchestrator/, guard/, heartbeat/, ipc/
+                 business/, providers/, tools/, bridge/, messaging/,
+                 orchestrator/, guard/, heartbeat/, ipc/, self-evolution/
 src/renderer/   React: App.tsx shell, views/ (36 lazy modules), layout/
-                (Sidebar/MainView/TopBar/RightPanel/StatusBar), stores/
-                (zustand: chat/session/auth/agents/brain/automation),
-                lib/greeting.ts, theme/, styles/globals.css
+                 (Sidebar/MainView/TopBar/RightPanel/StatusBar), stores/
+                 (zustand: chat/session/auth/agents/brain/automation),
+                 lib/greeting.ts, theme/, styles/globals.css
 src/preload/    contextIsolation bridge (window.api)
 src/shared/     ipc.ts contract, types.ts, owner.ts
 ```
@@ -63,7 +92,7 @@ src/shared/     ipc.ts contract, types.ts, owner.ts
 Main entry `src/main/index.ts`: single-instance lock, frameless window with
 `ready-to-show` + 8s failsafe, bridge server `:8765`, phone companion, Telegram
 inbound, model pre-warm, settings + MCP background init, 60s health loop,
-5min self-improvement loop, screenshot cleanup.
+5min self-improvement loop, **10min self-evolution loop**, screenshot cleanup.
 
 Renderer entry `src/renderer/App.tsx`: auth → onboarding → OS shell.
 `MainView.tsx` lazy-loads every heavy view; `ChatView` stays eager (default route).

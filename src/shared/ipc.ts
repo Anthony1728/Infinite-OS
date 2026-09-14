@@ -685,4 +685,13 @@ export const IPC = {
   EXPERIMENTAL_CODE_MODE: 'experimental:code-mode',
   EXPERIMENTAL_CLOUD_WORKERS_DESKTOP: 'experimental:cloud-workers-desktop',
   EXPERIMENTAL_SWARM: 'experimental:swarm',
-};
+
+  // Self-Evolution Engine
+  SELF_EVOLVE_ANALYZE: 'self-evolve:analyze',
+  SELF_EVOLVE_SUGGESTIONS: 'self-evolve:suggestions',
+  SELF_EVOLVE_ACCEPT: 'self-evolve:accept',
+  SELF_EVOLVE_DISMISS: 'self-evolve:dismiss',
+  SELF_EVOLVE_STATUS: 'self-evolve:status',
+  SELF_EVOLVE_PROMPT: 'self-evolve:prompt',
+  SELF_EVOLVE_EVOLVE: 'self-evolve:evolve',
+} as const;

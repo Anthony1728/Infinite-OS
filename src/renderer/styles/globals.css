@@ -261,6 +261,19 @@ button:disabled {
 .os-smash-core { animation: osSmashCore .9s ease-in-out infinite; }
 .os-smash-rumble { animation: osSmashRumble .5s linear infinite; }
 
+/* AgentBuddy — idle breathing vs working slam. SVG pieces rotate around
+   their own boxes (transform-box) so arms and rings move in place. */
+@keyframes osBuddyBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.2px); } }
+@keyframes osBuddySlam { 0%, 100% { transform: translateY(0) rotate(0deg); } 30% { transform: translateY(-1.6px) rotate(-4deg); } 55% { transform: translateY(1px) rotate(3deg); } }
+@keyframes osBuddyArmSlam { 0%, 100% { transform: rotate(0deg); } 30% { transform: rotate(-38deg); } 55% { transform: rotate(24deg); } }
+@keyframes osBuddyRingFlash { 0% { opacity: 0; transform: scale(.5); } 35%, 60% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0; transform: scale(1.5); } }
+.os-buddy-idle { display: inline-flex; animation: osBuddyBob 2.6s ease-in-out infinite; }
+.os-buddy-work { display: inline-flex; animation: osBuddySlam 1s ease-in-out infinite; }
+.os-buddy-arm { transform-box: fill-box; transform-origin: 50% 12%; }
+.os-buddy-work .os-buddy-arm { animation: osBuddyArmSlam 1s ease-in-out infinite; }
+.os-buddy-rings { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.os-buddy-work .os-buddy-rings { animation: osBuddyRingFlash 1s ease-out infinite; }
+
 .infinite-logo__luminous-aura {
   opacity: .16;
   filter: blur(4px) drop-shadow(0 0 11px rgba(255, 255, 255, .78));
