@@ -251,6 +251,16 @@ button:disabled {
 @keyframes infiniteSpectrumPink { from { stroke-dashoffset: -66; } to { stroke-dashoffset: -166; } }
 @keyframes infiniteSpectrumPulse { 0%, 100% { opacity: .12; } 50% { opacity: .32; } }
 
+/* Agent working smash — Hulk-style impact burst in Infinite glass.
+   Expanding shockwave rings + flashing core + faint rumble while tools run. */
+@keyframes osSmashRing { 0% { transform: scale(.45); opacity: .9; } 100% { transform: scale(2.1); opacity: 0; } }
+@keyframes osSmashCore { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+@keyframes osSmashRumble { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(.75px, -.5px); } 75% { transform: translate(-.75px, .5px); } }
+.os-smash-ring { animation: osSmashRing 1.15s ease-out infinite; }
+.os-smash-ring--late { animation-delay: .55s; }
+.os-smash-core { animation: osSmashCore .9s ease-in-out infinite; }
+.os-smash-rumble { animation: osSmashRumble .5s linear infinite; }
+
 .infinite-logo__luminous-aura {
   opacity: .16;
   filter: blur(4px) drop-shadow(0 0 11px rgba(255, 255, 255, .78));
@@ -1723,4 +1733,31 @@ button:disabled {
    where translateY would overlap neighboring controls like search bars. */
 .agent-card--static:hover {
   transform: none;
+}
+
+/* ── Focus mode — real dimming, not a fake toggle ─────────────────────
+   PowerCenter sets html[data-focus="on"]. When on:
+   - marketing / pulse / tips dim to 35% so chat + editor stay dominant
+   - sidebar conversation list dims, right activity panel slides away visually
+   - transitions are gentle; reduced-motion users get instant switch */
+html[data-focus='on'] .focus-dim {
+  opacity: 0.35;
+  filter: saturate(0.7);
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+.focus-dim {
+  transition: opacity 0.3s ease, filter 0.3s ease;
+}
+html[data-focus='on'] .os-sidebar nav {
+  opacity: 0.55;
+}
+html[data-focus='on'] .os-activity-panel-shell {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-focus='on'] .focus-dim,
+  .focus-dim {
+    transition: none;
+  }
 }

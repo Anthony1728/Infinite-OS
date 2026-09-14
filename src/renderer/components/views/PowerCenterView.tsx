@@ -117,6 +117,12 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
     return recentSessions.filter((s) => (s.title || '').toLowerCase().includes(q));
   }, [recentSessions, spotlight]);
 
+  const filteredAutos = useMemo(() => {
+    const q = spotlight.trim().toLowerCase();
+    if (!q) return recentAutos;
+    return recentAutos.filter((w) => `${w.name || w.id} ${w.enabled ? 'enabled on' : 'off disabled'}`.toLowerCase().includes(q));
+  }, [recentAutos, spotlight]);
+
   const handleNewChat = async () => {
     try {
       const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as { cwd?: string; model?: string; provider?: string };
@@ -151,7 +157,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
           <input
             value={spotlight}
             onChange={(e) => setSpotlight(e.target.value)}
-            placeholder="Spotlight — type to filter actions & recents, or press ⌘K for everything…"
+            placeholder="Spotlight — filter actions, chats & automations, or press ⌘K for everything…"
             className="flex-1 bg-transparent text-[13px] text-white placeholder:text-zinc-600 focus:outline-none"
             aria-label="Spotlight search"
           />
@@ -270,14 +276,14 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
                   <span className="ml-3 rounded-lg bg-white px-2 py-1 text-[11px] font-medium text-zinc-900">Open</span>
                 </button>
               ))}
-              <div className="pt-2">
+                <div className="pt-2">
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-600">Automations</span>
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-600">Automations{spotlight.trim() ? ` — ${filteredAutos.length} match${filteredAutos.length === 1 ? '' : 'es'}` : ''}</span>
                   <button onClick={() => onViewChange('automations')} className="text-[11px] text-zinc-500 hover:text-zinc-300">Manage →</button>
                 </div>
-                {recentAutos.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.015] px-3 py-3 text-[12px] text-zinc-500">No workflows yet — create one in Automation Studio.</div>
-                ) : recentAutos.map((w) => (
+                {(spotlight ? filteredAutos : recentAutos).length === 0 ? (
+                  spotlight ? <div className="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.015] px-3 py-3 text-[12px] text-zinc-500">No automations match “{spotlight}”.</div> : <div className="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.015] px-3 py-3 text-[12px] text-zinc-500">No workflows yet — create one in Automation Studio.</div>
+                ) : (spotlight ? filteredAutos : recentAutos).map((w) => (
                   <div key={w.id} className="flex items-center justify-between rounded-xl border border-white/[0.05] bg-white/[0.02] px-3 py-2">
                     <span className="truncate text-[12px] text-zinc-300">{w.name || w.id}</span>
                     <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] ${w.enabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-zinc-500/15 text-zinc-400'}`}>{w.enabled ? 'Enabled' : 'Off'}</span>
@@ -302,7 +308,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/[0.07] bg-[#12131a] p-4">
+            <div className="rounded-2xl border border-white/[0.07] bg-[#12131a] p-4 focus-dim">
               <h3 className="text-[12px] font-semibold text-white">System pulse</h3>
               <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
                 <PulseRow label="Engine" value={enginePhase === 'active' ? 'Live' : enginePhase} ok={enginePhase === 'active'} />
@@ -322,7 +328,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
         </div>
 
         {/* WHY BEST — positioning */}
-        <div className="mt-5 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#0f0f14] to-[#0c0d12] p-4 lg:p-5">
+        <div className="mt-5 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#0f0f14] to-[#0c0d12] p-4 lg:p-5 focus-dim">
           <h3 className="text-[12px] font-semibold uppercase tracking-widest text-zinc-500">What makes Infinite OS the best</h3>
           <div className="mt-3 grid gap-3 lg:grid-cols-4">
             <BestCard title="All-in-one, not tab hell" desc="Chat, code, files, terminal, browser + PC automation in one native app — no juggling 12 tools." />

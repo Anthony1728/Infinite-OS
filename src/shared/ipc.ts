@@ -346,6 +346,8 @@ export const IPC = {
   DEPLOY_DETECT_PROJECT: 'deploy:detect-project',
   DEPLOY_DEFAULT_CONFIG: 'deploy:default-config',
   DEPLOY_QUICK_PUSH: 'deploy:quick-push',
+  DEPLOY_OS_STATUS: 'deploy:os-status',
+  DEPLOY_OS_PUSH: 'deploy:os-push',
 
   // Testing
   TEST_CREATE_SUITE: 'test:create-suite',

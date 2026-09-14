@@ -38,10 +38,18 @@ export function LiveActivityFeed() {
       </div>
       <div className="flex gap-3">
         <div className="flex w-6 flex-col items-center">
-          <span className="relative flex h-6 w-6 items-center justify-center">
-            <span className="absolute inline-flex h-2 w-2 rounded-full bg-indigo-400 opacity-75 animate-ping" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-400" />
-          </span>
+          {running.length > 0 ? (
+            <span key={done} className="os-smash-rumble relative flex h-6 w-6 items-center justify-center" title="Agent smashing through work">
+              <span className="os-smash-ring absolute inline-flex h-3 w-3 rounded-full border border-violet-400/70" />
+              <span className="os-smash-ring os-smash-ring--late absolute inline-flex h-3 w-3 rounded-full border border-cyan-300/60" />
+              <span className="os-smash-core relative inline-flex h-2 w-2 rounded-full bg-gradient-to-br from-violet-400 to-cyan-300 shadow-[0_0_8px_rgba(139,92,246,.9)]" />
+            </span>
+          ) : (
+            <span className="relative flex h-6 w-6 items-center justify-center">
+              <span className="absolute inline-flex h-2 w-2 rounded-full bg-indigo-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-400" />
+            </span>
+          )}
         </div>
         <div className="min-w-0 flex-1 pt-1">
           <span className="truncate text-xs font-medium text-indigo-300/90">{trailing}</span>

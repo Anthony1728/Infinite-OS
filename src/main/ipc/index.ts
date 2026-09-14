@@ -26,6 +26,7 @@ import type { AgentId } from '../agents/types.js';
 import { v4 as uuid } from 'uuid';
 import type { Message } from '../../shared/types.js';
 import { collectSystemMetrics } from '../system/metrics.js';
+import { osPush, osPushStatus } from '../github/push.js';
 import { registerBrainIpc } from './brain.js';
 import { registerBrowserIpc } from './browser.js';
 import { registerBridgeIpc } from './bridge.js';
@@ -1080,6 +1081,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     ]);
     return deploySystem.runPipeline(pipeline.id, workDir);
   });
+  ipcMain.handle(IPC.DEPLOY_OS_STATUS, async () => osPushStatus());
+  ipcMain.handle(IPC.DEPLOY_OS_PUSH, async (_e, { message }: { message?: string }) => osPush(message));
 
   // Testing Framework IPC
   ipcMain.handle(IPC.TEST_CREATE_SUITE, async (_e, { name, framework, description }) =>

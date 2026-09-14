@@ -437,6 +437,8 @@ const api = {
   deployDetectProject: (args: { projectPath: string }) => ipcRenderer.invoke(IPC.DEPLOY_DETECT_PROJECT, args),
   deployDefaultConfig: (args: { type: string }) => ipcRenderer.invoke(IPC.DEPLOY_DEFAULT_CONFIG, args),
   deployQuickPush: (args: { cwd?: string; message?: string }) => ipcRenderer.invoke(IPC.DEPLOY_QUICK_PUSH, args),
+  deployOsStatus: () => ipcRenderer.invoke(IPC.DEPLOY_OS_STATUS),
+  deployOsPush: (args: { message?: string }) => ipcRenderer.invoke(IPC.DEPLOY_OS_PUSH, args),
 
   // Testing
   testCreateSuite: (args: { name: string; framework: string; description?: string }) =>
