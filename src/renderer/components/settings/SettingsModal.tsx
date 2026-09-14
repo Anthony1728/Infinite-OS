@@ -114,6 +114,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [models, setModels] = useState<{ id: string; label: string; free: boolean; provider?: string }[]>([]);
   const [currentModel, setCurrentModel] = useState(() => loadCurrent().model);
   const [cloudflareAccountId, setCloudflareAccountId] = useState('');
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customModel, setCustomModel] = useState('');
   const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
@@ -130,6 +132,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       .getSetting({ key: 'cloudflareAccountId' })
       .then((value: unknown) => {
         if (typeof value === 'string') setCloudflareAccountId(value);
+      })
+      .catch(() => undefined);
+    window.api
+      .getSetting({ key: 'customBaseUrl' })
+      .then((value: unknown) => {
+        if (typeof value === 'string') setCustomBaseUrl(value);
+      })
+      .catch(() => undefined);
+    window.api
+      .getSetting({ key: 'customModel' })
+      .then((value: unknown) => {
+        if (typeof value === 'string') setCustomModel(value);
       })
       .catch(() => undefined);
     window.api
@@ -243,6 +257,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     // testing AND saving, or every provider 401s a perfectly good key.
     const trimmedKey = apiKey.trim();
     try {
+      if (activeProvider === 'custom') await saveCustomFields();
       const res = await window.api.testProvider({ provider: activeProvider, apiKey: trimmedKey });
       if (res.ok) {
         if (trimmedKey) {
@@ -343,6 +358,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       key: 'cloudflareAccountId',
       value: cloudflareAccountId.trim(),
       cwd: loadCurrent().cwd || '.',
+    }).catch(() => undefined);
+  };
+
+  const saveCustomFields = async () => {
+    const cwdNow = loadCurrent().cwd || '.';
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'customBaseUrl',
+      value: customBaseUrl.trim().replace(/\/+$/, ''),
+      cwd: cwdNow,
+    }).catch(() => undefined);
+    await window.api.setSetting({
+      scope: 'user',
+      key: 'customModel',
+      value: customModel.trim(),
+      cwd: cwdNow,
     }).catch(() => undefined);
   };
 
@@ -656,6 +687,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           placeholder="Cloudflare account ID (from your dashboard URL)"
                           className="flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-white/[0.25] transition-colors placeholder:text-zinc-600"
                         />
+                      </div>
+                    )}
+                    {activeProvider === 'custom' && (
+                      <div className="flex flex-col gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={customBaseUrl}
+                          onChange={(e) => setCustomBaseUrl(e.target.value)}
+                          onBlur={() => void saveCustomFields()}
+                          placeholder="Base URL — e.g. https://my-gateway.example.com/v1"
+                          className="flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-white/[0.25] transition-colors placeholder:text-zinc-600"
+                        />
+                        <input
+                          type="text"
+                          value={customModel}
+                          onChange={(e) => setCustomModel(e.target.value)}
+                          onBlur={() => void saveCustomFields()}
+                          placeholder="Model ID — e.g. my-model-name"
+                          className="flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-white/[0.25] transition-colors placeholder:text-zinc-600"
+                        />
+                        <p className="text-xs text-zinc-500">Any OpenAI-compatible endpoint works: private gateways, local servers, new providers. Fill in all three fields, paste the key below, then Test & Save.</p>
                       </div>
                     )}
                     <div className="flex gap-2">

@@ -8,6 +8,7 @@ import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 import { opencode } from './opencode.js';
 import { cloudflare } from './cloudflare.js';
+import { custom } from './custom.js';
 import type { Message } from '../../shared/types.js';
 import { ensureOllamaRunning, OLLAMA_URL, resolveOllamaModel } from '../ollama/utils.js';
 
@@ -367,19 +368,28 @@ const REGISTRY: Record<string, ProviderAdapter> = {
     freePattern: /^free\//,
   }),
   cloudflare,
+  custom,
   bluesminds: openaiCompatible({
     id: 'bluesminds',
     label: 'BlueSminds',
     defaultBaseUrl: 'https://api.bluesminds.com/v1',
-    defaultModel: 'gemini-2.0-flash',
+    defaultModel: 'gpt-4o',
+    // Authoritative ids + capabilities from the BlueSminds API docs model
+    // table (doc.bluesminds.com). `default` group works on the free plan;
+    // `vip` needs a paid plan and 404s otherwise — labelled VIP so the pane
+    // never promises a model the key cannot use.
     freeModels: [
-      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'bluesminds', free: true, supports_tools: true },
-      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', provider: 'bluesminds', free: true, supports_tools: true },
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'bluesminds', free: true, supports_tools: true },
-      { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'bluesminds', free: true, supports_tools: true },
-      { id: 'claude-opus-4-5', label: 'Claude Opus 4.5', provider: 'bluesminds', free: true, supports_tools: true },
-      { id: 'grok-3', label: 'Grok 3', provider: 'bluesminds', free: true, supports_tools: true },
       { id: 'gpt-4o', label: 'GPT-4o', provider: 'bluesminds', free: true, supports_tools: true },
+      { id: 'gpt-4.1', label: 'GPT-4.1', provider: 'bluesminds', free: true, supports_tools: false },
+      { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'bluesminds', free: true, supports_tools: true },
+      { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'bluesminds', free: true, supports_tools: true },
+      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'bluesminds', free: true, supports_tools: false },
+      { id: 'deepseek-reasoner', label: 'DeepSeek Reasoner', provider: 'bluesminds', free: true, supports_tools: true },
+      { id: 'gpt-5.1', label: 'GPT-5.1 (VIP)', provider: 'bluesminds', free: false, supports_tools: true },
+      { id: 'claude-opus-4-5', label: 'Claude Opus 4.5 (VIP)', provider: 'bluesminds', free: false, supports_tools: true },
+      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (VIP)', provider: 'bluesminds', free: false, supports_tools: false },
+      { id: 'grok-3', label: 'Grok 3 (VIP)', provider: 'bluesminds', free: false, supports_tools: true },
+      { id: 'qwen-max', label: 'Qwen Max (VIP)', provider: 'bluesminds', free: false, supports_tools: true },
     ],
     homepage: 'https://api.bluesminds.com',
     gatewayCatalog: true,

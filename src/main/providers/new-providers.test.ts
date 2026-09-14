@@ -227,7 +227,7 @@ describe('gateway catalog honesty (apinex free/ vs paid)', () => {
     expect(extractCatalogEntries({ data: { models: [{ id: 'c' }] } })).toHaveLength(1);
   });
 
-  it('suffixes gateway-routed models with their upstream vendor', async () => {
+  it('keeps gateway model labels clean (no vendor suffix)', async () => {
     const adapter = openaiCompatible({
       id: 'bluesminds',
       label: 'BlueSminds',
@@ -239,13 +239,73 @@ describe('gateway catalog honesty (apinex free/ vs paid)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ data: [
         { id: 'gpt-4o', provider: 'OpenAI' },
-        { id: 'own-model', provider: 'bluesminds' },
       ] }), { status: 200 }),
     );
     const models = await adapter.listModels('k');
     const routed = models.find((m) => m.id === 'gpt-4o');
     expect(routed?.provider).toBe('bluesminds');
-    expect(routed?.label).toMatch(/OpenAI/);
-    expect(models.find((m) => m.id === 'own-model')?.label).toBe('own-model');
+    expect(routed?.label).toBe('GPT-4o');
+  });
+});
+
+describe('custom provider (bring your own endpoint)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    values.delete('customBaseUrl');
+    values.delete('customModel');
+  });
+
+  it('registers custom in the provider registry', async () => {
+    const { getProvider } = await import('./registry.js');
+    const customProvider = getProvider('custom');
+    expect(customProvider?.label).toBe('Custom');
+    expect(customProvider?.requiresApiKey).toBe(true);
+  });
+
+  it('refuses to test without base URL and model', async () => {
+    const { custom } = await import('./custom.js');
+    const result = await custom.testConnection('k');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not configured/i);
+  });
+
+  it('lists nothing without configuration', async () => {
+    const { custom } = await import('./custom.js');
+    await expect(custom.listModels('k')).resolves.toEqual([]);
+  });
+
+  it('falls back to the configured model when the endpoint exposes no catalog', async () => {
+    values.set('customBaseUrl', 'https://my-gateway.example.com/v1');
+    values.set('customModel', 'my-model');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('down'));
+    const { custom } = await import('./custom.js');
+    const models = await custom.listModels('k');
+    expect(models).toEqual([
+      { id: 'my-model', label: 'my-model', provider: 'custom', free: true, supports_tools: true },
+    ]);
+  });
+
+  it('prefers the live catalog when the endpoint exposes one', async () => {
+    values.set('customBaseUrl', 'https://my-gateway.example.com/v1');
+    values.set('customModel', 'my-model');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'live-model', name: 'Live Model' }] }), { status: 200 }),
+    );
+    const { custom } = await import('./custom.js');
+    const models = await custom.listModels('k');
+    expect(models.some((m) => m.id === 'live-model' && m.provider === 'custom')).toBe(true);
+  });
+
+  it('fails a turn as a plain error chunk without configuration', async () => {
+    const { custom } = await import('./custom.js');
+    const chunks = [];
+    for await (const chunk of custom.streamChat(
+      { model: '', messages: [], stream: true },
+      'k',
+    )) {
+      chunks.push(chunk);
+    }
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].type).toBe('error');
   });
 });

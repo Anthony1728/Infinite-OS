@@ -414,19 +414,9 @@ function normalizeModel(entry: unknown, opts: Opts): ModelInfo | null {
   }
 
   const supportsTools = known?.supports_tools;
-  // Gateway catalogs route to upstream vendors (APInex entries carry
-  // `provider: "OpenAI"`, OpenAI catalogs `owned_by`). Surfacing the vendor
-  // in the label proves the model is served through THIS provider's key —
-  // a `gpt-4o` under BlueSminds is BlueSminds-routed, not another account.
-  const vendorRaw = e.vendor ?? e.owned_by ?? e.provider;
-  const vendor = typeof vendorRaw === 'string' && vendorRaw.trim() ? vendorRaw.trim() : '';
-  const baseLabel = known?.label || e.name || id;
-  const label = vendor && !baseLabel.toLowerCase().includes(vendor.toLowerCase()) && vendor.toLowerCase() !== opts.id.toLowerCase()
-    ? `${baseLabel} (${vendor})`
-    : baseLabel;
   return {
     id,
-    label,
+    label: known?.label || e.name || id,
     provider: opts.id,
     free,
     ...(typeof e.context_length === 'number' ? { context_window: e.context_length } : {}),
