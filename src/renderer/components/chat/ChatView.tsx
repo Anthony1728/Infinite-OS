@@ -18,6 +18,7 @@ import { PairPanel, type PairSection } from './PairPanel';
 import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
+import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
 import { useLayoutStore } from '../../stores/layout';
 import { useNotificationStore } from '../../stores/notifications';
 
@@ -754,8 +755,15 @@ export function ChatView({
 
 function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) => void }) {
   const firstName = useAuthStore((state) => state.user?.name?.split(' ')[0] || 'there');
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const { greeting, sub } = useMemo(() => {
+    const now = new Date();
+    return creativeGreeting({
+      firstName,
+      hour: now.getHours(),
+      weekday: now.getDay(),
+      dayOfYear: dayOfYearSeed(now),
+    });
+  }, [firstName]);
 
   const modes: { label: string; view: string; icon: AppIconName }[] = [
     { label: 'Chat', view: 'chats', icon: 'home.chat' },
@@ -769,7 +777,7 @@ function ChatWorkspaceHeader({ onViewChange }: { onViewChange: (view: string) =>
           {greeting}, <span className="os-accent-text font-semibold">{firstName}</span>
         </h1>
         <p className="mt-2 text-[12px] text-zinc-500">
-          How can I help you build, create and automate today?
+          {sub}
         </p>
         <div className="mx-auto mt-4 grid grid-cols-3 gap-1.5 rounded-full border border-white/[0.07] bg-[#0b0f18]/95 p-1.5 shadow-[0_2px_8px_rgba(0,0,0,.35),0_0_0_0.5px_rgba(255,255,255,0.03)]">
           {modes.map((mode, index) => (

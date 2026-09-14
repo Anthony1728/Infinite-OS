@@ -6,6 +6,7 @@ import { useBrainStore } from '../../stores/brain';
 import { useAutomationStore } from '../../stores/automation';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
 
 interface PowerCenterViewProps {
   onViewChange: (view: string) => void;
@@ -81,12 +82,6 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   }, [loadWorkflows]);
 
   const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Anthony', [user?.name]);
-  const greeting = useMemo(() => {
-    const h = now.getHours();
-    if (h < 12) return 'Good morning';
-    if (h < 18) return 'Good afternoon';
-    return 'Good evening';
-  }, [now]);
   const dateLabel = useMemo(() => now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), [now]);
   const timeLabel = useMemo(() => now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), [now]);
 
@@ -99,6 +94,16 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   }, [workflows]);
 
   const tip = useMemo(() => TIPS[new Date().getDate() % TIPS.length], []);
+
+  const hero = useMemo(() => creativeGreeting({
+    firstName,
+    hour: now.getHours(),
+    weekday: now.getDay(),
+    dayOfYear: dayOfYearSeed(now),
+    recentSessions: recentSessions.length,
+    activeRuns,
+    readyAutomations: recentAutos.filter((w) => w.enabled).length,
+  }), [now, firstName, recentSessions.length, activeRuns, recentAutos]);
 
   const filteredActions = useMemo(() => {
     const q = spotlight.trim().toLowerCase();
@@ -172,9 +177,9 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
                   {enginePhase === 'active' ? 'Engine live 100%' : `Engine ${enginePhase} ${engineProgress}%`}
                 </span>
               </div>
-              <h1 className="mt-3 text-[26px] font-semibold tracking-tight text-white lg:text-[30px]">{greeting}, {firstName} <span className="text-zinc-500">—</span> <span className="bg-gradient-to-r from-violet-300 via-cyan-300 to-fuchsia-300 bg-clip-text text-transparent">ready to build.</span></h1>
+              <h1 className="mt-3 text-[26px] font-semibold tracking-tight text-white lg:text-[30px]">{hero.greeting}, {firstName} <span className="text-zinc-500">—</span> <span className="bg-gradient-to-r from-violet-300 via-cyan-300 to-fuchsia-300 bg-clip-text text-transparent">{hero.accent}</span></h1>
               <p className="mt-1.5 max-w-[62ch] text-[13px] leading-5 text-zinc-400">
-                One workspace for chat, code, automations, files, browser &amp; PC control. Fast, local-first, keyboard-driven. Press <span className="rounded bg-white/[0.08] px-1.5 py-0.5 font-mono text-[11px] text-zinc-200">⌘ K</span> to jump anywhere — this is the OS that makes the others obsolete.
+                {hero.sub}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button onClick={handleNewChat} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-[13px] font-semibold text-zinc-900 hover:bg-zinc-100 transition-colors">
