@@ -302,6 +302,13 @@ function localRuntimeSystem(fullSystem: string | undefined): string {
   ].filter(Boolean).join('\n');
 }
 
+/** Plain-language error for a CLI model that isn't offered right now —
+ * names what the installed CLI actually serves so the user can pick it. */
+export function openCodeUnavailableError(reqModel: string, allowed: Array<{ id: string }>): string {
+  const options = allowed.slice(0, 20).map((m) => m.id).join(', ') || 'none';
+  return `The selected OpenCode model is not currently available: ${reqModel}. Installed-CLI models right now: ${options}. Model fallback is OFF.`;
+}
+
 /** Test seam: resolve a requested OpenCode model against the live catalog.
  * Server-side retirements (e.g. big-pickle) fall back to a live model instead
  * of bricking the installed-CLI path; returns switched=false when exact. */
@@ -1146,8 +1153,14 @@ export const opencode: ProviderAdapter = {
           // Server-side retirements (e.g. big-pickle) must not brick the
           // installed-CLI path: fall back to a live catalog model instead of
           // failing the turn. The user sees which model actually answered.
+          // With the fallback kill-switch OFF, never substitute — fail
+          // plainly and name what the CLI actually offers.
           const resolved = resolveLiveOpenCodeModel(req.model, allowed);
           if (!resolved.switched || !resolved.fallbackId) throw new Error(`The selected OpenCode model is not currently available: ${req.model}`);
+          const { settings } = await import('../settings/store.js');
+          if (settings.get('failoverEnabled') === false) {
+            throw new Error(openCodeUnavailableError(req.model, allowed));
+          }
           console.info(`[opencode] ${req.model} not in live catalog; falling back to ${resolved.fallbackId}`);
           yield { type: 'provider_status', status: 'failover', provider: 'opencode', model: resolved.fallbackId, from: req.model, to: resolved.fallbackId, reason: `${req.model} is no longer offered — using ${resolved.fallbackId} instead.` };
           selected = { providerID: resolved.providerID, modelID: resolved.modelID };

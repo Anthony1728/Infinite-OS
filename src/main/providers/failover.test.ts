@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../settings/secrets.js', () => ({
+  getAllApiKeys: async () => [] as string[],
+}));
+
 import {
+  buildProviderFailoverPlan,
   isRecoverableProviderError,
   prioritizeProviderCandidates,
   recordProviderFailure,
@@ -87,5 +93,15 @@ describe('provider recovery selection', () => {
     const healthy = candidate('groq', 'healthy-model');
     recordProviderFailure(unhealthy, 'network timeout');
     expect(prioritizeProviderCandidates([fallback, unhealthy, healthy]).slice(1)).toEqual([healthy, unhealthy]);
+  });
+
+  it('keeps a keyless installed-CLI candidate for opencode with no saved key', async () => {
+    const plan = await buildProviderFailoverPlan({ provider: 'opencode', model: 'opencode::mimo-v2.5-free' });
+    expect(plan[0]).toMatchObject({ provider: 'opencode', model: 'opencode::mimo-v2.5-free', apiKey: '' });
+  });
+
+  it('keeps providers requiring a key out of the plan when no key is saved', async () => {
+    const plan = await buildProviderFailoverPlan({ provider: 'nvidia', model: 'mistralai/mistral-large' });
+    expect(plan.find((c) => c.provider === 'nvidia')).toBeUndefined();
   });
 });

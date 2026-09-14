@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeZenModels, opencode, otherTier, resolveLiveOpenCodeModel, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
+import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeUnavailableError, openCodeZenModels, opencode, otherTier, resolveLiveOpenCodeModel, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
 import type { ChatRequest, StreamChunk } from './base.js';
 import type { Message } from '../../shared/types.js';
 
@@ -762,6 +762,13 @@ describe('OpenCode retired-model fallback', () => {
     const r = resolveLiveOpenCodeModel('opencode::big-pickle', []);
     expect(r.switched).toBe(false);
     expect(r.fallbackId).toBe(null);
+  });
+
+  it('names the live CLI models when the selection is unavailable', () => {
+    const err = openCodeUnavailableError('opencode::mimo-v2.5-free', [{ id: 'opencode::chat' }, { id: 'opencode::code' }]);
+    expect(err).toMatch(/opencode::mimo-v2\.5-free/);
+    expect(err).toMatch(/opencode::chat/);
+    expect(err).toMatch(/fallback is OFF/);
   });
 
   it('switches models mid-stream instead of failing the turn', async () => {
