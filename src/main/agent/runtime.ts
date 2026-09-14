@@ -597,12 +597,14 @@ export async function runSubagent(
           }
         }
         if (chunk.type === 'error') {
-          providerFailure = chunk.error;
+          // First failure wins (mirrors loop.ts): a watchdog abort surfaces
+          // as 'Request cancelled' and must not clobber the stall message.
+          if (!providerFailure) providerFailure = chunk.error;
           break;
         }
       }
     } catch (e) {
-      providerFailure = (e as Error).message;
+      if (!providerFailure) providerFailure = (e as Error).message;
     } finally {
       clearInterval(subagentStallInterval);
       signal.removeEventListener('abort', onSubagentParentAbort);
@@ -646,7 +648,7 @@ export async function runSubagent(
       }
       if (switchCandidate(providerFailure, assistant, 'model response stream')) continue;
       state.status = 'failed';
-      state.error = `All available models have been tried. Last error: ${providerFailure}`;
+      state.error = `All available models have been tried. Last error (${activeCandidate.provider}/${activeCandidate.model}): ${providerFailure}`;
       opts.sink({ type: 'fail', runId: state.id, error: state.error });
       return '';
     }

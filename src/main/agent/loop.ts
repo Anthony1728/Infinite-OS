@@ -585,7 +585,12 @@ export async function runAgent(
             break;
           case 'error':
             console.error(`[agent] Stream error: ${chunk.error}`);
-            providerFailure = chunk.error;
+            // First failure wins: the stall watchdog sets providerFailure
+            // BEFORE aborting, and the abort then surfaces as a bare
+            // 'Request cancelled' chunk — it must never clobber the real
+            // stall message, or every stall burns the whole failover plan
+            // under a meaningless last error.
+            if (!providerFailure) providerFailure = chunk.error;
             break;
         }
         if (providerFailure) break;
@@ -593,7 +598,7 @@ export async function runAgent(
     } catch (e: unknown) {
       const error = e instanceof Error ? e : new Error(String(e));
       console.error('[agent] Stream loop error:', error.message);
-      providerFailure = error.message;
+      if (!providerFailure) providerFailure = error.message;
     } finally {
       if (streamStallInterval) clearInterval(streamStallInterval);
       opts.signal.removeEventListener('abort', onParentAbort);
