@@ -205,6 +205,8 @@ function FileExplorer({
   const commitCreate = useCallback(async () => {
     if (!creating || !creating.name.trim()) return;
     const raw = creating.name.trim();
+    // Windows forbids <>:"|?* and C0 controls in names.
+    // eslint-disable-next-line no-control-regex
     if (/[<>:"|?*\x00-\x1F]/.test(raw) || raw === '.' || raw === '..') return;
     const fullPath = joinSystemPath(cwd, raw);
     try {
@@ -581,6 +583,8 @@ export function WorkspaceView() {
   const commitCtxCreate = useCallback(async () => {
     if (!ctxCreate || !ctxCreate.name.trim()) return;
     const raw = ctxCreate.name.trim();
+    // Windows forbids <>:"|?* and C0 controls in names.
+    // eslint-disable-next-line no-control-regex
     if (/[<>:"|?*\x00-\x1F]/.test(raw) || raw === '.' || raw === '..') return;
     const fullPath = joinSystemPath(ctxCreate.parentPath, raw);
     try {

@@ -194,7 +194,41 @@ export type StreamEvent =
   | { type: 'message_end'; message_id: string; stop_reason: string; usage?: { input: number; output: number } }
   | { type: 'error'; error: string }
   | { type: 'fallback_required'; error?: string }
-  | { type: 'done'; success?: boolean; reason?: string };
+  | { type: 'done'; success?: boolean; reason?: string }
+  | {
+      type: 'plan_state';
+      active?: boolean;
+      approvalRequest?: string;
+      approvedPlan?: string;
+      approvalDeclined?: boolean;
+    }
+  | {
+      // AskUserQuestion: the agent is paused waiting on these cards.
+      type: 'question_request';
+      request_id: string;
+      questions: Array<{
+        id: string;
+        header: string;
+        question: string;
+        multiple: boolean;
+        options: Array<{ label: string; description?: string }>;
+        allowCustom: boolean;
+      }>;
+    };
+
+/** A live question-card set the agent is currently blocked on. */
+export interface PendingQuestionCards {
+  requestId: string;
+  questions: Array<{
+    id: string;
+    header: string;
+    question: string;
+    multiple: boolean;
+    options: Array<{ label: string; description?: string }>;
+    allowCustom: boolean;
+  }>;
+  receivedAt: number;
+}
 
 export interface ActivityItem {
   id: string;
@@ -212,6 +246,12 @@ export interface BrainTeachingLiveState extends BrainTeachingStatus {
 }
 
 export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build' | 'plan';
+
+/** Live ExitPlan approval request for the current session (plan mode). */
+export interface PlanApprovalState {
+  plan: string;
+  requestedAt: number;
+}
 
 export function isModelIdentityQuestion(text: string): boolean {
   const request = text.trim().toLowerCase().replace(/[?!.,]+$/g, '');
@@ -321,6 +361,30 @@ function withImages(text: string, images?: ContentBlock[]): ContentBlock[] {
 // Turn a tool name + input into a CLI-grade, Claude-style label.
 // Goals: explain what the AI is doing in 4-7 words + precise target, so the
 // LiveActivityFeed reads like "Bash: npm run build" not "Running a command".
+/**
+ * Human-readable preview of a tool call's STREAMING input JSON (a running
+ * partial snapshot, e.g. `{"command":"npm run bu`). Extracts high-signal
+ * keys when parseable, otherwise shows the raw JSON tail.
+ */
+function formatToolArgPreview(partialJson: string): string {
+  if (!partialJson) return '';
+  try {
+    const parsed = JSON.parse(partialJson) as Record<string, unknown>;
+    const pick = ['command', 'cmd', 'path', 'file_path', 'file', 'query', 'url', 'pattern', 'prompt', 'script'] as const;
+    for (const key of pick) {
+      const value = parsed[key];
+      if (typeof value === 'string' && value.trim()) {
+        const oneLine = value.replace(/\s+/g, ' ').trim();
+        return oneLine.length > 90 ? `${oneLine.slice(0, 90)}…` : oneLine;
+      }
+    }
+  } catch {
+    // Still mid-stream (invalid JSON) — show the raw tail below.
+  }
+  const tail = partialJson.length > 90 ? `…${partialJson.slice(-90)}` : partialJson;
+  return tail.replace(/\s+/g, ' ').trim();
+}
+
 function summarizeTool(name: string, input: unknown): { label: string; detail: string; category: string } {
   const i = (input ?? {}) as Record<string, unknown>;
   const n = name.toLowerCase();
@@ -386,6 +450,14 @@ interface ChatState {
   loadingSession: boolean;
   activity: ActivityItem[];
   pendingPermission: { id: string; tool: string; input: unknown } | null;
+  /** Active question-card set the agent is blocked on (AskUserQuestion). */
+  pendingQuestion: PendingQuestionCards | null;
+  /** Checkpoint from the run the user just aborted — one-click undo offer. */
+  abortedCheckpoint: { id: string; files: number } | null;
+  /** Active ExitPlan approval request (enforced plan mode). */
+  planApproval: PlanApprovalState | null;
+  /** True while the current/last run is gated to read-only by plan mode. */
+  planModeActive: boolean;
   orchestratedTaskId: string | null;
   orchestratorEvents: unknown[];
   // Real-time status from the main process (e.g. "Connecting to OpenRouter…")
@@ -412,8 +484,14 @@ interface ChatState {
   importSession: (content: string, format: 'markdown' | 'json') => Promise<Session>;
   shareSession: (id: string) => Promise<{ ok: boolean; length?: number }>;
   updateMessage: (messageId: string, text: string) => Promise<void>;
+  /** Approve or decline a pending ExitPlan request (enforced plan mode). */
+  resolvePlan: (approved: boolean) => Promise<void>;
+  /** Submit answers for the pending question cards (AskUserQuestion). */
+  resolveQuestion: (answers: Record<string, string>, skipped?: Record<string, boolean>) => Promise<void>;
+  /** Undo all file edits from the aborted run (rewind to its pre-run checkpoint). */
+  undoAbortedRun: () => Promise<void>;
   announceUncensoredMode: () => Promise<void>;
-  sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string) => Promise<void>;
+  sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string, background?: boolean) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
   isSessionStreaming: (id: string) => boolean;
@@ -428,6 +506,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadingSession: false,
   activity: [],
   pendingPermission: null,
+  pendingQuestion: null,
+  abortedCheckpoint: null,
+  planApproval: null,
+  planModeActive: false,
   orchestratedTaskId: null,
   orchestratorEvents: [],
   providerStatus: null,
@@ -481,6 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           | 'message_start'
           | 'provider_start'
           | 'tool_use_start'
+          | 'tool_use_delta'
           | 'tool_use_end'
           | 'tool_progress'
           | 'tool_result'
@@ -855,7 +938,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const data = ev.data as { subTaskId: string; agentType: string; description: string };
         if (!data.subTaskId || !data.agentType || !data.description) return;
         agentStore.addSubTask(ev.taskId, data.subTaskId, data.agentType, data.description);
-        subtaskProgressById.set(data.subTaskId, { description: data.description, preview: '', toolIds: [] });
+        subtaskProgressById.set(data.subTaskId, { description: data.description, preview: '', toolIds: [], toolInputs: new Map() });
         if (isCurrentSession) {
           set((state) => ({
             activity: [
@@ -903,7 +986,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // so parallel phases never interleave tokens into the chat transcript.
         const data = ev.data as { subTaskId: string; agentType: string; event: unknown };
         const inner = (data.event ?? {}) as { type?: string; text?: string };
-        const progress = subtaskProgressById.get(data.subTaskId) ?? { description: '', preview: '', toolIds: [] as string[] };
+        const progress = subtaskProgressById.get(data.subTaskId) ?? { description: '', preview: '', toolIds: [] as string[], toolInputs: new Map<string, string>() };
         subtaskProgressById.set(data.subTaskId, progress);
         if (inner.type === 'text_delta' && typeof inner.text === 'string' && inner.text) {
           if (!isCurrentSession) return;
@@ -925,6 +1008,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             transcript: false,
             liveIds: [],
             toolIds: progress.toolIds,
+            toolInputs: progress.toolInputs,
           },
           data.event,
         );
@@ -1192,22 +1276,59 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages });
   },
 
-  sendMessage: async (visibleText, images, mode = 'chat', agentId) => {
+  resolvePlan: async (approved) => {
+    const { currentSessionId } = get();
+    if (!currentSessionId) return;
+    // Clear the card immediately; the agent loop continues either way
+    // (approved → executes, declined → ExitPlan returns an error to the model).
+    set({ planApproval: null });
+    await window.api.resolvePlan({ sessionId: currentSessionId, approved }).catch((err: Error) =>
+      console.error('[chat] resolvePlan failed:', err),
+    );
+  },
+
+  undoAbortedRun: async () => {
+    const pending = get().abortedCheckpoint;
+    if (!pending) return;
+    set({ abortedCheckpoint: null });
+    try {
+      const result = (await window.api.checkpointRestore({ id: pending.id })) as { success?: boolean; rollbackActions?: string[]; error?: string };
+      if (result?.success) console.log(`[chat] undoAbortedRun: restored ` + (result.rollbackActions?.length ?? 0) + ` files`);
+      else console.error('[chat] undoAbortedRun failed:', result?.error);
+    } catch (err) {
+      console.error('[chat] undoAbortedRun failed:', err);
+    }
+  },
+  resolveQuestion: async (answers, skipped = {}) => {
+    const pending = get().pendingQuestion;
+    if (!pending) return;
+    // Clear the cards immediately; the blocked tool call resolves in main and
+    // the agent continues the original task with the answers in context.
+    set({ pendingQuestion: null });
+    await window.api.resolveQuestion({ id: pending.requestId, answers, skipped }).catch((err: Error) =>
+      console.error('[chat] resolveQuestion failed:', err),
+    );
+  },
+
+  sendMessage: async (visibleText, images, mode = 'chat', agentId, background = false) => {
     // Show thinking indicator IMMEDIATELY — before any async work.
     // This makes the UI feel instant when the user presses Enter.
-    set({ streaming: true });
+    // A new send also dismisses any stale "undo aborted run" offer.
+    set({ streaming: true, abortedCheckpoint: null });
 
-    // Only apply mode prefix when user explicitly chose a non-default mode.
-    // The default 'agent' mode should behave identically to the button path
-    // (no prefix, direct streaming via window.api.sendMessage).
-    const text = (mode && mode !== 'chat' && mode !== 'agent')
-      ? promptForExecutionMode(visibleText, mode)
-      : visibleText.trim();
+    // Plan mode is enforced at the tool level (main process read-only gate +
+    // ExitPlan approval), so the request goes through unmodified — no more
+    // prompt-prefix pretending. Other non-default modes keep their prefix.
+    const text = mode === 'plan'
+      ? visibleText.trim()
+      : (mode && mode !== 'chat' && mode !== 'agent')
+        ? promptForExecutionMode(visibleText, mode)
+        : visibleText.trim();
     const { currentSessionId } = get();
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
-    let model = settings.model ?? '';
-    let modelLabel = '';
+    const model = settings.model ?? '';
+    const modelLabel = '';
     const textLower = text.toLowerCase();
 
     const teachingCommand = parseBrainTeachingCommand(text);
@@ -1742,13 +1863,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isActionResponse = false;
         }
 
-        // If it's an ACTION, use the Brain response directly
-        if (isActionResponse) {
-
-        }
-        // If it's conversational and user has an API key, skip Brain ΓÇö go to API
-        else if (hasApiKey) {
-
+        // If it's an ACTION, use the Brain response directly (keep brainResponse).
+        // If it's conversational and user has an API key, skip Brain — go to API.
+        if (!isActionResponse && hasApiKey) {
           brainResponse = null; // Don't use Brain response
         }
       } catch (brainErr: unknown) {
@@ -2048,6 +2165,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           provider,
           model,
           cwd: settings.cwd ?? '.',
+          ...(mode === 'plan' ? { planMode: true } : {}),
+          ...(background ? { background: true } : {}),
         });
       }
     } catch (e: unknown) {
@@ -2088,6 +2207,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { currentSessionId } = get();
     if (currentSessionId) {
       await window.api.abortMessage({ sessionId: currentSessionId });
+      // Offer a one-click undo of this run's file edits: the auto-checkpoint
+      // (recorded by Write/Edit/Delete mutations) restores the pre-run state.
+      try {
+        const list = (await window.api.checkpointList({ taskId: `run-${currentSessionId}`, limit: 1 })) as Array<{ id: string; timestamp: number }>;
+        const latest = Array.isArray(list) ? list[0] : undefined;
+        if (latest) {
+          const files = (latest as unknown as { state?: { modifiedFiles?: unknown[] } }).state?.modifiedFiles?.length ?? 0;
+          set({ abortedCheckpoint: files > 0 ? { id: latest.id, files } : null });
+        }
+      } catch { /* checkpoint offer is best-effort */ }
       clearSafetyTimer(currentSessionId);
       const chatTaskId = activeChatTaskBySession.get(currentSessionId);
       if (chatTaskId) {
@@ -2319,7 +2448,7 @@ async function extractAndCreateFilesFromText(text: string, requestText = ''): Pr
 }
 
 // Live progress state for orchestrator subtasks (activity feed only).
-const subtaskProgressById = new Map<string, { description: string; preview: string; toolIds: string[] }>();
+const subtaskProgressById = new Map<string, { description: string; preview: string; toolIds: string[]; toolInputs: Map<string, string> }>();
 
 // ── Unified subagent live streaming ──────────────────────────────────────
 // Selected agents and orchestrator subtasks emit the same chat-compatible
@@ -2340,6 +2469,8 @@ interface SubagentLiveTarget {
   liveIds: string[];
   /** Tracked tool activity row ids / toolUseIds (mutated in place). */
   toolIds: string[];
+  /** Live tool-input snapshots (mutated in place): toolUseId -> running partial JSON. */
+  toolInputs: Map<string, string>;
 }
 
 interface SubagentLiveEvent {
@@ -2352,6 +2483,7 @@ interface SubagentLiveEvent {
   tool_use_id?: string;
   name?: string;
   input?: unknown;
+  partial_json?: string;
   status?: string;
   detail?: string;
   content?: unknown;
@@ -2491,6 +2623,22 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
                 timestamp: Date.now(),
               },
             ],
+      }));
+      break;
+    }
+    case 'tool_use_delta': {
+      // Stream the tool call as it forms: record the running partial JSON and
+      // surface it in the activity row so the card's args grow live.
+      if (!ev.tool_use_id || typeof ev.partial_json !== 'string') break;
+      target.toolInputs.set(ev.tool_use_id, ev.partial_json);
+      const preview = formatToolArgPreview(ev.partial_json);
+      if (!preview) break;
+      set((s) => ({
+        activity: s.activity.map((item) =>
+          item.toolUseId === ev.tool_use_id && item.status === 'running'
+            ? { ...item, detail: preview }
+            : item,
+        ),
       }));
       break;
     }
@@ -2673,6 +2821,21 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       }));
       break;
     }
+    case 'tool_use_delta': {
+      // Tool call is forming: surface the streaming input as the activity
+      // detail (the card appears once the full input arrives via tool_use_end).
+      if (typeof ev.partial_json !== 'string' || !ev.partial_json) break;
+      const preview = formatToolArgPreview(ev.partial_json);
+      if (!preview) break;
+      setState((s) => ({
+        activity: s.activity.map((item) =>
+          item.toolUseId === ev.tool_use_id && item.status === 'running'
+            ? { ...item, detail: preview }
+            : item,
+        ),
+      }));
+      break;
+    }
     case 'tool_use_end': {
       const summary = summarizeTool(ev.name, ev.input);
       setState((s) => ({
@@ -2809,6 +2972,38 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
             : a,
         ),
       }));
+      break;
+    }
+    case 'question_request': {
+      // AskUserQuestion: the agent is PAUSED until these cards are answered.
+      // Render the interactive card set; the submission resolves the blocked
+      // tool call in main (no new user message is sent).
+      if (Array.isArray(ev.questions) && ev.questions.length > 0 && ev.request_id) {
+        setState({
+          pendingQuestion: {
+            requestId: ev.request_id,
+            questions: ev.questions,
+            receivedAt: Date.now(),
+          },
+        });
+      }
+      break;
+    }
+    case 'plan_state': {
+      // Enforced plan mode: gate state + ExitPlan approval requests.
+      const active = Boolean(ev.active);
+      if (ev.approvalRequest) {
+        setState({
+          planModeActive: true,
+          planApproval: { plan: ev.approvalRequest, requestedAt: Date.now() },
+        });
+      } else if (ev.approvalDeclined) {
+        setState({ planApproval: null });
+      } else if (ev.approvedPlan) {
+        setState({ planModeActive: false, planApproval: null });
+      } else {
+        setState({ planModeActive: active });
+      }
       break;
     }
     case 'provider_start': {

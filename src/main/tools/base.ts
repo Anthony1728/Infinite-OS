@@ -238,11 +238,12 @@ export const toolRegistry = new ToolRegistry();
  */
 export const CORE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep',
-  'WebFetch', 'WebSearch', 'TodoWrite', 'Agent', 'Crew',
-  'PCLiveMap', 'Computer', 'browser_extension', 'Operator', 'Verify',
+  'WebFetch', 'WebSearch', 'TodoWrite', 'TodoRead', 'Agent', 'Crew',
+  'PCLiveMap', 'Computer', 'browser_extension', 'Operator', 'Verify', 'ExitPlan',
   'FileOps', 'Knowledge', 'System',
   'Git', 'CreateTab', 'BuildFeature',
   'Batch', 'AskUserQuestion', 'TaskGroup', 'Snapshot', 'Appointments', 'EnterpriseCompany', 'BusinessKnowledge',
+  'MusicGen', 'VideoGen', 'SellApp', 'LaunchProduct',
 ]);
 
 /**

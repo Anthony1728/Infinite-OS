@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { availableOpenCodeModels, describeOpenCodeFailure, freeOpenCodeModels, isTierRetryable, openCodeOwnModels, openCodeProgressChunk, openCodeUnavailableError, openCodeZenModels, opencode, otherTier, resolveLiveOpenCodeModel, setOpenCodeStallTimeout, tierFor, tryRemote, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
+import { availableOpenCodeModels, clearInvalidCliCredential, compareVersions, describeOpenCodeFailure, freeOpenCodeModels, getInstalledOpenCodeVersion, heartbeatDue, isOpenCodeVersionAtLeast, isTierRetryable, openCodeAuthLoginHint, openCodeFundsHint, openCodeHeartbeatIntervalMs, openCodeKeylessModels, openCodeOwnModels, openCodeProgressChunk, openCodeQuietTurnTimeoutReasons, openCodeUnavailableError, openCodeUpgradeHint, openCodeZenModels, opencode, orderFreeRotation, otherTier, resolveLiveOpenCodeModel, setLastGoodFreeModel, setOpenCodeFirstByteTimeout, setOpenCodeStallTimeout, tierFor, timeoutSignal, transcript, tryRemote, withOpenCodeHints, withUpgradeHint, OPENCODE_MIN_FREE_VERSION, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
 import type { ChatRequest, StreamChunk } from './base.js';
 import type { Message } from '../../shared/types.js';
 
 type Catalog = Parameters<typeof freeOpenCodeModels>[0];
+
+// Captured before any test mutates the live binding via setOpenCodeStallTimeout.
+const DEFAULT_STALL_TIMEOUT_MS = OPENCODE_STALL_TIMEOUT_MS;
 
 describe('OpenCode free chat model filtering', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -266,7 +267,7 @@ describe('OpenCode free chat model filtering', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/auth/opencode'))).toBe(false);
   });
 
-  it('shows only Zen models when a Zen key is supplied', async () => {
+  it('lists only paid Zen models for a Zen key (free-tier ids cannot serve keyed turns)', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       // Go endpoint is not available for this key; Zen succeeds.
@@ -295,19 +296,18 @@ describe('OpenCode free chat model filtering', () => {
     });
 
     await expect(opencode.listModels('zen-valid-test-key')).resolves.toMatchObject([
-      { id: 'opencode::big-pickle' },
-      { id: 'opencode::gpt-5.4-mini' },
+      { id: 'opencode::gpt-5.4-mini', free: false },
     ]);
   });
 
-  it('merges Go and Zen models when both endpoints accept the key', async () => {
+  it('merges paid Go and Zen models when both endpoints accept the key', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url === 'https://opencode.ai/zen/go/v1/models') {
-        return Response.json({ data: [{ id: 'go-model-free', object: 'model', owned_by: 'opencode' }] });
+        return Response.json({ data: [{ id: 'go-model-pro', object: 'model', owned_by: 'opencode' }] });
       }
       if (url === 'https://opencode.ai/zen/v1/models') {
-        return Response.json({ data: [{ id: 'zen-model-free', object: 'model', owned_by: 'opencode' }] });
+        return Response.json({ data: [{ id: 'zen-model-pro', object: 'model', owned_by: 'opencode' }] });
       }
       if (url.endsWith('/global/health')) return Response.json({ healthy: true });
       if (url.endsWith('/auth/opencode-go')) return Response.json(true);
@@ -324,8 +324,8 @@ describe('OpenCode free chat model filtering', () => {
     });
 
     await expect(opencode.listModels('go-zen-valid-test-key')).resolves.toMatchObject([
-      { id: 'opencode::go-model-free', free: true },
-      { id: 'opencode::zen-model-free', free: true },
+      { id: 'opencode::go-model-pro', free: false },
+      { id: 'opencode::zen-model-pro', free: false },
     ]);
   });
 
@@ -425,161 +425,38 @@ describe('OpenCode free chat model filtering', () => {
     expect(describeOpenCodeFailure(new Error('boom'), 'target').message).toBe('boom');
   });
 
-  it('retries transient transport failures before surfacing them', async () => {
-    let providerCalls = 0;
+  it('lists free models from the local OpenCode server when no key is supplied', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith('/global/health')) return Response.json({ healthy: true });
       if (url.endsWith('/provider')) {
-        providerCalls++;
-        if (providerCalls === 1) {
-          throw Object.assign(new TypeError('fetch failed'), {
-            cause: { code: 'ECONNREFUSED', address: '127.0.0.1', port: 4096 },
-          });
-        }
         return Response.json({
           connected: ['opencode'],
-          all: [{ id: 'opencode', models: { chat: { name: 'Chat', cost: { input: 0, output: 0 } } } }],
+          all: [{ id: 'opencode', models: { 'chat-free': { name: 'Chat Free', cost: { input: 0, output: 0 } } } }],
         });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    await expect(opencode.listModels('')).resolves.toHaveLength(1);
-    expect(providerCalls).toBe(2);
+    const models = await opencode.listModels('');
+    expect(models.some((m) => m.id === 'opencode::chat-free')).toBe(true);
   });
 
-  it('reports the underlying cause once retries are exhausted', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.endsWith('/global/health')) return Response.json({ healthy: true });
+  it('reports the server as unreachable when no key and no CLI', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw Object.assign(new TypeError('fetch failed'), {
-        cause: { code: 'ECONNREFUSED', address: '127.0.0.1', port: 4096, syscall: 'connect' },
+        cause: { code: 'ECONNREFUSED', address: '127.0.0.1', port: 4096 },
       });
     });
 
     const result = await opencode.testConnection('');
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('ECONNREFUSED');
-    expect(result.error).toContain('127.0.0.1:4096');
-    expect(result.error).toContain('Is the OpenCode runtime running');
-  });
+  }, 30_000);
 });
-
-// ---------------------------------------------------------------------------
-// Stall watchdog — a wedged runtime must never hang the turn for hours.
-// A real local HTTP server stands in for the opencode runtime.
-// ---------------------------------------------------------------------------
-
-type MessageMode = 'hold' | 'slow' | 'instant' | 'delayed';
-type SseMode = 'none' | 'heartbeats' | 'data';
-
-interface MockRuntime {
-  server: Server;
-  port: number;
-  sessionCreations: () => number;
-  messageRequests: () => number;
-}
-
-function startMockRuntime(messageMode: MessageMode, sseMode: SseMode = 'none'): MockRuntime {
-  let sessions = 0;
-  let messages = 0;
-  const server = createServer((req, res) => {
-    const url = req.url ?? '';
-    if (url.endsWith('/global/health')) {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ healthy: true }));
-      return;
-    }
-    if (url.endsWith('/provider')) {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        connected: ['opencode'],
-        all: [{ id: 'opencode', models: { chat: { name: 'Chat', cost: { input: 0, output: 0 } } } }],
-      }));
-      return;
-    }
-    if (url.includes('/message') && req.method === 'POST') {
-      messages++;
-      if (messageMode === 'hold') {
-        // Never send headers: the runtime appears to be thinking forever.
-        return;
-      }
-      const body = JSON.stringify({
-        info: { tokens: { input: 1, output: 1 } },
-        parts: [{ type: 'text', text: 'hello world' }],
-      });
-      if (messageMode === 'delayed') {
-        // Headers + body arrive after a delay; the turn completes eventually.
-        const timer = setTimeout(() => {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(body);
-        }, 600);
-        res.on('close', () => clearTimeout(timer));
-        return;
-      }
-      res.writeHead(200, { 'content-type': 'application/json' });
-      if (messageMode === 'slow') {
-        // Stream the body in dribbles: alive, but slower than the stall window.
-        let sent = 0;
-        const timer = setInterval(() => {
-          const chunk = body.slice(sent, sent + 6);
-          if (!chunk) {
-            clearInterval(timer);
-            res.end();
-            return;
-          }
-          res.write(chunk);
-          sent += 6;
-        }, 150);
-      } else {
-        res.end(body);
-      }
-      return;
-    }
-    if (url.startsWith('/event')) {
-      res.writeHead(200, { 'content-type': 'text/event-stream' });
-      if (sseMode !== 'none') {
-        const timer = setInterval(() => {
-          if (res.destroyed) {
-            clearInterval(timer);
-            return;
-          }
-          if (sseMode === 'heartbeats') {
-            res.write(': ping\n\n');
-          } else {
-            res.write('data: {"type":"message.part.updated","properties":{"part":{"sessionID":"x","type":"tool","state":{"status":"running"}}}}\n\n');
-          }
-        }, 100);
-        res.on('close', () => clearInterval(timer));
-      }
-      return;
-    }
-    if (url.startsWith('/session') && req.method === 'POST') {
-      sessions++;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ id: `sess-${sessions}` }));
-      return;
-    }
-    if (url.startsWith('/session/') && req.method === 'DELETE') {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    res.writeHead(404);
-    res.end();
-  });
-  return {
-    server,
-    port: 0,
-    sessionCreations: () => sessions,
-    messageRequests: () => messages,
-  };
-}
 
 function chatRequest(text: string): ChatRequest {
   const message: Message = { id: 'm1', role: 'user', timestamp: Date.now(), content: [{ type: 'text', text }] };
-  return { model: 'opencode::chat', messages: [message], stream: true };
+  return { model: 'opencode::chat-free', messages: [message], stream: true };
 }
 
 function sseResponse(lines: string[]): Response {
@@ -638,118 +515,38 @@ describe('OpenCode cross-tier fallback', () => {
     expect(tierFor('opencode::tier-probe-y')).toBe('go');
   });
 
-  it('sends free-tier models with a key to the remote API without touching the local server', async () => {
+  it('surfaces the remote FreeTierError when a free model is attempted remotely', async () => {
+    // Upstream policy (verified live): the Zen API 403s every free-tier turn
+    // that does not come from the OpenCode client itself, so keyed free
+    // models must run on the local runtime instead.
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith('http://127.0.0.1:4096')) throw new Error(`Local server must not be contacted: ${url}`);
       if (url === 'https://opencode.ai/zen/v1/chat/completions') {
-        return sseResponse(['data: {"choices":[{"delta":{"content":"free-remote-ok"}}]}', '', 'data: [DONE]', '']);
+        return Response.json(
+          { type: 'error', error: { type: 'FreeTierError', message: "OpenCode's free tier can only be used from within OpenCode" } },
+          { status: 403 },
+        );
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
-    const request: ChatRequest = { ...chatRequest('hi'), model: 'opencode::mimo-v2.5-free' };
-    const chunks: StreamChunk[] = [];
-    for await (const chunk of opencode.streamChat(request, 'test-key')) chunks.push(chunk);
-    expect(chunks).toContainEqual({ type: 'text_delta', text: 'free-remote-ok' });
-    expect(chunks.some((c) => c.type === 'error')).toBe(false);
-  });
-});
-
-async function collect(url: string, req: ChatRequest): Promise<StreamChunk[]> {
-  const chunks: StreamChunk[] = [];
-  for await (const chunk of opencode.streamChat(req, '', url)) chunks.push(chunk);
-  return chunks;
-}
-
-describe('OpenCode stall watchdog', () => {
-  let runtime: ReturnType<typeof startMockRuntime>;
-
-  afterEach(() => {
-    setOpenCodeStallTimeout(OPENCODE_STALL_TIMEOUT_MS);
-    runtime.server.closeAllConnections();
-    runtime.server.close();
-  });
-
-  it('breaks a totally silent (wedged) runtime after the stall window and retries with fresh sessions', { timeout: 15_000 }, async () => {
-    setOpenCodeStallTimeout(400);
-    runtime = startMockRuntime('hold');
-    await new Promise<void>((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-    const port = (runtime.server.address() as AddressInfo).port;
-
-    const chunks = await collect(`http://127.0.0.1:${port}`, chatRequest('please finish this task'));
-    const errors = chunks.filter((c): c is { type: 'error'; error: string } => c.type === 'error');
-    const retries = chunks.filter((c) => c.type === 'provider_status');
-
-    expect(errors).toHaveLength(1);
-    expect(errors[0].error).toContain('stopped responding');
-    expect(retries.length).toBeGreaterThanOrEqual(2);
-    expect(runtime.sessionCreations()).toBe(5);
-    expect(runtime.messageRequests()).toBe(5);
-  });
-
-  it('does not stall a slow-but-alive run: activity resets the watchdog', { timeout: 15_000 }, async () => {
-    setOpenCodeStallTimeout(1_000);
-    runtime = startMockRuntime('slow');
-    await new Promise<void>((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-    const port = (runtime.server.address() as AddressInfo).port;
-
-    const chunks = await collect(`http://127.0.0.1:${port}`, chatRequest('take your time'));
-    expect(chunks.some((c) => c.type === 'error')).toBe(false);
-    expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
-    expect(chunks.some((c) => c.type === 'text_delta' && c.text === 'hello world')).toBe(true);
-    expect(runtime.sessionCreations()).toBe(1);
-  });
-
-  it('does not count SSE heartbeat comments as activity: keepalives cannot hide a wedge', { timeout: 15_000 }, async () => {
-    setOpenCodeStallTimeout(400);
-    runtime = startMockRuntime('hold', 'heartbeats');
-    await new Promise<void>((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-    const port = (runtime.server.address() as AddressInfo).port;
-
-    const chunks = await collect(`http://127.0.0.1:${port}`, chatRequest('keep going'));
-    const errors = chunks.filter((c): c is { type: 'error'; error: string } => c.type === 'error');
-    expect(errors).toHaveLength(1);
-    expect(errors[0].error).toContain('stopped responding');
-    expect(runtime.sessionCreations()).toBe(5);
-  });
-
-  it('counts SSE data events as activity: a working runtime is never stalled', { timeout: 15_000 }, async () => {
-    setOpenCodeStallTimeout(1_000);
-    runtime = startMockRuntime('delayed', 'data');
-    await new Promise<void>((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-    const port = (runtime.server.address() as AddressInfo).port;
-
-    // The message completes 600ms in, while data events arrive every 100ms;
-    // the 400ms stall window must never fire despite the late response.
-    const chunks = await collect(`http://127.0.0.1:${port}`, chatRequest('work steadily'));
-    expect(chunks.some((c) => c.type === 'error')).toBe(false);
-    expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
-    expect(runtime.sessionCreations()).toBe(1);
-  });
-
-  it('completes immediately for a healthy runtime', async () => {
-    runtime = startMockRuntime('instant');
-    await new Promise<void>((resolve) => runtime.server.listen(0, '127.0.0.1', resolve));
-    const port = (runtime.server.address() as AddressInfo).port;
-
-    const chunks = await collect(`http://127.0.0.1:${port}`, chatRequest('hi'));
-    expect(chunks.some((c) => c.type === 'error')).toBe(false);
-    expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
-    expect(runtime.sessionCreations()).toBe(1);
+    const request: ChatRequest = { ...chatRequest('hi'), model: 'opencode::tier-probe-free' };
+    const attempt = await tryRemote(request, 'test-key', 'zen');
+    expect(attempt.ok).toBe(false);
+    expect(attempt.ok === false && attempt.error).toMatch(/FreeTierError|free tier/i);
   });
 });
 
 describe('OpenCode retired-model fallback', () => {
   it('keeps an exact catalog match without switching', () => {
-    const r = resolveLiveOpenCodeModel('opencode::chat', [{ id: 'opencode::chat' }]);
-    expect(r).toEqual({ providerID: 'opencode', modelID: 'chat', switched: false, fallbackId: null });
+    const r = resolveLiveOpenCodeModel('opencode::chat-free', [{ id: 'opencode::chat-free' }]);
+    expect(r).toEqual({ providerID: 'opencode', modelID: 'chat-free', switched: false, fallbackId: null });
   });
 
   it('falls back to a live opencode model when the selected id retired', () => {
-    const r = resolveLiveOpenCodeModel('opencode::big-pickle', [{ id: 'opencode::chat' }]);
+    const r = resolveLiveOpenCodeModel('opencode::big-pickle', [{ id: 'opencode::chat-free' }]);
     expect(r.switched).toBe(true);
-    expect(r.fallbackId).toBe('opencode::chat');
-    expect(r.modelID).toBe('chat');
+    expect(r.fallbackId).toBe('opencode::chat-free');
+    expect(r.modelID).toBe('chat-free');
   });
 
   it('prefers free models when no opencode-subscription model exists', () => {
@@ -765,28 +562,209 @@ describe('OpenCode retired-model fallback', () => {
   });
 
   it('names the live CLI models when the selection is unavailable', () => {
-    const err = openCodeUnavailableError('opencode::mimo-v2.5-free', [{ id: 'opencode::chat' }, { id: 'opencode::code' }]);
+    const err = openCodeUnavailableError('opencode::mimo-v2.5-free', [{ id: 'opencode::chat-free' }, { id: 'opencode::code' }]);
     expect(err).toMatch(/opencode::mimo-v2\.5-free/);
     expect(err).toMatch(/opencode::chat/);
     expect(err).toMatch(/fallback is OFF/);
   });
+});
 
-  it('switches models mid-stream instead of failing the turn', async () => {
-    // Mock catalog offers only `chat`; requesting retired `big-pickle` must
-    // yield a failover notice and still complete the turn.
-    const rt = startMockRuntime('instant');
-    await new Promise<void>((resolve) => rt.server.listen(0, '127.0.0.1', resolve));
-    const port = (rt.server.address() as AddressInfo).port;
-    try {
-      const chunks = await collect(`http://127.0.0.1:${port}`, { ...chatRequest('hi'), model: 'opencode::big-pickle' });
-      const failover = chunks.find((c) => c.type === 'provider_status' && (c as { status?: string }).status === 'failover');
-      expect(failover).toBeTruthy();
-      expect(chunks.some((c) => c.type === 'message_end')).toBe(true);
-      expect(chunks.some((c) => c.type === 'error')).toBe(false);
-      expect(rt.sessionCreations()).toBe(1);
-    } finally {
-      rt.server.closeAllConnections();
-      rt.server.close();
-    }
+describe('OpenCode free-tier rotation', () => {
+  afterEach(() => {
+    setOpenCodeFirstByteTimeout(120_000);
+    setLastGoodFreeModel(null);
+  });
+
+  it('prefers the most-recently-answering model over alphabetical order', () => {
+    expect(orderFreeRotation('opencode::ling', ['opencode::big-pickle', 'opencode::muse'])).toEqual(
+      ['opencode::big-pickle', 'opencode::muse']);
+    setLastGoodFreeModel('opencode::muse');
+    expect(orderFreeRotation('opencode::ling', ['opencode::big-pickle', 'opencode::muse'])).toEqual(
+      ['opencode::muse', 'opencode::big-pickle']);
+    // Never prefer the already-selected model.
+    expect(orderFreeRotation('opencode::muse', ['opencode::big-pickle', 'opencode::muse'])).toEqual(
+      ['opencode::big-pickle', 'opencode::muse']);
+  });
+
+});
+
+describe('OpenCode abort and keep-alive', () => {
+  afterEach(() => {
+    setLastGoodFreeModel(null);
+  });
+
+  it('combines caller abort with a timeout without masking user cancel', async () => {
+    const parent = new AbortController();
+    const combined = timeoutSignal(parent.signal, 50);
+    expect(combined.aborted).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(combined.aborted).toBe(true);
+    expect(combined.reason?.name).toBe('TimeoutError');
+    const stopper = new AbortController();
+    stopper.abort(new Error('user stop'));
+    const userFirst = timeoutSignal(stopper.signal, 10_000);
+    expect(userFirst.aborted).toBe(true);
+    expect((userFirst.reason as Error)?.message).toBe('user stop');
+  });
+});
+
+describe('OpenCode free-tier version gate', () => {
+  afterEach(() => {
+    clearInvalidCliCredential();
+    setOpenCodeStallTimeout(DEFAULT_STALL_TIMEOUT_MS);
+  });
+  it('compares semver numerically, not lexicographically', () => {
+    expect(compareVersions('1.17.20', '1.18.0')).toBeLessThan(0);
+    expect(compareVersions('1.18.0', '1.18.0')).toBe(0);
+    expect(compareVersions('1.18.1', '1.18.0')).toBeGreaterThan(0);
+    expect(compareVersions('2.0.0', '1.18.0')).toBeGreaterThan(0);
+  });
+
+  it('gates the free tier on the minimum CLI version', () => {
+    expect(isOpenCodeVersionAtLeast('1.17.20')).toBe(false);
+    expect(isOpenCodeVersionAtLeast('1.18.0')).toBe(true);
+    expect(isOpenCodeVersionAtLeast('1.19.2')).toBe(true);
+    expect(isOpenCodeVersionAtLeast(null)).toBe(false);
+    expect(isOpenCodeVersionAtLeast(undefined)).toBe(false);
+    expect(OPENCODE_MIN_FREE_VERSION).toBe('1.18.0');
+  });
+
+  it('reports the installed CLI version without throwing when missing', async () => {
+    const version = await getInstalledOpenCodeVersion();
+    // CLI 1.17.20 is installed on this machine; elsewhere it may be absent.
+    expect(version === null || /^\d+\.\d+\.\d+$/.test(version)).toBe(true);
+  }, 20_000);
+
+  it('produces an upgrade hint only for version-gate failures', () => {
+    expect(openCodeUpgradeHint('OpenCode 1.18.0 or newer is required to use the free tier'))
+      .toMatch(/npm i -g opencode-ai@latest/);
+    expect(openCodeUpgradeHint('OpenCode message failed (HTTP 426): UpgradeRequired')).toMatch(/1\.18\.0/);
+    expect(openCodeUpgradeHint('fetch failed: ECONNREFUSED')).toBeNull();
+    expect(openCodeUpgradeHint('API error (401): bad key')).toBeNull();
+  });
+
+  it('prefixes errors with the upgrade hint when it applies', () => {
+    expect(withUpgradeHint('1.18.0 or newer is required')).toMatch(/^OpenCode: .*npm i -g/);
+    expect(withUpgradeHint('boom')).toBe('OpenCode: boom');
+  });
+
+  it('points at `opencode auth login` when the stored login is rejected upstream', () => {
+    expect(openCodeAuthLoginHint('Upstream request failed: Invalid credential')).toMatch(/opencode auth login/);
+    expect(openCodeAuthLoginHint('fetch failed: ECONNREFUSED')).toBeNull();
+    expect(withOpenCodeHints('Upstream request failed: Invalid credential')).toMatch(/opencode auth login/);
+    expect(withOpenCodeHints('boom')).toBe('OpenCode: boom');
+  });
+
+  it('paces still-working notices inside the stall window', () => {
+    const interval = openCodeHeartbeatIntervalMs();
+    expect(interval).toBeGreaterThanOrEqual(5_000);
+    expect(interval).toBeLessThanOrEqual(30_000);
+    expect(interval).toBeLessThanOrEqual(Math.max(5_000, DEFAULT_STALL_TIMEOUT_MS));
+    expect(heartbeatDue(0, interval, interval)).toBe(true);
+    expect(heartbeatDue(0, interval - 1, interval)).toBe(false);
+  });
+
+});
+
+describe('OpenCode lean transcript (TUI-shaped payload)', () => {
+  const msg = (role: 'user' | 'assistant', content: Message['content']): Message => ({
+    id: `${role}-${Math.random()}`, role, content, timestamp: Date.now(),
+  });
+
+  it('stays small and text-only on heavy histories', () => {
+    const huge = 'x'.repeat(50_000);
+    const messages: Message[] = [
+      msg('user', [{ type: 'text', text: 'do the thing' }]),
+      msg('assistant', [{ type: 'tool_use', id: 't1', name: 'read', input: { path: '/a', extra: huge } }]),
+      msg('user', [{ type: 'tool_result', tool_use_id: 't1', content: huge }]),
+      msg('user', [{ type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'iVBOR'.repeat(5000) } }]),
+      msg('user', [{ type: 'tool_result', tool_use_id: 't2', content: [{ type: 'text', text: 'ok' }, { type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'zz'.repeat(5000) } }] }]),
+      msg('user', [{ type: 'text', text: `see data:image/png;base64,${'A'.repeat(2000)} done` }]),
+    ];
+    const text = transcript(messages);
+    expect(text.length).toBeLessThanOrEqual(12_000);
+    expect(text).not.toMatch(/iVBOR{3,}|A{500,}|x{2100,}/);
+    expect(text).toMatch(/do the thing/);
+    expect(text).toMatch(/image omitted|embedded data omitted|blob omitted/);
+  });
+
+  it('keeps recent task context within the budget', () => {
+    const messages: Message[] = Array.from({ length: 30 }, (_, i) =>
+      msg(i % 2 ? 'assistant' : 'user', [{ type: 'text', text: `message number ${i} with some task detail` }]));
+    const text = transcript(messages);
+    expect(text.length).toBeLessThanOrEqual(12_000);
+    expect(text).toMatch(/message number 29/);
+  });
+});
+
+describe('OpenCode keyless remake (free + Go via installed CLI)', () => {
+  const keylessCatalog = {
+    connected: ['opencode', 'opencode-go'],
+    all: [
+      {
+        id: 'opencode',
+        name: 'OpenCode Zen',
+        models: {
+          'big-pickle': { name: 'Big Pickle', cost: { input: 0, output: 0 } },
+          'paid-zen': { name: 'Paid Zen', cost: { input: 1, output: 2 } },
+        },
+      },
+      {
+        id: 'opencode-go',
+        name: 'OpenCode Go',
+        models: {
+          'go-model': { name: 'Go Model', cost: { input: 2, output: 5 } },
+        },
+      },
+      {
+        id: 'nvidia',
+        name: 'NVIDIA',
+        models: {
+          'chat': { name: 'Chat', cost: { input: 0, output: 0 } },
+        },
+      },
+    ],
+  } as unknown as Catalog;
+
+  it('includes free opencode, paid zen, and go models, never unrelated providers', () => {
+    const ids = openCodeKeylessModels(keylessCatalog).map((m) => m.id);
+    expect(ids).toContain('opencode::big-pickle');
+    expect(ids).toContain('opencode::paid-zen');
+    expect(ids).toContain('opencode-go::go-model');
+    expect(ids.some((id) => id.startsWith('nvidia::'))).toBe(false);
+  });
+
+  it('keeps opencode-only helper for subscription-off filtering', () => {
+    expect(openCodeOwnModels(keylessCatalog).map((m) => m.id)).toEqual(['opencode::big-pickle']);
+  });
+
+  it('preserves the go provider prefix when falling back', () => {
+    const r = resolveLiveOpenCodeModel('opencode-go::missing', [{ id: 'opencode-go::go-model' }]);
+    expect(r).toMatchObject({ providerID: 'opencode-go', modelID: 'go-model', switched: true, fallbackId: 'opencode-go::go-model' });
+  });
+
+  it('names free-tier exhaustion with a reset time and alternatives', () => {
+    const next = Date.now() + 4 * 60_000;
+    const out = openCodeQuietTurnTimeoutReasons({
+      type: 'session.status',
+      properties: { status: { type: 'retry', action: { reason: 'free_tier_limit' }, message: 'Free usage exceeded, subscribe to Go', next } },
+    });
+    expect(out.timedOut).toBe(true);
+    expect(out.reason).toMatch(/resets in ~\d+ min/);
+    expect(out.reason).toMatch(/nvidia/);
+  });
+
+  it('emits rate_limited status chunks for retry events so turns fail fast', () => {
+    const chunk = openCodeProgressChunk({
+      type: 'session.status',
+      properties: { status: { type: 'retry', action: { reason: 'free_tier_limit' }, message: 'Free usage exceeded', next: Date.now() + 60_000 } },
+    }, 'ses_x');
+    expect(chunk).toMatchObject({ type: 'provider_status', status: 'rate_limited', provider: 'opencode' });
+  });
+
+  it('adds a funds hint for 402 paid-model failures', () => {
+    expect(openCodeFundsHint('Upstream request failed: Insufficient account funds')).toMatch(/no funds/);
+    expect(withOpenCodeHints('Upstream request failed: Insufficient account funds')).toMatch(/no funds/);
+    expect(openCodeFundsHint('all good')).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ import { listSnapshots, restoreSnapshot, pruneSnapshots } from './snapshots.js';
 export const snapshotTool: Tool = {
   name: 'Snapshot',
   description:
-    'List and restore versioned snapshots of Infinite OS self-edits. Every agent Write/Edit inside the repo is auto-snapshotted per session — list shows the versions (newest first with file lists), restore rolls files back to a version, prune drops old ones. Use restore when an edit broke something and re-verifying is slower than rolling back.',
+    'List/restore snapshots of self-edits (auto-taken per session). list shows versions newest-first, restore rolls files back, prune drops old. Use restore when an edit broke something and rollback is cheaper than re-verifying.',
   inputSchema: {
     type: 'object',
     properties: {

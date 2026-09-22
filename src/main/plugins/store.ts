@@ -201,6 +201,8 @@ export class PluginStore {
           return this.executeNotionPlugin(command, args);
         case 'slack':
           return this.executeSlackPlugin(command, args);
+        case 'openai-tools':
+          return this.executeOpenAIToolsPlugin(command, args);
         case 'docker':
           return this.executeDockerPlugin(command, args);
         default:
@@ -211,16 +213,26 @@ export class PluginStore {
     }
   }
 
+  private pluginToken(pluginId: string): string {
+    const cfg = this.plugins.get(pluginId)?.config ?? {};
+    const raw = (cfg.token ?? cfg.apiKey ?? '') as unknown;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
   private async executeGitHubPlugin(command: string, args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
-    const token = this.plugins.get('github')?.config?.token as string;
+    const token = this.pluginToken('github');
     
     switch (command) {
       case 'list_repos': {
         if (!token) return { success: false, error: 'GitHub token not configured' };
         try {
-          const result = execSync('curl -s -H "Authorization: token ' + token + '" https://api.github.com/user/repos?per_page=10', { encoding: 'utf-8' });
-          const repos = JSON.parse(result);
-          return { success: true, result: repos.map((r: { name: string; description?: string }) => `${r.name}: ${r.description || 'No description'}`).join('\n') };
+          const res = await fetch('https://api.github.com/user/repos?per_page=10', {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) return { success: false, error: `GitHub HTTP ${res.status}` };
+          const repos = (await res.json()) as Array<{ name: string; description?: string }>;
+          return { success: true, result: repos.map((r) => `${r.name}: ${r.description || 'No description'}`).join('\n') };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -231,9 +243,16 @@ export class PluginStore {
         const title = args?.title as string;
         const body = args?.body as string;
         if (!repo || !title) return { success: false, error: 'repo and title required' };
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return { success: false, error: 'Invalid repo format. Use owner/repo.' };
         try {
-          const result = execSync(`curl -s -X POST -H "Authorization: token ${token}" -H "Content-Type: application/json" -d '{"title":"${title}","body":"${body || ''}"}' https://api.github.com/repos/${repo}/issues`, { encoding: 'utf-8' });
-          const issue = JSON.parse(result);
+          const res = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/vnd.github+json' },
+            body: JSON.stringify({ title, body: body || '' }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) return { success: false, error: `GitHub HTTP ${res.status}` };
+          const issue = (await res.json()) as { number: number; html_url: string };
           return { success: true, result: `Created issue #${issue.number}: ${issue.html_url}` };
         } catch (e) {
           return { success: false, error: (e as Error).message };
@@ -245,15 +264,21 @@ export class PluginStore {
   }
 
   private async executeNotionPlugin(command: string, _args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
-    const token = this.plugins.get('notion')?.config?.token as string;
+    const token = this.pluginToken('notion');
     
     switch (command) {
       case 'list_pages': {
         if (!token) return { success: false, error: 'Notion token not configured' };
         try {
-          const result = execSync(`curl -s -H "Authorization: Bearer ${token}" -H "Notion-Version: 2022-06-28" https://api.notion.com/v1/search`, { encoding: 'utf-8' });
-          const data = JSON.parse(result);
-          return { success: true, result: data.results?.map((r: { properties?: { title?: { title?: Array<{ plain_text?: string }> } } }) => `${r.properties?.title?.title?.[0]?.plain_text || 'Untitled'}`).join('\n') || 'No pages found' };
+          const res = await fetch('https://api.notion.com/v1/search', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ page_size: 10 }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) return { success: false, error: `Notion HTTP ${res.status}` };
+          const data = (await res.json()) as { results?: Array<{ properties?: { title?: { title?: Array<{ plain_text?: string }> } } }> };
+          return { success: true, result: data.results?.map((r) => `${r.properties?.title?.title?.[0]?.plain_text || 'Untitled'}`).join('\n') || 'No pages found' };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -264,15 +289,19 @@ export class PluginStore {
   }
 
   private async executeSlackPlugin(command: string, args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
-    const token = this.plugins.get('slack')?.config?.token as string;
+    const token = this.pluginToken('slack');
     
     switch (command) {
       case 'list_channels': {
         if (!token) return { success: false, error: 'Slack token not configured' };
         try {
-          const result = execSync(`curl -s -H "Authorization: Bearer ${token}" https://slack.com/api/conversations.list`, { encoding: 'utf-8' });
-          const data = JSON.parse(result);
-          return { success: true, result: data.channels?.map((c: { name: string }) => `#${c.name}`).join('\n') || 'No channels found' };
+          const res = await fetch('https://slack.com/api/conversations.list', {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!res.ok) return { success: false, error: `Slack HTTP ${res.status}` };
+          const data = (await res.json()) as { channels?: Array<{ name: string }> };
+          return { success: true, result: data.channels?.map((c) => `#${c.name}`).join('\n') || 'No channels found' };
         } catch (e) {
           return { success: false, error: (e as Error).message };
         }
@@ -283,8 +312,13 @@ export class PluginStore {
         const text = args?.text as string;
         if (!channel || !text) return { success: false, error: 'channel and text required' };
         try {
-          const result = execSync(`curl -s -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{"channel":"${channel}","text":"${text}"}' https://slack.com/api/chat.postMessage`, { encoding: 'utf-8' });
-          const data = JSON.parse(result);
+          const res = await fetch('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel, text }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const data = (await res.json()) as { ok: boolean; error?: string };
           return { success: data.ok, result: data.ok ? 'Message sent' : data.error };
         } catch (e) {
           return { success: false, error: (e as Error).message };
@@ -292,6 +326,28 @@ export class PluginStore {
       }
       default:
         return { success: false, error: `Unknown Slack command: ${command}` };
+    }
+  }
+
+  private async executeOpenAIToolsPlugin(command: string, _args?: Record<string, unknown>): Promise<{ success: boolean; result?: string; error?: string }> {
+    const token = this.pluginToken('openai-tools');
+    switch (command) {
+      case 'status': {
+        if (!token) return { success: false, error: 'OpenAI API key not configured (Plugin → OpenAI Extended Tools → apiKey)' };
+        try {
+          const res = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(15000),
+          });
+          return res.ok
+            ? { success: true, result: 'OpenAI Extended Tools connected.' }
+            : { success: false, error: `OpenAI HTTP ${res.status}` };
+        } catch (e) {
+          return { success: false, error: (e as Error).message };
+        }
+      }
+      default:
+        return { success: false, error: `Unknown OpenAI tools command: ${command}. Available: status` };
     }
   }
 
@@ -317,9 +373,13 @@ export class PluginStore {
         const image = args?.image as string;
         const name = args?.name as string;
         if (!image) return { success: false, error: 'image required' };
+        if (!/^[\w][\w.:/-]{0,255}$/.test(image)) return { success: false, error: 'Invalid image name.' };
+        if (name && !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(name)) return { success: false, error: 'Invalid container name.' };
         try {
-          const cmd = name ? `docker run -d --name ${name} ${image}` : `docker run -d ${image}`;
-          const result = execSync(cmd, { encoding: 'utf-8' });
+          const { execFileSync } = await import('node:child_process');
+          const result = name
+            ? execFileSync('docker', ['run', '-d', '--name', name, image], { encoding: 'utf-8' })
+            : execFileSync('docker', ['run', '-d', image], { encoding: 'utf-8' });
           return { success: true, result: `Container started: ${result.trim()}` };
         } catch (e) {
           return { success: false, error: (e as Error).message };
@@ -328,8 +388,10 @@ export class PluginStore {
       case 'stop': {
         const container = args?.container as string;
         if (!container) return { success: false, error: 'container required' };
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(container)) return { success: false, error: 'Invalid container name.' };
         try {
-          execSync(`docker stop ${container}`);
+          const { execFileSync } = await import('node:child_process');
+          execFileSync('docker', ['stop', container]);
           return { success: true, result: `Container ${container} stopped` };
         } catch (e) {
           return { success: false, error: (e as Error).message };

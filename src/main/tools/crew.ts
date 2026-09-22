@@ -38,7 +38,7 @@ export const crewTool: Tool = {
     const { loadSessionMeta } = await import('../session/store.js');
     const meta = await loadSessionMeta(ctx.sessionId);
     const leaderProvider = meta?.provider ?? 'openrouter';
-    const leaderModel = meta?.model ?? 'meta-llama/llama-3.3-70b-instruct:free';
+    const leaderModel = meta?.model ?? 'google/gemma-4-31b-it:free';
 
     // All provider keys the user has configured.
     const available = new Map<string, { apiKey?: string; baseUrl?: string }>();

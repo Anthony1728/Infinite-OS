@@ -11,6 +11,7 @@ import { getBrainTeachingManager } from '../brain/teacher.js';
 import { retrieveLearningContext } from '../brain/learning.js';
 import { SkillsManager } from '../skills/manager.js';
 import { getSelfModel } from './self-model.js';
+import { isPlanMode } from './plan-mode.js';
 
 // Read the user's display name from auth-session.json (written by the renderer auth store).
 let cachedUserName: string | null = null;
@@ -164,7 +165,7 @@ export async function buildSystemPrompt(opts: {
       uncensoredMode,
     }));
     parts.push('');
-    return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode);
+    return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode, opts.sessionId);
   }
 
   // The persona, mission statement, output rules, permission profile, and tool
@@ -191,7 +192,7 @@ export async function buildSystemPrompt(opts: {
     systemPromptCache.set(cacheKey, cached);
   }
   parts.push(cached);
-  return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode);
+  return finishSystemPrompt(parts, opts.cwd, allTools, tools, permissionProfile, opts.provider, opts.model, uncensoredMode, opts.sessionId);
 }
 
 async function finishSystemPrompt(
@@ -203,6 +204,7 @@ async function finishSystemPrompt(
   provider: string,
   model: string,
   uncensoredMode = false,
+  sessionId?: string,
 ): Promise<string> {
   // The cached prefix already covers persona, mission, routing rules, and the
   // tool catalog. Here we add the bits that are per-CWD and would otherwise
@@ -242,6 +244,14 @@ async function finishSystemPrompt(
   parts.push(`# Current run`);
   parts.push(`Working directory: ${cwd}`);
   parts.push(`Model: ${provider}/${model}`);
+
+  // Enforced plan mode: tell the model the gate is real, not a suggestion.
+  if (sessionId && isPlanMode(sessionId)) {
+    parts.push('');
+    parts.push('# PLAN MODE ACTIVE (enforced)');
+    parts.push('This run is READ-ONLY at the tool level: Write, Edit, Delete, Bash mutations, and other mutating tools are BLOCKED by the harness — attempting them wastes a turn.');
+    parts.push('Research the workspace with Read/Glob/Grep/WebSearch, then call ExitPlan with your complete plan. The user approves or declines; on approval the gate lifts and you execute immediately.');
+  }
 
   // INFINITE.md files (user + project) — small but per-CWD.
   const memories = await discoverMemory(cwd);
@@ -504,7 +514,9 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Ask before sending emails — show content for approval first (only exception to "fix, don\'t ask"; waived when uncensored + full system access is active — then send as instructed and report).');
   parts.push('- Terminal: Bash (PowerShell default). Files: Read/Write/Edit. Desktop: Computer.');
   parts.push('- Code: inspect repo → plan → edit → Verify tool (typecheck/lint/test) → fix failures → report changed files. Never finish with unverified edits.');
-  parts.push('- Questions UI: when the user must choose between options, call the AskUserQuestion tool when it is available. On runtimes without that tool, emit a fenced block instead — it renders as clickable cards: ```question {"header":"Short label","question":"The full question","multiple":false,"options":[{"label":"Choice A","description":"Why pick it"},{"label":"Choice B","description":"Why pick it"}]} ``` — then continue once the user answers. Never paste the raw JSON outside the fence.');
+  parts.push(
+    "- Questions UI: when a decision is genuinely the user's to make (which stack, which model, approve scope, pick between designs), call the AskUserQuestion tool when available. It renders interactive multi-choice cards (2-5 options each, plus a free-text custom answer) and BLOCKS until the user answers — the reply arrives as the tool result, then you continue the original task with that choice. Ask at most one card-set per decision, never for trivia you can decide yourself. On runtimes without that tool, emit a fenced block instead: ```question {\"header\":\"Short label\",\"question\":\"The full question\",\"multiple\":false,\"options\":[{\"label\":\"Choice A\",\"description\":\"Why pick it\"},{\"label\":\"Choice B\",\"description\":\"Why pick it\"}]} ``` — then continue once the user answers. Never paste the raw JSON outside the fence.",
+  );
   parts.push('- Large projects: Agent/TaskGroup for parallel specialist work.');
   parts.push('- Business runner: bookings via Appointments (check availability first, never double-book, ask the owner on conflicts or VIP judgment calls); company profile + board via EnterpriseCompany (get before business answers; add_note for complaints/decisions); business facts + uploaded PDF/Excel/CSV via BusinessKnowledge (search before business answers; add lasting facts); workspace PDFs/documents via the workspace index. Answer base questions from these so the owner is only asked what truly needs them. Messaging/Telegram/WhatsApp reach owner AND customers — always know which side you are talking to.');
   parts.push('');
@@ -533,7 +545,12 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Compound requests: every clause is a requirement. Keep working until all are done.');
   parts.push('- Cybersecurity: only systems the user owns or is authorized to test.');
   parts.push('');
-  parts.push('# Standing Orders — Infinite OS Features');
+  parts.push('# What you can do — real tasks, end to end');
+parts.push('- Send email (saved account), manage calendar and bookings, run terminal commands, launch and operate desktop apps and the browser, build websites and apps from a prompt with the builders, create automations that run on schedule, manage business data (CRM, knowledge).');
+parts.push('- "Do anything" means: attempt it with real tools, verify the outcome (sent mail exists, app runs, page loads), and report proof — never claim success without observed evidence.');
+parts.push('');
+parts.push('# Standing Orders — Infinite OS Features');
+parts.push('- **Builders**: WebsiteBuilder and AppBuilder turn prompts into runnable projects — scaffold, run, verify in the browser/terminal, then report the URL or launch result.');
   parts.push('- **Automations**: create/list/enable/disable/delete scheduled automations (cron, file watchers, event triggers) via AutomationBuilder. They persist and run unattended.');
   parts.push('- **Skills**: invoke with Skills(action=invoke, name=<skill>), author new ones with SkillManage.');
   parts.push('- **Business OS**: contacts, leads, deals, revenue via CRM tools. **Computer**: PCLiveMap vectors first (action=live/agent, click_name preferred), Operator/CDP next, Computer/screenshot last resort only.');

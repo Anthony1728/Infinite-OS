@@ -1,52 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../stores/auth';
 import { useChatStore } from '../../stores/chat';
-import { useAgentsStore } from '../../stores/agents';
-import { useMultiAgentStore } from '../../stores/multiAgent';
-import { useAutomationStore } from '../../stores/automation';
-import { AgentBuddy } from '../brand/AgentBuddy';
 
-// Bottom status bar — Hermes' "Gateway ready" strip in Infinite glass:
+// Bottom status bar in Infinite glass:
 // provider/model, engine pulse, session count, version, user.
-// Buddy rule: smashing the car while Infinite OS is working, standing by when idle/offline.
 export function StatusBar() {
   const user = useAuthStore((s) => s.user);
   const sessionCount = useChatStore((s) => s.sessions.length);
-  const streaming = useChatStore((s) => s.streaming);
-  const chatTasks = useAgentsStore((s) => s.chatTasks);
-  const runs = useAgentsStore((s) => s.runs);
-  const subTasks = useAgentsStore((s) => s.subTasks);
-  const multiTasks = useMultiAgentStore((s) => s.tasks);
-  const activeAutomation = useAutomationStore((s) => s.activeRun);
-  const [isOnline, setIsOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [provider, setProvider] = useState('…');
   const [model, setModel] = useState('');
   const [version, setVersion] = useState('');
   const [engineOk, setEngineOk] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const onOnline = () => setIsOnline(true);
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-    };
-  }, []);
-
-  const agentWorking =
-    chatTasks.some((t) => t.status === 'working') ||
-    runs.some((r) => r.status === 'queued' || r.status === 'running') ||
-    subTasks.some((t) => t.status === 'pending' || t.status === 'running') ||
-    multiTasks.some((t) => t.status === 'pending' || t.status === 'in_progress') ||
-    (activeAutomation != null &&
-      (activeAutomation.status === 'starting' || activeAutomation.status === 'running'));
-
-  // True "Infinite OS working" = engine ok + online + any real work happening.
-  // Otherwise the buddy just stands beside the car.
-  const systemWorking = streaming || agentWorking;
-  const systemOffline = !isOnline || engineOk === false;
 
   useEffect(() => {
     let alive = true;
@@ -86,8 +50,7 @@ export function StatusBar() {
   }, []);
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-white/[0.06] bg-[#0a0a0e]/90 px-3 text-[11px] text-zinc-500 select-none">
-      <AgentBuddy working={systemWorking} offline={systemOffline} />
+    <footer className="flex h-6 shrink-0 items-center gap-2 border-t border-white/[0.06] bg-[#0a0a0e]/90 px-2 text-[10px] text-zinc-500 select-none">
       <span className="inline-flex items-center gap-1.5" title={engineOk === false ? 'Engine issue' : 'Engine status'}>
         <span
           className={`h-1.5 w-1.5 rounded-full ${

@@ -1,10 +1,9 @@
 import type { Tool, ToolResult } from './base.js';
-
-// In-session checklist. State lives in the session store; this tool just appends entries.
+import { getTodos, setTodos, type TodoItem } from '../agent/todo-store.js';
 
 export const todowrite: Tool = {
   name: 'TodoWrite',
-  description: 'Manage the in-session task checklist. Pass an array of {status, content, activeForm} items to set the list.',
+  description: 'Manage the persistent in-session task checklist. Pass an array of {status, content, activeForm} items to set the full list. The plan persists across turns and renders live for the user.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -25,10 +24,24 @@ export const todowrite: Tool = {
   },
   permission: 'none',
 
-  async execute(args): Promise<ToolResult> {
-    const { items } = args as { items: { status: string; content: string; activeForm?: string }[] };
-    // Renderer subscribes to a side channel to render the todo list.
-    return { content: items.map((i) => `[${i.status}] ${i.content}`).join('\n') };
+  async execute(args, ctx): Promise<ToolResult> {
+    const { items } = args as { items: TodoItem[] };
+    const saved = setTodos(ctx.sessionId, Array.isArray(items) ? items : []);
+    const done = saved.filter((i) => i.status === 'completed').length;
+    return { content: `Todo list updated: ${saved.length} items (${done} completed, ${saved.length - done} open). Keep exactly one item in_progress and update after each step.` };
   },
 };
 
+export const todoread: Tool = {
+  name: 'TodoRead',
+  description: 'Read the current session task checklist. Use at the start of resuming multi-step work to recover the plan and what remains.',
+  inputSchema: { type: 'object', properties: {} },
+  permission: 'none',
+
+  async execute(_args, ctx): Promise<ToolResult> {
+    const items = getTodos(ctx.sessionId);
+    if (!items.length) return { content: 'No todos yet for this session. Plan multi-step work with TodoWrite.' };
+    const lines = items.map((i) => `[${i.status}] ${i.content}`);
+    return { content: `Session todos:\n${lines.join('\n')}` };
+  },
+};

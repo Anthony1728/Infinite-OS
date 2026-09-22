@@ -1,6 +1,7 @@
-import { lstat, rm } from 'node:fs/promises';
+import { lstat, rm, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
+import { recordFileMutation } from '../agent/edit-checkpoint.js';
 
 export const deleteTool: Tool = {
   name: 'Delete',
@@ -25,7 +26,11 @@ export const deleteTool: Tool = {
       if (stat.isDirectory() && !input.recursive) {
         return { content: `Refusing to delete directory ${target} without recursive=true.`, is_error: true };
       }
+      const original = stat.isFile() ? await readFile(target, 'utf8').catch(() => undefined) : undefined;
       await rm(target, { recursive: Boolean(input.recursive), force: false });
+      if (stat.isFile()) {
+        recordFileMutation({ sessionId: ctx.sessionId, path: target, operation: 'delete', originalContent: original, newContent: '' });
+      }
       return { content: `Deleted ${target}.` };
     } catch (error) {
       return { content: `Delete failed for ${target}: ${(error as Error).message}`, is_error: true };

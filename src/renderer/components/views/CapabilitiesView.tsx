@@ -196,11 +196,7 @@ export function CapabilitiesView() {
 
   const handleToggleSkill = async (skill: SkillInfo) => {
     try {
-      if (skill.enabled) {
-        await window.api.skillsDisable(skill.id);
-      } else {
-        await window.api.skillsEnable(skill.id);
-      }
+      await window.api.skillsToggle(skill.id);
       // Refresh
       const updated = await window.api.skillsList().catch(() => [] as SkillInfo[]);
       setSkills(updated);

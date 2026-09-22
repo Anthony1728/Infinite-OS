@@ -61,6 +61,7 @@ export type AgentEvent =
   | { type: 'message_start'; runId: string; message_id: string }
   | { type: 'provider_start'; runId: string; message_id: string; provider: string; model: string; requested_provider?: string; requested_model?: string; turn: number }
   | { type: 'tool_use_start'; runId: string; message_id: string; tool_use_id: string; name: string }
+  | { type: 'tool_use_delta'; runId: string; message_id: string; tool_use_id: string; partial_json: string }
   | { type: 'tool_use_end'; runId: string; message_id: string; tool_use_id: string; name: string; input: unknown }
   | { type: 'tool_progress'; runId: string; tool_use_id: string; name: string; status: 'running' | 'completed' | 'error'; detail?: string }
   | { type: 'tool_result'; runId: string; tool_use_id: string; content: unknown; is_error?: boolean; partial?: boolean }

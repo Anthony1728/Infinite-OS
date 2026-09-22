@@ -39,10 +39,17 @@ export const anthropic: ProviderAdapter = {
   async *streamChat(req: ChatRequest, apiKey): AsyncIterable<StreamChunk> {
     const client = new Anthropic({ apiKey });
     try {
+      // Prompt caching: the system prompt is static per session and the tail
+      // of the conversation is stable between loop turns, so a cache breakpoint
+      // on the system prompt saves ~90% of input tokens on multi-turn agent
+      // runs. (The older bundled SDK types lack cache_control — cast.)
+      const systemBlocks = req.system
+        ? [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } } as unknown as Anthropic.TextBlockParam]
+        : [];
       const stream = client.messages.stream({
         model: req.model,
         max_tokens: req.max_tokens ?? 4096,
-        system: req.system,
+        system: systemBlocks.length ? systemBlocks : undefined,
         messages: toAnthropicMessages(req.messages),
         tools: req.tools?.map((t) => ({
           name: t.name,
@@ -82,12 +89,18 @@ export const anthropic: ProviderAdapter = {
         }
         if (event.type === 'message_stop') {
           const final = await stream.finalMessage();
+          const usage = final.usage as typeof final.usage & {
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
           yield {
             type: 'message_end',
             stop_reason: final.stop_reason ?? 'end_turn',
             usage: {
               input: final.usage.input_tokens,
               output: final.usage.output_tokens,
+              cache_read: usage.cache_read_input_tokens ?? 0,
+              cache_write: usage.cache_creation_input_tokens ?? 0,
             },
           };
         }

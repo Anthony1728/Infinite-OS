@@ -91,7 +91,7 @@ function fmt(a: Appointment): string {
 export const appointmentsTool: Tool = {
   name: 'Appointments',
   description:
-    'Customer booking ledger with real availability. request proposes a slot (conflicts are reported, never silently double-booked); confirm/cancel change status; availability lists free slots in a window; list shows upcoming. When unsure (VIP customer, conflict, odd hours), ask the owner with the question UI instead of guessing — then confirm. Times are ISO strings.',
+    'Booking ledger with real availability. request proposes (conflicts reported, never double-booked); confirm/cancel/status; availability lists free slots; list shows upcoming. Unsure (VIP, conflict, odd hours)? Ask the owner instead of guessing. Times are ISO.',
   inputSchema: {
     type: 'object',
     properties: {

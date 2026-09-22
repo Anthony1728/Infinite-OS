@@ -77,39 +77,65 @@ export class OCRManager {
   }
 
   async analyzeImage(imagePath: string, prompt: string): Promise<string> {
-    // Use AI vision model to analyze image
+    // Use AI vision model to analyze image — routed through the provider
+    // registry so the user's configured key (NVIDIA NIM, OpenAI, OpenRouter)
+    // is honored instead of only process.env.OPENAI_API_KEY.
     try {
       const imageData = readFileSync(imagePath).toString('base64');
       const ext = imagePath.split('.').pop()?.toLowerCase() || 'png';
       const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
 
-      // Call OpenAI vision API if key is available
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (apiKey) {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: prompt },
-                  { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageData}` } },
-                ],
-              },
-            ],
-            max_tokens: 1000,
-          }),
-        });
-        const data = (await response.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        return data.choices?.[0]?.message?.content || 'No analysis available';
+      const { getApiKey } = await import('../settings/secrets.js');
+      const { getProvider } = await import('../providers/registry.js');
+      const candidates: Array<{ provider: string; model: string; apiKey: string; baseUrl?: string }> = [];
+      for (const [providerId, modelId] of [
+        ['nvidia', 'google/gemma-3-12b-it'],
+        ['openai', 'gpt-4o'],
+        ['openrouter', 'google/gemma-4-31b-it:free'],
+      ] as Array<[string, string]>) {
+        try {
+          const key = (await getApiKey(providerId).catch(() => '')) || process.env[`${providerId.toUpperCase()}_API_KEY`] || (providerId === 'nvidia' ? process.env.NVIDIA_API_KEY : '');
+          if (!key) continue;
+          const adapter = getProvider(providerId);
+          if (!adapter) continue;
+          candidates.push({ provider: providerId, model: modelId, apiKey: key, baseUrl: adapter.defaultBaseUrl });
+        } catch { /* try next provider */ }
+      }
+      // Legacy env-only fallback: OPENAI_API_KEY without a saved secret.
+      if (candidates.length === 0 && process.env.OPENAI_API_KEY) {
+        candidates.push({ provider: 'openai', model: 'gpt-4o', apiKey: process.env.OPENAI_API_KEY, baseUrl: 'https://api.openai.com/v1' });
+      }
+      for (const candidate of candidates) {
+        try {
+          const adapter = getProvider(candidate.provider);
+          if (!adapter) continue;
+          let text = '';
+          let providerError = '';
+          for await (const chunk of adapter.streamChat(
+            {
+              model: candidate.model,
+              messages: [
+                {
+                  id: 'ocr-vision',
+                  role: 'user',
+                  timestamp: Date.now(),
+                  content: [
+                    { type: 'text', text: prompt },
+                    { type: 'image', source: { type: 'base64', mediaType: mimeType as 'image/png' | 'image/jpeg', data: imageData } },
+                  ],
+                },
+              ],
+              stream: true,
+            },
+            candidate.apiKey,
+            candidate.baseUrl,
+          )) {
+            if (chunk.type === 'text_delta') text += chunk.text;
+            else if (chunk.type === 'error') providerError = chunk.error;
+          }
+          if (providerError) continue;
+          if (text.trim()) return text.trim();
+        } catch { /* try next provider, then OCR fallback */ }
       }
 
       // Fallback to OCR

@@ -92,18 +92,15 @@ export async function startOrchestratorServer(): Promise<void> {
     };
   });
 
-  // List available providers/models
+  // List available providers/models — authoritative registry, not a hardcoded subset.
   fastify.get('/api/providers', async () => {
-    // Return known providers - this could be enhanced to query the registry
+    const { listProviders } = await import('../providers/registry.js');
     return {
-      providers: [
-        { id: 'openrouter', name: 'OpenRouter', requiresApiKey: true },
-        { id: 'ollama', name: 'Ollama (Local)', requiresApiKey: false },
-        { id: 'opencode', name: 'OpenCode', requiresApiKey: false },
-        { id: 'openai', name: 'OpenAI', requiresApiKey: true },
-        { id: 'anthropic', name: 'Anthropic', requiresApiKey: true },
-        { id: 'gemini', name: 'Google Gemini', requiresApiKey: true },
-      ],
+      providers: listProviders().map((p) => ({
+        id: p.id,
+        name: p.label,
+        requiresApiKey: p.requiresApiKey,
+      })),
     };
   });
 

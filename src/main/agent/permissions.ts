@@ -87,6 +87,14 @@ export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cw
   return true;
 }
 
+/**
+ * Human-readable name of the permission profile currently in effect.
+ * Used by the action audit log to record under what authority an action ran.
+ */
+export function currentPermissionProfile(): string {
+  return resolvePermissionProfile() ?? 'default';
+}
+
 function resolvePermissionProfile(): PermissionProfile | null {
   const explicit = settings.get('permissionProfile') as string | undefined;
   if (explicit === ':full-system-access' || explicit === 'fullSystemAccess' || explicit === 'full-system-access' || explicit === 'full_system_access') return ':full-system-access';

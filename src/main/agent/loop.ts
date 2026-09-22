@@ -27,7 +27,10 @@ import {
   type CapabilityFailureType,
 } from '../providers/failover.js';
 import { routeForcedBrowserTool } from './browser-routing.js';
+import { StreamCoalescer } from './stream-coalescer.js';
+import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
+import { shouldCompact, compactMessages } from './compaction.js';
 export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
@@ -40,7 +43,12 @@ export let LOOP_STREAM_STALL_TIMEOUT_MS = 60_000;
 export const setLoopStallTimeout = (ms: number) => { LOOP_STREAM_STALL_TIMEOUT_MS = ms; };
 
 /** Build a user-facing message when all failover candidates are exhausted. */
-function buildExhaustedMessage(plan: ProviderCandidate[], lastError: string, capTracker?: CapabilityTracker): string {
+function buildExhaustedMessage(
+  plan: ProviderCandidate[],
+  lastError: string,
+  capTracker?: CapabilityTracker,
+  candidateErrors?: Array<{ label: string; error: string }>,
+): string {
   const triedModels = [...new Set(plan.map((c) => `${c.provider}/${c.model}`))];
   const errorType = classifyError(lastError);
 
@@ -106,6 +114,14 @@ function buildExhaustedMessage(plan: ProviderCandidate[], lastError: string, cap
 
   details.push('');
   details.push(`Models tried: ${triedModels.join(', ')}`);
+  if (candidateErrors?.length) {
+    details.push('');
+    details.push('Per-model errors:');
+    for (const entry of candidateErrors.slice(0, 6)) {
+      details.push(`  - ${entry.label}: ${entry.error}`);
+    }
+    if (candidateErrors.length > 6) details.push(`  - …and ${candidateErrors.length - 6} more`);
+  }
   return `${header}\n${details.join('\n')}`;
 }
 
@@ -279,6 +295,10 @@ export async function runAgent(
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
   const problemTracker = new ProblemTracker();
+  // Per-candidate failure log for the exhausted-run diagnosis (loop.ts): the
+  // final message names every model tried and why each one failed instead of
+  // only the last error.
+  const candidateErrors: Array<{ label: string; error: string }> = [];
 
   // ── Autonomous Agent Architecture: Prompt Architect → Critic → Execution Brief ──
   // For non-trivial objectives, derive a compact execution brief once per run.
@@ -307,6 +327,7 @@ export async function runAgent(
 
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
+    candidateErrors.push({ label: activeCandidate.label, error: failure.slice(0, 220) });
     // Kill-switch: never leave the selected model. The caller surfaces the
     // real error instead of substituting another model.
     if (!failoverEnabled) return false;
@@ -351,6 +372,58 @@ export async function runAgent(
     }
     problemTracker.setTurn(turn);
     if (opts.signal.aborted) break;
+
+    // Auto-compaction: before building this turn's request, summarize old
+    // turns when history approaches the model's context window. Long tool-heavy
+    // runs (the ones that matter) no longer silently lose their oldest context.
+    if (turn > 0 && providerSupportsTools(activeCandidate.provider, activeCandidate.model)) {
+      try {
+        const contextBudget = getProvider(activeCandidate.provider)?.freeModels.find((item) => item.id === activeCandidate.model)?.context_window ?? 64_000;
+        if (shouldCompact(messages, contextBudget)) {
+          const summarize = async (prompt: string): Promise<string> => {
+            const { getProvider: getProviderForSummarizer } = await import('../providers/registry.js');
+            // Local-first: the summarizer is a background chore — prefer a free
+            // local model when Ollama has one, then the active candidate.
+            const { listOllamaModels } = await import('../ollama/utils.js');
+            const localModels = await listOllamaModels().catch(() => []);
+            let summarizerProvider = getProvider(activeCandidate.provider);
+            let summarizerModel = activeCandidate.model;
+            if (localModels.length > 0) {
+              const local = getProviderForSummarizer('ollama');
+              if (local) {
+                summarizerProvider = local;
+                summarizerModel = localModels[0].id;
+              }
+            }
+            const collected: string[] = [];
+            if (!summarizerProvider) throw new Error('summarizer provider unavailable');
+            const stream = summarizerProvider.streamChat({
+              model: summarizerModel,
+              cwd: opts.cwd,
+              messages: [{ id: 'compaction', role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() }],
+              system: 'You compress agent-work transcripts into structured handoff notes. Keep file paths, commands, error messages, and decisions exact. No preamble — only the requested sections.',
+              stream: true,
+              signal: opts.signal,
+            }, activeCandidate.apiKey);
+      for await (const chunk of stream) {
+              if (chunk.type === 'text_delta') collected.push(chunk.text);
+              if (chunk.type === 'error') throw new Error(chunk.error);
+            }
+            return collected.join('');
+          };
+          const result = await compactMessages({ messages, contextTokenBudget: contextBudget, originalRequest, summarize, onEvent: (detail) => opts.onEvent({ type: 'provider_status', status: detail }) });
+          if (result) {
+            // Replace history in place: the array identity is shared with the
+            // caller, so splice instead of reassigning.
+            messages.splice(0, messages.length, ...result.messages);
+            console.log(`[agent] Compacted context: ${result.stats.originalMessages} → ${result.stats.compactedMessages} messages (summarized ${result.stats.summarizedTurns} turns)`);
+          }
+        }
+      } catch (e) {
+        // Compaction is best-effort; a failure must never kill the run.
+        console.warn('[agent] Compaction skipped:', (e as Error).message);
+      }
+    }
 
     const activeProvider = getProvider(activeCandidate.provider);
     if (!activeProvider) {
@@ -485,6 +558,20 @@ export async function runAgent(
     );
 
     const pendingToolCalls: Map<string, { name: string; json: string }> = new Map();
+    // Coalesce tiny text deltas into ~50ms frames: the first token still
+    // lands instantly, but fast streams stop re-rendering the UI per token.
+    const deltaCoalescer = new StreamCoalescer({
+      onFlush: (text) => opts.onEvent({ type: "text_delta", message_id: assistant.id, text }),
+    });
+    // Stream tool calls AS THEY FORM: name announced early, partial input JSON
+    // batched into ~40ms frames (snapshot semantics) so the renderer's card
+    // grows live instead of appearing fully-formed after the call completes.
+    const toolArgCoalescer = new ToolCallArgCoalescer({
+      onDelta: ({ id, name, partialJson }) => {
+        if (name) opts.onEvent({ type: "tool_use_start", message_id: assistant.id, tool_use_id: id, name });
+        if (partialJson) opts.onEvent({ type: "tool_use_delta", message_id: assistant.id, tool_use_id: id, partial_json: partialJson });
+      },
+    });
 
     let streamLastEvent = Date.now();
     let streamStallInterval: ReturnType<typeof setInterval> | undefined;
@@ -505,11 +592,11 @@ export async function runAgent(
         switch (chunk.type) {
           case 'text_delta':
             appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
-            opts.onEvent({ type: 'text_delta', message_id: assistant.id, text: chunk.text });
+            deltaCoalescer.push(chunk.text);
             break;
           case 'tool_use_start':
             pendingToolCalls.set(chunk.id, { name: chunk.name, json: '' });
-            opts.onEvent({ type: 'tool_use_start', message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name });
+            toolArgCoalescer.start(chunk.id, chunk.name);
             break;
           case 'tool_use_delta': {
             const existing = pendingToolCalls.get(chunk.id);
@@ -518,7 +605,8 @@ export async function runAgent(
             } else {
               pendingToolCalls.set(chunk.id, { name: '', json: chunk.partial_json });
             }
-            opts.onEvent({ type: 'tool_use_delta', message_id: assistant.id, tool_use_id: chunk.id, partial_json: chunk.partial_json });
+            const tracked = pendingToolCalls.get(chunk.id)!;
+            toolArgCoalescer.delta(chunk.id, tracked.json, tracked.name);
             break;
           }
           case 'tool_use_end': {
@@ -533,6 +621,7 @@ export async function runAgent(
             const block: ContentBlock = { type: 'tool_use', id: chunk.id, name, input: parsed };
             assistant.content.push(block);
             pendingToolCalls.delete(chunk.id);
+            toolArgCoalescer.end(chunk.id, name);
             opts.onEvent({ type: 'tool_use_end', message_id: assistant.id, tool_use_id: chunk.id, name, input: parsed });
             break;
           }
@@ -601,6 +690,8 @@ export async function runAgent(
       if (!providerFailure) providerFailure = error.message;
     } finally {
       if (streamStallInterval) clearInterval(streamStallInterval);
+      deltaCoalescer.dispose();
+      toolArgCoalescer.dispose();
       opts.signal.removeEventListener('abort', onParentAbort);
       performanceMetrics.totalStreamMs += Date.now() - streamStartTime;
     }
@@ -639,7 +730,7 @@ export async function runAgent(
       // All candidates exhausted — the full diagnosis (models tried + last
       // error) travels on the event so the UI shows the real problem
       // instead of silently substituting another answer.
-      const errorMsg = buildExhaustedMessage(failoverPlan, providerFailure, capTracker);
+      const errorMsg = buildExhaustedMessage(failoverPlan, providerFailure, capTracker, candidateErrors);
       opts.onEvent({ type: 'provider_status', status: errorMsg });
       opts.onEvent({ type: 'fallback_required', error: errorMsg });
       return messages;
@@ -1006,7 +1097,11 @@ function providerSupportsTools(providerId: string, model: string): boolean {
   const provider = getProvider(providerId);
   if (!provider) return false;
   const knownModel = provider.freeModels.find((item) => item.id === model);
-  return knownModel?.supports_tools !== false;
+  // Opt-out semantics: a model is tool-less only when its catalog explicitly
+  // says so. Unknown/custom/gateway models are OpenAI-compatible by definition
+  // of their provider adapter, so they keep tools (fixes custom endpoints and
+  // key-metered catalogs silently losing the entire tool loop).
+  return knownModel ? knownModel.supports_tools !== false : true;
 }
 
 function appendOrCreate(blocks: ContentBlock[], block: ContentBlock) {

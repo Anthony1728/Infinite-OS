@@ -2,8 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc.js';
 
 const api = {
-  sendMessage: (args: { sessionId: string; message: unknown; displayMessage?: unknown; provider: string; model: string; cwd: string }) =>
+  sendMessage: (args: { sessionId: string; message: unknown; displayMessage?: unknown; provider: string; model: string; cwd: string; planMode?: boolean }) =>
     ipcRenderer.invoke(IPC.CHAT_SEND, args),
+  resolvePlan: (args: { sessionId: string; approved: boolean }) => ipcRenderer.invoke(IPC.CHAT_PLAN_RESOLVE, args),
+  resolveQuestion: (args: { id: string; answers: Record<string, string>; skipped: Record<string, boolean> }) =>
+    ipcRenderer.invoke(IPC.CHAT_QUESTION_RESOLVE, args),
+  listBackgroundTasks: () => ipcRenderer.invoke(IPC.BACKGROUND_TASKS_LIST),
   abortMessage: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.CHAT_ABORT, args),
   interjectMessage: (args: { sessionId: string; message: string }) => ipcRenderer.invoke(IPC.CHAT_INTERJECT, args),
   operatorBrowserSearch: (args: { query: string }) => ipcRenderer.invoke(IPC.OPERATOR_BROWSER_SEARCH, args),
@@ -50,8 +54,19 @@ const api = {
     ipcRenderer.invoke(IPC.PROVIDER_MODELS, args),
   setProviderKey: (args: { provider: string; key: string }) => ipcRenderer.invoke(IPC.PROVIDER_SET_KEY, args),
   hasProviderKey: (args: { provider: string }) => ipcRenderer.invoke(IPC.PROVIDER_HAS_KEY, args),
+  opencodeCliVersion: () => ipcRenderer.invoke(IPC.OPENCODE_CLI_VERSION),
+  opencodeCliUpgrade: () => ipcRenderer.invoke(IPC.OPENCODE_CLI_UPGRADE),
+  opencodeServerRestart: () => ipcRenderer.invoke(IPC.OPENCODE_SERVER_RESTART),
 
   listTools: () => ipcRenderer.invoke(IPC.TOOLS_LIST),
+
+  // Action audit log (query the agent's black-box record)
+  auditRecent: (args?: { limit?: number }) => ipcRenderer.invoke(IPC.AUDIT_RECENT, args),
+  auditQuery: (args?: { sessionId?: string; tool?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC.AUDIT_QUERY, args),
+  auditDay: (args?: { date?: string }) => ipcRenderer.invoke(IPC.AUDIT_DAY, args),
+  auditStats: () => ipcRenderer.invoke(IPC.AUDIT_STATS),
+  auditVerify: () => ipcRenderer.invoke(IPC.AUDIT_VERIFY),
 
   listAgents: () => ipcRenderer.invoke(IPC.AGENT_LIST),
   listAgentRuns: () => ipcRenderer.invoke(IPC.AGENT_RUNS),
@@ -350,6 +365,8 @@ const api = {
   skillsStats: () => ipcRenderer.invoke(IPC.SKILLS_STATS),
   skillsImportClaude: (args: { filePath: string }) => ipcRenderer.invoke(IPC.SKILLS_IMPORT_CLAUDE, args),
   skillsRelevant: (args: { task: string }) => ipcRenderer.invoke(IPC.SKILLS_RELEVANT, args),
+  skillsExport: (args?: { skillIds?: string[] }) => ipcRenderer.invoke(IPC.SKILLS_EXPORT, args),
+  skillsImport: (args: { manifest: unknown }) => ipcRenderer.invoke(IPC.SKILLS_IMPORT, args),
 
   // Personalization
   profileGet: () => ipcRenderer.invoke('profile:get'),

@@ -3,6 +3,7 @@ import type { ProviderInfo } from '../../../shared/types';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { useUiTheme, UI_THEMES } from '../../theme/uiTheme';
 import { TEMPLATE_PRESETS, useUIStore, type UITemplate } from '../../stores/ui';
+import { syncActiveModelToMain } from '../../utils/active-model-sync';
 
 const TEMPLATE_CARDS: Array<{ id: UITemplate; name: string; description: string; colors: string[] }> = [
   { id: 'infinite', name: 'Infinite', description: 'Balanced cosmic workspace', colors: ['#080b14', '#8b5cf6', '#22d3ee'] },
@@ -99,6 +100,11 @@ function loadCurrent(): CurrentSettings {
 function saveCurrent(patch: Partial<CurrentSettings>) {
   const current = loadCurrent();
   localStorage.setItem('infinite:current', JSON.stringify({ ...current, ...patch }));
+  // Keep the main-process store in sync so background turns (WhatsApp,
+  // Telegram, scheduled runs) use the picked model, never a local fallback.
+  if (patch.provider !== undefined || patch.model !== undefined || patch.cwd !== undefined) {
+    syncActiveModelToMain({ ...current, ...patch });
+  }
 }
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -198,10 +204,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           if (!result.ok) {
             setStatus('fail');
             setStatusMessage(result.error || 'Local provider is unavailable.');
-            if (selectedProvider.acceptsApiKey) {
-              const fallbackList = await window.api.listProviderModels({ provider: activeProvider });
-              if (!cancelled) setModels((fallbackList as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === activeProvider));
-            }
             return;
           }
           const list = await window.api.listProviderModels({ provider: activeProvider });
@@ -252,7 +254,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const test = async () => {
     setStatus('testing');
-    setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models...' : 'Checking provider connection...');
+    setStatusMessage('Checking provider connection...');
     // Pasted keys routinely carry stray whitespace/newlines — trim before
     // testing AND saving, or every provider 401s a perfectly good key.
     const trimmedKey = apiKey.trim();
@@ -279,11 +281,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         saveCurrent({ provider: activeProvider, model: nextModel, hasApiKey: Boolean(apiKey.trim() || apiKeyLoaded) });
         if (nextModel) setCurrentModel(nextModel);
         setStatusMessage(
-          activeProvider === 'opencode'
-            ? `OpenCode connected - ${nextModels.length} model${nextModels.length === 1 ? '' : 's'} available`
-            : nextModel
-              ? `Connected - ${nextModel}`
-              : 'Connected',
+          nextModel
+            ? `Connected - ${nextModel}`
+            : 'Connected',
         );
         window.dispatchEvent(new Event('storage'));
       } else {
@@ -298,25 +298,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const handleUseInstalledOpenCode = async () => {
     setStatus('testing');
-    setStatusMessage('Switching to installed OpenCode credentials...');
+    setStatusMessage('Checking OpenCode and loading free models…');
     try {
       await window.api.setProviderKey({ provider: 'opencode', key: '' });
       setApiKey('');
       setApiKeyLoaded(false);
       const result = await window.api.testProvider({ provider: 'opencode', apiKey: '' });
       const list = await window.api.listProviderModels({ provider: 'opencode', apiKey: '' });
-      const nextModels = (list as { id: string; label: string; free: boolean; provider?: string }[]).filter((m) => !m.provider || m.provider === 'opencode');
-      setModels(nextModels);
-      const saved = loadCurrent();
-      const nextModel = nextModels.some((model) => model.id === saved.model) ? saved.model : nextModels[0]?.id;
-      saveCurrent({ provider: 'opencode', model: nextModel, hasApiKey: false });
-      if (nextModel) setCurrentModel(nextModel);
-      setStatus(result.ok ? 'ok' : 'fail');
-      setStatusMessage(result.ok ? 'Using installed OpenCode CLI credentials.' : result.error || 'OpenCode CLI is unavailable.');
-      window.dispatchEvent(new Event('storage'));
+      const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
+        .filter((model) => !model.provider || model.provider === 'opencode');
+      setModels(modelList);
+      if (result.ok && modelList.length > 0) {
+        setStatus('ok');
+        setStatusMessage(`${modelList.length} free models available`);
+        const saved = loadCurrent();
+        const nextModel = modelList.some((model) => model.id === saved.model) ? saved.model : modelList[0]?.id;
+        saveCurrent({ provider: 'opencode', model: nextModel, hasApiKey: false });
+        if (nextModel) setCurrentModel(nextModel);
+        window.dispatchEvent(new Event('storage'));
+      } else {
+        setStatus('fail');
+        setStatusMessage(result.error || 'OpenCode CLI is unavailable.');
+      }
     } catch (error) {
       setStatus('fail');
-      setStatusMessage(error instanceof Error ? error.message : 'Could not switch to installed OpenCode credentials.');
+      setStatusMessage(error instanceof Error ? error.message : 'Could not connect to OpenCode');
     }
   };
 
@@ -665,9 +671,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     >
                       <div className="font-medium text-sm text-zinc-100">{p.label}</div>
                       {p.requiresApiKey && <div className="text-xs text-zinc-500 mt-0.5">Requires API key</div>}
-                      {!p.requiresApiKey && p.acceptsApiKey && (
-                        <div className="text-xs text-zinc-500 mt-0.5">CLI or optional subscription key</div>
-                      )}
                       {p.freeModels.length > 0 && (
                         <div className="text-xs text-zinc-400 mt-0.5">{p.freeModels.length} free models</div>
                       )}
@@ -715,7 +718,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         type="password"
                         value={apiKey}
                         onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={apiKeyLoaded ? 'Key saved securely (enter a new key to replace it)' : provider.acceptsApiKey ? 'Paste your OpenCode Zen API key' : 'Paste your API key'}
+                        placeholder={apiKeyLoaded ? 'Key saved securely (enter a new key to replace it)' : 'Paste your API key'}
                         className="flex-1 rounded-lg border border-white/[0.08] bg-black/30 px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-white/[0.25] transition-colors placeholder:text-zinc-600"
                       />
                       <button
@@ -724,20 +727,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         className="btn-premium shrink-0 px-4 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {status === 'testing'
-                          ? activeProvider === 'opencode' ? 'Scanning...' : 'Testing...'
-                          : activeProvider === 'opencode' && apiKey.trim()
-                            ? 'Save & Scan Models'
-                            : apiKey.trim()
-                              ? 'Test & Save'
-                              : 'Test Connection'}
+                          ? 'Testing...'
+                          : apiKey.trim()
+                            ? 'Test & Save'
+                            : 'Test Connection'}
                       </button>
                     </div>
-                    {provider.acceptsApiKey && (
-                      <div className="mt-2 flex items-center justify-between gap-3">
-                        <p className="text-xs text-zinc-500">Free path: use your installed OpenCode CLI credentials — no key needed. Or paste an OpenCode Zen key to scan Zen models.</p>
-                        <button onClick={() => void handleUseInstalledOpenCode()} className="shrink-0 text-xs text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline">Use installed CLI (free)</button>
+                  </div>
+                )}
+
+                {activeProvider === 'opencode' && (
+                  <div className="mb-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-zinc-100">Free models — no API key needed</div>
+                        <p className="mt-0.5 text-xs text-zinc-500">Uses your installed OpenCode CLI and its signed-in account.</p>
                       </div>
-                    )}
+                      <button
+                        onClick={() => void handleUseInstalledOpenCode()}
+                        disabled={status === 'testing'}
+                        className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {status === 'testing' ? 'Connecting…' : models.length > 0 ? `Connected · ${models.length} free` : 'Use OpenCode Free'}
+                      </button>
+                    </div>
                   </div>
                 )}
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ProviderInfo } from '../../../shared/types';
 import { useNotificationStore } from '../../stores/notifications';
+import { syncActiveModelToMain } from '../../utils/active-model-sync';
 import { useUIStore, type LogoStyle } from '../../stores/ui';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { useChatStore } from '../../stores/chat';
@@ -36,12 +37,18 @@ function loadCurrent(): CurrentSettings {
     const raw = localStorage.getItem('infinite:current');
     if (raw) return JSON.parse(raw);
   } catch { /* ignore */ }
-  return { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free', cwd: '.' };
+  return { provider: 'openrouter', model: 'google/gemma-4-31b-it:free', cwd: '.' };
 }
 
 function saveCurrent(patch: Partial<CurrentSettings>) {
   const current = loadCurrent();
   localStorage.setItem('infinite:current', JSON.stringify({ ...current, ...patch }));
+  // Background consumers (WhatsApp/Telegram turns, scheduled runs) read the
+  // selection from the main-process store — keep it in sync so they answer on
+  // the picked model instead of a silent local fallback.
+  if (patch.provider !== undefined || patch.model !== undefined || patch.cwd !== undefined) {
+    syncActiveModelToMain({ ...current, ...patch });
+  }
 }
 
 function PhoneConnectCard() {
@@ -79,7 +86,7 @@ function PhoneConnectCard() {
             <div className="text-[10px] uppercase tracking-wider text-textMuted/60">Phone URL</div>
             <div className="mt-1 break-all font-mono text-xs text-textMain bg-black/20 border border-white/10 rounded-lg px-2.5 py-2">{url}</div>
             <div className="mt-2 flex gap-2">
-              <button onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch {} }} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-textMain hover:bg-white/[0.07]">{copied ? 'Copied!' : 'Copy link'}</button>
+              <button onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ } }} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-textMain hover:bg-white/[0.07]">{copied ? 'Copied!' : 'Copy link'}</button>
               <button onClick={() => window.open(url, '_blank')} className="rounded-lg bg-white text-black px-3 py-1.5 text-xs font-medium hover:bg-zinc-100">Open preview</button>
             </div>
             <p className="text-[10px] text-textMuted mt-2">Phone & PC must be on the same Wi-Fi/network (or VPN). If the page doesn't load, allow Infinite OS through Windows Firewall for port 8766.</p>
@@ -170,7 +177,7 @@ export function SettingsView() {
       if (selectedProvider.requiresApiKey && !has) return;
 
       setStatus('testing');
-      setStatusMessage(activeProvider === 'opencode' ? 'Checking OpenCode and loading models…' : 'Checking provider…');
+      setStatusMessage('Checking provider…');
       const result = await window.api.testProvider({ provider: activeProvider, apiKey: '' });
       if (cancelled) return;
       const list = await window.api.listProviderModels({ provider: activeProvider });
@@ -180,16 +187,9 @@ export function SettingsView() {
       setModels(modelList);
       setStatus(result.ok ? 'ok' : 'fail');
       setStatusMessage(result.ok ? `${modelList.length} models available` : result.error || 'Connection failed');
-
-      if (result.ok) {
-        const current = loadCurrent();
-        const nextModel = current.provider === activeProvider && modelList.some((model) => model.id === current.model)
-          ? current.model
-          : modelList.find((model) => model.free)?.id ?? modelList[0]?.id ?? '';
-        saveCurrent({ provider: activeProvider, model: nextModel, hasApiKey: has });
-        setCurrentModel(nextModel);
-        window.dispatchEvent(new Event('storage'));
-      }
+      // Display only: browsing provider tabs must never rewrite the chat's
+      // saved provider/model. Selection happens explicitly via Test & Save
+      // or clicking a model.
     })().catch((error) => {
       if (!cancelled) {
         setStatus('fail');
@@ -204,7 +204,7 @@ export function SettingsView() {
 
   const test = async () => {
     setStatus('testing');
-    setStatusMessage(activeProvider === 'opencode' ? 'Validating key and scanning available models…' : 'Checking provider connection…');
+    setStatusMessage('Checking provider connection…');
     try {
       if (activeProvider === 'cloudflare') await saveCloudflareAccountId();
       if (activeProvider === 'custom') await saveCustomFields();
@@ -235,19 +235,10 @@ export function SettingsView() {
           hasApiKey: Boolean(enteredKey || apiKeyLoaded),
         });
         setCurrentModel(nextModel);
-        setStatusMessage(
-          activeProvider === 'opencode'
-            ? `OpenCode connected · ${modelList.length} model${modelList.length === 1 ? '' : 's'} available`
-            : `Connected · ${modelList.length} model${modelList.length === 1 ? '' : 's'} available`,
-        );
+        setStatusMessage(`Connected · ${modelList.length} model${modelList.length === 1 ? '' : 's'} available`);
         window.dispatchEvent(new Event('storage'));
 
-        addToast({
-          type: 'success',
-          title: activeProvider === 'opencode'
-            ? `OpenCode key saved · ${modelList.length} models found`
-            : 'Provider connected and saved',
-        });
+        addToast({ type: 'success', title: 'Provider connected and saved' });
       } else {
         setStatus('fail');
         setStatusMessage(res.error || 'Connection failed');
@@ -263,6 +254,7 @@ export function SettingsView() {
 
   const handleUseInstalledOpenCode = async () => {
     setStatus('testing');
+    setStatusMessage('Checking OpenCode and loading free models…');
     try {
       await window.api.setProviderKey({ provider: 'opencode', key: '' });
       setApiKey('');
@@ -272,19 +264,26 @@ export function SettingsView() {
       const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
         .filter((model) => !model.provider || model.provider === 'opencode');
       setModels(modelList);
-      setStatus(result.ok ? 'ok' : 'fail');
-      setStatusMessage(result.ok ? `${modelList.length} CLI models available` : result.error || 'OpenCode CLI connection failed');
-      const current = loadCurrent();
-      const nextModel = modelList.some((model) => model.id === current.model)
-        ? current.model
-        : modelList.find((model) => model.free)?.id ?? modelList[0]?.id ?? '';
-      saveCurrent({ provider: 'opencode', model: nextModel, hasApiKey: false });
-      setCurrentModel(nextModel);
-      window.dispatchEvent(new Event('storage'));
-      addToast({ type: result.ok ? 'success' : 'error', title: result.ok ? 'Using installed OpenCode credentials' : 'OpenCode CLI connection failed' });
+      if (result.ok && modelList.length > 0) {
+        setStatus('ok');
+        setStatusMessage(`${modelList.length} free models available`);
+        const current = loadCurrent();
+        const nextModel = current.provider === 'opencode' && modelList.some((model) => model.id === current.model)
+          ? current.model
+          : modelList.find((model) => model.free)?.id ?? modelList[0]?.id ?? '';
+        saveCurrent({ provider: 'opencode', model: nextModel, hasApiKey: false });
+        setCurrentModel(nextModel);
+        window.dispatchEvent(new Event('storage'));
+        addToast({ type: 'success', title: 'Using OpenCode free tier (no API key)' });
+      } else {
+        setStatus('fail');
+        const message = result.error || (modelList.length === 0 ? 'No free models available. Sign in to OpenCode (`opencode auth login`) and try again.' : 'OpenCode CLI connection failed');
+        setStatusMessage(message);
+        addToast({ type: 'error', title: message });
+      }
     } catch (error) {
       setStatus('fail');
-      const message = error instanceof Error ? error.message : 'Could not switch credentials';
+      const message = error instanceof Error ? error.message : 'Could not connect to OpenCode';
       setStatusMessage(message);
       addToast({ type: 'error', title: message });
     }
@@ -554,8 +553,6 @@ export function SettingsView() {
                 <div className="font-medium text-sm text-textMain">{p.label}</div>
                 {p.requiresApiKey ? (
                   <div className="text-xs text-textMuted mt-1">Requires API key</div>
-                ) : p.acceptsApiKey ? (
-                  <div className="text-xs text-textMuted mt-1">CLI or optional subscription key</div>
                 ) : (
                   <div className="text-xs text-green-400 mt-1">Local / Free</div>
                 )}
@@ -606,7 +603,7 @@ export function SettingsView() {
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={apiKeyLoaded ? 'Key saved securely (enter a new key to replace it)' : provider.acceptsApiKey ? 'Paste your OpenCode Zen API key' : `Enter your ${provider.label} API key`}
+                  placeholder={apiKeyLoaded ? 'Key saved securely (enter a new key to replace it)' : `Enter your ${provider.label} API key`}
                   className="input-premium flex-1"
                 />
                 <button
@@ -615,20 +612,35 @@ export function SettingsView() {
                   className="btn-premium whitespace-nowrap"
                 >
                   {status === 'testing'
-                    ? activeProvider === 'opencode' ? 'Scanning...' : 'Testing...'
-                    : activeProvider === 'opencode' && apiKey.trim()
-                      ? 'Save & Scan Models'
-                      : apiKey.trim()
-                        ? 'Test & Save'
-                        : 'Test Connection'}
+                    ? 'Testing...'
+                    : apiKey.trim()
+                      ? 'Test & Save'
+                      : 'Test Connection'}
                 </button>
               </div>
-              {provider.acceptsApiKey && (
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <p className="text-xs text-textMuted">Free path — no key needed: use your installed OpenCode CLI. Or paste an OpenCode Zen key to scan Zen models.</p>
-                  <button onClick={() => void handleUseInstalledOpenCode()} className="shrink-0 text-xs text-indigo-300 hover:text-indigo-200">Use installed CLI (free)</button>
-                </div>
+              {activeProvider === 'opencode' && (
+                <p className="mt-2 text-xs text-textMuted">Paste a Zen or Go API key from opencode.ai/auth. Paid subscription models only.</p>
               )}
+            </div>
+          )}
+
+          {activeProvider === 'opencode' && (
+            <div className="mb-4 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-textMain">Free models — no API key needed</div>
+                  <p className="mt-0.5 text-xs text-textMuted">
+                    Uses your installed OpenCode CLI and its signed-in account. Keep the OpenCode app running or let Infinite OS start it for you.
+                  </p>
+                </div>
+                <button
+                  onClick={() => void handleUseInstalledOpenCode()}
+                  disabled={status === 'testing'}
+                  className="shrink-0 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {status === 'testing' ? 'Connecting…' : models.length > 0 ? `Connected · ${models.length} free models` : 'Use OpenCode Free'}
+                </button>
+              </div>
             </div>
           )}
 

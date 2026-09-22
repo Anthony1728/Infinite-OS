@@ -170,7 +170,7 @@ function WebsiteBrowser({ tab, embedded }: { tab: AiWorkspaceTab; embedded?: boo
       setUrl(target);
       setInputUrl(target);
     } else {
-      try { iframeRef.current?.contentWindow?.history.back(); } catch {}
+      try { iframeRef.current?.contentWindow?.history.back(); } catch { /* cross-origin, ignore */ }
     }
   }, [hIdx, history]);
 
@@ -182,7 +182,7 @@ function WebsiteBrowser({ tab, embedded }: { tab: AiWorkspaceTab; embedded?: boo
       setUrl(target);
       setInputUrl(target);
     } else {
-      try { iframeRef.current?.contentWindow?.history.forward(); } catch {}
+      try { iframeRef.current?.contentWindow?.history.forward(); } catch { /* cross-origin, ignore */ }
     }
   }, [hIdx, history]);
 

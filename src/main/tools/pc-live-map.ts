@@ -24,7 +24,7 @@ function pretty(v: unknown): string { try { return JSON.stringify(v, null, 2); }
 export const pcLiveMapTool: Tool = {
   name: 'PCLiveMap',
   description:
-    'Infinite OS PC Live Map v6.1 — Infinite OS native tool, screenshot-free eyes + hands (vectors ALWAYS, screenshot only when vectors cannot see). Lets you SEE the whole PC as live vectors: mouse 0-1000, ALL windows, 50 UIA elements WITH values (read inputs), focused control WITH value, clipboard, idle, virtual screen + seq/stale_ms — and ACT via click_name (no coords), click/move/doubleclick/drag/scroll/type/keys/wait/focus/start with norm 0-1000. ALWAYS prefer this over Computer screenshots/visual_observe: ~500-950 text tokens at 4 Hz, 13-15x cheaper and 50x faster, text-only models drive it fully. Use live/agent before acting; verify seq advanced. Falls back to screenshot only when zone=unknown or text inside canvas/game/scanned PDF with no UIA names/values — say why.',
+    'PC Live Map — screenshot-free eyes + hands: live vectors of all windows, 50 UIA elements WITH values, clipboard, idle. ACT via click_name/click/drag/scroll/type/keys/wait/focus (norm 0-1000). ALWAYS prefer over Computer screenshots: 13-15x cheaper, 50x faster, works with text-only models. Use live/agent before acting; verify seq advanced. Screenshot fallback only when vectors cannot see (canvas/game/scanned PDF) — say why.',
   inputSchema: {
     type: 'object',
     properties: {

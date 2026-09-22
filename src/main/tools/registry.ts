@@ -9,7 +9,7 @@ import { glob } from './glob.js';
 import { grep } from './grep.js';
 import { webfetch } from './webfetch.js';
 import { websearch } from './websearch.js';
-import { todowrite } from './todowrite.js';
+import { todowrite, todoread } from './todowrite.js';
 import { agent as agentTool } from './agent.js';
 import { crewTool } from './crew.js';
 import { createCustomAgentTool } from './custom-agent.js';
@@ -117,6 +117,13 @@ import { appointmentsTool } from './appointments.js';
 import { enterpriseCompanyTool } from './enterprise-company.js';
 import { businessKnowledgeTool } from './business-knowledge.js';
 import { pcLiveMapTool } from './pc-live-map.js';
+import { exitPlanTool } from './exit-plan.js';
+import { lspTool } from './lsp.js';
+// Creative + commerce: the "do anything a human can on a PC" tools
+import { musicGeneratorTool } from './music-generator.js';
+import { videoGeneratorTool } from './video-generator.js';
+import { sellAppTool } from './sell-app.js';
+import { launchProductTool } from './launch-product.js';
 
 export function registerBuiltinTools(): void {
   for (const t of [
@@ -130,6 +137,7 @@ export function registerBuiltinTools(): void {
     webfetch,
     websearch,
     todowrite,
+    todoread,
     agentTool,
     crewTool,
     createCustomAgentTool,
@@ -244,6 +252,17 @@ export function registerBuiltinTools(): void {
     enterpriseCompanyTool,
     businessKnowledgeTool,
     pcLiveMapTool,
+    // Enforced plan mode — ExitPlan is the approval gate
+    exitPlanTool,
+    // LSP-grade diagnostics (tsc/pyright/ruff/cargo)
+    lspTool,
+    // Creative media — real audio/video files, keyless fallbacks
+    musicGeneratorTool,
+    videoGeneratorTool,
+    // Builder → revenue handoff: package + Stripe payment link
+    sellAppTool,
+    // One-run product launch: build → jingle → promo → package → payment link
+    launchProductTool,
   ]) {
     toolRegistry.register(t);
   }

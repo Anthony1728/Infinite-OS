@@ -3,7 +3,7 @@ import { automationBuilder, type Action } from '../automation/builder.js';
 
 export const automationTool: Tool = {
   name: 'Automation',
-  description: 'Create and run scheduled, event, webhook, file-change, and manual workflows with tool calls, agent runs, conditions, delays, notifications, scripts, computer actions, retries, and human approval patterns.',
+  description: 'Create and run scheduled, event, webhook, file-change, and manual workflows with tool calls, agent runs, conditions, delays, notifications, scripts, computer actions, retries, and human approval patterns. Notify actions REALLY deliver: desktop toast by default, or channel whatsapp (your linked WhatsApp self-chat), telegram (default chat), email (needs "to"). Chain agent_run -> notify with {{previous}} in the message to deliver generated content (e.g. a morning brief: "Morning brief: {{previous}}" with channel whatsapp). Undeliverable notifications fail the run loudly instead of succeeding silently.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -13,7 +13,7 @@ import { homedir } from 'node:os';
     if (!existsSync(markerPath)) return;
     const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as { sourceDir: string };
     const src = marker.sourceDir;
-    if (!src || !existsSync(src)) { try { rmSync(markerPath, { force: true }); } catch {} return; }
+    if (!src || !existsSync(src)) { try { rmSync(markerPath, { force: true }); } catch { /* stale marker, ignore */ } return; }
     const installDir = process.execPath ? join(process.execPath, '..') : '';
     if (!installDir || installDir.includes('node_modules')) return;
     if (!existsSync(join(installDir, 'Infinite OS.exe')) && !existsSync(join(installDir, 'resources'))) return;
@@ -297,6 +297,20 @@ app.whenReady().then(async () => {
       telegramInbound.start();
     } catch (e) {
       logger.warn({ err: e }, 'Telegram inbound failed to start');
+    }
+  }).catch(() => {});
+
+  // WhatsApp link auto-resume (self-chat-only, OpenClaw-style): a previous
+  // pairing reconnects in the background so messaging yourself just works.
+  // Fresh installs stay off until linked from Messaging → WhatsApp Link.
+  void import('./messaging/whatsapp-link.js').then(({ whatsAppLink }) => {
+    try {
+      if (whatsAppLink.hasLinkedCreds()) {
+        void whatsAppLink.start({ log: (...args: unknown[]) => console.log('[whatsapp-link]', ...args) })
+          .catch((e) => logger.warn({ err: e }, 'WhatsApp auto-resume failed'));
+      }
+    } catch (e) {
+      logger.warn({ err: e }, 'WhatsApp auto-resume check failed');
     }
   }).catch(() => {});
 

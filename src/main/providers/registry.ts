@@ -7,6 +7,7 @@ import { anthropic } from './anthropic.js';
 import { gemini } from './gemini.js';
 import { openai } from './openai.js';
 import { opencode } from './opencode.js';
+import { freebuff } from './freebuff.js';
 import { cloudflare } from './cloudflare.js';
 import { custom } from './custom.js';
 import type { Message } from '../../shared/types.js';
@@ -396,6 +397,7 @@ const REGISTRY: Record<string, ProviderAdapter> = {
   }),
   ollama: ollamaAdapter,
   opencode,
+  freebuff,
   gemini,
   anthropic,
   openai,

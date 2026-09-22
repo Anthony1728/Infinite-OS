@@ -322,7 +322,7 @@ export function MessagingView() {
           </span>
         </div>
         <p className="text-xs text-zinc-500 mb-3">
-          Link your number as a companion device. Message yourself to talk to the agent, and anyone who messages you directly gets an answer too — the agent runs the turn on this PC and replies in that chat. Groups are ignored.
+          Link your number as a companion device, then message yourself to talk to Infinite AI — the agent runs the turn on this PC and replies in that chat. Only your self-chat is ever answered; messages from anyone else are always ignored.
         </p>
         {waLink?.state === 'qr' && waLink.qrDataUrl && (
           <div className="mb-3 flex justify-center">
@@ -340,7 +340,7 @@ export function MessagingView() {
         )}
         {waLink?.state === 'open' && waLink.lastInbound && (
           <p className="text-[11px] text-zinc-500 mb-3">
-            Last message {new Date(waLink.lastInbound.at).toLocaleTimeString()} — {waLink.lastInbound.answered ? 'answered' : `not answered (${waLink.lastInbound.reason})`}.
+            Last message {new Date(waLink.lastInbound.at).toLocaleTimeString()} — {waLink.lastInbound.answered ? 'answered' : waLink.lastInbound.reason === 'not-owner' ? 'ignored (only your self-chat is answered)' : `not answered (${waLink.lastInbound.reason})`}.
             {waLink.lastTurn && !waLink.lastTurn.ok && waLink.lastTurn.error ? ` Turn failed: ${waLink.lastTurn.error.slice(0, 160)}` : ''}
           </p>
         )}

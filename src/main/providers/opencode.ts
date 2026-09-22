@@ -3,8 +3,9 @@ import { existsSync } from 'node:fs';
 import { request as nodeHttpRequest, type IncomingMessage } from 'node:http';
 import { request as nodeHttpsRequest } from 'node:https';
 import { delimiter, join } from 'node:path';
-import type { Message, ModelInfo } from '../../shared/types.js';
+import type { ContentBlock, Message, ModelInfo } from '../../shared/types.js';
 import type { ChatRequest, ProviderAdapter, StreamChunk } from './base.js';
+import { clearProviderAuthFailure, isProviderAuthKnownBad, noteProviderAuthFailure } from './health.js';
 
 const DEFAULT_URL = 'http://127.0.0.1:4096';
 const ZEN_API_URL = 'https://opencode.ai/zen/v1';
@@ -16,6 +17,26 @@ const modelTiers = new Map<string, 'zen' | 'go'>();
 let starting: Promise<boolean> | null = null;
 const rejectedFreeProviders = new Set<string>();
 const rejectedFreeModels = new Set<string>();
+// Last free model that completed a turn. Quotas gate per model per hour, so
+// after a 429 the fastest recovery is the model that most recently answered
+// — not the next name alphabetically (which may itself be retired or gated).
+let lastGoodFreeModel: string | null = null;
+
+/** Test seam: remember (or forget, with null) the model that last answered. */
+export function setLastGoodFreeModel(id: string | null): void {
+  lastGoodFreeModel = id;
+}
+
+/** Test seam: most-recently-answering candidate first, stable otherwise. */
+export function orderFreeRotation(selectedId: string, candidateIds: string[]): string[] {
+  if (lastGoodFreeModel && lastGoodFreeModel !== selectedId) {
+    const idx = candidateIds.indexOf(lastGoodFreeModel);
+    if (idx > 0) return [candidateIds[idx]!, ...candidateIds.slice(0, idx), ...candidateIds.slice(idx + 1)];
+  }
+  return [...candidateIds];
+}
+// Cache credential configuration to avoid PUT /auth on every turn.
+const configuredCredentials = new Set<string>();
 
 // A run finishes when the model finishes — there is deliberately no task cap.
 // But a *silent* connection (zero bytes on the response AND zero SSE events)
@@ -29,9 +50,157 @@ export function setOpenCodeStallTimeout(ms: number): void {
   OPENCODE_STALL_TIMEOUT_MS = ms;
 }
 
+let OPENCODE_FIRST_BYTE_TIMEOUT_MS = 120_000;
+
+/** First-byte budget before a quiet free-tier turn rotates models. */
+export function openCodeFirstByteTimeoutMs(): number {
+  return OPENCODE_FIRST_BYTE_TIMEOUT_MS;
+}
+
+/** Override the first-byte budget (tests use short budgets). */
+export function setOpenCodeFirstByteTimeout(ms: number): void {
+  OPENCODE_FIRST_BYTE_TIMEOUT_MS = ms;
+}
+
+/**
+ * How often a live-but-quiet turn reminds the caller it is still working.
+ * Scales with the stall window so tests with short windows never emit one,
+ * while production turns heartbeat well inside the 60s agent watchdog.
+ */
+export function openCodeHeartbeatIntervalMs(): number {
+  return Math.max(5_000, Math.min(30_000, Math.floor(OPENCODE_STALL_TIMEOUT_MS / 3)));
+}
+
+/** True when a waiting turn owes the caller a still-working notice. */
+export function heartbeatDue(lastNoticeAt: number, nowMs: number, intervalMs: number): boolean {
+  return nowMs - lastNoticeAt >= intervalMs;
+}
+
+// The CLI's stored login can die (expired/revoked) while the runtime stays
+// healthy and keeps listing models. Every turn then burns a minute-plus of
+// upstream retries before failing — and the agent watchdog aborts at 60s with
+// "stalled", hiding the true cause. Remember the failure briefly (persisted
+// across restarts by provider-health, so each launch doesn't re-burn a
+// minute) so repeat turns fail fast with the login hint instead of stalling
+// again. TTL is short on purpose: a repaired login must unblock quickly.
+let cliCredentialBadAt = 0;
+const CLI_CREDENTIAL_BAD_TTL_MS = 5 * 60_000;
+
+/** Test seam: mark the CLI credential as rejected upstream. */
+export function noteInvalidCliCredential(): void {
+  cliCredentialBadAt = Date.now();
+  noteProviderAuthFailure('opencode');
+}
+
+/** Test seam: forget a recorded credential failure. */
+export function clearInvalidCliCredential(): void {
+  cliCredentialBadAt = 0;
+  clearProviderAuthFailure('opencode');
+}
+
+export function isCliCredentialKnownBad(nowMs = Date.now()): boolean {
+  if (cliCredentialBadAt > 0 && nowMs - cliCredentialBadAt < CLI_CREDENTIAL_BAD_TTL_MS) return true;
+  return isProviderAuthKnownBad('opencode', nowMs);
+}
+
+function noteCliCredentialOutcome(failure: string): void {
+  if (/invalid credential|unauthori[sz]ed|forbidden|\b401\b|\b403\b/i.test(failure)) {
+    noteInvalidCliCredential();
+  }
+}
+
+/**
+ * Minimum installed CLI for the free tier. Older runtimes proxy free-tier
+ * turns to opencode.ai/zen, which rejects them with HTTP 426
+ * ("OpenCode 1.18.0 or newer is required to use the free tier").
+ */
+export const OPENCODE_MIN_FREE_VERSION = '1.18.0';
+
+/** Numeric semver compare: negative when a < b, 0 when equal, positive when a > b. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => Number.parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+export function isOpenCodeVersionAtLeast(version: string | null | undefined, min = OPENCODE_MIN_FREE_VERSION): boolean {
+  if (!version) return false;
+  return compareVersions(version, min) >= 0;
+}
+
+/** Installed CLI version (`opencode --version`), or null when not installed. */
+export async function getInstalledOpenCodeVersion(): Promise<string | null> {
+  try {
+    const { spawnSync } = await import('node:child_process');
+    const exe = executable();
+    const result = spawnSync(exe, ['--version'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+      // .cmd shims only run through the shell on Windows.
+      shell: process.platform === 'win32' && exe.toLowerCase().endsWith('.cmd'),
+    });
+    if (result.error || result.status !== 0) return null;
+    const match = /(\d+\.\d+\.\d+)/.exec(String(result.stdout ?? ''));
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Actionable hint when a turn fails because the runtime predates the free
+ * tier gate. Returns null for unrelated errors.
+ */
+export function openCodeUpgradeHint(error: string): string | null {
+  if (/\b426\b|upgrade.?required|newer is required/i.test(error)) {
+    return `The OpenCode runtime is too old for the free tier (needs v${OPENCODE_MIN_FREE_VERSION}+). Upgrade the CLI (\`npm i -g opencode-ai@latest\`) and restart the runtime server (Settings → AI Provider → OpenCode → Restart runtime).`;
+  }
+  return null;
+}
+
+/** Prefix a raw OpenCode error, appending the CLI-upgrade hint when it applies. */
+export function withUpgradeHint(message: string): string {
+  const hint = openCodeUpgradeHint(message);
+  return hint ? `OpenCode: ${message} ${hint}` : `OpenCode: ${message}`;
+}
+
+/**
+ * Hint when the runtime's stored login is rejected upstream (expired or
+ * revoked `opencode auth login` session). Returns null for other errors.
+ */
+export function openCodeAuthLoginHint(error: string): string | null {
+  if (/invalid credential|invalid.*api.?key|unauthori[sz]ed|forbidden/i.test(error)
+    && /upstream|credential|auth/i.test(error)) {
+    return 'The installed CLI signed in before, but its login is expired or revoked. Refresh it with `opencode auth login`, then retry.';
+  }
+  return null;
+}
+
+/**
+ * Hint when a paid turn fails for lack of funds. Returns null for other errors.
+ */
+export function openCodeFundsHint(error: string): string | null {
+  if (/insufficient account funds|insufficient.*funds|\b402\b/i.test(error)) {
+    return 'The OpenCode account has no funds for paid models. Top up at opencode.ai, wait for the free-tier reset, or switch to a free provider (nvidia / groq / apinex) in Settings → AI Provider.';
+  }
+  return null;
+}
+
+/** Prefix a raw OpenCode error, appending upgrade, auth, and funds hints when they apply. */
+export function withOpenCodeHints(message: string): string {
+  const hints = [openCodeUpgradeHint(message), openCodeAuthLoginHint(message), openCodeFundsHint(message)].filter(Boolean);
+  return hints.length ? `OpenCode: ${message} ${hints.join(' ')}` : `OpenCode: ${message}`;
+}
+
 function resetDiscoveredModelFailures(): void {
   rejectedFreeProviders.clear();
   rejectedFreeModels.clear();
+  configuredCredentials.clear();
 }
 
 interface OpenCodeModel {
@@ -103,7 +272,7 @@ function isTransientOpenCodeFailure(error: unknown): boolean {
   const cause = (error as { cause?: { code?: string } }).cause;
   const code = cause?.code ?? '';
   return /^(ECONNREFUSED|ECONNRESET|ECONNABORTED|ETIMEDOUT|EPIPE|EHOSTUNREACH|ENETUNREACH|EADDRNOTAVAIL|ENOTFOUND|UND_ERR)/.test(code)
-    || (code === '' && /fetch failed|stopped responding|HTTP\s*5\d\d|server\s*error/i.test(error instanceof Error ? error.message : String(error)));
+    || (code === '' && /fetch failed|stopped responding|timed out|timeout|HTTP\s*5\d\d|server\s*error/i.test(error instanceof Error ? error.message : String(error)));
 }
 
 /** Exponential backoff with 30% jitter. Keeps retries from hammering a
@@ -112,6 +281,18 @@ function openCodeRetryDelay(attempt: number, baseMs = 500): number {
   const exponential = baseMs * (2 ** attempt);
   const jitter = Math.random() * exponential * 0.3;
   return Math.min(exponential + jitter, 30_000);
+}
+
+/**
+ * Combine the caller's signal with a hard timeout so a wedged runtime can't
+ * hold a turn silently forever: the outer agent watchdog would otherwise fire
+ * first and the turn would die as a bare "operation was aborted". The caller's
+ * own abort reason still wins (AbortSignal.any keeps the first reason), so a
+ * user stop is never misreported as a timeout.
+ */
+export function timeoutSignal(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 async function openCodeRequest(
@@ -190,29 +371,162 @@ async function healthy(baseUrl: string): Promise<boolean> {
   }
 }
 
-function executable(): string {
-  if (process.platform !== 'win32') return 'opencode';
-  const binary = process.env['APPDATA']
-    ? join(process.env['APPDATA'], 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
-    : '';
-  if (binary && existsSync(binary)) return binary;
-  const shim = process.env['APPDATA'] ? join(process.env['APPDATA'], 'npm', 'opencode.cmd') : '';
-  return shim && existsSync(shim) ? shim : 'opencode.cmd';
+/** Running runtime version from /global/health, or null when unreachable. */
+export async function openCodeServerVersion(baseUrl: string = DEFAULT_URL): Promise<string | null> {
+  try {
+    const response = await openCodeRequest(`${cleanUrl(baseUrl)}/global/health`, {
+      headers: authHeaders(), signal: AbortSignal.timeout(3000),
+    }, baseUrl);
+    if (!response.ok) return null;
+    const body = await response.json() as { healthy?: boolean; version?: unknown };
+    return typeof body.version === 'string' ? body.version : null;
+  } catch {
+    return null;
+  }
 }
 
-export function hasInstalledOpenCodeCli(): boolean {
-  const names = process.platform === 'win32' ? ['opencode.cmd', 'opencode.exe'] : ['opencode'];
-  const explicit = process.platform === 'win32' && process.env['APPDATA']
+function isStaleForFreeTier(version: string | null): boolean {
+  return Boolean(version) && /^\d+\.\d+\.\d+/.test(version as string) && !isOpenCodeVersionAtLeast(version);
+}
+
+/** PID listening on 127.0.0.1:port (our managed runtime port), or null. */
+async function pidListeningOnPort(port: number): Promise<number | null> {
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    if (process.platform === 'win32') {
+      const { stdout } = await promisify(execFile)('netstat', ['-ano'], {
+        encoding: 'utf8', timeout: 10_000, windowsHide: true,
+      });
+      for (const line of String(stdout).split('\n')) {
+        const m = /^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i.exec(line);
+        if (m && Number(m[2]) === port && (m[1] === '127.0.0.1' || m[1] === '0.0.0.0')) return Number(m[3]);
+      }
+      return null;
+    }
+    const { stdout } = await promisify(execFile)('lsof', ['-ti', `:${port}`], {
+      encoding: 'utf8', timeout: 10_000, windowsHide: true,
+    });
+    const pid = Number(String(stdout).trim().split('\n')[0]);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function killPortOwner(port: number): Promise<boolean> {
+  const pid = await pidListeningOnPort(port);
+  if (pid === null) return true;
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    if (process.platform === 'win32') {
+      await promisify(execFile)('taskkill', ['/PID', String(pid), '/F'], { timeout: 15_000, windowsHide: true });
+    } else {
+      process.kill(pid, 'SIGTERM');
+    }
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if ((await pidListeningOnPort(port)) === null) return true;
+    }
+    return (await pidListeningOnPort(port)) === null;
+  } catch {
+    return (await pidListeningOnPort(port)) === null;
+  }
+}
+
+/**
+ * Restart our managed runtime (DEFAULT_URL only) when the running server
+ * predates the free-tier gate. Returns the server version afterwards, or
+ * null when no healthy server could be established.
+ */
+export async function restartStaleOpenCodeServer(baseUrl: string = DEFAULT_URL, cwd = process.cwd()): Promise<string | null> {
+  const url = cleanUrl(baseUrl);
+  if (url !== DEFAULT_URL) return openCodeServerVersion(url);
+  const current = await openCodeServerVersion(url);
+  // Unknown version (health without a version field): nothing to heal.
+  if (current === null) return null;
+  // A runtime that lists no keyless models lost its upstream access (expired
+  // CLI login, cleared auth) — restarting with the CLI re-syncs the catalog.
+  if (!isStaleForFreeTier(current)) {
+    try {
+      const data = await providerData(url);
+      if (openCodeKeylessModels(data).length > 0) return current;
+      console.info('[opencode] runtime lists no keyless models — restarting with the installed CLI.');
+    } catch { /* fall through to restart */ }
+  } else {
+    console.info(`[opencode] runtime v${current} predates free-tier gate v${OPENCODE_MIN_FREE_VERSION}.`);
+  }
+  console.info(`[opencode] runtime v${current} needs a restart (free-tier gate v${OPENCODE_MIN_FREE_VERSION} or a lost catalog) — restarting with the installed CLI.`);
+  await killPortOwner(4096);
+  if (!await ensureServer(url, cwd)) return null;
+  return openCodeServerVersion(url);
+}
+
+/**
+ * Best-effort self-heal before an installed-CLI (keyless) turn: when the
+ * running server is too old for the free tier, restart it so the turn can
+ * proceed. Returns true when a usable server is in place.
+ */
+async function ensureFreeTierServer(baseUrl: string, cwd?: string): Promise<boolean> {
+  const version = await restartStaleOpenCodeServer(baseUrl, cwd ?? process.cwd());
+  if (version !== null) return true;
+  return ensureServer(cleanUrl(baseUrl), cwd);
+}
+
+/**
+ * Resolve the installed OpenCode CLI to a concrete binary when possible.
+ * Returns null when no CLI is installed. Prefers .exe on Windows because a
+ * bare 'opencode.cmd' fallback cannot be spawned without shell:true
+ * (ENOENT) — the old fallback broke every non-npm install layout on Windows
+ * (native installer, scoop, pnpm, manual PATH) even though the CLI was there.
+ */
+function resolveOpenCodeExecutable(): string | null {
+  if (process.platform !== 'win32') return 'opencode';
+  const explicit = process.env['APPDATA']
     ? [
         join(process.env['APPDATA'], 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
         join(process.env['APPDATA'], 'npm', 'opencode.cmd'),
       ]
     : [];
-  if (explicit.some((candidate) => existsSync(candidate))) return true;
-  return (process.env['PATH'] ?? '')
-    .split(delimiter)
-    .filter(Boolean)
-    .some((directory) => names.some((name) => existsSync(join(directory.replace(/^"|"$/g, ''), name))));
+  for (const candidate of explicit) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  // Any other install layout: accept opencode.exe first (spawns directly),
+  // then opencode.cmd (spawned through the shell — see ensureServer).
+  for (const directory of (process.env['PATH'] ?? '').split(delimiter).filter(Boolean)) {
+    const clean = directory.replace(/^"|"$/g, '');
+    for (const name of ['opencode.exe', 'opencode.cmd']) {
+      try {
+        const full = join(clean, name);
+        if (existsSync(full)) return full;
+      } catch { /* unreadable PATH entry */ }
+    }
+  }
+  return null;
+}
+
+export function hasInstalledOpenCodeCli(): boolean {
+  if (process.platform !== 'win32') {
+    return (process.env['PATH'] ?? '')
+      .split(delimiter)
+      .filter(Boolean)
+      .some((directory) => {
+        try {
+          return existsSync(join(directory.replace(/^"|"$/g, ''), 'opencode'));
+        } catch {
+          return false;
+        }
+      });
+  }
+  return resolveOpenCodeExecutable() !== null;
+}
+
+function executable(): string {
+  if (process.platform !== 'win32') return 'opencode';
+  // Bare 'opencode' lets Windows resolve opencode.exe via PATH (a bare
+  // 'opencode.cmd' fallback would ENOENT without shell:true).
+  return resolveOpenCodeExecutable() ?? 'opencode';
 }
 
 async function ensureServer(baseUrl: string, cwd = process.cwd()): Promise<boolean> {
@@ -232,9 +546,13 @@ async function ensureServer(baseUrl: string, cwd = process.cwd()): Promise<boole
         try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); } catch { /* exists */ }
         errFd = fs.openSync(logPath, 'a');
       } catch { /* logging is best-effort; server still starts */ }
-      const child = spawn(executable(), ['serve', '--pure', '--hostname', '127.0.0.1', '--port', '4096'], {
+      const exe = executable();
+      const child = spawn(exe, ['serve', '--pure', '--hostname', '127.0.0.1', '--port', '4096'], {
         cwd, detached: true, stdio: ['ignore', 'ignore', errFd ?? 'ignore'], windowsHide: true,
         env: process.env,
+        // .cmd shims cannot be spawned directly on Windows (ENOENT) — run
+        // them through the shell. .exe binaries spawn directly.
+        shell: process.platform === 'win32' && exe.toLowerCase().endsWith('.cmd'),
       });
       child.unref();
       // Cold starts on slower machines can exceed a few seconds; wait up to
@@ -258,6 +576,9 @@ function decodeModel(value: string): { providerID: string; modelID: string } {
 }
 
 function quarantineFailure(selected: { providerID: string; modelID: string }, failure: string): void {
+  // A free-tier version gate (426) is a client problem, not a model problem:
+  // never blame or exclude the model for it.
+  if (/\b426\b|upgrade.?required|newer is required/i.test(failure)) return;
   if (/invalid api key|token (?:expired|incorrect)|expired (?:api )?key|unauthori[sz]ed|forbidden|authorization failed|\b401\b|\b403\b/i.test(failure)) {
     rejectedFreeProviders.add(selected.providerID);
   }
@@ -272,23 +593,68 @@ function quarantineFailure(selected: { providerID: string; modelID: string }, fa
   }
 }
 
-function transcript(messages: Message[]): string {
-  // Lean budget for the local runtime: it injects ~40k+ tokens of its own
-  // project context, so our full 300k-char history + 18k system prompt tips
-  // small free-tier models into 500s. Last 40 messages / 40k chars keeps the
-  // task context without drowning the model. Tool results stay verbatim.
-  return messages.slice(-40).map((message) => {
-    const content = message.content.map((block) => {
-      if (block.type === 'text') return block.text;
-      if (block.type === 'tool_result') {
-        const value = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-        return `[Tool result${block.is_error ? ' error' : ''}]: ${value}`;
+/** Extract text from a structured tool result, omitting images/files (their
+ * base64 would otherwise be dumped inline and explode the request size). */
+function toolResultText(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content.map((block) => {
+    if (block.type === 'text') return block.text;
+    if (block.type === 'image' || block.type === 'file') return '[image omitted]';
+    if (block.type === 'tool_use') return `[Tool requested: ${block.name}]`;
+    if (block.type === 'tool_result') return toolResultText(block.content);
+    return '';
+  }).filter(Boolean).join('\n');
+}
+
+/** Strip embedded blobs (data URIs, long base64 runs) that bloat requests
+ * past what small free-tier models accept. */
+function stripBlobs(text: string): string {
+  return text
+    .replace(/data:[^,\s;]*;base64,[A-Za-z0-9+/=]+/g, '[embedded data omitted]')
+    .replace(/[A-Za-z0-9+/]{500,}={0,2}/g, '[long blob omitted]');
+}
+
+/** Test seam: flatten history into the lean text the local runtime receives. */
+export function transcript(messages: Message[]): string {
+  // Match the official TUI's lean request shape: small and text-only. The
+  // local runtime injects ~40k tokens of its own project context, and every
+  // turn here uses a FRESH session (no server-side history), so pasting our
+  // full history as one giant text part tips small free-tier models into
+  // HTTP 400 (payload/context too large) or burns the hourly token quota
+  // into 429s — while the TUI's tiny same-session requests sail through
+  // with 200s. Keep the recent task context, drop the weight.
+  const MAX_MESSAGES = 15;
+  const MAX_TOTAL = 12_000;
+  const MAX_TOOL_RESULT = 2_000;
+  const MAX_TEXT_BLOCK = 4_000;
+  const out: string[] = [];
+  for (const message of messages.slice(-MAX_MESSAGES)) {
+    const blocks: string[] = [];
+    for (const block of message.content) {
+      if (block.type === 'text') {
+        const clean = stripBlobs(block.text).slice(0, MAX_TEXT_BLOCK);
+        if (clean.trim()) blocks.push(clean);
+      } else if (block.type === 'tool_result') {
+        const raw = stripBlobs(toolResultText(block.content));
+        const clean = raw.length > MAX_TOOL_RESULT
+          ? `${raw.slice(0, MAX_TOOL_RESULT)}\n...[tool output truncated]...`
+          : raw;
+        blocks.push(`[Tool result${block.is_error ? ' error' : ''}]: ${clean}`);
+      } else if (block.type === 'tool_use') {
+        // The input JSON (file contents, commands) can be huge; the result
+        // above already carries what matters. Keep just the invocation.
+        let input = '';
+        try {
+          input = JSON.stringify(block.input ?? {}).slice(0, 300);
+        } catch { /* unstringifiable input */ }
+        blocks.push(`[Tool requested: ${block.name}${input && input !== '{}' ? ` ${input}` : ''}]`);
       }
-      if (block.type === 'tool_use') return `[Tool requested: ${block.name} ${JSON.stringify(block.input)}]`;
-      return '';
-    }).filter(Boolean).join('\n');
-    return `${message.role.toUpperCase()}: ${content}`;
-  }).join('\n\n').slice(-40_000);
+      // image/file/question/pair blocks never travel: images are base64
+      // weight, the rest is UI-only.
+    }
+    if (blocks.length) out.push(`${message.role.toUpperCase()}: ${blocks.join('\n')}`);
+  }
+  return out.join('\n\n').slice(-MAX_TOTAL);
 }
 
 /** The local runtime brings its own agent, tools, and ~40k tokens of project
@@ -318,10 +684,50 @@ export function resolveLiveOpenCodeModel(reqModel: string, allowed: Array<{ id: 
     return { ...selected, switched: false, fallbackId: null };
   }
   const fallback = allowed.find((model) => model.id.startsWith('opencode::'))
-    ?? allowed.find((model) => model.free);
+    ?? allowed.find((model) => model.id.startsWith('opencode-go::'))
+    ?? allowed.find((model) => model.free ?? true);
   if (!fallback) return { ...selected, switched: false, fallbackId: null };
-  const fallbackModelID = fallback.id.includes('::') ? fallback.id.split('::').slice(1).join('::') : fallback.id;
-  return { providerID: 'opencode', modelID: fallbackModelID, switched: true, fallbackId: fallback.id };
+  const sep = fallback.id.indexOf('::');
+  const fallbackProvider = sep > 0 ? fallback.id.slice(0, sep) : 'opencode';
+  const fallbackModelID = sep > 0 ? fallback.id.slice(sep + 2) : fallback.id;
+  return { providerID: fallbackProvider, modelID: fallbackModelID, switched: true, fallbackId: fallback.id };
+}
+
+/**
+ * The runtime's message POST can hang past the caller's patience while it
+ * retries upstream (rate-limited free turns and model-not-found both
+ * misreport as hangs — the real reason only arrives on the event bus).
+ * Bus events (openCodeProgressChunk) prove liveness, so a turn with zero
+ * output for this long is treated as dead and the bus reason surfaces.
+ * Generous by design: long *working* turns keep streaming through the bus.
+ */
+export let OPENCODE_QUIET_TURN_TIMEOUT_MS = 3 * 60_000;
+
+/** Override the quiet-turn window (tests use short windows). */
+export function setOpenCodeQuietTurnTimeout(ms: number): void {
+  OPENCODE_QUIET_TURN_TIMEOUT_MS = ms;
+}
+
+/**
+ * Identify a wedged free-tier turn from a `session.status` bus event:
+ * the runtime retries upstream with type "retry" and never returns the
+ * HTTP response, so "reason" here comes from the session status payload.
+ */
+export function openCodeQuietTurnTimeoutReasons(event: unknown): { timedOut: boolean; reason: string | null } {
+  const status = (event as { type?: string; properties?: { status?: { type?: string; action?: { reason?: string }; message?: string; next?: number } } })
+    .properties?.status;
+  if (!status || status.type !== 'retry') return { timedOut: false, reason: null };
+  const actionReason = status.action?.reason ?? '';
+  const message = status.message ?? '';
+  const next = typeof status.next === 'number' ? status.next : null;
+  const waitMin = next ? Math.max(1, Math.round((next - Date.now()) / 60_000)) : null;
+  if (/free_tier_limit|rate.?limit|usage/i.test(`${actionReason} ${message}`)) {
+    return {
+      timedOut: true,
+      reason: `OpenCode free tier limit reached${waitMin ? ` — resets in ~${waitMin} min` : ''}. ${message} Pick another free model, wait for the reset, use a free provider (nvidia / groq / apinex), or subscribe at opencode.ai/go.`,
+    };
+  }
+  return { timedOut: true, reason: `OpenCode runtime is retrying upstream: ${message || actionReason || 'unknown reason'}.` };
 }
 
 async function providerData(baseUrl: string): Promise<ProviderResponse> {
@@ -378,6 +784,9 @@ async function scanRemoteModels(apiKey: string, baseUrl: string, tier: 'zen' | '
 
 async function configureRemoteCredential(baseUrl: string, apiKey: string, tier: 'zen' | 'go' = 'zen'): Promise<void> {
   if (!apiKey) return;
+  // Skip if this exact key+tier was already configured successfully.
+  const cacheKey = `${tier}:${apiKey.slice(0, 16)}`;
+  if (configuredCredentials.has(cacheKey)) return;
   const tierLabel = tier === 'go' ? 'Go' : 'Zen';
   const authPath = tier === 'go' ? 'opencode-go' : 'opencode';
   const response = await openCodeRequest(`${baseUrl}/auth/${authPath}`, {
@@ -391,6 +800,7 @@ async function configureRemoteCredential(baseUrl: string, apiKey: string, tier: 
   }
   const saved = await response.json().catch(() => false);
   if (saved !== true) throw new Error(`OpenCode did not accept the ${tierLabel} credential.`);
+  configuredCredentials.add(cacheKey);
 
   // A replacement credential should immediately restore a provider/model that
   // was quarantined after an earlier expired key.
@@ -415,7 +825,10 @@ function collectOpenCodeModels(data: ProviderResponse, includeZenSubscription: b
       const identity = `${modelID} ${model.name ?? ''} ${model.family ?? ''}`.toLowerCase();
       if (/(^|[\s/_-])(embed(ding)?|bge|rerank|whisper|transcri(be|ption)|tts|speech|moderation|esm\d*|esmfold|gliner|reward|classifier|guard|nvclip)([\s/_-]|$)/i.test(identity)) continue;
       const free = (model.cost?.input ?? 0) === 0 && (model.cost?.output ?? 0) === 0;
-      if (!free && !(includeZenSubscription && provider.id === 'opencode')) continue;
+      // Keyless local runtime serves the CLI's own logins: free `opencode`
+      // models plus the subscription catalogs (`opencode` paid, `opencode-go`)
+      // that the installed CLI is signed into — no pasted key needed.
+      if (!free && !(includeZenSubscription && (provider.id === 'opencode' || provider.id === 'opencode-go'))) continue;
       models.push({
         id,
         label: `${provider.name || provider.id} / ${model.name || modelID}`,
@@ -425,6 +838,41 @@ function collectOpenCodeModels(data: ProviderResponse, includeZenSubscription: b
     }
   }
   return models.sort((a, b) => a.label.localeCompare(b.label)).slice(0, 500);
+}
+
+/** Local-runtime providers served keyless through the installed CLI. */
+const OPENCODE_KEYLESS_IDS = new Set(['opencode', 'opencode-go']);
+
+/**
+ * Keyless catalog: everything the installed CLI can serve without a pasted
+ * key — free `opencode` models plus the CLI's subscription logins
+ * (`opencode` paid, `opencode-go`). Paid entries carry free=false so the UI
+ * and rotation can tell them apart.
+ */
+export function openCodeKeylessModels(data: ProviderResponse): ModelInfo[] {
+  return collectOpenCodeModels(data, true, OPENCODE_KEYLESS_IDS);
+}
+
+/** Counts behind the keyless catalog (Settings status, diagnostics). */
+export async function openCodeKeylessStatus(baseUrl: string = DEFAULT_URL): Promise<{
+  connected: string[];
+  opencodeCount: number;
+  goCount: number;
+  freeCount: number;
+} | null> {
+  try {
+    const data = await providerData(cleanUrl(baseUrl));
+    const connected = data.connected ?? [];
+    const models = openCodeKeylessModels(data);
+    return {
+      connected,
+      opencodeCount: models.filter((m) => m.id.startsWith('opencode::')).length,
+      goCount: models.filter((m) => m.id.startsWith('opencode-go::')).length,
+      freeCount: models.filter((m) => m.free).length,
+    };
+  } catch {
+    return null;
+  }
 }
 
 interface OpenCodeBusEvent {
@@ -447,6 +895,27 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
     if (info && typeof info.id === 'string' && typeof info.role === 'string') {
       if (messageRoles.size > 500) messageRoles.clear();
       messageRoles.set(info.id, info.role);
+    }
+    // Assistant failures (model not found, upstream rejections) publish an
+    // error on the message info instead of failing the HTTP POST, which
+    // would otherwise hang the turn until the stall watchdog fires.
+    const infoError = info?.error as { data?: { message?: string }; name?: string } | undefined;
+    if (info?.role === 'assistant' && infoError) {
+      return {
+        type: 'provider_status',
+        status: 'error',
+        provider: 'opencode',
+        reason: String(infoError.data?.message ?? infoError.name ?? 'The model request failed.'),
+      } as unknown as StreamChunk;
+    }
+    return null;
+  }
+  if (event.type === 'session.status') {
+    // "retry" statuses (free-tier limit, upstream outage) surface as plain
+    // status lines instead of an indefinite silent hang.
+    const quiet = openCodeQuietTurnTimeoutReasons(event);
+    if (quiet.reason) {
+      return { type: 'provider_status', status: 'rate_limited', provider: 'opencode', reason: quiet.reason };
     }
     return null;
   }
@@ -585,6 +1054,27 @@ async function* streamSessionMessage(args: {
   // When the progress stream already delivered the model's text live, do not
   // re-emit the full text from the final response (avoids duplicate bubbles).
   let liveTextStreamed = false;
+  // Fails-fast state: when the turn produced zero output (no bus chunks at
+  // all) the runtime is retrying upstream — rate limits and model-not-found
+  // both look like hangs. Abort with a sentinel the first-byte wrapper
+  // translates into a plain-language, rotation-worthy failure. Any real bus
+  // activity re-arms the timer, so long *working* turns keep streaming.
+  let quietTurnTimer: ReturnType<typeof setTimeout> | null = null;
+  const armQuietTurnTimer = () => {
+    if (quietTurnTimer) clearTimeout(quietTurnTimer);
+    quietTurnTimer = setTimeout(() => {
+      if (settled) return;
+      controller.abort(new Error('__quiet_turn_timeout__'));
+    }, OPENCODE_QUIET_TURN_TIMEOUT_MS);
+    quietTurnTimer.unref?.();
+  };
+  const disarmQuietTurnTimer = () => {
+    if (quietTurnTimer) {
+      clearTimeout(quietTurnTimer);
+      quietTurnTimer = null;
+    }
+  };
+  let busFailure: string | null = null;
 
   // Liveness watchdog: any byte from the message response or any SSE event
   // proves the runtime is alive. Total silence for the stall window means the
@@ -609,11 +1099,46 @@ async function* streamSessionMessage(args: {
     ready,
     (chunk) => {
       if (chunk.type === 'text_delta') liveTextStreamed = true;
+      // A provider_status error chunk carries the real failure (model not
+      // found, upstream rejection). Capture it and break the wedged POST —
+      // its response never arrives on these errors.
+      if (chunk.type === 'provider_status' && (chunk as { status?: string }).status === 'error') {
+        const reason = String((chunk as { reason?: string }).reason ?? 'The model request failed.');
+        // Terminal only when nothing streamed yet and the error is the kind
+        // that never recovers on this model (model not found, upstream
+        // rejection, quota). Mid-run step errors after real output do NOT
+        // end the turn — the runtime keeps working.
+        if (!liveTextStreamed && /not.?found|not.?valid|rate.?limit|insufficient|unauthori[sz]ed|forbidden|free.?tier|quota|entitl/i.test(reason)) {
+          busFailure = reason;
+          settled = true;
+          controller.abort();
+          notify();
+          return;
+        }
+      }
+      // Free-tier exhaustion arrives as rate_limited (session.status retry
+      // with free_tier_limit) while the message POST hangs indefinitely.
+      // Fail fast with the reset time instead of burning the 3-minute quiet
+      // window per model — the quota is account-wide, so rotating cannot help.
+      if (chunk.type === 'provider_status' && (chunk as { status?: string }).status === 'rate_limited') {
+        const reason = String((chunk as { reason?: string }).reason ?? '');
+        if (!liveTextStreamed && /free.?tier|free usage exceeded|subscribe to go|rate.?limit|quota|429/i.test(reason)) {
+          busFailure = reason;
+          settled = true;
+          controller.abort();
+          notify();
+          return;
+        }
+      }
+      // Any bus activity proves the turn is alive; only total silence for
+      // the quiet window means the runtime is stuck retrying upstream.
+      armQuietTurnTimer();
       queue.push(chunk);
       notify();
     },
     touch,
   );
+  armQuietTurnTimer();
 
   try {
     // Give the SSE subscription a chance to attach before dispatching work so
@@ -621,8 +1146,10 @@ async function* streamSessionMessage(args: {
     // the actual model request for more than one second.
     await Promise.race([readyPromise, new Promise((resolve) => setTimeout(resolve, 50))]);
     const directory = args.directory ? `?directory=${encodeURIComponent(args.directory)}` : '';
+    // Built once so the debug line reports the exact payload that ships.
+    const messageText = transcript(args.request.messages);
     try {
-      const dbgParts = JSON.stringify({ model: args.selected, agent: 'build', systemLen: (args.request.system ?? '').length, msgsLen: JSON.stringify(args.request.messages).length, tools: args.request.tools?.length ?? 0 });
+      const dbgParts = JSON.stringify({ model: args.selected, agent: 'build', systemLen: (args.request.system ?? '').length, msgsLen: JSON.stringify(args.request.messages).length, tools: args.request.tools?.length ?? 0, textLen: messageText.length });
       console.info(`[opencode] message ${dbgParts}`);
     } catch { /* debug only */ }
     type MessageResult = {
@@ -643,16 +1170,25 @@ async function* streamSessionMessage(args: {
             model: args.selected,
             agent: 'build',
             system: localRuntimeSystem(args.request.system),
-            parts: [{ type: 'text', text: transcript(args.request.messages) }],
+            parts: [{ type: 'text', text: messageText }],
           }),
           signal,
         });
         const body = await readBody(response, signal, touch);
         if (!response.statusCode || response.statusCode >= 400) {
-          throw new Error(`OpenCode message failed (HTTP ${response.statusCode}): ${body.slice(0, 240)}`);
+          throw new Error(`OpenCode message failed (HTTP ${response.statusCode}): ${body.slice(0, 500)}`);
         }
         return { result: JSON.parse(body || '{}') as MessageResult };
       } catch (error) {
+        // The quiet-turn sentinel (zero output while the runtime retries
+        // upstream) becomes a plain-language, rotation-worthy failure here.
+        if (signal.reason instanceof Error && signal.reason.message === '__quiet_turn_timeout__') {
+          return {
+            failure: new Error(
+              'OpenCode runtime returned no output — it is retrying upstream (free-tier rate limit or an unavailable model). Rotating to another free model.',
+            ),
+          };
+        }
         if (stall.triggered) {
           return {
             failure: new Error(
@@ -667,6 +1203,7 @@ async function* streamSessionMessage(args: {
       notify();
     });
 
+    let lastBeat = Date.now();
     while (true) {
       const next = queue.shift();
       if (next) {
@@ -674,16 +1211,39 @@ async function* streamSessionMessage(args: {
         continue;
       }
       if (settled) break;
-      // Set the waiter first, then re-check: a chunk pushed between the shift
-      // and the await would otherwise be missed until the next notification.
+      // Wake periodically so a live-but-quiet runtime can say it is still
+      // working: those notices keep agent watchdogs from mistaking a long
+      // upstream wait for a wedged connection. They deliberately do NOT touch
+      // the true-silence watchdog above.
       await new Promise<void>((resolve) => {
-        wake = resolve;
-        if (settled || queue.length > 0) resolve();
+        const timer = setTimeout(resolve, openCodeHeartbeatIntervalMs());
+        timer.unref?.();
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        if (settled || queue.length > 0) wake();
       });
+      if (!settled && queue.length === 0 && heartbeatDue(lastBeat, Date.now(), openCodeHeartbeatIntervalMs())) {
+        lastBeat = Date.now();
+        yield {
+          type: 'provider_status',
+          status: 'streaming',
+          provider: 'opencode',
+          model: `${args.selected.providerID}::${args.selected.modelID}`,
+          reason: 'OpenCode runtime is still working — no output yet.',
+        };
+      }
     }
     controller.abort();
     const outcome = await requestPromise;
     await subscription.catch(() => undefined);
+    disarmQuietTurnTimer();
+    if (busFailure) {
+      // The bus named the failure (rate limit, model not found). A hung POST
+      // may still reject with the same text later — prefer the bus reason.
+      throw new Error(busFailure);
+    }
     if ('failure' in outcome) throw outcome.failure;
     const result = outcome.result;
     if (result.info?.error) {
@@ -701,6 +1261,7 @@ async function* streamSessionMessage(args: {
     };
   } finally {
     clearInterval(watchdog);
+    disarmQuietTurnTimer();
   }
 }
 
@@ -894,6 +1455,7 @@ export async function tryRemote(req: ChatRequest, apiKey: string, tier: 'zen' | 
   // Manual next() loop (NOT for-await): exiting a for-await would close the
   // generator and the buffered-then-stream handoff would lose everything.
   try {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value, done } = await gen.next();
       if (done) break;
@@ -993,6 +1555,50 @@ export function openCodeOwnModels(data: ProviderResponse, includeZenSubscription
   return collectOpenCodeModels(data, includeZenSubscription, new Set(['opencode']));
 }
 
+/**
+ * Wrap a session stream with a first-byte budget. Free-tier turns that get
+ * rate-limited server-side otherwise hang indefinitely with zero bytes;
+ * this aborts the attempt so the caller can rotate to another free model
+ * instead of burning minutes on a wedged turn.
+ */
+async function* streamWithFirstByteTimeout(
+  args: Parameters<typeof streamSessionMessage>[0],
+  ms: number,
+): AsyncIterable<StreamChunk> {
+  const attempt = new AbortController();
+  const parent = args.request.signal;
+  const onParentAbort = () => attempt.abort(parent?.reason);
+  parent?.addEventListener('abort', onParentAbort, { once: true });
+  let firstByte = false;
+  const timer = setTimeout(() => {
+    if (!firstByte) attempt.abort(new Error('__first_byte_timeout__'));
+  }, ms);
+  timer.unref?.();
+  try {
+    for await (const chunk of streamSessionMessage({
+      ...args,
+      request: { ...args.request, signal: attempt.signal },
+    })) {
+      if (!firstByte) {
+        firstByte = true;
+        clearTimeout(timer);
+      }
+      yield chunk;
+    }
+  } catch (e) {
+    const reason = (attempt.signal.reason as Error | undefined)?.message;
+    if (!firstByte && reason === '__first_byte_timeout__') {
+      throw new Error(
+        `OpenCode free tier gave no response in ${Math.round(ms / 1000)}s — likely rate-limited, trying another free model.`,
+      );
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener('abort', onParentAbort);
+  }
+}
+
 export const opencode: ProviderAdapter = {
   id: 'opencode',
   label: 'OpenCode',
@@ -1001,7 +1607,9 @@ export const opencode: ProviderAdapter = {
   defaultBaseUrl: DEFAULT_URL,
   defaultModel: '',
   homepage: 'https://opencode.ai',
-  freeModels: [],
+  freeModels: [
+    { id: 'opencode::big-pickle', label: 'OpenCode / Big Pickle', provider: 'opencode', free: true, supports_tools: true },
+  ],
 
   async testConnection(apiKey, baseUrl) {
     const url = cleanUrl(baseUrl);
@@ -1037,19 +1645,26 @@ export const opencode: ProviderAdapter = {
         // local OpenCode CLI. Authenticated chat uses the direct Go/Zen API.
         return { ok: true };
       }
+      // KEYLESS: free-tier turns via the installed CLI.
       if (!await ensureServer(url)) {
-        return { ok: false, error: 'OpenCode is not reachable. Install the OpenCode CLI or run `opencode serve --pure --port 4096`.' };
+        if (!hasInstalledOpenCodeCli()) {
+          return { ok: false, error: 'OpenCode CLI is not installed. Install it (`npm i -g opencode-ai`), then sign in (`opencode auth login`) to use the free models with no API key.' };
+        }
+        return { ok: false, error: 'OpenCode is not reachable. Run `opencode serve --pure --port 4096`, or sign in (`opencode auth login`) and try again.' };
       }
-      // Testing without an Infinite OS key is the explicit recovery path back
-      // to credentials managed by the installed OpenCode CLI. Forget failures
-      // from the previous credential/model so a repaired CLI login can be used
-      // immediately instead of remaining quarantined until app restart.
+      // A stale runtime (predating the free-tier gate) lists models fine but
+      // fails every turn with 426 — restart it now so setup ends usable.
+      await ensureFreeTierServer(url);
       resetDiscoveredModelFailures();
       const data = await providerData(url);
-      const models = openCodeOwnModels(data, (data.connected ?? []).includes('opencode'));
-      return models.length > 0
-        ? { ok: true }
-        : { ok: false, error: 'OpenCode is running, but it did not report any usable OpenCode models. Sign in to OpenCode (`opencode auth login`) and try again.' };
+      const models = openCodeKeylessModels(data);
+      if (models.length === 0) {
+        const connected = (data.connected ?? []).join(', ') || 'none';
+        return { ok: false, error: `OpenCode is running, but no signed-in catalog is available (connected: ${connected}). Sign in to OpenCode (\`opencode auth login\`) and try again.` };
+      }
+      // A repaired login must unblock immediately, not after the TTL.
+      clearInvalidCliCredential();
+      return { ok: true };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }
@@ -1069,6 +1684,10 @@ export const opencode: ProviderAdapter = {
       models = [...goModels, ...zenModels].filter((m) => {
         if (seen.has(m.id)) return false;
         seen.add(m.id);
+        // Free-tier ids are OpenCode-client-only upstream (403 for any other
+        // client) — they can only be served by the local CLI runtime, never
+        // the remote Zen/Go API. List only paid models the pasted key can serve.
+        if (m.free) return false;
         return true;
       });
       // A Zen/Go key selects the OpenCode catalog. Do not merge unrelated
@@ -1077,13 +1696,15 @@ export const opencode: ProviderAdapter = {
       // and were the reason the OpenCode settings pane showed the wrong list.
       // Do not start or require a local CLI server for remote subscription catalogs.
     } else {
-      if (!await ensureServer(url)) return [];
+      // KEYLESS: free-tier turns via the installed CLI.
+      if (!await ensureServer(url)) return this.freeModels;
       try {
         const data = await providerData(url);
-        models = openCodeOwnModels(data, (data.connected ?? []).includes('opencode'));
+        models = openCodeKeylessModels(data);
       } catch {
-        try { models = openCodeOwnModels(await providerData(url)); } catch { /* empty */ }
+        try { models = openCodeKeylessModels(await providerData(url)); } catch { /* keep fallback */ }
       }
+      if (models.length === 0) return this.freeModels;
     }
     // Cache the latest model list on the adapter so failover planning can fall
     // back to another OpenCode model when the currently selected one fails.
@@ -1097,30 +1718,49 @@ export const opencode: ProviderAdapter = {
     let modelId = `${selected.providerID}::${selected.modelID}`;
     const tier = modelTiers.get(modelId) ?? 'zen';
     const freeTier = selected.modelID === 'big-pickle' || /(?:^|[-_])free$/i.test(selected.modelID);
-    if (apiKey && selected.providerID === 'opencode') {
-      // Remote-first for EVERY keyed model, free-tier included: a valid key is
-      // the fastest path and never touches the local runtime's failure modes.
-      // Only when the remote API rejects the turn before producing text do we
-      // fall through to the local server (free-tier entitlement lives there).
+    if (apiKey && selected.providerID === 'opencode' && !freeTier) {
+      // Subscription models run remotely: the local runtime's free-tier CLI
+      // login cannot serve paid Zen models (402 without funds).
+      yield { type: 'provider_status', status: 'connecting', provider: 'opencode', model: modelId,
+        reason: 'Contacting the OpenCode API…' };
       const remote = await remoteWithFallback(req, apiKey, tier);
       if (remote.ok) {
         yield* remote.stream;
         return;
       }
-      if (!freeTier) {
-        yield { type: 'error', error: remote.error };
-        return;
-      }
-      console.info(`[opencode] remote attempt rejected (${remote.error.slice(0, 140)}); using local runtime for free-tier model`);
-    }
-    if (!await ensureServer(url, req.cwd)) {
-      yield { type: 'error', error: 'OpenCode server is unavailable.' };
+      yield { type: 'error', error: remote.error };
       return;
     }
-    // Credential rule: the CLI's own stored auth (oauth/subscription) always
-    // wins. PUTting a pasted key over it breaks working free-tier auth with
-    // server 500s — so only configure the pasted key when the local server
-    // has NO opencode credential of its own.
+    if (apiKey && freeTier) {
+      // Free models are OpenCode-client-only upstream (403 FreeTierError for
+      // every other client) — they run on the local runtime with the CLI's
+      // own login. Skip the doomed remote attempt entirely.
+      console.info('[opencode] free-tier model: running on the local runtime (remote API serves free turns only to the OpenCode client).');
+    }
+    // A recently rejected CLI login fails every turn the same way after a
+    // minute of upstream retries — fail fast with the fix instead of
+    // stalling into the agent watchdog again.
+    if (selected.providerID === 'opencode' && isCliCredentialKnownBad()) {
+      yield { type: 'error', error: `OpenCode: the installed CLI login was just rejected upstream. ${openCodeAuthLoginHint('Invalid credential') ?? 'Refresh it with `opencode auth login`, then retry.'}` };
+      return;
+    }
+    if (!await ensureServer(url, req.cwd)) {
+      yield { type: 'error', error: hasInstalledOpenCodeCli()
+        ? 'OpenCode server is unavailable. Run `opencode serve --pure --port 4096` and try again.'
+        : 'OpenCode CLI is not installed. Install it (`npm i -g opencode-ai`), then sign in (`opencode auth login`) to use the free models with no API key.' };
+      return;
+    }
+    // Installed-CLI turns die with 426 on a stale runtime — heal it before
+    // the turn instead of failing into failover.
+    if (!apiKey && !await ensureFreeTierServer(url, req.cwd)) {
+      yield { type: 'error', error: 'OpenCode server is unavailable. Run `opencode serve --pure --port 4096` and try again.' };
+      return;
+    }
+    // Credential rule: free models always run on the CLI's own stored auth —
+    // never PUT a pasted key over a working CLI login (it caused server 500s).
+    // A pasted key is only configured when the runtime has no opencode
+    // credential at all, so a fresh install with a pasted subscription key
+    // can still reach paid models through the runtime.
     if (apiKey && selected.providerID === 'opencode') {
       let cliHasAuth = false;
       try {
@@ -1138,17 +1778,49 @@ export const opencode: ProviderAdapter = {
         }
       }
     }
-    // A Zen key selects the OpenCode Zen catalog. Models shown in the
-    // UI were already validated against the Zen API, so when apiKey is
-    // present we don't re-check against the local provider catalog.
-    // The local catalog may not include subscription-only models.
+    // Validate the selection against the LOCAL runtime catalog for keyed
+    // free models too: keyed lists come from the remote Zen scan, which
+    // carries free models the local runtime cannot resolve (the turn then
+    // hangs as ProviderModelNotFoundError). Subscription (non-free) models
+    // were validated remotely in listModels and never touch the runtime.
+    if (apiKey && freeTier) {
+      try {
+        yield { type: 'provider_status', status: 'connecting', provider: 'opencode', model: modelId,
+          reason: 'Checking the installed CLI model catalog…' };
+        const data = await providerData(url);
+        const connected = openCodeKeylessModels(data);
+        // A free selection must fall back to a FREE model — the first catalog
+        // hit may be a paid model the runtime would reject with a funds error.
+        const allowed = connected.filter((model) => model.free);
+        if (!allowed.some((model) => model.id === `${selected.providerID}::${selected.modelID}`)) {
+          const resolved = resolveLiveOpenCodeModel(req.model, allowed.length ? allowed : connected);
+          if (!resolved.switched || !resolved.fallbackId) {
+            yield { type: 'error', error: openCodeUnavailableError(req.model, allowed) };
+            return;
+          }
+          console.info(`[opencode] ${req.model} (keyed) not in local catalog; running ${resolved.fallbackId} instead`);
+          yield { type: 'provider_status', status: 'failover', provider: 'opencode', model: resolved.fallbackId, from: req.model, to: resolved.fallbackId, reason: `${req.model} is served by the local runtime as ${resolved.fallbackId}.` };
+          selected = { providerID: resolved.providerID, modelID: resolved.modelID };
+          modelId = `${selected.providerID}::${selected.modelID}`;
+        }
+      } catch (error) {
+        if (req.signal?.aborted) {
+          yield { type: 'error', error: 'Request cancelled.' };
+          return;
+        }
+        yield { type: 'error', error: `OpenCode: ${(error as Error).message}` };
+        return;
+      }
+    }
     if (!apiKey) {
       try {
+        // The catalog read can stall against a wedged runtime with zero
+        // output; announce liveness first so the outer agent watchdog keeps
+        // waiting instead of aborting the turn as "operation was aborted".
+        yield { type: 'provider_status', status: 'connecting', provider: 'opencode', model: modelId,
+          reason: 'Checking the installed CLI model catalog…' };
         const data = await providerData(url);
-        const allowed = openCodeOwnModels(
-          data,
-          selected.providerID === 'opencode' && (data.connected ?? []).includes('opencode'),
-        );
+        const allowed = openCodeKeylessModels(data);
         if (!allowed.some((model) => model.id === `${selected.providerID}::${selected.modelID}`)) {
           // Server-side retirements (e.g. big-pickle) must not brick the
           // installed-CLI path: fall back to a live catalog model instead of
@@ -1167,6 +1839,12 @@ export const opencode: ProviderAdapter = {
           modelId = `${selected.providerID}::${selected.modelID}`;
         }
       } catch (error) {
+        // A caller abort (user stop, agent watchdog) is a cancellation, not a
+        // provider failure — report it plainly.
+        if (req.signal?.aborted) {
+          yield { type: 'error', error: 'Request cancelled.' };
+          return;
+        }
         // A fallback switch already yielded a status above — only hard-fail
         // when there is genuinely nothing to fall back to.
         if (modelId === `${decodeModel(req.model).providerID}::${decodeModel(req.model).modelID}`) {
@@ -1178,59 +1856,156 @@ export const opencode: ProviderAdapter = {
     const directoryPath = req.cwd ?? '';
     const directory = directoryPath ? `?directory=${encodeURIComponent(directoryPath)}` : '';
 
-    // A momentary blip against the local runtime (cold start, restart, busy
-    // stream) must not kill the whole agent turn. Re-create a fresh session
-    // and re-send the message on transient transport failures only.
-    const MAX_ATTEMPTS = 5;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      let sessionID = '';
+    // Free-tier rotation: individual free models get rate-limited per hour
+    // (429 FreeUsageLimitError) while others answer fine. Instead of hanging
+    // on the selected model, rotate through live free models until one
+    // answers — using the tier the way OpenCode itself does.
+    const { settings: rotationSettings } = await import('../settings/store.js');
+    const rotationAllowed = rotationSettings.get('failoverEnabled') !== false;
+    let rotation: Array<{ providerID: string; modelID: string }> = [{ ...selected }];
+    const isKeylessSelection = selected.providerID === 'opencode' || selected.providerID === 'opencode-go';
+    if (rotationAllowed && isKeylessSelection) {
       try {
-        const sessionResponse = await openCodeRequest(`${url}/session${directory}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ title: 'Infinite OS provider run' }), signal: req.signal,
-        }, 'session create', 1);
-        if (!sessionResponse.ok) throw new Error(`Could not create OpenCode session (HTTP ${sessionResponse.status}).`);
-        const session = await sessionResponse.json() as { id?: string };
-        sessionID = session.id ?? '';
-        if (!sessionID) throw new Error('OpenCode did not return a session ID.');
+        // Same silent-read hazard as the catalog check above: announce
+        // liveness before the fetch.
+        yield { type: 'provider_status', status: 'connecting', provider: 'opencode', model: modelId,
+          reason: 'Checking which free models are answering…' };
+        const rotationCatalog = await providerData(url);
+        const selfId = `${selected.providerID}::${selected.modelID}`;
+        const liveFreeIds = orderFreeRotation(
+          selfId,
+          openCodeKeylessModels(rotationCatalog)
+            .filter((m) => m.free && m.id !== selfId)
+            .slice(0, 2)
+            .map((m) => m.id),
+        );
+        const liveFree = liveFreeIds.map((id) => {
+          const sep = id.indexOf('::');
+          return sep > 0
+            ? { providerID: id.slice(0, sep), modelID: id.slice(sep + 2) }
+            : { providerID: 'opencode', modelID: id };
+        });
+        if (liveFree.length) rotation = [{ ...selected }, ...liveFree];
+      } catch { /* rotation falls back to the selected model only */ }
+    }
 
+    // One model attempt: fresh session, stream with a first-byte budget,
+    // retrying transient transport blips. Throws on final failure so the
+    // rotation loop can move to the next free model.
+    const runOneModel = async function* (sel: { providerID: string; modelID: string }): AsyncGenerator<StreamChunk> {
+      // A momentary blip against the local runtime (cold start, restart, busy
+      // stream) must not kill the whole agent turn. Re-create a fresh session
+      // and re-send the message on transient transport failures only.
+      const MAX_ATTEMPTS = 5;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        let sessionID = '';
         try {
-          for await (const chunk of streamSessionMessage({
-            baseUrl: url,
-            directory: directoryPath,
-            sessionID,
-            selected,
-            request: req,
-          })) {
-            yield chunk;
+          // A wedged runtime can accept the connection and then never answer.
+          // Bound the wait so the attempt fails with a timeout (retryable and
+          // rotation-worthy) instead of hanging until the outer agent watchdog
+          // aborts the whole turn. Retries stay at the runOneModel level so
+          // each one announces itself with a cold_start status chunk.
+          const sessionResponse = await openCodeRequest(`${url}/session${directory}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ title: 'Infinite OS provider run' }), signal: timeoutSignal(req.signal, 30_000),
+          }, 'session create', 0);
+          if (!sessionResponse.ok) throw new Error(`Could not create OpenCode session (HTTP ${sessionResponse.status}).`);
+          const session = await sessionResponse.json() as { id?: string };
+          sessionID = session.id ?? '';
+          if (!sessionID) throw new Error('OpenCode did not return a session ID.');
+
+          try {
+            for await (const chunk of streamWithFirstByteTimeout({
+              baseUrl: url,
+              directory: directoryPath,
+              sessionID,
+              selected: sel,
+              request: req,
+            }, FIRST_BYTE_TIMEOUT_MS)) {
+              yield chunk;
+            }
+          } catch (error) {
+            quarantineFailure(sel, (error as Error).message);
+            if (attempt < MAX_ATTEMPTS - 1 && isTransientOpenCodeFailure(error) && !req.signal?.aborted) {
+              yield { type: 'provider_status', status: 'cold_start', provider: 'opencode', model: req.model,
+                reason: 'The OpenCode runtime connection dropped; retrying with a fresh session.' };
+              await new Promise((resolve) => setTimeout(resolve, openCodeRetryDelay(attempt)));
+              if (await ensureServer(url, req.cwd)) continue;
+            }
+            throw error;
           }
+          clearInvalidCliCredential();
+          if (!apiKey && sel.providerID === 'opencode') {
+            setLastGoodFreeModel(`${sel.providerID}::${sel.modelID}`);
+          }
+          return;
         } catch (error) {
-          quarantineFailure(selected, (error as Error).message);
           if (attempt < MAX_ATTEMPTS - 1 && isTransientOpenCodeFailure(error) && !req.signal?.aborted) {
             yield { type: 'provider_status', status: 'cold_start', provider: 'opencode', model: req.model,
-              reason: 'The OpenCode runtime connection dropped; retrying with a fresh session.' };
+              reason: 'The OpenCode runtime was not ready; retrying.' };
             await new Promise((resolve) => setTimeout(resolve, openCodeRetryDelay(attempt)));
             if (await ensureServer(url, req.cwd)) continue;
           }
+          noteCliCredentialOutcome((error as Error).message);
           throw error;
-        }
-        return;
-      } catch (error) {
-        if (attempt < MAX_ATTEMPTS - 1 && isTransientOpenCodeFailure(error) && !req.signal?.aborted) {
-          yield { type: 'provider_status', status: 'cold_start', provider: 'opencode', model: req.model,
-            reason: 'The OpenCode runtime was not ready; retrying.' };
-          await new Promise((resolve) => setTimeout(resolve, openCodeRetryDelay(attempt)));
-          if (await ensureServer(url, req.cwd)) continue;
-        }
-        yield { type: 'error', error: `OpenCode: ${(error as Error).message}` };
-        return;
-      } finally {
-        if (sessionID) {
-          openCodeRequest(`${url}/session/${encodeURIComponent(sessionID)}`, {
-            method: 'DELETE', headers: authHeaders(), signal: AbortSignal.timeout(5000),
-          }, 'session cleanup').catch(() => undefined);
+        } finally {
+          if (sessionID) {
+            openCodeRequest(`${url}/session/${encodeURIComponent(sessionID)}`, {
+              method: 'DELETE', headers: authHeaders(), signal: AbortSignal.timeout(5000),
+            }, 'session cleanup').catch(() => undefined);
+          }
         }
       }
+    };
+
+    // How long to wait for the first byte before concluding the model is
+    // rate-limited/queued. Working free turns answer well inside this;
+    // hung turns previously burned 9+ minutes with zero bytes.
+    const FIRST_BYTE_TIMEOUT_MS = openCodeFirstByteTimeoutMs();
+    const MAX_ROTATION = Math.min(rotation.length, 3);
+    let lastRotationError: unknown = null;
+
+    for (let r = 0; r < MAX_ROTATION; r++) {
+      const current = rotation[r]!;
+      if (r > 0) {
+        selected = { ...current };
+        modelId = `${selected.providerID}::${selected.modelID}`;
+        yield { type: 'provider_status', status: 'failover', provider: 'opencode', model: modelId, from: req.model, to: modelId, reason: `Free tier busy on the previous model — trying ${modelId} instead.` };
+      }
+      try {
+        yield* runOneModel(current);
+        return;
+      } catch (error) {
+        lastRotationError = error;
+        // A caller abort (user stop, agent watchdog) is a cancellation, not a
+        // provider failure: report it plainly so it never burns the failover
+        // plan under a bare "The operation was aborted".
+        if (req.signal?.aborted) {
+          yield { type: 'error', error: 'Request cancelled.' };
+          return;
+        }
+        const msg = (error as Error).message;
+        // Account-wide free-tier exhaustion (every free model refuses until
+        // the reset) — rotating cannot help. Distinct from per-model rate
+        // limits and first-byte timeouts, which stay rotation-worthy.
+        if (/free usage exceeded|subscribe to go|opencode\.ai\/go|insufficient account funds/i.test(msg)) {
+          noteCliCredentialOutcome(msg);
+          yield { type: 'error', error: withOpenCodeHints(msg) };
+          return;
+        }
+        const worthRotating = /timed out waiting for first response|timed out|timeout|429|rate.?limit|quota|capacity|overloaded|FreeUsageLimit|404|not.?found|not valid|no longer offered|retired|returned no output/i.test(msg);
+        if (r < MAX_ROTATION - 1 && worthRotating) continue;
+        yield { type: 'error', error: withOpenCodeHints(msg) };
+        noteCliCredentialOutcome(msg);
+        return;
+      }
     }
+    if (req.signal?.aborted) {
+      yield { type: 'error', error: 'Request cancelled.' };
+      return;
+    }
+    yield { type: 'error', error: withOpenCodeHints((lastRotationError as Error)?.message ?? 'OpenCode free tier is busy.') };
+    if (lastRotationError) noteCliCredentialOutcome((lastRotationError as Error).message);
+    return;
   },
 };

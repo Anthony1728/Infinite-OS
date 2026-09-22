@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Tool } from '../tools/base.js';
 
-vi.mock('./hooks.js', () => ({ runHooks: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('./permissions.js', () => ({ checkPermission: vi.fn().mockResolvedValue(true) }));
+vi.mock('./hooks.js', () => ({ runHooks: vi.fn().mockResolvedValue({ blocked: false }) }));
+vi.mock('./permissions.js', () => ({
+  checkPermission: vi.fn().mockResolvedValue(true),
+  currentPermissionProfile: vi.fn().mockReturnValue('default'),
+}));
 
 import { executeToolCall, getToolTimeout } from './tool-execution.js';
 

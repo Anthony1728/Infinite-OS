@@ -1,7 +1,9 @@
 import type { ContentBlock } from '../../shared/types.js';
-import { checkPermission } from './permissions.js';
+import { checkPermission, currentPermissionProfile } from './permissions.js';
 import { runHooks } from './hooks.js';
 import type { Tool, ToolResult } from '../tools/base.js';
+import { actionAuditLog } from '../audit/action-log.js';
+import { planModeGuard } from './plan-mode.js';
 
 export const TOOL_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 
@@ -54,6 +56,16 @@ interface ToolExecutionOptions {
   onUpdate: (partial: ToolResult) => void;
 }
 
+/**
+ * Map a tool result to an audit outcome. Errors are already converted into
+ * results by most tools, so `is_error` is the signal for failure here.
+ */
+function auditOutcome(result: ToolResult | undefined, error: unknown): { outcome: 'ok' | 'error'; durationNote?: string } {
+  if (error) return { outcome: 'error' };
+  if (result?.is_error) return { outcome: 'error' };
+  return { outcome: 'ok' };
+}
+
 /** Bounds the complete tool lifecycle and cancels the underlying operation. */
 export async function executeToolCall(options: ToolExecutionOptions): Promise<ToolResult> {
   const { tool, toolUse, sessionId, cwd, parentSignal, onUpdate } = options;
@@ -67,7 +79,15 @@ export async function executeToolCall(options: ToolExecutionOptions): Promise<To
   if (parentSignal.aborted) abort();
   else parentSignal.addEventListener('abort', abort, { once: true });
 
+  // Audit: capture the authority context once per call. Cheap and purely
+  // observational — nothing here can alter execution.
+  const profile = currentPermissionProfile();
+  const unrestricted = profile === ':full-system-access' || profile === 'full-system-access';
+  const started = Date.now();
+  const canonicalToolName = tool?.name ?? toolUse.name;
+
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   try {
     const operation = async (): Promise<ToolResult> => {
       // Fail fast on structurally invalid input BEFORE prompting for
@@ -77,8 +97,37 @@ export async function executeToolCall(options: ToolExecutionOptions): Promise<To
       if (tool.name === 'Bash' && !((toolUse.input as { command?: unknown } | undefined)?.command)) {
         return { content: 'Bash tool requires a non-empty "command" string parameter.', is_error: true };
       }
-      await runHooks('PreToolUse', { tool: toolUse.name, input: toolUse.input }, { sessionId, cwd, signal: controller.signal });
+      // Enforced plan mode (tool-level, like Claude Code's plan gate): the
+      // read-only verdict comes before permission checks so even a full-system
+      // profile cannot mutate the machine while a plan is pending approval.
+      const planBlock = planModeGuard(sessionId, canonicalToolName, toolUse.input);
+      if (planBlock) {
+        actionAuditLog.record({
+          sessionId, tool: canonicalToolName, input: toolUse.input,
+          decision: 'denied', outcome: 'denied',
+          durationMs: Date.now() - started,
+          unrestricted,
+        });
+        return planBlock;
+      }
+      // PreToolUse hooks can block deterministically (JSON verdict).
+      const pre = await runHooks('PreToolUse', { tool: toolUse.name, input: toolUse.input }, { sessionId, cwd, signal: controller.signal });
+      if (pre.blocked) {
+        actionAuditLog.record({
+          sessionId, tool: canonicalToolName, input: toolUse.input,
+          decision: 'denied', outcome: 'denied',
+          durationMs: Date.now() - started,
+          unrestricted,
+        });
+        return { content: pre.blockReason || 'Blocked by PreToolUse hook.', is_error: true };
+      }
       if (!(await checkPermission(toolUse, { sessionId, cwd, signal: controller.signal }))) {
+        actionAuditLog.record({
+          sessionId, tool: canonicalToolName, input: toolUse.input,
+          decision: 'denied', outcome: 'denied',
+          durationMs: Date.now() - started,
+          unrestricted,
+        });
         return { content: 'Permission denied by user.', is_error: true };
       }
       const result = await tool.execute(toolUse.input, {
@@ -87,18 +136,49 @@ export async function executeToolCall(options: ToolExecutionOptions): Promise<To
         sessionId,
         onUpdate,
       });
-      await runHooks('PostToolUse', { tool: toolUse.name, input: toolUse.input, result }, { sessionId, cwd, signal: controller.signal });
+      // PostToolUse hooks may append governance context to the result.
+      const post = await runHooks('PostToolUse', { tool: toolUse.name, input: toolUse.input, result }, { sessionId, cwd, signal: controller.signal });
+      if (post.additionalContext) {
+        const baseContent = typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+        return { ...result, content: `${baseContent}\n\n[Hook context]: ${post.additionalContext}` };
+      }
       return result;
     };
 
     const timeout = new Promise<never>((_resolve, reject) => {
       const toolTimeout = getToolTimeout(toolUse.name);
       timeoutId = setTimeout(() => {
+        timedOut = true;
         controller.abort(new Error('tool timeout'));
         reject(new Error(`Tool "${toolUse.name}" timed out after ${Math.round(toolTimeout / 60_000)} minutes and was cancelled.`));
       }, toolTimeout);
     });
-    return await Promise.race([operation(), timeout, cancellation]);
+
+    try {
+      const result = await Promise.race([operation(), timeout, cancellation]);
+      const { outcome } = auditOutcome(result, undefined);
+      actionAuditLog.record({
+        sessionId,
+        tool: canonicalToolName,
+        input: toolUse.input,
+        decision: unrestricted ? 'full-system' : 'auto',
+        outcome,
+        durationMs: Date.now() - started,
+        unrestricted,
+      });
+      return result;
+    } catch (err) {
+      actionAuditLog.record({
+        sessionId,
+        tool: canonicalToolName,
+        input: toolUse.input,
+        decision: unrestricted ? 'full-system' : 'auto',
+        outcome: timedOut ? 'timeout' : 'cancelled',
+        durationMs: Date.now() - started,
+        unrestricted,
+      });
+      throw err;
+    }
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
     parentSignal.removeEventListener('abort', abort);

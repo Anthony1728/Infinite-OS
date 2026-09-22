@@ -99,7 +99,7 @@ function runCheck(check: Check, cwd: string, signal: AbortSignal): Promise<{ ok:
 export const verifyTool: Tool = {
   name: 'Verify',
   description:
-    'Run the workspace checks after editing code: typecheck, lint, test, build (auto-detected from package.json scripts, pytest, or go). Returns structured pass/fail per check with the failing tail. Run this after Write/Edit and fix every failure before replying — this is the edit→verify→fix loop.',
+    'Run workspace checks after editing code: typecheck, lint, test, build (auto-detected). Returns pass/fail per check with the failing tail. Run after Write/Edit and fix every failure before replying — the edit→verify→fix loop.',
   inputSchema: {
     type: 'object',
     properties: {

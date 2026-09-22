@@ -40,9 +40,9 @@ export const imageGeneratorTool: Tool = {
     await mkdir(outDir, { recursive: true });
     const wantProvider = a.provider || 'auto';
 
-    // Provider: OpenAI
+    // Provider: OpenAI — prefer saved secret, fall back to env.
     if (wantProvider === 'openai' || wantProvider === 'auto') {
-      const key = process.env.OPENAI_API_KEY;
+      const key = await resolveImageKey('openai', 'OPENAI_API_KEY');
       if (key) {
         try {
           const [w, h] = size.split('x');
@@ -67,13 +67,13 @@ export const imageGeneratorTool: Tool = {
           if (wantProvider === 'openai') return { content: `OpenAI error: ${(e as Error).message}`, is_error: true };
         }
       } else if (wantProvider === 'openai') {
-        return { content: 'OPENAI_API_KEY not set. Set it in env or use provider=auto/placeholder.', is_error: true };
+        return { content: 'OpenAI key not set. Save it in Settings → AI Provider → OpenAI or set OPENAI_API_KEY, or use provider=auto/placeholder.', is_error: true };
       }
     }
 
     // Provider: Stability
     if (wantProvider === 'stability' || wantProvider === 'auto') {
-      const key = process.env.STABILITY_API_KEY;
+      const key = await resolveImageKey('stability', 'STABILITY_API_KEY');
       if (key) {
         try {
           const [w, h] = size.split('x').map(Number);
@@ -85,6 +85,7 @@ export const imageGeneratorTool: Tool = {
           const res = await fetchWithTimeout('https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image', {
             method: 'POST',
             headers: { Accept: 'application/json', Authorization: `Bearer ${key}` },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             body: fd as unknown as any,
           }, ctx.abortSignal);
           if (res.ok) {
@@ -110,9 +111,18 @@ export const imageGeneratorTool: Tool = {
       await writeFile(p, svg, 'utf8');
       paths.push(p);
     }
-    return { content: `Generated placeholder SVG (${size}) — no API key required, real file for preview/verification:\n${paths.join('\n')}\nPrompt: ${prompt}${wantProvider === 'auto' ? '\nHint: set OPENAI_API_KEY or STABILITY_API_KEY for photoreal.' : ''}` };
+    return { content: `Generated placeholder SVG (${size}) — no API key required, real file for preview/verification:\n${paths.join('\n')}\nPrompt: ${prompt}${wantProvider === 'auto' ? '\nHint: save OpenAI/Stability key in Settings → AI Provider for photoreal.' : ''}` };
   },
 };
+
+async function resolveImageKey(providerId: string, envName: string): Promise<string> {
+  try {
+    const { getApiKey } = await import('../settings/secrets.js');
+    const saved = await getApiKey(providerId).catch(() => '');
+    if (saved) return saved;
+  } catch { /* env fallback below */ }
+  return process.env[envName] ?? '';
+}
 
 function placeholderSvg(prompt: string, size: string): string {
   const [w, h] = size.split('x').map(Number);

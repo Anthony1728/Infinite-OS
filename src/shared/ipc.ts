@@ -1,11 +1,29 @@
 // IPC channel constants — shared by main (ipcMain.handle) and renderer (ipcRenderer.invoke)
 
+/** ExitPlan approval waits this long for the user before auto-declining. */
+export const PLAN_APPROVAL_TIMEOUT_MS = 10 * 60_000;
+/** AskUserQuestion cards wait this long before auto-skipping (user may be away). */
+export const QUESTION_TIMEOUT_MS = 30 * 60_000;
+
 export const IPC = {
   // Chat
   CHAT_SEND: 'chat:send',
   CHAT_ABORT: 'chat:abort',
   CHAT_INTERJECT: 'chat:interject',
   CHAT_STREAM_EVENT: 'chat:stream-event', // main → renderer push
+
+  // Plan mode (enforced read-only + ExitPlan approval gate)
+  CHAT_PLAN_STATE: 'chat:plan-state', // main → renderer push: { sessionId, active, plan? }
+  CHAT_PLAN_RESOLVE: 'chat:plan-resolve', // renderer → main: { sessionId, approved }
+
+  // Blocking question cards (AskUserQuestion): the agent pauses until the user
+  // answers. The request rides the chat event bus (CHAT_STREAM_EVENT with type
+  // question_request); resolution comes back over this channel.
+  CHAT_QUESTION_RESOLVE: 'chat:question-resolve', // renderer -> main: { id, answers, skipped }
+
+  // Background tasks (detached chat runs with completion notifications)
+  BACKGROUND_TASKS_LIST: 'chat:background-tasks',
+
   OPERATOR_BROWSER_SEARCH: 'operator:browser-search',
   OPERATOR_BROWSER_NAVIGATE: 'operator:browser-navigate',
   OPERATOR_BROWSER_SHUTDOWN: 'operator:browser-shutdown',
@@ -37,11 +55,21 @@ export const IPC = {
   PROVIDER_MODELS: 'provider:models',
   PROVIDER_SET_KEY: 'provider:set-key',
   PROVIDER_HAS_KEY: 'provider:has-key',
+  OPENCODE_CLI_VERSION: 'opencode:cli-version',
+  OPENCODE_CLI_UPGRADE: 'opencode:cli-upgrade',
+  OPENCODE_SERVER_RESTART: 'opencode:server-restart',
 
   // Tools
   TOOLS_LIST: 'tools:list',
   TOOL_PERMISSIONS_GET: 'tools:permissions:get',
   TOOL_PERMISSIONS_SET: 'tools:permissions:set',
+
+  // Action audit log (query the agent's black-box record)
+  AUDIT_RECENT: 'audit:recent',
+  AUDIT_QUERY: 'audit:query',
+  AUDIT_DAY: 'audit:day',
+  AUDIT_STATS: 'audit:stats',
+  AUDIT_VERIFY: 'audit:verify',
 
   // Agents (multi-agent system)
   AGENT_LIST: 'agent:list',
@@ -77,6 +105,8 @@ export const IPC = {
   SKILLS_STATS: 'skills:stats',
   SKILLS_IMPORT_CLAUDE: 'skills:import-claude',
   SKILLS_RELEVANT: 'skills:relevant',
+  SKILLS_EXPORT: 'skills:export',
+  SKILLS_IMPORT: 'skills:import',
 
   // MCP
   MCP_LIST_SERVERS: 'mcp:list-servers',

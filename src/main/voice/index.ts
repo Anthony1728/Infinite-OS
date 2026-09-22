@@ -260,7 +260,9 @@ async function initVoiceManager(): Promise<VoiceManager> {
     voiceInitPromise = (async () => {
       try {
         const { getApiKey } = await import('../settings/secrets.js');
-        const key = await getApiKey('openai-tts');
+        // Provider system stores chat key under 'openai'; legacy TTS key was
+        // 'openai-tts'. Accept either so a saved OpenAI key enables voice.
+        const key = (await getApiKey('openai').catch(() => '')) || (await getApiKey('openai-tts').catch(() => ''));
         if (key) voiceInstance!.setApiKey(key);
       } catch { /* secrets not available yet */ }
     })();

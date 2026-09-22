@@ -19,6 +19,8 @@ import { executeToolCall } from '../agent/tool-execution.js';
 import { spawnSubagent } from '../agent/runtime.js';
 import { settings } from '../settings/store.js';
 import { execSync } from 'node:child_process';
+import { deliverNotification } from './deliver.js';
+import { resolveActiveModel } from '../agent/active-model.js';
 
 export interface AutomationConfig {
   dataDir: string;
@@ -447,6 +449,9 @@ export class AutomationBuilder {
 
     // Execute actions sequentially with durable per-action retry counts.
     const actionAttempts = new Map<string, number>();
+    // Result of the most recent completed action — notify steps reference it
+    // as {{previous}} so agent_run → notify chains deliver the actual content.
+    let previousResult = '';
     let actionIndex = 0;
     while (actionIndex < workflow.actions.length) {
       if (runController.signal.aborted) {
@@ -502,13 +507,15 @@ export class AutomationBuilder {
             const agentId = String(action.config.agent ?? 'general') as Parameters<typeof spawnSubagent>[0]['agentId'];
             const task = String(action.config.task ?? '');
             if (!task.trim()) throw new Error('agent_run requires a task.');
-            const provider = String(settings.get<string>('provider') ?? 'openrouter');
-            const model = String(settings.get<string>('model') ?? 'google/gemma-4-31b-it:free');
+            // Scheduled runs answer on the user's SELECTED model — never a
+            // silent local fallback that hogs the machine. Nothing selected
+            // fails the action loudly instead of burning CPU unasked.
+            const { provider, model, cwd } = resolveActiveModel((key) => settings.get(key));
             const spawned = spawnSubagent({
               agentId,
               task,
               sessionId: workflow.id,
-              cwd: homedir(),
+              cwd,
               provider,
               model,
               parentHistory: [],
@@ -540,7 +547,24 @@ export class AutomationBuilder {
             break;
           }
           case 'notify': {
-            result = `Notification: ${action.config.message}`;
+            const template = String(action.config.message ?? '');
+            const message = template.includes('{{previous}}')
+              ? template.split('{{previous}}').join(previousResult)
+              : template;
+            if (!message.trim()) throw new Error('notify requires a message.');
+            // Real delivery (desktop toast by default; whatsapp / telegram /
+            // email on request). A notification that cannot be delivered fails
+            // the action loudly — scheduled briefs must never "succeed" into
+            // the void the way the old no-op string did.
+            const delivery = await deliverNotification({
+              message,
+              title: typeof action.config.title === 'string' ? action.config.title : workflow.name,
+              channel: typeof action.config.channel === 'string' ? action.config.channel : undefined,
+              to: typeof action.config.to === 'string' ? action.config.to : undefined,
+              subject: typeof action.config.subject === 'string' ? action.config.subject : undefined,
+            });
+            result = delivery.detail;
+            if (!delivery.delivered) throw new Error(delivery.detail);
             break;
           }
           case 'script': {
@@ -607,6 +631,7 @@ export class AutomationBuilder {
         }
 
         run.actionResults.push({ actionId: action.id, status: 'completed', result });
+        previousResult = result;
         emit({ type: 'action_completed', actionId: action.id, actionType: action.type, actionIndex, message: `${action.type.replace(/_/g, ' ')} completed`, result });
         actionIndex++;
       } catch (err) {

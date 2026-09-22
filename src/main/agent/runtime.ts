@@ -34,6 +34,8 @@ import { buildToolRecoveryDirective, toolAttemptSignature, type FailedToolAttemp
 import { LOOP_STREAM_STALL_TIMEOUT_MS } from './loop.js';
 import { keepPartialAssistant } from './loop.js';
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
+import { StreamCoalescer } from './stream-coalescer.js';
+import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
 import { settings } from '../settings/store.js';
 
 type EventSink = (e: AgentEvent) => void;
@@ -381,8 +383,12 @@ export async function runSubagent(
   let recoveryContext: Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'> | null = null;
   const providerProgressSeen = new Set<string>();
   const runSystemPrompts = new Map<string, string>();
+  // Per-candidate failure log: the exhausted-run error names every model
+  // tried and why each failed (mirrors loop.ts) instead of only the last.
+  const candidateErrors: Array<{ label: string; error: string }> = [];
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
+    candidateErrors.push({ label: activeCandidate.label, error: failure.slice(0, 220) });
     // Kill-switch (mirrors loop.ts): never leave the selected model.
     if (!failoverEnabled) return false;
     // Every attempt keeps its own bubble: only discard a partial with
@@ -537,6 +543,19 @@ export async function runSubagent(
       }
     }, Math.min(30_000, LOOP_STREAM_STALL_TIMEOUT_MS / 4));
 
+    // Coalesce subagent text deltas into ~50ms frames (same feel as the
+    // main loop; parallel agents no longer spam one IPC event per token).
+    const deltaCoalescer = new StreamCoalescer({
+      onFlush: (text) => opts.sink({ type: "text_delta", runId: state.id, message_id: assistant.id, text }),
+    });
+    // Stream tool calls as they form (same as the main loop): early name,
+    // batched partial-JSON snapshots, final flush before tool_use_end.
+    const toolArgCoalescer = new ToolCallArgCoalescer({
+      onDelta: ({ id, name, partialJson }) => {
+        if (name) opts.sink({ type: "tool_use_start", runId: state.id, message_id: assistant.id, tool_use_id: id, name });
+        if (partialJson) opts.sink({ type: "tool_use_delta", runId: state.id, message_id: assistant.id, tool_use_id: id, partial_json: partialJson });
+      },
+    });
     try {
       for await (const chunk of stream) {
         streamLastEvent = Date.now();
@@ -548,12 +567,16 @@ export async function runSubagent(
         if (chunk.type === 'text_delta') {
           appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
           state.preview = (state.preview ?? '') + chunk.text;
-          opts.sink({ type: 'text_delta', runId: state.id, message_id: assistant.id, text: chunk.text });
+          deltaCoalescer.push(chunk.text);
         }
         if (chunk.type === 'tool_use_start') {
-          opts.sink({ type: 'tool_use_start', runId: state.id, message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name });
+          toolArgCoalescer.start(chunk.id, chunk.name);
+        }
+        if (chunk.type === 'tool_use_delta') {
+          toolArgCoalescer.delta(chunk.id, chunk.partial_json);
         }
         if (chunk.type === 'tool_use_end') {
+          toolArgCoalescer.end(chunk.id, chunk.name);
           state.toolCallCount++;
           opts.sink({ type: 'tool_call', runId: state.id, toolName: chunk.name });
           opts.sink({ type: 'tool_use_end', runId: state.id, message_id: assistant.id, tool_use_id: chunk.id, name: chunk.name, input: chunk.input });
@@ -612,6 +635,8 @@ export async function runSubagent(
       if (!providerFailure) providerFailure = (e as Error).message;
     } finally {
       clearInterval(subagentStallInterval);
+      deltaCoalescer.dispose();
+      toolArgCoalescer.dispose();
       signal.removeEventListener('abort', onSubagentParentAbort);
       if (activeStreamControllers.get(state.id) === subagentStreamController) activeStreamControllers.delete(state.id);
     }
@@ -656,7 +681,13 @@ export async function runSubagent(
       }
       if (switchCandidate(providerFailure, assistant, 'model response stream')) continue;
       state.status = 'failed';
-      state.error = `All available models have been tried. Last error (${activeCandidate.provider}/${activeCandidate.model}): ${providerFailure}`;
+      candidateErrors.push({ label: activeCandidate.label, error: providerFailure.slice(0, 220) });
+      {
+        const tried = [...new Set(candidateErrors.map((e) => e.label))];
+        const perModel = candidateErrors.slice(0, 6).map((e) => `  - ${e.label}: ${e.error}`).join('\n');
+        state.error = `All available models have been tried (${tried.join(', ')}). Last error (${activeCandidate.provider}/${activeCandidate.model}): ${providerFailure}`
+          + (perModel ? `\n\nPer-model errors:\n${perModel}${candidateErrors.length > 6 ? `\n  - …and ${candidateErrors.length - 6} more` : ''}` : '');
+      }
       opts.sink({ type: 'fail', runId: state.id, error: state.error });
       return '';
     }
@@ -943,7 +974,7 @@ export function abortSessionRuns(sessionId: string): number {
   for (const [runId, ctrl] of activeStreamControllers) {
     const st = runStates.get(runId);
     if (!st || st.sessionId === sessionId) {
-      try { ctrl.abort(new Error('Session aborted by user.')); } catch {}
+      try { ctrl.abort(new Error('Session aborted by user.')); } catch { /* already aborted */ }
     }
   }
   return n;
@@ -953,7 +984,11 @@ function providerSupportsTools(providerId: string, model: string): boolean {
   const provider = getProvider(providerId);
   if (!provider) return false;
   const knownModel = provider.freeModels.find((item) => item.id === model);
-  return knownModel?.supports_tools !== false;
+  // Opt-out semantics: a model is tool-less only when its catalog explicitly
+  // says so. Unknown/custom/gateway models are OpenAI-compatible by definition
+  // of their provider adapter, so they keep tools (fixes custom endpoints and
+  // key-metered catalogs silently losing the entire tool loop).
+  return knownModel ? knownModel.supports_tools !== false : true;
 }
 
 function appendOrCreate(blocks: ContentBlock[], block: ContentBlock) {

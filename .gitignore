@@ -24,3 +24,17 @@ test-results/
 .infinite-backups/
 
 nul
+
+# Scratch/backup junk (keep real zips like extensions/ tracked)
+/src-backup-*.zip
+/c
+
+# Bridge extension config: regenerated at runtime with a LIVE auth token that
+# grants browser control (ws://127.0.0.1:8765 /exec). Never commit it.
+extensions/*/config.js
+!extensions/*/config.example.js
+
+# Nested project secrets — only .env.example (with placeholders) belongs in git
+Infinite OS/**/.env
+Infinite OS/**/.env.local
+Infinite OS/**/.env.*.local

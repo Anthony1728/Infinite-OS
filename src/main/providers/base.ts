@@ -36,7 +36,7 @@ export type StreamChunk =
     }
   | {
       type: 'provider_status';
-      status: 'connecting' | 'streaming' | 'failover' | 'cold_start' | 'rate_limited';
+      status: 'connecting' | 'streaming' | 'failover' | 'cold_start' | 'rate_limited' | 'error';
       provider?: string;
       model?: string;
       from?: string;

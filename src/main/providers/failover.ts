@@ -1,9 +1,10 @@
 import { getAllApiKeys } from '../settings/secrets.js';
 import { getProvider } from './registry.js';
+import { isProviderAuthKnownBad } from './health.js';
 
 export interface ProviderCandidate { provider: string; model: string; apiKey: string; label: string; }
 
-const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom', 'ollama', 'opencode', 'gemini', 'anthropic', 'openai'];
+const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom', 'ollama', 'opencode', 'freebuff', 'gemini', 'anthropic', 'openai'];
 const unhealthyUntil = new Map<string, number>();
 const lastSuccessfulAt = new Map<string, number>();
 
@@ -17,7 +18,17 @@ export type FailoverReason =
   | 'server_error' | 'timeout' | 'context_overflow' | 'model_not_found'
   | 'content_blocked' | 'format_error' | 'network' | 'unknown';
 
+/**
+ * Account-wide free-tier exhaustion (OpenCode free quota spent until reset).
+ * The whole provider is unusable for hours — the run must leave it for a
+ * keyed provider instead of cycling its dead free models.
+ */
+export function isFreeTierExhausted(error: string): boolean {
+  return /free.?tier|free usage exceeded|resets in/i.test(error);
+}
+
 export function classifyError(error: string): FailoverReason {
+  if (isFreeTierExhausted(error)) return 'billing';
   if (/\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i.test(error)) return 'auth';
   if (/\b(?:402|billing|insufficient\s+balance|quota\s*exceeded|credit)\b/i.test(error)) return 'billing';
   if (/\b(?:429|rate.?limit|quota|capacity)\b/i.test(error)) return 'rate_limit';
@@ -114,6 +125,12 @@ export const CAPABILITY_FAILURE_THRESHOLD = 2;
  * rate-limit-specific backoff before retrying.
  */
 export function isTransientStreamFailure(error: string): boolean {
+  // Credential/setup failures are never transient, even when the message
+  // contains retry-sounding words ("try again" in a login hint must not read
+  // as overloaded) — retrying the same model can never succeed.
+  if (/api.?key|auth|login|sign.?in|credential|unauthori[sz]ed|forbidden|\b401\b|\b403\b|not signed in|no .*key saved/i.test(error)) {
+    return false;
+  }
   const reason = classifyError(error);
   return reason === 'timeout' || reason === 'network' || reason === 'server_error' || reason === 'overloaded' || reason === 'rate_limit';
 }
@@ -177,7 +194,8 @@ export function recordProviderSuccess(candidate: Pick<ProviderCandidate, 'provid
 }
 
 export function isProviderWideFailure(error: string): boolean {
-  return /\b(?:401|402|403|408|409|429|5\d\d|api.?key|auth|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|stalled|stall|no provider progress|supervisor.*restart|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted.*stream)\b/i.test(error);
+  if (isFreeTierExhausted(error)) return true;
+  return /\b(?:401|402|403|408|409|426|429|5\d\d|api.?key|auth|login|sign.?in|credential|rate.?limit|quota|credit|capacity|overloaded|upgrade.?required|newer is required|timeout|timed out|stalled|stall|no provider progress|supervisor.*restart|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted.*stream)\b/i.test(error);
 }
 
 export function prioritizeProviderCandidates(candidates: ProviderCandidate[], now = Date.now()): ProviderCandidate[] {
@@ -201,7 +219,7 @@ export function prioritizeProviderCandidates(candidates: ProviderCandidate[], no
 }
 
 /** Errors that mean the selected provider itself is unusable and the run may leave it. */
-const CREDENTIAL_FAILURE = /\b(401|402|403|api.?key|auth|unauthori[sz]ed|forbidden|quota|credit|insufficient\s+balance|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i;
+const CREDENTIAL_FAILURE = /\b(401|402|403|api.?key|auth|login|sign.?in|credential|unauthori[sz]ed|forbidden|quota|credit|free.?tier|free usage exceeded|resets in|insufficient\s+balance|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i;
 // A 404 from an OpenAI-compatible endpoint almost always means "that model
 // string does not exist on this provider" — the configured (provider, model)
 // pair is wrong. That is a hard misconfiguration, not a transient issue, so
@@ -266,10 +284,8 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
       }
       return;
     }
-    // Keyless-capable providers (Ollama, installed OpenCode CLI): keyed
-    // candidates first when keys exist (remote/subscription routes), then the
-    // keyless route — so the installed CLI stays plan-visible with no key
-    // saved at all instead of failing as "not available".
+    // Keyless-capable providers (Ollama, installed OpenCode CLI, FreeBuff):
+    // keyed candidates first when keys exist, then the keyless route.
     if (!credentials.has(providerId)) credentials.set(providerId, await getAllApiKeys(providerId));
     const keys = credentials.get(providerId) ?? [];
     for (const apiKey of keys) {
@@ -289,6 +305,10 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
   for (const providerId of orderedProviders) {
     const provider = getProvider(providerId);
     if (!provider) continue;
+    // A keyless provider whose login was just rejected fails every model
+    // identically. Keep the user's explicit selection (it fails fast with the
+    // fix), but don't offer its dead catalog as automatic fallback.
+    if (providerId !== selected.provider && !provider.requiresApiKey && isProviderAuthKnownBad(providerId)) continue;
     for (const model of provider.freeModels) await add(providerId, model.id);
     if (provider.defaultModel) await add(providerId, provider.defaultModel);
   }
@@ -301,5 +321,5 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
 }
 
 export function isRecoverableProviderError(error: string): boolean {
-  return /\b(401|402|403|404|408|409|429|5\d\d|api\s*key|auth|unauthori[sz]ed|forbidden|token\s+(?:expired|incorrect|invalid)|expired\s+(?:api\s*)?key|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted|cancelled|canceled|model.*(?:unavailable|not found))\b/i.test(error);
+  return /\b(401|402|403|404|408|409|426|429|5\d\d|api\s*key|auth|unauthori[sz]ed|forbidden|invalid credential|freebuff|consent_required|spend_limited|ip_capped|model_locked|model_unavailable|token\s+(?:expired|incorrect|invalid)|expired\s+(?:api\s*)?key|upgrade.?required|newer is required|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted|cancelled|canceled|model.*(?:unavailable|not found))\b/i.test(error);
 }

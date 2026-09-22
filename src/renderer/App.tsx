@@ -23,10 +23,12 @@ import { SettingsModalClassic } from './components/settings/SettingsModalClassic
 import { useUiTheme } from './theme/uiTheme';
 import { ExperienceSettingsModal, type ExperienceSettingsSection } from './components/settings/ExperienceSettingsModal';
 import { PermissionDialog } from './components/permissions/PermissionDialog';
+import { PlanApprovalDialog } from './components/permissions/PlanApprovalDialog';
 import { ToastContainer } from './components/notifications/ToastContainer';
 import { StatusBar } from './components/layout/StatusBar';
 import { InfiniteLogo } from './components/brand/InfiniteLogo';
 import { ShortcutsModal } from './components/modals/ShortcutsModal';
+import { syncActiveModelToMain } from './utils/active-model-sync';
 
 type AuthView = 'login' | 'register';
 
@@ -194,6 +196,20 @@ export function App() {
     })();
   }, []);
 
+  // One-time backfill: selections saved before the main-process sync existed
+  // only live in renderer localStorage. Push the current pick to the main
+  // store once per launch so background turns (WhatsApp, Telegram, scheduled
+  // runs) answer on the selected model from the very first message.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('infinite:current');
+      if (!raw) return;
+      const current = JSON.parse(raw) as { provider?: unknown; model?: unknown; cwd?: unknown };
+      if (current.provider || current.model) syncActiveModelToMain(current);
+    } catch {
+      /* a corrupt selection must never block startup */
+    }
+  }, []);
   // Netflix-style isolation, renderer side: device storage (provider pick,
   // bot chats, tabs, history, workspace UI) belongs to one account. When the
   // signed-in account differs from whoever used this window last, wipe it —
@@ -404,6 +420,7 @@ export function App() {
       {experienceSettingsOpen && <ExperienceSettingsModal key={experienceSettingsSection} initialSection={experienceSettingsSection} onClose={() => setExperienceSettingsOpen(false)} />}
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <PermissionDialog />
+      <PlanApprovalDialog />
       <ToastContainer />
       </div>
     </div>

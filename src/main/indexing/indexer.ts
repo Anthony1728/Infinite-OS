@@ -3,12 +3,16 @@
  * 
  * Provides code semantic search using embeddings.
  * Supports file indexing, search, and semantic query.
+ * Vectors come from Ollama embedding models when available (real semantic
+ * search, local + free) with a deterministic lexical fallback when offline.
+ * Files are embedded as symbol/heading-aware chunks, not whole-file vectors.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { infiniteHome } from '../profiles/home.js';
+import { embedText, lexicalVector, cosineSimilarity, normalize } from './embeddings.js';
 
 export interface IndexedFile {
   id: string;
@@ -19,6 +23,16 @@ export interface IndexedFile {
   size: number;
   indexedAt: number;
   modifiedAt: number;
+}
+
+/** A symbol/heading-aware chunk of a file with its own vector. */
+export interface IndexedChunk {
+  fileId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  text: string;
+  vector: number[];
 }
 
 export interface SearchResult {
@@ -97,55 +111,28 @@ const EXCLUDED_EXTENSIONS = new Set([
 ]);
 
 /**
- * Simple embedding generator
- * In production, this would use Ollama or an external API
+ * Split file content into symbol/heading-aware chunks (~80 lines target).
+ * Boundaries prefer function/class/def/section markers so a chunk is a
+ * meaningful unit, then fall back to hard line cuts.
  */
-function generateEmbedding(text: string): number[] {
-  // Simple hash-based pseudo-embedding for demo
-  // Real implementation should use: Ollama embeddings API, OpenAI, etc.
-  const embedding = new Array(384).fill(0);
-  const words = text.toLowerCase().split(/\s+/);
-  
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    for (let j = 0; j < word.length; j++) {
-      const idx = (word.charCodeAt(j) * (i + 1) * (j + 1)) % 384;
-      embedding[idx] += 1;
+export function chunkFileContent(content: string, targetLines = 80): Array<{ startLine: number; endLine: number; text: string }> {
+  const lines = content.split('\n');
+  if (lines.length <= targetLines) return [{ startLine: 1, endLine: lines.length, text: content }];
+  const boundaryRe = /^(?:\s*(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|struct|def|fn|func|const\s+[A-Z_][A-Za-z0-9_]*\s*=)\b|#{1,3}\s|\/\*\*|\/\/\s*={3,})/;
+  const chunks: Array<{ startLine: number; endLine: number; text: string }> = [];
+  let start = 0;
+  while (start < lines.length) {
+    let end = Math.min(start + targetLines, lines.length);
+    if (end < lines.length) {
+      // Look back up to 30 lines for a symbol boundary to cut at.
+      for (let i = end; i > Math.max(start + targetLines - 30, start + 1); i--) {
+        if (boundaryRe.test(lines[i])) { end = i; break; }
+      }
     }
+    chunks.push({ startLine: start + 1, endLine: end, text: lines.slice(start, end).join('\n') });
+    start = end;
   }
-
-  // Normalize
-  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-  if (magnitude > 0) {
-    for (let i = 0; i < embedding.length; i++) {
-      embedding[i] /= magnitude;
-    }
-  }
-
-  return embedding;
-}
-
-/**
- * Cosine similarity between two vectors
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-  
-  let dotProduct = 0;
-  let magnitudeA = 0;
-  let magnitudeB = 0;
-  
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    magnitudeA += a[i] * a[i];
-    magnitudeB += b[i] * b[i];
-  }
-  
-  const magA = Math.sqrt(magnitudeA);
-  const magB = Math.sqrt(magnitudeB);
-  
-  if (magA === 0 || magB === 0) return 0;
-  return dotProduct / (magA * magB);
+  return chunks;
 }
 
 /**
@@ -155,6 +142,8 @@ export class WorkspaceIndexer {
   private dataDir: string;
   private index: Map<string, IndexedFile> = new Map();
   private embeddings: Map<string, number[]> = new Map();
+  /** Symbol/heading-aware chunks with per-chunk vectors (the search unit). */
+  private chunks: Map<string, IndexedChunk[]> = new Map();
   private lastIndexed: number = 0;
 
   constructor(dataDir?: string) {
@@ -226,7 +215,8 @@ export class WorkspaceIndexer {
       };
 
       this.index.set(indexedFile.id, indexedFile);
-      this.embeddings.set(indexedFile.id, generateEmbedding(content));
+      this.embeddings.set(indexedFile.id, await this.embedFor(content));
+      await this.buildChunks(indexedFile);
 
       return indexedFile;
     } catch (err) {
@@ -244,68 +234,125 @@ export class WorkspaceIndexer {
 
     this.index.delete(file.id);
     this.embeddings.delete(file.id);
+    this.chunks.delete(file.id);
     this.save();
     return true;
   }
 
+  /** Best available embedding: Ollama model when present, lexical otherwise. */
+  private async embedFor(text: string): Promise<number[]> {
+    try {
+      const { vector } = await embedText(text);
+      return vector;
+    } catch {
+      return lexicalVector(text);
+    }
+  }
+
+  /** Chunk a freshly indexed file and embed each chunk. */
+  private async buildChunks(file: IndexedFile): Promise<void> {
+    const pieces = chunkFileContent(file.content);
+    const chunks: IndexedChunk[] = [];
+    for (const piece of pieces) {
+      chunks.push({
+        fileId: file.id,
+        path: file.path,
+        startLine: piece.startLine,
+        endLine: piece.endLine,
+        text: piece.text,
+        vector: await this.embedFor(`${file.path}\n${piece.text}`),
+      });
+    }
+    this.chunks.set(file.id, chunks);
+  }
+
   /**
-   * Search the index
+   * Search the index — chunk-level semantic search. Each chunk's vector is
+   * compared to the query vector; the file's score is its best chunk so a
+   * relevant function inside a big file surfaces without the whole file
+   * diluting the signal.
    */
   search(query: string, limit: number = 20): SearchResult[] {
     if (!query.trim()) return [];
 
-    const queryEmbedding = generateEmbedding(query);
     const results: SearchResult[] = [];
-
-    for (const [fileId, embedding] of this.embeddings) {
+    for (const [fileId, chunks] of this.chunks) {
       const file = this.index.get(fileId);
       if (!file) continue;
 
-      const score = cosineSimilarity(queryEmbedding, embedding);
-      if (score < 0.1) continue; // Threshold
+      const queryVector = lexicalVector(query); // sync path uses lexical; embedText is async
+      let bestScore = 0;
+      let bestMatches: SearchResult['matches'] = [];
 
-      // Find matching lines
-      const lines = file.content.split('\n');
-      const matches: SearchResult['matches'] = [];
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const lineLower = line.toLowerCase();
-        const queryLower = query.toLowerCase();
-        
-        // Simple keyword matching
-        const queryWords = queryLower.split(/\s+/);
-        const matchCount = queryWords.filter(w => 
-          w.length > 2 && lineLower.includes(w)
-        ).length;
-        
-        if (matchCount > 0) {
-          matches.push({
-            line: i + 1,
-            content: line,
-            snippet: this.getSnippet(line, query),
-          });
+      for (const chunk of chunks) {
+        const score = cosineSimilarity(queryVector, chunk.vector);
+        if (score > bestScore) {
+          bestScore = score;
+          const chunkLines = chunk.text.split('\n');
+          const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const matches: SearchResult['matches'] = [];
+          for (let i = 0; i < chunkLines.length; i++) {
+            const lineLower = chunkLines[i].toLowerCase();
+            if (queryWords.some((w) => lineLower.includes(w))) {
+              matches.push({
+                line: chunk.startLine + i,
+                content: chunkLines[i],
+                snippet: this.getSnippet(chunkLines[i], query),
+              });
+            }
+          }
+          bestMatches = matches.slice(0, 5);
         }
       }
 
-      // Sort matches by relevance
-      matches.sort((a, b) => {
-        const aLen = a.content.length;
-        const bLen = b.content.length;
-        return aLen - bLen;
-      });
-
-      results.push({
-        file,
-        score,
-        matches: matches.slice(0, 5), // Top 5 matches per file
-      });
+      if (bestScore >= 0.1 && bestMatches.length) {
+        results.push({ file, score: bestScore, matches: bestMatches });
+      }
     }
 
-    // Sort by score
     results.sort((a, b) => b.score - a.score);
-
     return results.slice(0, limit);
+  }
+
+  /**
+   * Async search that embeds the query with the real backend (Ollama when
+   * available), giving true semantic recall. Falls back to the sync lexical
+   * path on any failure.
+   */
+  async searchSemantic(query: string, limit: number = 20): Promise<SearchResult[]> {
+    if (!query.trim()) return [];
+    try {
+      const { vector: queryVector, backend } = await embedText(query);
+      const results: SearchResult[] = [];
+      for (const [fileId, chunks] of this.chunks) {
+        const file = this.index.get(fileId);
+        if (!file) continue;
+        let bestScore = 0;
+        let bestChunk: IndexedChunk | null = null;
+        for (const chunk of chunks) {
+          // Vectors from different backends are incomparable — score lexical
+          // chunk vectors with the lexical query vector only.
+          const score = cosineSimilarity(queryVector, backend === 'ollama' ? normalize(chunk.vector) : chunk.vector);
+          if (score > bestScore) {
+            bestScore = score;
+            bestChunk = chunk;
+          }
+        }
+        if (bestScore >= 0.1 && bestChunk) {
+          const chunkLines = bestChunk.text.split('\n');
+          const queryWords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const matches: SearchResult['matches'] = chunkLines
+            .map((line, i) => ({ line: bestChunk!.startLine + i, content: line, snippet: this.getSnippet(line, query) }))
+            .filter((m) => queryWords.some((w) => m.content.toLowerCase().includes(w)))
+            .slice(0, 5);
+          results.push({ file, score: bestScore, matches: matches.length ? matches : [{ line: bestChunk.startLine, content: chunkLines[0] ?? '', snippet: '' }] });
+        }
+      }
+      results.sort((a, b) => b.score - a.score);
+      return results.slice(0, limit);
+    } catch {
+      return this.search(query, limit);
+    }
   }
 
   /**
@@ -372,6 +419,7 @@ export class WorkspaceIndexer {
   clear(): void {
     this.index.clear();
     this.embeddings.clear();
+    this.chunks.clear();
     this.save();
   }
 
@@ -524,7 +572,7 @@ export class WorkspaceIndexer {
           const content = readFileSync(file.path, 'utf-8');
           const hydrated = { ...file, content };
           this.index.set(file.id, hydrated);
-          this.embeddings.set(file.id, generateEmbedding(content));
+          this.embeddings.set(file.id, lexicalVector(content));
         } catch {
           // Skip files that became unreadable since the previous index.
         }

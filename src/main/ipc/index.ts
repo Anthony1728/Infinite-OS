@@ -8,10 +8,25 @@ import { settings } from '../settings/store.js';
 import { deleteApiKey, setApiKey, hasApiKey, getApiKey } from '../settings/secrets.js';
 import { listProviders, getProvider, providerRegistry } from '../providers/registry.js';
 import { toolRegistry } from '../tools/base.js';
+import { actionAuditLog } from '../audit/action-log.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect, getStatus as mcpGetStatus, listTools as mcpListTools } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
 import { interjectAgent, runAgent } from '../agent/loop.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
+import { resolveUserQuestions } from '../agent/question-prompt.js';
+import {
+  setPlanMode,
+  resolveExitPlan,
+  getPendingExitPlan,
+} from '../agent/plan-mode.js';
+import { setPlanModeEmitter } from '../agent/plan-mode-events.js';
+import { setTodoEmitter } from '../agent/todo-store.js';
+import {
+  setBackgroundTaskEmitter,
+  startBackgroundTask,
+  finishBackgroundTask,
+  listBackgroundTasks,
+} from '../agent/background-tasks.js';
 import { listAgents } from '../agents/registry.js';
 import {
   listCustomAgents,
@@ -89,7 +104,24 @@ import {
 const activeRuns = new Map<string, AbortController>();
 const discardedRuns = new Set<string>();
 
+/** First text block of an incoming message payload, for task titles. */
+function messageTextOf(message: unknown): string {
+  try {
+    const content = (message as { content?: Array<{ type: string; text?: string }> }).content ?? [];
+    const text = content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join(' ').trim();
+    return text.length > 60 ? `${text.slice(0, 60)}…` : text || 'Background task';
+  } catch {
+    return 'Background task';
+  }
+}
+
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
+  // Plan-mode + todo events ride the chat stream channel, so wire the emitters here.
+  const chatStreamSend: (channel: string, payload: unknown) => void = (channel, payload) =>
+    getMainWindow()?.webContents.send(channel, payload);
+  setPlanModeEmitter(chatStreamSend);
+  setTodoEmitter(chatStreamSend);
+  setBackgroundTaskEmitter(chatStreamSend);
   registerWindowIpc(getMainWindow);
   registerAuthIpc();
   registerOwnerIpc();
@@ -145,7 +177,27 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     return { ok: true };
   });
   // Chat
-  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd }) => {
+  ipcMain.handle(IPC.CHAT_PLAN_RESOLVE, async (_e, { sessionId, approved }: { sessionId: string; approved: boolean }) => {
+    const pending = getPendingExitPlan(sessionId);
+    const ok = resolveExitPlan(sessionId, approved);
+    if (ok && pending) {
+      const win = getMainWindow();
+      if (win && approved) {
+        // The agent loop continues with the plan in context; surface it as a
+        // provider status so the user sees the transition live.
+        win.webContents.send(IPC.CHAT_STREAM_EVENT, {
+          sessionId,
+          type: 'provider_status',
+          status: 'Plan approved — executing with full tools.',
+        });
+      }
+    }
+    return { ok };
+  });
+
+  ipcMain.handle(IPC.BACKGROUND_TASKS_LIST, async () => listBackgroundTasks());
+
+  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd, planMode, background }) => {
     // Mark heartbeat as active — don't run consolidation while user is chatting.
     void import('../heartbeat/index.js').then(({ heartbeatTouch }) => heartbeatTouch()).catch(() => {});
     const win = getMainWindow();
@@ -156,6 +208,17 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
     const controller = new AbortController();
     activeRuns.set(sessionId, controller);
+
+    // Enforced plan mode: when the user sent this message in Plan mode, arm the
+    // read-only gate for the run. It stays on until the model calls ExitPlan
+    // and the user approves (CHAT_PLAN_RESOLVE), or the run ends.
+    if (planMode) setPlanMode(sessionId, true);
+    // Background detach: register the run so completion raises an OS
+    // notification and the sidebar can badge it. The run itself is unchanged —
+    // the user simply doesn't have to keep this session in the foreground.
+    if (background) {
+      startBackgroundTask(sessionId, messageTextOf(message));
+    }
 
     const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
     const storedUserMessage: Message = { ...userMessage, content: displayMessage ?? message };
@@ -175,6 +238,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         },
       });
       const duration = Date.now() - startTime;
+      if (background) {
+        const lastAssistant = [...completedMessages].reverse().find((m) => m.role === 'assistant');
+        const summary = lastAssistant
+          ? lastAssistant.content.filter((c) => c.type === 'text').map((c) => (c as { text?: string }).text ?? '').join(' ')
+          : '';
+        finishBackgroundTask(sessionId, 'completed', summary);
+      }
 
       // Record this interaction in the Intelligence Engine for learning
       try {
@@ -236,6 +306,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
           : typeof err === 'object' && err !== null && 'message' in err
             ? String(err.message)
             : String(err);
+      if (background) finishBackgroundTask(sessionId, 'failed', errorMessage);
       console.error('[IPC] CHAT_SEND: runAgent failed:', errorMessage);
       try {
         win.webContents.send(IPC.CHAT_STREAM_EVENT, {
@@ -250,6 +321,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
     discardedRuns.delete(sessionId);
     if (activeRuns.get(sessionId) === controller) activeRuns.delete(sessionId);
+    // A run that ended without ExitPlan approval leaves the gate armed; clear
+    // it so the next normal message is not silently read-only.
+    if (planMode && !getPendingExitPlan(sessionId)) setPlanMode(sessionId, false);
     return { ok: true };
   });
 
@@ -260,11 +334,11 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     try {
       const { abortSessionRuns } = await import('../agent/runtime.js');
       abortSessionRuns(sessionId);
-    } catch {}
+    } catch { /* best-effort abort */ }
     try {
       const { cancelCrewSession } = await import('../agent/crew.js');
       cancelCrewSession(sessionId);
-    } catch {}
+    } catch { /* best-effort abort */ }
     return { ok: true };
   });
 
@@ -415,8 +489,66 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
   ipcMain.handle(IPC.PROVIDER_HAS_KEY, async (_e, { provider }) => hasApiKey(provider));
 
+  ipcMain.handle(IPC.OPENCODE_CLI_VERSION, async () => {
+    const { getInstalledOpenCodeVersion, isOpenCodeVersionAtLeast, openCodeServerVersion, OPENCODE_MIN_FREE_VERSION, openCodeKeylessStatus } =
+      await import('../providers/opencode.js');
+    const version = await getInstalledOpenCodeVersion();
+    const serverVersion = await openCodeServerVersion();
+    // The running server answers turns — it decides free-tier support. When
+    // no server is running yet, the installed binary (which will be spawned)
+    // decides.
+    const effective = serverVersion ?? version;
+    const keyless = await openCodeKeylessStatus().catch(() => null);
+    return {
+      version,
+      serverVersion,
+      minFreeVersion: OPENCODE_MIN_FREE_VERSION,
+      freeTierSupported: isOpenCodeVersionAtLeast(effective),
+      serverStale: Boolean(serverVersion) && !isOpenCodeVersionAtLeast(serverVersion),
+      connected: keyless?.connected ?? null,
+      opencodeCount: keyless?.opencodeCount ?? null,
+      goCount: keyless?.goCount ?? null,
+      freeCount: keyless?.freeCount ?? null,
+    };
+  });
+  ipcMain.handle(IPC.OPENCODE_SERVER_RESTART, async () => {
+    const { restartStaleOpenCodeServer } = await import('../providers/opencode.js');
+    const version = await restartStaleOpenCodeServer();
+    return { version };
+  });
+  ipcMain.handle(IPC.OPENCODE_CLI_UPGRADE, async () => {
+    try {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      // .cmd shims need a shell on Windows; quoting is handled by execFile.
+      const { stdout } = await execFileAsync('npm', ['install', '--global', 'opencode-ai@latest'], {
+        timeout: 240_000,
+        windowsHide: true,
+        ...(process.platform === 'win32' ? { shell: true } : {}),
+      });
+      const tail = String(stdout ?? '').trim().split('\n').slice(-5).join('\n');
+      return { ok: true as const, output: tail };
+    } catch (e) {
+      return { ok: false as const, error: (e as Error).message.slice(0, 500) };
+    }
+  });
+
   // Tools
   ipcMain.handle(IPC.TOOLS_LIST, async () => toolRegistry.asProviderTools());
+
+  // Action audit log — query the durable record of agent actions
+  ipcMain.handle(IPC.AUDIT_RECENT, async (_e, args?: { limit?: number }) =>
+    actionAuditLog.recent(args?.limit));
+  ipcMain.handle(IPC.AUDIT_QUERY, async (_e, args?: { sessionId?: string; tool?: string; limit?: number }) =>
+    actionAuditLog.query({ sessionId: args?.sessionId, toolPrefix: args?.tool, limit: args?.limit }));
+  ipcMain.handle(IPC.AUDIT_DAY, async (_e, args?: { date?: string }) =>
+    actionAuditLog.readDay(args?.date ? new Date(args.date) : new Date()));
+  ipcMain.handle(IPC.AUDIT_STATS, async () => actionAuditLog.stats());
+  ipcMain.handle(IPC.AUDIT_VERIFY, async () => {
+    const brokenSeq = actionAuditLog.verifyIntegrity();
+    return { intact: brokenSeq === null, brokenSeq };
+  });
 
   // Agents (multi-agent system)
   ipcMain.handle(IPC.AGENT_LIST, async () => {
@@ -491,6 +623,12 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.PERMISSION_RESPONSE, async (_e, { id, allowed }) => {
     respondToPermission(id, allowed);
     return { ok: true };
+  });
+
+  // Blocking question cards (AskUserQuestion)
+  ipcMain.handle(IPC.CHAT_QUESTION_RESOLVE, async (_e, { id, answers, skipped }) => {
+    const ok = resolveUserQuestions(id, { answers: answers ?? {}, skipped: skipped ?? {} });
+    return { ok };
   });
 
   // File System
@@ -726,8 +864,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SELF_EVOLVE_ANALYZE, async () => {
     return selfEvolutionEngine.analyzePatterns();
   });
-  ipcMain.handle(IPC.SELF_EVOLVE_SUGGESTIONS, async (_e, { status }: { status?: string }) => {
-    return selfEvolutionEngine.getSuggestions(status as any);
+  ipcMain.handle(IPC.SELF_EVOLVE_SUGGESTIONS, async (_e, { status }: { status?: 'suggested' | 'accepted' | 'dismissed' }) => {
+    return selfEvolutionEngine.getSuggestions(status);
   });
   ipcMain.handle(IPC.SELF_EVOLVE_ACCEPT, async (_e, { id }: { id: string }, autoCreate: boolean = true) => {
     return selfEvolutionEngine.acceptSuggestion(id, autoCreate);
@@ -785,6 +923,29 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SKILLS_RELEVANT, async (_e, { task }: { task: string }) => {
     const mgr = new SkillsManager();
     return mgr.getRelevantSkills(task);
+  });
+  ipcMain.handle(IPC.SKILLS_EXPORT, async (_e, { skillIds }: { skillIds?: string[] }) => {
+    const mgr = new SkillsManager();
+    return mgr.exportSkills(skillIds);
+  });
+  ipcMain.handle(IPC.SKILLS_IMPORT, async (_e, { manifest }: { manifest: unknown }) => {
+    const mgr = new SkillsManager();
+    const m = manifest as { skills?: Array<{ name: string; description: string; category: string; instructions: string; enabled?: boolean }> };
+    let imported = 0;
+    for (const skill of m.skills ?? []) {
+      try {
+        await mgr.addSkill({
+          name: skill.name,
+          description: skill.description,
+          category: skill.category,
+          instructions: skill.instructions,
+          source: 'imported',
+          enabled: skill.enabled ?? true,
+        });
+        imported++;
+      } catch { /* skip duplicates */ }
+    }
+    return { imported };
   });
 
   // Personalization IPC

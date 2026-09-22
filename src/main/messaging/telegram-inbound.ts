@@ -17,7 +17,18 @@ import { infiniteHome } from '../profiles/home.js';
 import { settings } from '../settings/store.js';
 import { getApiKey } from '../settings/secrets.js';
 import { messagingTool } from '../tools/messaging.js';
-// NOTE: runAgent is lazy-imported inside defaultRunTurn so that tests and
+import {
+  NoActiveModelError,
+  resolveActiveModel,
+  type AgentRunner,
+  type SettingsGetter,
+} from '../agent/active-model.js';
+// NOTE: session/store evaluates infiniteHome() at import time (module-level
+// DIR), which pins the profile home to whatever loads this module first.
+// Lazy-load it like runAgent so the home resolves late, at call time.
+async function sessions(): Promise<typeof import('../session/store.js')> {
+  return import('../session/store.js');
+}// NOTE: runAgent is lazy-imported inside defaultRunTurn so that tests and
 // lightweight consumers of this module never load the full agent graph.
 
 export interface TelegramUpdate {
@@ -34,10 +45,17 @@ export interface InboundDeps {
   fetchFn?: typeof fetch;
   runTurn?: (text: string, chatId: string) => Promise<string>;
   sendReply?: (chatId: string, text: string) => Promise<void>;
+  /** Test seam: override settings reads (defaults to the live settings store). */
+  getSetting?: SettingsGetter;
+  /** Test seam: override the agent runner (defaults to the real runAgent). */
+  runAgentImpl?: AgentRunner;
   log?: (...args: unknown[]) => void;
 }
 
 const OFFSET_FILE = 'messaging/telegram-inbound.json';
+
+/** Stable per-chat session ids within the process (backed by the session store). */
+const conversationSessionIds = new Map<string, string>();
 
 function offsetPath(): string {
   return join(infiniteHome(), OFFSET_FILE);
@@ -118,33 +136,78 @@ export function isInboundEnabled(): boolean {
   return process.env.TELEGRAM_INBOUND === '1';
 }
 
-async function defaultRunTurn(text: string): Promise<string> {
-  const provider = settings.get<string>('provider') ?? 'ollama';
-  const model = settings.get<string>('model') ?? 'qwen3:4b';
-  const { runAgent } = await import('../agent/loop.js');
+/**
+ * Default turn: runs the user's SELECTED Infinite OS model (never a silent
+ * local fallback) in a stable per-chat session so Telegram conversations keep
+ * their history across messages and restarts, exactly like the desktop chat.
+ * Exported for tests; the poll loop calls it with the live deps.
+ */
+export async function defaultRunTurn(
+  text: string,
+  chatId?: string,
+  deps: InboundDeps = {},
+): Promise<string> {
+  const get: SettingsGetter = deps.getSetting ?? ((key) => settings.get(key));
+  let active;
+  try {
+    active = resolveActiveModel(get);
+  } catch (e) {
+    if (e instanceof NoActiveModelError) return e.message;
+    throw e;
+  }
+  const { provider, model, cwd } = active;
+  const runAgent: AgentRunner =
+    deps.runAgentImpl ?? ((await import('../agent/loop.js')).runAgent as unknown as AgentRunner);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 4 * 60_000);
   try {
+    // Stable per-chat session, PERSISTED in the session store so history
+    // survives restarts — the same conversation continues message to message.
+    const sessionId = chatId
+      ? (conversationSessionIds.get(chatId) ?? await resolveTelegramSession(chatId, provider, model, cwd))
+      : `telegram-${Date.now()}`;
+    if (chatId) conversationSessionIds.set(chatId, sessionId);
+    const store = await sessions();
+    const history = await store.loadMessages(sessionId).catch(() => []);
     const userMessage = {
       id: crypto.randomUUID(),
       role: 'user',
-      content: [{ type: 'text', text }],
+      content: [{ type: 'text', text: `[Telegram] ${text}` }],
       timestamp: Date.now(),
     } as never;
-    const completed = await runAgent([], userMessage, {
-      sessionId: `telegram-${Date.now()}`,
-      cwd: process.cwd(),
+    await store.appendMessage(sessionId, userMessage).catch(() => undefined);
+    const completed = await runAgent([...history] as never, userMessage, {
+      sessionId,
+      cwd,
       provider,
       model,
       signal: ctrl.signal,
-      onEvent: () => {},
+      onEvent: async () => {},
     });
-    const last = [...completed].reverse().find((m) => m.role === 'assistant');
+    for (const m of (completed as unknown as Array<never>).slice(history.length + 1)) {
+      await store.appendMessage(sessionId, m as never).catch(() => undefined);
+    }
+    const last = [...(completed as unknown as Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>)].reverse().find((m) => m.role === 'assistant');
     const blocks = (last?.content ?? []) as Array<{ type?: string; text?: string }>;
     const answer = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n\n').trim();
     return answer || '(The agent finished with no text answer.)';
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Stable persisted session per Telegram chat (mirrors the WhatsApp link). */
+async function resolveTelegramSession(chatId: string, provider: string, model: string, cwd: string): Promise<string> {
+  const suffix = chatId.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 32);
+  try {
+    const store = await sessions();
+    const found = await store.listSessions();
+    const existing = found.find((s) => s.id === `telegram-${suffix}` || s.title === `Telegram: ${chatId}`);
+    if (existing) return existing.id;
+    const created = await store.createSession({ cwd, model, provider, title: `Telegram: ${chatId}` });
+    return created.id;
+  } catch {
+    return `telegram-${suffix}-${Date.now()}`;
   }
 }
 
@@ -162,6 +225,36 @@ class TelegramInbound {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * Outbound delivery to the default Telegram chat (used by automation
+   * notifications). Resolves the bot token plus the configured default chat
+   * (telegramDefaultChatId setting / TELEGRAM_CHAT_ID env, else the sole
+   * allowlisted chat). Never throws — failures come back as { ok: false }.
+   */
+  async sendToDefault(text: string): Promise<{ ok: boolean; error?: string }> {
+    const body = text.trim();
+    if (!body) return { ok: false, error: 'Nothing to send.' };
+    const token = await resolveToken();
+    if (!token) return { ok: false, error: 'Telegram bot token is not configured.' };
+    const explicit = String(settings.get<unknown>('telegramDefaultChatId') ?? process.env.TELEGRAM_CHAT_ID ?? '').trim().replace(/^@/, '');
+    let chatId = explicit;
+    if (!chatId) {
+      const allowed = resolveAllowed();
+      if (allowed.size === 1) chatId = [...allowed][0];
+    }
+    if (!chatId) {
+      return { ok: false, error: 'No default Telegram chat: set telegramDefaultChatId (or TELEGRAM_CHAT_ID), or allowlist exactly one chat.' };
+    }
+    try {
+      for (let i = 0; i < body.length; i += 4000) {
+        await defaultSendReply(token, chatId, body.slice(i, i + 4000));
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
   }
 
   start(deps: InboundDeps = {}): void {
@@ -221,7 +314,7 @@ class TelegramInbound {
           try {
             const answer = deps.runTurn
               ? await deps.runTurn(item.text, item.chatId)
-              : await defaultRunTurn(item.text);
+              : await defaultRunTurn(item.text, item.chatId, deps);
             if (deps.sendReply) await deps.sendReply(item.chatId, answer);
             else await defaultSendReply(token, item.chatId, answer);
           } catch (err) {

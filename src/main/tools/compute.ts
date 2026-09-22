@@ -86,7 +86,7 @@ async function getGpu(): Promise<{ name: string | null; vramGB: number | null; d
     const lines = out.split('\n').filter(l => l.trim() && !l.toLowerCase().includes('node')).slice(0, 3);
     for (const line of lines) {
       // wmic csv: Node,AdapterRAM,DriverVersion,Name
-      const m = line.match(/\"(.+)\"/);
+      const m = line.match(/"(.+)"/);
       if (m) {
         const name = m[1].trim();
         if (name) {

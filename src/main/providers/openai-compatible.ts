@@ -278,7 +278,7 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
                 yield {
                   type: 'message_end',
                   stop_reason: choice.finish_reason,
-                  usage: obj.usage ?? { input: 0, output: 0 },
+                  usage: normalizeUsage(obj.usage),
                 };
               }
             } catch {
@@ -290,6 +290,31 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
       }
     },
   };
+}
+
+interface RawUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+  cache_read_input_tokens?: number;
+}
+
+/**
+ * Normalize provider usage shapes into TokenUsage. Extracts cached-input
+ * tokens (OpenAI `prompt_tokens_details.cached_tokens`, OpenRouter
+ * `cache_read_input_tokens`, DeepSeek `prompt_cache_hit_tokens` style) so the
+ * UI's cache panel shows real hit rates instead of a permanent 0.
+ */
+export function normalizeUsage(raw: unknown): { input: number; output: number; cache_read?: number; cache_write?: number } {
+  const u = (raw ?? {}) as RawUsage & { prompt_cache_hit_tokens?: number };
+  const input = Number(u.prompt_tokens ?? u.input_tokens ?? 0) || 0;
+  const output = Number(u.completion_tokens ?? u.output_tokens ?? 0) || 0;
+  const cacheRead = Number(
+    u.prompt_tokens_details?.cached_tokens ?? u.cache_read_input_tokens ?? u.prompt_cache_hit_tokens ?? 0,
+  ) || 0;
+  return cacheRead > 0 ? { input, output, cache_read: cacheRead } : { input, output };
 }
 
 function isDegradedFunctionError(text: string): boolean {

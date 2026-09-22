@@ -60,6 +60,16 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
     setCurrentView(activeView);
   }, [activeView, setCurrentView]);
 
+  // Listen for custom navigation events from child views.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === 'string') onViewChange(detail);
+    };
+    window.addEventListener('infinite:navigate', handler);
+    return () => window.removeEventListener('infinite:navigate', handler);
+  }, [onViewChange]);
+
   const renderContent = () => {
     if (activeAiTab) return <DynamicTabView tab={activeAiTab} onViewChange={onViewChange} />;
 

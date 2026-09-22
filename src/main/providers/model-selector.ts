@@ -12,7 +12,8 @@ export interface ModelSelection {
 }
 
 // Priority order: free models that support tools, then free without tools, then paid
-const FREE_PROVIDER_PRIORITY = ['ollama', 'opencode', 'openrouter', 'groq'];
+// nvidia first: free-tier NIM with tool support; ollama keyless local next.
+const FREE_PROVIDER_PRIORITY = ['nvidia', 'ollama', 'opencode', 'freebuff', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom'];
 
 export function selectBestModel(
   taskType: 'code' | 'research' | 'design' | 'data' | 'seo' | 'general',
@@ -83,7 +84,7 @@ export function selectBestModel(
   // 4. No free models available — use OpenRouter default (paid)
   return {
     provider: 'openrouter',
-    model: 'meta-llama/llama-3.3-70b-instruct',
+    model: 'google/gemma-4-31b-it:free',
     free: false,
     reason: 'No free models available. Using paid model. Consider adding a free provider API key.',
   };

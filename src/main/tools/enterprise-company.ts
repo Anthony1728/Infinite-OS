@@ -13,7 +13,7 @@ const KINDS: CompanyNoteKind[] = ['note', 'complaint', 'decision', 'contact'];
 
 export const enterpriseCompanyTool: Tool = {
   name: 'EnterpriseCompany',
-  description: 'Read and edit the company board shown in the Enterprise tab: profile (name/industry/website) plus timestamped notes (note/complaint/decision/contact). Use get before business answers so replies fit the actual company; use add_note to record complaints, decisions, and facts the owner should see; update keeps the profile current. Shares storage with the Enterprise UI — both sides see every change.',
+  description: 'Read/edit the Enterprise-tab company board: profile + timestamped notes. get before business answers; add_note records complaints/decisions/facts; update keeps profile current. Shared with the Enterprise UI.',
   inputSchema: {
     type: 'object',
     properties: {

@@ -21,9 +21,9 @@ const PORT = Number(process.env.INFINITE_REMOTE_PORT ?? 8766);
 const REMOTE_SESSION_ID = 'phone-remote';
 const MAX_BODY_BYTES = 64 * 1024;
 // Same fallback pair the multi-agent orchestrator uses when no explicit
-// provider/model is supplied.
+// provider/model is supplied. Must match the OpenRouter registry entry.
 const DEFAULT_PROVIDER = 'openrouter';
-const DEFAULT_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
+const DEFAULT_MODEL = 'google/gemma-4-31b-it:free';
 
 interface RemoteClient {
   res: http.ServerResponse;

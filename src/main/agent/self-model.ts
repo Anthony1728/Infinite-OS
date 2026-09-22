@@ -69,6 +69,8 @@ export function getSelfModel(): string {
     `Surfaces: ${surfaces}.`,
     `Chat: slash commands (${SLASH}); @-reference files; drag-drop/paste attachments; voice; multi-model; branch/pin/search/export/import/share.`,
     `Execution: PTY terminal (Ctrl+\`); read/write/edit; git; browser + computer control; scheduled automations; checkpoints; task queue; workspace search; skills; memory (INFINITE.md/AGENTS.md/CLAUDE.md/.hermes.md/SOUL.md, auto-memory, learned prefs).`,
+    `Create & sell: MusicGen (real audio files: ElevenLabs/Replicate, local synth fallback), VideoGen (real mp4s: Replicate, ffmpeg slideshow fallback), SellApp (zip + listing + Stripe payment link from a built creation), LaunchProduct (one run: build app → jingle → promo video → package → payment link). Use these instead of saying "I can't make music/videos".`,
+    `Remote control: the user may chat with you from their phone over WhatsApp (Messaging → WhatsApp Link). Phone messages run as real agent turns in "WhatsApp: <number>" sessions; permission approvals can be answered from the phone with YES/NO. Treat those sessions as the same employee — same tools, same memory.`,
     `Bots: named specialists with model pin, SOUL persona, tool allowlist, avatar. Each owns a forever-chat titled "Bot: <name>" — always use it, never fork. Routines are automations named "[bot:<name>] <task>".`,
     `Pair model: user message runs as a crew (leader + collaborator + specialists) in one transcript with a summary; on failure, offer single-model retry.`,
     `Self-evolution: /feature builds (inspect, smallest change, typecheck/tests), /audit fixes bugs. Source edits need background build + restart — say so, never claim visibility before restart.`,

@@ -58,7 +58,10 @@ async function getConfig(): Promise<EmailConfig | null> {
   const stored = await readStoredConfig();
   if (!stored) return null;
   let password = '';
-  if (stored.passwordEncrypted && safeStorage.isEncryptionAvailable()) {
+  // safeStorage only exists inside Electron. Headless/tool contexts (tests,
+  // exec scripts) must degrade to the credential store instead of crashing.
+  const storageAvailable = typeof safeStorage !== 'undefined' && safeStorage.isEncryptionAvailable();
+  if (stored.passwordEncrypted && storageAvailable) {
     password = safeStorage.decryptString(Buffer.from(stored.passwordEncrypted, 'base64'));
   } else if (stored.credentialId) {
     password = getCredentials().getCredential(stored.credentialId) ?? '';
@@ -325,7 +328,7 @@ export async function saveEmailConfig(config: EmailConfig): Promise<void> {
   const { password, ...metadata } = config;
   const stored: StoredEmailConfig = { ...metadata };
   if (password) {
-    if (safeStorage.isEncryptionAvailable()) {
+    if (typeof safeStorage !== 'undefined' && safeStorage.isEncryptionAvailable()) {
       stored.passwordEncrypted = safeStorage.encryptString(password).toString('base64');
     } else {
       const credentialId = 'email:primary-password';

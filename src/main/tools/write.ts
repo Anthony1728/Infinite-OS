@@ -1,7 +1,8 @@
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
 import { backupFile } from './backup.js';
+import { recordFileMutation } from '../agent/edit-checkpoint.js';
 
 export const write: Tool = {
   name: 'Write',
@@ -26,8 +27,11 @@ export const write: Tool = {
       // Auto-backup before overwriting existing files (session-grouped
       // snapshot inside the Infinite OS repo, legacy .backups elsewhere)
       const backupPath = await backupFile(abs, ctx.sessionId);
+      const original = await readFile(abs, 'utf8').catch(() => undefined);
       await mkdir(dirname(abs), { recursive: true });
       await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });
+      // Checkpoint-on-edit: enable rewind-to-here for this session.
+      recordFileMutation({ sessionId: ctx.sessionId, path: abs, operation: original === undefined ? 'create' : 'modify', originalContent: original, newContent: content });
       const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
       return { content: `Wrote ${content.length} bytes to ${file_path}${backupNote}` };
     } catch (e) {

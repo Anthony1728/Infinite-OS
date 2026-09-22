@@ -7,7 +7,7 @@ import { watch, statSync, type FSWatcher } from 'node:fs';
 import { join, relative } from 'node:path';
 
 let watcher: FSWatcher | null = null;
-let allowedPaths = new Set<string>();
+const allowedPaths = new Set<string>();
 let allowedUntil = 0;
 const ALLOW_WINDOW_MS = 3000; // agent writes are allowed for 3s after the tool call
 let onViolation: ((file: string) => void) | null = null;

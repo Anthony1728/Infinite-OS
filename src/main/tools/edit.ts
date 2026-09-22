@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Tool, ToolResult } from './base.js';
 import { backupFile } from './backup.js';
+import { recordFileMutation } from '../agent/edit-checkpoint.js';
 
 export const edit: Tool = {
   name: 'Edit',
@@ -42,6 +43,8 @@ export const edit: Tool = {
       // Auto-backup before writing (session-grouped snapshot in the repo)
       const backupPath = await backupFile(abs, ctx.sessionId);
       await writeFile(abs, updated, { encoding: 'utf8', ...fsOpts });
+      // Checkpoint-on-edit: enable rewind-to-here for this session.
+      recordFileMutation({ sessionId: ctx.sessionId, path: abs, operation: 'modify', originalContent: original, newContent: updated });
       const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
       return { content: `Edited ${file_path} successfully${backupNote}` };
     } catch (e) {

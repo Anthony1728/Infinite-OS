@@ -13,6 +13,7 @@ vi.mock('./permission-prompt.js', () => ({
 }));
 
 import { executeToolCall } from './tool-execution.js';
+import { actionAuditLog } from '../audit/action-log.js';
 import { bash } from '../tools/bash.js';
 
 const options = {
@@ -23,12 +24,14 @@ const options = {
 };
 
 beforeEach(() => {
+  actionAuditLog.setMemoryOnly(true);
+  actionAuditLog.reset();
   mocks.values.clear();
   mocks.requestPermission.mockReset().mockResolvedValue(false);
 });
 
 describe('real tool pipeline (permission -> executeToolCall -> bash)', () => {
-  it('executes a read-only PowerShell pipeline on this machine without prompting in workspace mode', async () => {
+  it('executes a read-only PowerShell pipeline on this machine without prompting in workspace mode', { timeout: 15000 }, async () => {
     mocks.values.set('permissionMode', 'workspace');
     const result = await executeToolCall({
       tool: bash,

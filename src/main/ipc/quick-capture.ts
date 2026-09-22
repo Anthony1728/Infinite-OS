@@ -3,7 +3,7 @@
 // and command palette to drop a thought without leaving the current app.
 
 import { app, ipcMain, shell } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readdirSync } from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -62,8 +62,7 @@ function sanitize(text: string): string {
 function latestNotePath(dir: string): string | null {
   if (!existsSync(dir)) return null;
   // Synchronous list to avoid async caller plumbing; the folder is tiny.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const entries = require('node:fs').readdirSync(dir) as string[];
+  const entries = readdirSync(dir);
   const notes = entries.filter((f) => /^Quick Notes \d{4}-\d{2}-\d{2}\.md$/.test(f));
   if (!notes.length) return null;
   notes.sort();
@@ -83,7 +82,7 @@ export function registerQuickCapture(): void {
     try {
       await fs.appendFile(file, entry, 'utf8');
       return { ok: true, path: file };
-    } catch (err) {
+    } catch {
       // Fallback to a sync write in case the async append was blocked by AV.
       try {
         if (!existsSync(file)) writeFileSync(file, `# Quick Notes\n${entry}`, 'utf8');

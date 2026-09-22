@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
 import { inferExecutionMode, useChatStore, type ChatExecutionMode } from '../../stores/chat';
 import { useAgentsStore } from '../../stores/agents';
@@ -8,6 +11,7 @@ import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { CodeBlock } from './CodeBlock';
 import { MessageContextMenu, type ContextMenuItem } from './MessageContextMenu';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
@@ -18,6 +22,7 @@ import { PairPanel, type PairSection } from './PairPanel';
 import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
+import { estimateCost, formatCost } from '../../../main/providers/pricing';
 import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
 import { useLayoutStore } from '../../stores/layout';
 import { useNotificationStore } from '../../stores/notifications';
@@ -1031,7 +1036,7 @@ function InputBar({
   const processFile = useCallback((file: File) => {
     const MAX_FILE_MB = 25;
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
-      try { useNotificationStore.getState().addToast({ title: 'File too large', message: `${file.name} is too large (max ${MAX_FILE_MB} MB)`, type: 'error' }); } catch {}
+      try { useNotificationStore.getState().addToast({ title: 'File too large', message: `${file.name} is too large (max ${MAX_FILE_MB} MB)`, type: 'error' }); } catch { /* toast store unavailable */ }
       return;
     }
     const mime = file.type || mimeFromExt(file.name);
@@ -2035,6 +2040,10 @@ function RealChat({
   const abortChat = useChatStore((s) => s.abort);
   const sessions = useChatStore((s) => s.sessions);
   const selectSession = useChatStore((s) => s.selectSession);
+  const pendingQuestion = useChatStore((s) => s.pendingQuestion);
+  const resolveQuestion = useChatStore((s) => s.resolveQuestion);
+  const abortedCheckpoint = useChatStore((s) => s.abortedCheckpoint);
+  const undoAbortedRun = useChatStore((s) => s.undoAbortedRun);
   const [isOnline, setIsOnline] = useState(false);
   const [statsExpanded, setStatsExpanded] = useState(false);
 
@@ -2043,12 +2052,16 @@ function RealChat({
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheRead = 0;
-    let models = new Set<string>();
+    let cost = 0;
+    const models = new Set<string>();
     for (const m of messages) {
       if (m.usage) {
         inputTokens += m.usage.input ?? 0;
         outputTokens += m.usage.output ?? 0;
         cacheRead += m.usage.cache_read ?? 0;
+        // Spend estimate per message (Codex/Claude Code parity): list-price
+        // math from providers/pricing.ts; unknown/free models count $0.
+        cost += estimateCost({ provider: m.provider, model: m.model, input: m.usage.input ?? 0, output: m.usage.output ?? 0, cache_read: m.usage.cache_read });
       }
       if (m.model) models.add(m.model);
     }
@@ -2061,6 +2074,7 @@ function RealChat({
       inputTokens,
       outputTokens,
       cacheRead,
+      cost: formatCost(cost),
       totalTokens: inputTokens + outputTokens,
       models: [...models],
       messageCount: messages.length,
@@ -2133,6 +2147,7 @@ function RealChat({
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Session Stats</span>
               <span className="text-[10px] text-zinc-600">{sessionStats.messageCount} messages</span>
               <span className="text-[10px] text-zinc-600">{sessionStats.totalTokens.toLocaleString()} tokens</span>
+              <span className="text-[10px] text-emerald-500/90" title="Estimated spend this session (list price)">{sessionStats.cost}</span>
               <span className="text-[10px] text-zinc-600">{sessionStats.duration}</span>
             </button>
             {statsExpanded && (
@@ -2148,6 +2163,10 @@ function RealChat({
                 <div>
                   <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Cache Read</div>
                   <div className="text-xs font-medium text-zinc-300">{sessionStats.cacheRead.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Est. Spend</div>
+                  <div className="text-xs font-medium text-emerald-400">{sessionStats.cost}</div>
                 </div>
                 <div>
                   <div className="text-[9px] text-zinc-600 uppercase tracking-wider">Model{sessionStats.models.length > 1 ? 's' : ''}</div>
@@ -2220,6 +2239,36 @@ function RealChat({
             <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
           ))}
           {showThinking && <ThinkingBubble />}
+          {pendingQuestion && (
+            <div className="my-2 space-y-2">
+              {pendingQuestion.questions.map((q, i) => (
+                <InteractiveQuestion
+                  key={q.id}
+                  block={{ questionId: q.id, header: q.header, question: q.question, multiple: q.multiple, options: q.options }}
+                  answeredCount={i}
+                  totalCount={pendingQuestion.questions.length}
+                  onAnswer={(answer) => void resolveQuestion({ [q.id]: answer })}
+                  onSkip={() => void resolveQuestion({}, { [q.id]: true })}
+                />
+              ))}
+            </div>
+          )}
+          {abortedCheckpoint && !streaming && (
+            <div className="my-2 flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-4 py-3">
+              <svg className="h-4 w-4 flex-shrink-0 text-amber-300/80" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path d="M3 3v5h5M3 8a9 9 0 1 1-2.2 5.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="min-w-0 flex-1 text-xs text-amber-100/85">
+                Run stopped — {abortedCheckpoint.files} file{abortedCheckpoint.files === 1 ? '' : 's'} were changed.
+              </span>
+              <button
+                onClick={() => void undoAbortedRun()}
+                className="flex-shrink-0 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-400/20"
+              >
+                Undo changes
+              </button>
+            </div>
+          )}
           <LiveActivityFeed />
           {streaming && !isStreamingText && activity.length === 0 && (
             <div className="flex items-center gap-2 text-xs text-indigo-400/80 py-1">
@@ -2271,6 +2320,8 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const branchSession = useChatStore((state) => state.branchSession);
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [checkpointState, setCheckpointState] = useState<'idle' | 'checking' | 'restoring'>('idle');
+  const [checkpointToast, setCheckpointToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const textBlocks = message.content.filter((b) => b.type === 'text');
@@ -2318,7 +2369,44 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
       icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M6 3v12M18 9a3 3 0 01-3 3h-4a3 3 0 00-3 3M6 21l4-8h8l4 8" /></svg>,
       onClick: () => void branchSession(currentSessionId, message.id),
     }] : []),
+    ...(isAssistant && currentSessionId ? [{
+      label: 'Restore files to here…',
+      icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24"><path d="M3 3v5h5M3 8a9 9 0 1 1-2.2 5.8M21 21v-5h-5" /></svg>,
+      onClick: () => void restoreCheckpoint(),
+    }] : []),
   ];
+
+  /**
+   * Rewind the workspace's files to how they were when this assistant message
+   * was produced (Claude Code-style "restore checkpoint" on every message).
+   * Finds the closest auto-checkpoint snapshot taken at or before this message.
+   */
+  const restoreCheckpoint = async () => {
+    if (!currentSessionId) return;
+    try {
+      setCheckpointState('checking');
+      const list = await window.api.checkpointList({ taskId: `run-${currentSessionId}`, limit: 20 });
+      const checkpoints = (Array.isArray(list) ? list : []) as Array<{ id: string; name: string; timestamp: number }>;
+      if (checkpoints.length === 0) {
+        setCheckpointToast('No checkpoint available for this message yet.');
+      } else {
+        const atOrBefore = checkpoints.find((cp) => cp.timestamp <= message.timestamp) ?? checkpoints[checkpoints.length - 1];
+        setCheckpointState('restoring');
+        const result = (await window.api.checkpointRestore({ id: atOrBefore.id })) as { success?: boolean; rollbackActions?: string[]; error?: string };
+        if (result?.success) {
+          const n = result.rollbackActions?.length ?? 0;
+          setCheckpointToast(n > 0 ? `Restored ${n} file${n === 1 ? '' : 's'} to this message's state.` : 'Workspace already matched this checkpoint.');
+        } else {
+          setCheckpointToast(result?.error ? `Restore failed: ${result.error}` : 'Restore failed.');
+        }
+      }
+    } catch (err) {
+      setCheckpointToast(`Restore failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCheckpointState('idle');
+      setTimeout(() => setCheckpointToast(null), 6000);
+    }
+  };
 
   return (
     <>
@@ -2408,8 +2496,35 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
                 </svg>
               </button>
             )}
+            {isAssistant && currentSessionId && (
+              <button
+                onClick={() => void restoreCheckpoint()}
+                disabled={checkpointState !== 'idle'}
+                className="icon-button w-7 h-7 disabled:opacity-40"
+                title={checkpointState === 'checking' ? 'Finding checkpoint…' : checkpointState === 'restoring' ? 'Restoring files…' : 'Restore workspace files to this message (checkpoint rollback)'}
+                aria-label="Restore files to here"
+              >
+                {checkpointState === 'restoring' ? (
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                    <path d="M21 12a9 9 0 1 1-9-9" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                    <path d="M3 3v5h5M3 8a9 9 0 1 1-2.2 5.8M21 21v-5h-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            )}
           </div>
         </div>
+        {checkpointToast && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-indigo-400/20 bg-indigo-400/[0.06] px-3 py-1.5 text-xs text-indigo-200/90">
+            <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+              <path d="M3 3v5h5M3 8a9 9 0 1 1-2.2 5.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {checkpointToast}
+          </div>
+        )}
         {editing ? (
           <div className="space-y-2">
             <textarea
@@ -2461,7 +2576,8 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               return (
               <div key={i} className="text-sm text-zinc-300 leading-relaxed">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
                     code({ className, children, ...props }) {
                       const match = /language-(\w+)/.exec(className || '');
@@ -2497,22 +2613,10 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
                       const isBlock = String(children).includes('\n');
                       if (isBlock) {
                         return (
-                          <div className="relative my-3 rounded-lg border border-white/[0.08] bg-black/40 overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-1.5 bg-white/[0.03] border-b border-white/[0.06]">
-                              <span className="text-[10px] text-zinc-500 font-mono">{match?.[1] || 'code'}</span>
-                              <button
-                                onClick={() => {
-                                  void navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
-                                }}
-                                className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
-                              >
-                                Copy
-                              </button>
-                            </div>
-                            <pre className="p-3 overflow-x-auto text-[12px] font-mono leading-relaxed">
-                              <code className={className} {...props}>{children}</code>
-                            </pre>
-                          </div>
+                          <CodeBlock
+                            code={String(children).replace(/\n$/, '')}
+                            language={match?.[1]}
+                          />
                         );
                       }
                       return (

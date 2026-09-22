@@ -282,7 +282,6 @@ export function buildCrewPlan(
     }
   }
 
-  let idx = 0;
   for (const [agentId, kind] of wanted) {
     if (members.length >= MAX_MEMBERS + (forcePair ? 1 : 0)) {
       reasons.push(`Capped crew at ${MAX_MEMBERS} specialists`);
@@ -306,7 +305,6 @@ export function buildCrewPlan(
       status: 'standby',
       toolCallCount: 0,
     });
-    idx++;
     reasons.push(`${info.role} → ${picked.assignment.provider}/${picked.assignment.model}`);
   }
 

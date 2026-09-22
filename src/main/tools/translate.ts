@@ -51,7 +51,7 @@ export const translateTool: Tool = {
       try {
         const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(a.text.slice(0, 500))}`, { signal: AbortSignal.timeout(10_000) });
         if (!res.ok) return { content: `Detection failed: ${res.status}`, is_error: true };
-        const data = await res.json() as any;
+        const data = (await res.json()) as [unknown[], unknown, string];
         const detected = data?.[2] || 'unknown';
         return { content: `Detected language: **${LANGUAGES[detected] || detected}** (${detected})` };
       } catch (e) {
@@ -66,10 +66,10 @@ export const translateTool: Tool = {
       try {
         const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(a.text.slice(0, 5000))}`, { signal: AbortSignal.timeout(15_000) });
         if (!res.ok) return { content: `Translation failed: ${res.status}`, is_error: true };
-        const data = await res.json() as any;
-        const translated = (data?.[0] || []).map((seg: any) => seg[0]).join('');
-        const detectedSource = data?.[2] || from;
-        const fromLabel = LANGUAGES[detectedSource] || detectedSource;
+        const data = (await res.json()) as Array<unknown>;
+        const translated = ((data?.[0] as Array<Array<string>>) || []).map((seg) => seg[0]).join('');
+        const detectedSource = (data?.[2] as string) || from;
+        const fromLabel = LANGUAGES[detectedSource as keyof typeof LANGUAGES] || detectedSource;
         const toLabel = LANGUAGES[to] || to;
         return { content: `**${fromLabel} → ${toLabel}:**\n\n${translated}` };
       } catch (e) {

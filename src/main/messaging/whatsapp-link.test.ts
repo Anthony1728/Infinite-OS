@@ -52,14 +52,21 @@ describe('whatsapp link gating', () => {
     expect(
       shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', messageTimeMs: Date.now() - 3600_000 }).reason,
     ).toBe('history');
-    expect(shouldAnswerInbound({ ...base, remoteJid: '19998887777@s.whatsapp.net' }).reason).toBe('direct');
+    // Self-chat-only: direct 1:1s from anyone else are never answered — no
+    // reply, no ack, no permission prompt.
+    expect(shouldAnswerInbound({ ...base, remoteJid: '19998887777@s.whatsapp.net' })).toEqual({
+      answer: false,
+      reason: 'not-owner',
+    });
+    // The allowlist is never consulted: even an explicitly allowed stranger
+    // stays ignored.
     expect(
       shouldAnswerInbound({
         ...base,
         remoteJid: '19998887777@s.whatsapp.net',
         extraAllowedJids: new Set(['19998887777@s.whatsapp.net']),
-      }).answer,
-    ).toBe(true);
+      }),
+    ).toEqual({ answer: false, reason: 'not-owner' });
     // My own outbound messages to other people are never answered (their
     // reply arrives as its own inbound); self-chat still qualifies.
     expect(
@@ -68,6 +75,32 @@ describe('whatsapp link gating', () => {
     expect(
       shouldAnswerInbound({ ...base, remoteJid: '15551234567@s.whatsapp.net', fromMe: true, messageId: 'msg-10' }).reason,
     ).toBe('self-chat');
+  });
+
+  it('recognises the self-chat across LID/PN identity variants', () => {
+    // WhatsApp may address the account (or the message) by its LID instead
+    // of its phone number — every known owner identity counts as self.
+    expect(
+      shouldAnswerInbound({
+        ...base,
+        remoteJid: '12345@lid',
+        ownJid: '15551234567@s.whatsapp.net',
+        ownerAltJids: ['12345@lid'],
+      }),
+    ).toEqual({ answer: true, reason: 'self-chat' });
+    // Alt identity carried on the message key instead of the remote JID.
+    expect(
+      shouldAnswerInbound({
+        ...base,
+        remoteJid: '12345@lid',
+        remoteJidAlt: '15551234567@s.whatsapp.net',
+        ownJid: '15551234567@s.whatsapp.net',
+      }),
+    ).toEqual({ answer: true, reason: 'self-chat' });
+    // A stranger's LID is still a stranger.
+    expect(
+      shouldAnswerInbound({ ...base, remoteJid: '99999@lid', ownJid: '15551234567@s.whatsapp.net' }),
+    ).toEqual({ answer: false, reason: 'not-owner' });
   });
 
   it('writes a capped debug log under the active home', async () => {

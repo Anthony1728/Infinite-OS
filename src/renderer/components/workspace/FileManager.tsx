@@ -267,6 +267,8 @@ export function FileManager() {
   const commitFmCreate = useCallback(async () => {
     if (!fmCreate || !fmCreate.name.trim()) return;
     const raw = fmCreate.name.trim();
+    // Windows forbids <>:"|?* and C0 controls in names.
+    // eslint-disable-next-line no-control-regex
     if (/[<>:"|?*\x00-\x1F]/.test(raw) || raw === '.' || raw === '..') { setError('Invalid name'); return; }
     const filePath = joinSystemPath(path, raw);
     let result: { error?: string } | undefined;
@@ -303,6 +305,8 @@ export function FileManager() {
     if (!fmRename) return;
     const raw = fmRename.name.trim();
     if (!raw || raw === fmRename.oldPath.split(/[\\/]/).pop()) { setFmRename(null); return; }
+    // Windows forbids <>:"|?* and C0 controls in names.
+    // eslint-disable-next-line no-control-regex
     if (/[<>:"|?*\x00-\x1F]/.test(raw)) { setError('Invalid name'); return; }
     const parent = fmRename.oldPath.substring(0, Math.max(fmRename.oldPath.lastIndexOf('/'), fmRename.oldPath.lastIndexOf('\\')));
     const newPath = joinSystemPath(parent || path, raw);
@@ -391,7 +395,7 @@ export function FileManager() {
   const toggleViewMode = useCallback(() => {
     setViewMode(prev => {
       const next = prev === 'list' ? 'grid' : 'list';
-      try { localStorage.setItem('infinite:fm-view', next); } catch {}
+      try { localStorage.setItem('infinite:fm-view', next); } catch { /* private mode, ignore */ }
       return next;
     });
   }, []);
