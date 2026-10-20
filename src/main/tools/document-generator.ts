@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Tool, ToolContext, ToolResult } from './base.js';
+import { outputDirectoryDenial } from './write-guard.js';
 
 const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || '.', 'infinite-documents');
 
@@ -138,6 +139,8 @@ async function createPDF(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResul
   const pdfBytes = await pdfDoc.save();
   const filename = args.filename || `document-${randomUUID().slice(0, 8)}.pdf`;
   const outDir = args.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   await writeFile(filePath, pdfBytes);
@@ -189,6 +192,8 @@ async function createExcel(args: DocGenArgs, _ctx: ToolContext): Promise<ToolRes
 
   const filename = args.filename || `spreadsheet-${randomUUID().slice(0, 8)}.xlsx`;
   const outDir = args.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
 
@@ -270,6 +275,8 @@ async function createPowerPoint(args: DocGenArgs, _ctx: ToolContext): Promise<To
 
   const filename = args.filename || `presentation-${randomUUID().slice(0, 8)}.pptx`;
   const outDir = args.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
 
@@ -362,6 +369,8 @@ async function createWord(args: DocGenArgs, _ctx: ToolContext): Promise<ToolResu
   const buffer = await Packer.toBuffer(doc);
   const filename = args.filename || `document-${randomUUID().slice(0, 8)}.docx`;
   const outDir = args.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
   await ensureOutputDir(outDir);
   const filePath = join(outDir, filename);
   await writeFile(filePath, buffer);

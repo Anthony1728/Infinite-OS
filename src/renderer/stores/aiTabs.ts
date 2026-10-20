@@ -5,7 +5,8 @@ export type AiTabKind =
   | 'chart' | 'document' | 'video' | 'invoice' | 'data' | 'dashboard' | 'financial' | 'custom'
   | 'website' | 'image' | 'embed' | 'media'
   | 'schedule' | 'tracker' | 'portfolio' | 'comparison' | 'calculator'
-  | 'presentation' | 'mindmap' | 'checklist' | 'timeline' | 'kanban';
+  | 'presentation' | 'mindmap' | 'checklist' | 'timeline' | 'kanban'
+  | 'overview';
 
 export interface TabSection {
   title: string;

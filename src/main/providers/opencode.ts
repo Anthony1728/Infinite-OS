@@ -193,8 +193,7 @@ export function openCodeFundsHint(error: string): string | null {
 
 /** Prefix a raw OpenCode error, appending upgrade, auth, and funds hints when they apply. */
 export function withOpenCodeHints(message: string): string {
-  const hints = [openCodeUpgradeHint(message), openCodeAuthLoginHint(message), openCodeFundsHint(message)].filter(Boolean);
-  return hints.length ? `OpenCode: ${message} ${hints.join(' ')}` : `OpenCode: ${message}`;
+  const hints = [openCodeUpgradeHint(message), openCodeAuthLoginHint(message), openCodeFundsHint(message)].filter(Boolean);  return hints.length ? `OpenCode: ${message} ${hints.join(' ')}` : `OpenCode: ${message}`;
 }
 
 function resetDiscoveredModelFailures(): void {
@@ -457,8 +456,7 @@ export async function restartStaleOpenCodeServer(baseUrl: string = DEFAULT_URL, 
   } else {
     console.info(`[opencode] runtime v${current} predates free-tier gate v${OPENCODE_MIN_FREE_VERSION}.`);
   }
-  console.info(`[opencode] runtime v${current} needs a restart (free-tier gate v${OPENCODE_MIN_FREE_VERSION} or a lost catalog) — restarting with the installed CLI.`);
-  await killPortOwner(4096);
+  console.info(`[opencode] runtime v${current} needs a restart (free-tier gate v${OPENCODE_MIN_FREE_VERSION} or a lost catalog) — restarting with the installed CLI.`);  await killPortOwner(4096);
   if (!await ensureServer(url, cwd)) return null;
   return openCodeServerVersion(url);
 }
@@ -1660,8 +1658,7 @@ export const opencode: ProviderAdapter = {
       const models = openCodeKeylessModels(data);
       if (models.length === 0) {
         const connected = (data.connected ?? []).join(', ') || 'none';
-        return { ok: false, error: `OpenCode is running, but no signed-in catalog is available (connected: ${connected}). Sign in to OpenCode (\`opencode auth login\`) and try again.` };
-      }
+        return { ok: false, error: `OpenCode is running, but no signed-in catalog is available (connected: ${connected}). Sign in to OpenCode (\`opencode auth login\`) and try again.` };      }
       // A repaired login must unblock immediately, not after the TTL.
       clearInvalidCliCredential();
       return { ok: true };
@@ -1740,7 +1737,7 @@ export const opencode: ProviderAdapter = {
     // A recently rejected CLI login fails every turn the same way after a
     // minute of upstream retries — fail fast with the fix instead of
     // stalling into the agent watchdog again.
-    if (selected.providerID === 'opencode' && isCliCredentialKnownBad()) {
+    if (!apiKey && selected.providerID === 'opencode' && isCliCredentialKnownBad()) {
       yield { type: 'error', error: `OpenCode: the installed CLI login was just rejected upstream. ${openCodeAuthLoginHint('Invalid credential') ?? 'Refresh it with `opencode auth login`, then retry.'}` };
       return;
     }
@@ -1864,8 +1861,7 @@ export const opencode: ProviderAdapter = {
     const rotationAllowed = rotationSettings.get('failoverEnabled') !== false;
     let rotation: Array<{ providerID: string; modelID: string }> = [{ ...selected }];
     const isKeylessSelection = selected.providerID === 'opencode' || selected.providerID === 'opencode-go';
-    if (rotationAllowed && isKeylessSelection) {
-      try {
+    if (rotationAllowed && isKeylessSelection) {      try {
         // Same silent-read hazard as the catalog check above: announce
         // liveness before the fetch.
         yield { type: 'provider_status', status: 'connecting', provider: 'opencode', model: modelId,
@@ -1876,8 +1872,7 @@ export const opencode: ProviderAdapter = {
           selfId,
           openCodeKeylessModels(rotationCatalog)
             .filter((m) => m.free && m.id !== selfId)
-            .slice(0, 2)
-            .map((m) => m.id),
+            .slice(0, 2)            .map((m) => m.id),
         );
         const liveFree = liveFreeIds.map((id) => {
           const sep = id.indexOf('::');
@@ -1937,8 +1932,7 @@ export const opencode: ProviderAdapter = {
           clearInvalidCliCredential();
           if (!apiKey && sel.providerID === 'opencode') {
             setLastGoodFreeModel(`${sel.providerID}::${sel.modelID}`);
-          }
-          return;
+          }          return;
         } catch (error) {
           if (attempt < MAX_ATTEMPTS - 1 && isTransientOpenCodeFailure(error) && !req.signal?.aborted) {
             yield { type: 'provider_status', status: 'cold_start', provider: 'opencode', model: req.model,
@@ -1962,8 +1956,7 @@ export const opencode: ProviderAdapter = {
     // rate-limited/queued. Working free turns answer well inside this;
     // hung turns previously burned 9+ minutes with zero bytes.
     const FIRST_BYTE_TIMEOUT_MS = openCodeFirstByteTimeoutMs();
-    const MAX_ROTATION = Math.min(rotation.length, 3);
-    let lastRotationError: unknown = null;
+    const MAX_ROTATION = Math.min(rotation.length, 3);    let lastRotationError: unknown = null;
 
     for (let r = 0; r < MAX_ROTATION; r++) {
       const current = rotation[r]!;
@@ -1993,8 +1986,7 @@ export const opencode: ProviderAdapter = {
           yield { type: 'error', error: withOpenCodeHints(msg) };
           return;
         }
-        const worthRotating = /timed out waiting for first response|timed out|timeout|429|rate.?limit|quota|capacity|overloaded|FreeUsageLimit|404|not.?found|not valid|no longer offered|retired|returned no output/i.test(msg);
-        if (r < MAX_ROTATION - 1 && worthRotating) continue;
+        const worthRotating = /timed out waiting for first response|timed out|timeout|429|rate.?limit|quota|capacity|overloaded|FreeUsageLimit|404|not.?found|not valid|no longer offered|retired|returned no output/i.test(msg);        if (r < MAX_ROTATION - 1 && worthRotating) continue;
         yield { type: 'error', error: withOpenCodeHints(msg) };
         noteCliCredentialOutcome(msg);
         return;

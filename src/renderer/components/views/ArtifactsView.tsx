@@ -62,8 +62,8 @@ export function ArtifactsView({ onOpenTab }: { onOpenTab: (view: string) => void
         </div>
       )}
 
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        {filteredTabs.length === 0 ? (
+
+      <div className="mt-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pt-1 pr-1">        {filteredTabs.length === 0 ? (
           <div className="h-full min-h-[240px] flex flex-col items-center justify-center gap-2 text-center rounded-xl bg-[#0c1018] border border-white/[0.06]">
             {search ? (
               <>
@@ -86,12 +86,12 @@ export function ArtifactsView({ onOpenTab }: { onOpenTab: (view: string) => void
             <div className="text-xs text-zinc-600 mb-3">
               Showing {filteredTabs.length} of {tabs.length} artifact{tabs.length !== 1 ? 's' : ''}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 card-grid-animated pb-6">
               {filteredTabs.map((t) => (
                 <div
                   key={t.id}
-                  className="agent-card agent-card--static !p-4 cursor-pointer hover:border-white/15 transition-colors"
-                  onClick={() => onOpenTab(t.id)}
+                  className="agent-card agent-card--static !p-4 cursor-pointer"                  onClick={() => onOpenTab(t.id)}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {

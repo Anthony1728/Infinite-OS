@@ -41,6 +41,19 @@ vi.mock('../tools/base.js', () => ({ toolRegistry: { asProviderTools: mocks.asPr
 vi.mock('../brain/router.js', () => ({ DecisionRouter: vi.fn().mockImplementation(() => ({ recordTask: vi.fn() })) }));
 vi.mock('./browser-routing.js', () => ({ routeForcedBrowserTool: mocks.routeForcedBrowserTool }));
 vi.mock('./learning-adapter.js', () => ({ learnFromToolResult: mocks.learnFromToolResult, learnFromCompletedResponse: vi.fn() }));
+// Sticky auto-switch persists the recovered model through the settings store —
+// stub it so tests never touch the real profile's settings.json, while still
+// recording writes so the auto-switch can be asserted.
+vi.mock('../settings/store.js', () => {
+  const sets: Array<{ scope: string; key: string; value: unknown }> = [];
+  return {
+    settings: {
+      get: () => undefined,
+      set: async (scope: string, key: string, value: unknown) => { sets.push({ scope, key, value }); },
+    },
+    __recordedSets: sets,
+  };
+});
 
 import { keepPartialAssistant, runAgent, setLoopStallTimeout } from './loop.js';
 
@@ -275,6 +288,61 @@ describe('Selected-model honesty', () => {
     const failover = events.find((e) => e.type === 'provider_status' && e.status === 'failover');
     expect(failover?.reason).toMatch(/socket hang up/);
     expect(streamChat).toHaveBeenCalledTimes(5);
+  }, 10_000);
+
+  it('persists the recovered model as the new active model after a hard failure', async () => {
+    const selected = { provider: 'test', model: 'selected-model', label: 'Test / selected-model', apiKey: 'k' };
+    const backup = { provider: 'test', model: 'backup-model', label: 'Test / backup-model', apiKey: 'k' };
+    mocks.buildProviderFailoverPlan.mockResolvedValue([selected, backup]);
+    mocks.selectNextProviderCandidate.mockReturnValue(backup);
+    mocks.isTransientStreamFailure.mockReturnValue(false);
+    providerWith(['error', 'ok'], 'API error (401): bad key');
+
+    const settingsModule = await import('../settings/store.js');
+    const recorded = (settingsModule as unknown as { __recordedSets: Array<{ key: string; value: unknown }> }).__recordedSets;
+    recorded.length = 0;
+
+    const events: Array<{ type: string; status?: string; sticky?: boolean; provider?: string; model?: string }> = [];
+    await runAgent([], msg('hello'), {
+      sessionId: 's1', cwd: '/tmp', provider: 'test', model: 'selected-model',
+      signal: new AbortController().signal, onEvent: (e) => events.push(e as never),
+    });
+
+    // The Brain announces the sticky switch with the ids the renderer adopts…
+    const sticky = events.find((e) => e.type === 'provider_status' && e.sticky === true);
+    expect(sticky?.provider).toBe('test');
+    expect(sticky?.model).toBe('backup-model');
+    // …and saves it so the NEXT turn (WhatsApp, Telegram, scheduled) starts here.
+    expect(recorded).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: 'provider', value: 'test' }),
+        expect.objectContaining({ key: 'model', value: 'backup-model' }),
+      ]),
+    );
+  }, 10_000);
+
+  it('never persists a switch after a transient blip', async () => {
+    const selected = { provider: 'test', model: 'selected-model', label: 'Test / selected-model', apiKey: 'k' };
+    const backup = { provider: 'test', model: 'backup-model', label: 'Test / backup-model', apiKey: 'k' };
+    mocks.buildProviderFailoverPlan.mockResolvedValue([selected, backup]);
+    mocks.selectNextProviderCandidate.mockReturnValue(backup);
+    // Transient: the run retries the selection, then may fail over in-run —
+    // but the user's saved choice must never be overwritten.
+    mocks.isTransientStreamFailure.mockReturnValue(true);
+    providerWith(['error', 'error', 'error', 'error', 'ok'], 'Network error: socket hang up');
+
+    const settingsModule = await import('../settings/store.js');
+    const recorded = (settingsModule as unknown as { __recordedSets: Array<{ key: string }> }).__recordedSets;
+    recorded.length = 0;
+
+    const events: Array<{ type: string; sticky?: boolean }> = [];
+    await runAgent([], msg('hello'), {
+      sessionId: 's1', cwd: '/tmp', provider: 'test', model: 'selected-model',
+      signal: new AbortController().signal, onEvent: (e) => events.push(e as never),
+    });
+
+    expect(events.some((e) => e.sticky === true)).toBe(false);
+    expect(recorded).toHaveLength(0);
   }, 10_000);
 });
 

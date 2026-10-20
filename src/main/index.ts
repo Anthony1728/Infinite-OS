@@ -30,6 +30,7 @@ import { homedir } from 'node:os';
   } catch { /* normal startup */ }
 })();
 import { registerIpc } from './ipc/index.js';
+import { attachBackgroundWindow, disposeTray } from './workers/background.js';
 import { registerMiniMode } from './ipc/mini-mode.js';
 import { registerQuickCapture } from './ipc/quick-capture.js';
 import { registerBuiltinTools } from './tools/registry.js';
@@ -53,6 +54,7 @@ import { phoneRemoteServer } from './remote/server.js';
 import { getEngine } from './engine/intelligence.js';
 import { browserOperator } from './operator/browser-operator.js';
 import { windowsDictation } from './voice/windows-dictation.js';
+import { disposeLocalVoice } from './voice/local-voice.js';
 
 import { automationBuilder } from './automation/builder.js';
 import { WebsiteBuilder } from './builders/website.js';
@@ -75,12 +77,76 @@ async function warmUpModels(): Promise<void> {
   } catch (err) {
     logger.warn({ err }, 'Model warm-up encountered issues (non-blocking)');
   }
-  // Pin local weights in memory too — otherwise the first local chat pays
-  // a ~10-15s cold load even though Ollama itself is already running.
+  // Local weights are deliberately NOT loaded at boot any more.
+  //
+  // This used to pull a local model into RAM and pin it for 30 minutes on every
+  // single launch, whether or not the user ever chose a local model. Measured on
+  // the development machine: 1.5 GB resident for `qwen3:1.7b`, 2.5 GB for
+  // `qwen3:4b`, all of it system RAM because there is no CUDA GPU there. That is
+  // the main reason local models made the whole computer feel slow, and it was
+  // paid by users who never intended to use one.
+  //
+  // Instead the model is warmed on first use — see `warmLocalModels`, which is
+  // now called when a local model is actually selected, and which picks the
+  // smallest comfortable model and respects the machine's memory tier.
   try {
-    const { warmLocalModels } = await import('./ollama/utils.js');
-    warmLocalModels();
-  } catch { /* local warm is best-effort */ }
+    const { getHardwareProfile } = await import('./ollama/hardware.js');
+    logger.info(`Local model budget: ${getHardwareProfile().tier} tier`);
+  } catch { /* hardware probe is best-effort */ }
+
+  // Boot optimization.
+  //
+  // Runs after the window is up rather than before, and it applies ONLY the
+  // `safe` tier: temp files in actual temp folders. It never disables a service,
+  // never ends a process and never uninstalls anything — those need the user to
+  // agree, and they live in Settings -> Performance where each one explains what
+  // it costs. It also does nothing at all if the user has turned it off, and it
+  // never runs before they have seen the panel once, so a first launch cannot
+  // change the machine behind their back.
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const [{ runBootOptimization, hasSeenFindings }, { settings }] = await Promise.all([
+          import('./ipc/optimize.js'),
+          import('./settings/store.js'),
+        ]);
+        if (settings.get('bootOptimization') === false) return;
+        if (!hasSeenFindings()) {
+          logger.info('[optimize] first run: showing the panel instead of acting');
+          return;
+        }
+        const result = await runBootOptimization();
+        if (result.applied.length > 0) {
+          logger.info(`[optimize] cleaned on launch: ${result.applied.join(', ')}`);
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Boot optimization pass failed (non-blocking)');
+      }
+    })();
+  }, 8_000).unref?.();
+  // Resolve local voice availability early (import checks, no audio): the
+  // first voice:status call then answers from cache instead of spawning
+  // Python while the user is already tapping the mic.
+  try {
+    const { getVoice } = await import('./voice/index.js');
+    const voice = getVoice();
+    voice.hasLocalStt();
+    voice.hasLocalKokoro();
+  } catch { /* voice warm is best-effort */ }
+  // Then pre-load the offline models a few seconds later. Deferring means the
+  // window finishes painting first; the server warms faster-whisper as soon as
+  // it spawns, so the first mic tap no longer pays a ~3s model load.
+  try {
+    const { getLocalVoice, isLocalVoiceScriptAvailable } = await import('./voice/local-voice.js');
+    if (isLocalVoiceScriptAvailable()) {
+      const timer = setTimeout(() => {
+        void getLocalVoice()
+          .warm()
+          .catch(() => undefined);
+      }, 8_000);
+      timer.unref?.();
+    }
+  } catch { /* local voice warm is best-effort */ }
 }
 
 // Keep acceleration available on integrated and discrete graphics. It can be
@@ -157,6 +223,10 @@ function createWindow(): void {
     },
   });
 
+  // Close-to-tray: with "keep workers running" enabled, closing the window
+  // hides it instead of quitting so scheduled workers keep firing.
+  attachBackgroundWindow(mainWindow);
+
   mainWindow.once('ready-to-show', () => {
     console.log('[main] Window ready-to-show, showing...');
     mainWindow?.show();
@@ -185,9 +255,16 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   }
 
-  mainWindow.webContents.on('console-message', (_e, level, message, line, source) => {
-    const tag = ['V', 'I', 'W', 'E'][level] ?? '?';
-    console.log(`[renderer ${tag}] ${message} (${source}:${line})`);
+  // Take only the details object (Event<WebContentsConsoleMessageEventParams>):
+  // Electron checks listener arity and warns at runtime when a listener uses
+  // the deprecated positional (level, message, line, source) arguments.
+  const rendererTag: Record<string, string> = {
+    '0': 'V', '1': 'I', '2': 'W', '3': 'E',
+    debug: 'V', verbose: 'V', info: 'I', warning: 'W', warn: 'W', error: 'E',
+  };
+  mainWindow.webContents.on('console-message', (details) => {
+    const tag = rendererTag[String(details.level)] ?? '?';
+    console.log(`[renderer ${tag}] ${details.message} (${details.sourceId}:${details.lineNumber})`);
   });
   let hasCrashed = false;
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
@@ -196,6 +273,13 @@ function createWindow(): void {
       hasCrashed = true;
       setTimeout(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
+          // The renderer restarted, so it has no idea which tabs were open.
+          // Release the old guests first; the new surface re-creates the tab it
+          // is actually showing. Leaving them attached would stack duplicates
+          // over the window and keep stale pages alive off-screen.
+          void import('./tab-browser-view.js')
+            .then(({ closeAllTabBrowserViews }) => closeAllTabBrowserViews())
+            .catch(() => {});
           mainWindow.reload();
         }
       }, 2000);
@@ -210,6 +294,24 @@ function createWindow(): void {
     return { action: 'deny' };
   });
 
+  // Fullscreen state is broadcast from the WINDOW's own events, not from the
+  // code that requests it.
+  //
+  // Previously only the F11 handler sent `window:fullscreen-changed`, so
+  // entering full screen from the title-bar button, from an IPC call, or from
+  // anything else left the renderer believing it was still windowed — the title
+  // bar never got out of the way and no layout adapted. One authority means
+  // every route reports the same truth.
+  const broadcastFullscreen = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const fullscreen = mainWindow.isFullScreen();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('window:fullscreen-changed', { fullscreen });
+    }
+  };
+  mainWindow.on('enter-full-screen', broadcastFullscreen);
+  mainWindow.on('leave-full-screen', broadcastFullscreen);
+
   // F11 and Ctrl+Shift+F toggle fullscreen
   mainWindow.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
@@ -219,9 +321,9 @@ function createWindow(): void {
     if (isF11 || isCtrlShiftF) {
       e.preventDefault();
       if (!mainWindow || mainWindow.isDestroyed()) return;
-      const nowFs = mainWindow.isFullScreen();
-      mainWindow.setFullScreen(!nowFs);
-      mainWindow.webContents.send('window:fullscreen-changed', { fullscreen: !nowFs });
+      // The window's own enter/leave event does the broadcasting, so every
+      // route (key, button, IPC) reports through the same path.
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
     }
   });
 
@@ -290,6 +392,15 @@ app.whenReady().then(async () => {
   // watch the agent over SSE. Never blocks startup.
   phoneRemoteServer.start();
 
+  // Always-on voice: when the setting is on, the mic stays live and every view
+  // keeps hearing you. Settings-gated like Telegram inbound, and it never blocks
+  // startup — the microphone opens in the background after the window is up.
+  void import('./voice/session.js').then(({ voiceSession }) => {
+    void voiceSession.init();
+  }).catch((e) => {
+    logger.warn({ err: e }, 'Always-on voice failed to initialize');
+  });
+
   // Telegram inbound (OpenClaw loop): DMs to your bot become agent turns.
   // Idle until enabled via settings/env + token + allowlist. Never blocks startup.
   void import('./messaging/telegram-inbound.js').then(({ telegramInbound }) => {
@@ -313,6 +424,19 @@ app.whenReady().then(async () => {
       logger.warn({ err: e }, 'WhatsApp auto-resume check failed');
     }
   }).catch(() => {});
+
+  // Continuous self-evolution auto-resume: a loop left enabled in Settings
+  // picks up where it left off on every launch (createEvolutionLoop reads the
+  // persisted snapshot and re-arms itself when enabled).
+  void import('./brain/evolution-loop.js')
+    .then(({ createEvolutionLoop }) => {
+      try {
+        createEvolutionLoop(); // arms the timer when evolveLoopEnabled is true
+      } catch (e) {
+        logger.warn({ err: e }, 'Evolution loop auto-resume failed');
+      }
+    })
+    .catch(() => {});
 
   // Pre-warm model connections in background (non-blocking)
   warmUpModels().catch((e) => logger.warn({ err: e }, 'Model warm-up failed'));
@@ -419,8 +543,55 @@ app.whenReady().then(async () => {
   });
 });
 
+/**
+ * Flush what is still buffered before the process goes away.
+ *
+ * There was no `before-quit` handler at all, so anything written on a timer or
+ * batched in memory was simply lost on quit. The action audit log is the one
+ * that mattered: it records every tool call as it happens, and its `flush` is
+ * explicitly meant for graceful shutdown but was never called. Losing it means
+ * losing the record of what the agent did — which is exactly the record the
+ * resume banner reconstructs its summary from.
+ */
+app.on('before-quit', () => {
+  disposeTray();
+  void import('./audit/action-log.js')
+    .then(({ actionAuditLog }) => actionAuditLog.flush())
+    .catch((err) => console.warn('[shutdown] action log flush failed:', err));
+});
+
 app.on('window-all-closed', () => {
+  disposeTray();
   windowsDictation.stop();
+  // Release the always-on voice microphone before the engine goes away, so
+  // closing the last window doesn't leave dictation running.
+  void import('./voice/session.js').then(({ voiceSession }) => {
+    try {
+      voiceSession.stop();
+    } catch { /* already stopped */ }
+  }).catch(() => {});
+  // Shuts down the Python voice server (shutdown command + stdin EOF), so the
+  // microphone is released and no orphaned process survives the app.
+  disposeLocalVoice();
+  // Close the loopback static server so no port is left listening after quit.
+  void import('./workspace-server.js')
+    .then(({ stopAllWorkspaceServers }) => stopAllWorkspaceServers())
+    .catch(() => {});
+  // Release the agent's detached in-app browser. It is not a child view, so it
+  // needs its own shutdown or the guest process outlives the app.
+  void import('./in-app-browser.js')
+    .then(({ disposeInAppBrowser }) => disposeInAppBrowser())
+    .catch(() => {});
+  // Every in-app tab guest is a child of this window's contentView; they must be
+  // released with it or they are orphaned.
+  void import('./tab-browser-view.js')
+    .then(({ closeAllTabBrowserViews }) => closeAllTabBrowserViews())
+    .catch(() => {});
+  // REA runs as a long-lived child process while an investigation is open.
+  // Stop it with the window, or the node process outlives the app.
+  void import('./rea/client.js')
+    .then(({ reaClient }) => reaClient.close())
+    .catch(() => {});
   bridgeServer.stop();
   phoneRemoteServer.stop();
   automationScheduler.stop();
@@ -456,8 +627,18 @@ app.on('child-process-gone', (_e, details) => {
   console.error('[main] Child process gone:', details.type, details.reason);
 });
 
-// Hard-disable navigation to external URLs
+// Hard-disable navigation to external URLs.
+//
+// This guard is for the APP's own surfaces: a stray link click must never
+// navigate the Infinite OS window away to some external site.
+//
+// Tab browsing is explicitly exempt. A `<webview>` guest is its own
+// WebContents, so this listener also fires for it — without the type check, the
+// embedded browser in the Tabs section was blocked from loading any real
+// website, which is the entire reason it exists. Guests are sandboxed into
+// their own partition and cannot reach the app's preload or Node.
 app.on('web-contents-created', (_e, contents) => {
+  if (contents.getType() === 'webview') return;
   contents.on('will-navigate', (e, url) => {
     if (!url.startsWith('http://localhost') && !url.startsWith('file://')) e.preventDefault();
   });

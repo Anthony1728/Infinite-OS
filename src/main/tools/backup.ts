@@ -13,7 +13,21 @@ export interface SnapshotManifest {
   files: string[];
 }
 
-/** Walk up from a file to the Infinite OS repo root (package.json named infinite-ai). */
+/**
+ * Walk up from a path to the Infinite OS repo root (package.json named infinite-ai).
+ *
+ * `filePath` may be a file or a directory — callers pass both: the conversation
+ * cwd (a directory) when guarding a write, and the target file when backing one
+ * up. The starting path itself is therefore checked, not just its parent.
+ *
+ * That distinction was not cosmetic. This used to begin at `dirname(path)`, so
+ * passing the repo root itself started the search one level too high and never
+ * found it. Since the conversation cwd is normally the repo root, every caller
+ * relying on this got `null`. `Write`/`Edit`/`Delete` hid it behind
+ * `?? ctx.cwd`, but `build-feature` had no such fallback — so its
+ * self-modification guard was skipped entirely in the most common case, which is
+ * the one it exists for.
+ */
 export function findInfiniteRepoRoot(filePath: string, read: (p: string) => string | null = (p) => {
   try {
     return readFileSync(p, 'utf8');
@@ -21,8 +35,10 @@ export function findInfiniteRepoRoot(filePath: string, read: (p: string) => stri
     return null;
   }
 }): string | null {
-  let dir = dirname(resolve(filePath));
-  for (let depth = 0; depth < 10; depth++) {
+  let dir = resolve(filePath);
+  // 12 rather than 10: the starting path consumes an iteration, so the same
+  // depth now reaches one ancestor further.
+  for (let depth = 0; depth < 12; depth++) {
     let raw: string | null = null;
     try {
       raw = read(join(dir, 'package.json'));

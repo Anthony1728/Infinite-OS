@@ -1,7 +1,8 @@
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import type { AiWorkspaceTab, TabSection, TabMetric, TabChartData, TabTableData } from '../../stores/aiTabs';
 import { useChatStore } from '../../stores/chat';
-import { useAiTabsStore } from '../../stores/aiTabs';
+import { useFullscreenStore } from '../../stores/fullscreen';
+import { TabBrowser } from './TabBrowser';
 
 interface DynamicTabViewProps {
   tab: AiWorkspaceTab;
@@ -10,6 +11,11 @@ interface DynamicTabViewProps {
 
 export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
   const sendMessage = useChatStore((state) => state.sendMessage);
+  // In full screen the page is the point, so the actions rail gets out of the
+  // way unless it is explicitly asked for. It is still one click away.
+  const fullscreen = useFullscreenStore((s) => s.fullscreen);
+  const [railPinned, setRailPinned] = useState(false);
+  const showRail = !fullscreen || railPinned;
 
   const continueInChat = (prompt: string) => {
     onViewChange('chats');
@@ -23,10 +29,10 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
 
   if (shouldShowBrowser) {
     return (
-      <div className="flex h-full min-h-0 bg-[#080a10]">
+      <div className="relative flex h-full min-h-0 bg-[#080a10]">
         <div className="flex-1 min-w-0 flex flex-col">
           <TabHeader tab={tab} compact />
-          <WebsiteBrowser tab={tab} />
+          <TabBrowser tab={tab} />
           {tab.filePath && (
             <div className="mx-6 mb-4 rounded-lg border border-white/[0.07] bg-[#0c1018] p-3 flex items-center gap-3">
               <span className="text-sm">📁</span>
@@ -35,9 +41,31 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
             </div>
           )}
         </div>
-        <aside className="hidden lg:flex w-[280px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0d14] p-4">
-          <TabActions tab={tab} onAction={continueInChat} />
-        </aside>
+        {fullscreen && !showRail && (
+          <button
+            type="button"
+            onClick={() => setRailPinned(true)}
+            title="Show tab actions"
+            aria-label="Show tab actions"
+            className="absolute right-2 top-2 z-20 rounded-lg border border-white/[0.08] bg-[#12121a]/90 px-2 py-1 text-[10px] text-zinc-400 backdrop-blur transition-colors hover:border-white/[0.16] hover:text-zinc-200"
+          >
+            Actions
+          </button>
+        )}
+        {showRail && (
+          <aside className="hidden w-[280px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0b0d14] p-4 lg:flex">
+            {fullscreen && (
+              <button
+                type="button"
+                onClick={() => setRailPinned(false)}
+                className="mb-2 self-end rounded-md px-2 py-1 text-[10px] text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-300"
+              >
+                Hide
+              </button>
+            )}
+            <TabActions tab={tab} onAction={continueInChat} />
+          </aside>
+        )}
       </div>
     );
   }
@@ -60,7 +88,7 @@ export function DynamicTabView({ tab, onViewChange }: DynamicTabViewProps) {
           {tab.htmlContent && !htmlIsUrl && <HtmlBlock html={tab.htmlContent} />}
           {htmlIsUrl && (
             <div className="mt-4">
-              <WebsiteBrowser tab={tab} embedded />
+              <TabBrowser tab={tab} embedded />
             </div>
           )}
           {!tab.htmlContent && !tab.sections && !tab.chartData && !tab.tableData && !tab.metrics && (
@@ -111,136 +139,6 @@ function TabHeader({ tab, compact }: { tab: AiWorkspaceTab; compact?: boolean })
         </div>
         <h1 className="mt-1.5 text-2xl font-semibold text-zinc-100 tracking-[-0.02em]">{tab.title}</h1>
         <p className="mt-1.5 max-w-2xl text-sm text-zinc-500">{tab.prompt}</p>
-      </div>
-    </div>
-  );
-}
-
-function WebsiteBrowser({ tab, embedded }: { tab: AiWorkspaceTab; embedded?: boolean }) {
-  const updateTab = useAiTabsStore((s) => s.updateTab);
-  const metaUrl = (tab.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined;
-  const initial = metaUrl || (tab.htmlContent && /^https?:\/\//i.test(tab.htmlContent.trim()) ? tab.htmlContent.trim() : 'https://www.google.com');
-  const [url, setUrl] = useState(initial);
-  const [inputUrl, setInputUrl] = useState(initial);
-  const [history, setHistory] = useState<string[]>([initial]);
-  const [hIdx, setHIdx] = useState(0);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-
-  // AI can navigate by updating tab.htmlContent / metadata.browserUrl
-  useEffect(() => {
-    const newUrl = (tab.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined;
-    const htmlUrl = tab.htmlContent && /^https?:\/\//i.test(tab.htmlContent.trim()) ? tab.htmlContent.trim() : null;
-    const target = newUrl || htmlUrl;
-    if (target && target !== url) {
-      setUrl(target);
-      setInputUrl(target);
-      setHistory((prev) => {
-        const next = prev.slice(0, hIdx + 1);
-        next.push(target);
-        return next.slice(-30);
-      });
-      setHIdx((prev) => Math.min(prev + 1, 29));
-    }
-  }, [tab.htmlContent, (tab.metadata as Record<string, unknown> | undefined)?.browserUrl]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const navigate = useCallback((nextUrl: string) => {
-    let target = nextUrl.trim();
-    if (!target) return;
-    if (!/^https?:\/\//i.test(target)) {
-      if (/^[\w-]+(\.[\w-]+)+/.test(target)) target = 'https://' + target;
-      else target = 'https://www.google.com/search?q=' + encodeURIComponent(target);
-    }
-    setUrl(target);
-    setInputUrl(target);
-    setHistory((prev) => {
-      const next = prev.slice(0, hIdx + 1);
-      next.push(target);
-      return next.slice(-30);
-    });
-    setHIdx((prev) => Math.min(prev + 1, 29));
-    // Persist so AI sees the new URL and user can return
-    updateTab(tab.id, { htmlContent: target, metadata: { ...(tab.metadata || {}), browserUrl: target } });
-  }, [hIdx, tab.id, tab.metadata, updateTab]);
-
-  const goBack = useCallback(() => {
-    if (hIdx > 0) {
-      const nextIdx = hIdx - 1;
-      setHIdx(nextIdx);
-      const target = history[nextIdx];
-      setUrl(target);
-      setInputUrl(target);
-    } else {
-      try { iframeRef.current?.contentWindow?.history.back(); } catch { /* cross-origin, ignore */ }
-    }
-  }, [hIdx, history]);
-
-  const goForward = useCallback(() => {
-    if (hIdx < history.length - 1) {
-      const nextIdx = hIdx + 1;
-      setHIdx(nextIdx);
-      const target = history[nextIdx];
-      setUrl(target);
-      setInputUrl(target);
-    } else {
-      try { iframeRef.current?.contentWindow?.history.forward(); } catch { /* cross-origin, ignore */ }
-    }
-  }, [hIdx, history]);
-
-  const reload = useCallback(() => {
-    const src = iframeRef.current?.src;
-    if (iframeRef.current && src) iframeRef.current.src = src;
-  }, []);
-
-  const lastBrowserActionRef = useRef<number>(0);
-  useEffect(() => {
-    const meta = tab.metadata as Record<string, unknown> | undefined;
-    const action = meta?.browserAction as string | undefined;
-    const at = meta?.at as number | undefined;
-    if (!action || !at || at === lastBrowserActionRef.current) return;
-    lastBrowserActionRef.current = at;
-    if (action === 'back') goBack();
-    else if (action === 'forward') goForward();
-    else if (action === 'reload') reload();
-  }, [tab.metadata, goBack, goForward, reload]);
-
-  const openExternal = useCallback(() => {
-    window.open(url, '_blank');
-  }, [url]);
-
-  return (
-    <div className={embedded ? 'rounded-xl overflow-hidden border border-white/[0.07] bg-[#0c1018]' : 'flex-1 min-h-0 flex flex-col bg-[#0c1018]'}>
-      <div className="flex items-center gap-1.5 px-2 py-2 border-b border-white/[0.06] bg-[#0b1018]">
-        <button onClick={goBack} disabled={hIdx <= 0} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Back">‹</button>
-        <button onClick={goForward} disabled={hIdx >= history.length - 1} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:cursor-not-allowed" title="Forward">›</button>
-        <button onClick={reload} className="p-1.5 rounded-md hover:bg-white/[0.06] text-zinc-400 hover:text-zinc-100" title="Reload">↻</button>
-        <div className="flex-1 flex items-center gap-2 bg-black/30 border border-white/[0.07] rounded-full px-3 py-1.5">
-          <span className="text-[10px] text-emerald-400">●</span>
-          <input
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') navigate(inputUrl); }}
-            placeholder="Search or enter URL — AI can control this browser too"
-            className="flex-1 bg-transparent text-xs text-zinc-200 placeholder:text-zinc-500 outline-none"
-          />
-          <button onClick={() => navigate(inputUrl)} className="text-[10px] font-medium text-cyan-300 hover:text-cyan-200">Go</button>
-        </div>
-        <button onClick={openExternal} className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-[11px] text-zinc-400 hover:text-zinc-100" title="Open in external Chrome">↗</button>
-        <span className="hidden sm:inline text-[10px] text-zinc-600 border border-white/[0.06] rounded-full px-2 py-1">AI controllable</span>
-      </div>
-      <div className={embedded ? 'h-[520px] bg-white' : 'flex-1 min-h-0 bg-white relative'}>
-        <iframe
-          ref={iframeRef}
-          src={url}
-          title={tab.title}
-          className="w-full h-full border-0 bg-white"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-          allow="fullscreen; clipboard-read; clipboard-write"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      </div>
-      <div className="px-3 py-1.5 bg-[#0b1018] border-t border-white/[0.06] flex items-center justify-between">
-        <span className="text-[11px] text-zinc-500 truncate">{url}</span>
-        <span className="text-[10px] text-zinc-600 hidden sm:inline">Tab as browser — AI uses this via TabBrowser tool • You can type, back, forward too</span>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { priceForModel, estimateCost, estimateTotalCost, formatCost } from './pricing.js';
+import { priceForModel, pricingStatus, estimateCost, estimateTotalCost, formatCost } from './pricing.js';
 
 describe('priceForModel', () => {
   it('resolves bare and gateway-prefixed ids', () => {
@@ -12,9 +12,33 @@ describe('priceForModel', () => {
     expect(priceForModel('bluesminds', 'deepseek-reasoner:free')?.input).toBe(0.55);
   });
 
-  it('returns null for unknown models (reported as free)', () => {
+  it('returns null for models with no published rate', () => {
     expect(priceForModel('ollama', 'qwen3:4b')).toBeNull();
     expect(priceForModel(undefined, 'mystery-model')).toBeNull();
+  });
+});
+
+describe('pricingStatus', () => {
+  it('separates a published rate from genuinely free', () => {
+    expect(pricingStatus('anthropic', 'claude-sonnet-4-5')).toBe('priced');
+    expect(pricingStatus('ollama', 'qwen3:4b')).toBe('free');
+    expect(pricingStatus('lmstudio', 'some-local-model')).toBe('free');
+    expect(pricingStatus('openrouter', 'deepseek/deepseek-chat:free')).toBe('free');
+  });
+
+  it('calls an unknown model unpriced rather than free', () => {
+    expect(pricingStatus('nvidia', 'mystery-model')).toBe('unknown');
+    expect(pricingStatus(undefined, undefined)).toBe('unknown');
+  });
+
+  it('does not charge a :free variant the paid list price', () => {
+    const usd = estimateCost({
+      provider: 'openrouter',
+      model: 'deepseek/deepseek-chat:free',
+      input: 1_000_000,
+      output: 1_000_000,
+    });
+    expect(usd).toBe(0);
   });
 });
 
@@ -30,7 +54,7 @@ describe('estimateCost', () => {
     expect(usd).toBeCloseTo(0.3 + 0.27, 5);
   });
 
-  it('unknown models cost zero', () => {
+  it('unpriced models cost zero here (the store reports them separately)', () => {
     expect(estimateCost({ provider: 'ollama', model: 'qwen3:4b', input: 500_000, output: 5_000 })).toBe(0);
   });
 

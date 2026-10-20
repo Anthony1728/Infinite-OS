@@ -826,6 +826,25 @@ button:disabled {
 }
 
 @layer components {
+  /* ── Gradient shift animation ── */
+  @keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradientShift 3s ease infinite;
+  }
+
+  /* ── Particle float animation ── */
+  @keyframes particleFloat {
+    0%, 100% { opacity: 0; transform: translateY(10px) scale(0); }
+    20% { opacity: 1; transform: translateY(0) scale(1); }
+    80% { opacity: 1; transform: translateY(-10px) scale(1); }
+    100% { opacity: 0; transform: translateY(-20px) scale(0); }
+  }
+
   .glass-panel {
     background: rgba(13, 13, 17, 0.8);
     backdrop-filter: blur(16px);
@@ -887,18 +906,24 @@ button:disabled {
 
   .btn-premium {
     @apply px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200;
-    background: #ececec;
-    color: #18181b;
-    box-shadow: none;
+    /* Was `background: #ececec; color: #18181b` — a near-white button on a
+       #070709 app, which is why every primary action glared against the dark
+       surface in this theme while looking correct in the classic one. Now it
+       uses the same accent treatment as globals-classic.css, so a button means
+       the same thing in both themes. */
+    background: linear-gradient(135deg, var(--os-accent), #7c3aed);
+    color: #ffffff;
+    box-shadow: 0 4px 14px rgba(139, 92, 246, 0.28);
   }
 
   .btn-premium:hover {
-    background: #ffffff;
+    background: linear-gradient(135deg, #9d7bf8, #8b5cf6);
+    box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
   }
 
   .btn-premium:active {
     transform: translateY(0);
-    background: #d4d4d8;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
   }
 
   .btn-danger {
@@ -1742,10 +1767,39 @@ button:disabled {
 }
 
 /* ── Static card variant ─────────────────────────────────────────────
-   Same glass look, no hover lift. Use in dense grids (Bots, Artifacts)
-   where translateY would overlap neighboring controls like search bars. */
+   Keeps the SAME hover lift/glow animation as .agent-card.
+   Top-clipping is fixed with grid breathing room (pt-2/px-1), NOT by
+   killing the animation — the full card + animation must stay visible. */
+.agent-card--static {
+  background: rgba(15, 12, 26, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+}
 .agent-card--static:hover {
-  transform: none;
+  transform: translateY(-4px);
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.6), 0 0 24px rgba(139, 92, 246, 0.25);
+}
+.agent-card--static:hover .af-action {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: #ffffff;
+}
+/* Breathing room for animated card grids so the hover lift + 24px glow is
+   never cut off by a scroll container's padding box. The shadow paints ~32px
+   outside the border box (24px blur + falloff) on top, left and right, so the
+   padding has to clear that plus the 4px lift — 8px/4px sliced the glow flat
+   against the scroller edge. */
+.card-grid-animated {
+  padding: 28px;
 }
 
 /* ── Focus mode — real dimming, not a fake toggle ─────────────────────

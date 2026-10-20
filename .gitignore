@@ -38,3 +38,8 @@ extensions/*/config.js
 Infinite OS/**/.env
 Infinite OS/**/.env.local
 Infinite OS/**/.env.*.local
+
+# Python bytecode (local scripts)
+__pycache__/
+*.pyc
+

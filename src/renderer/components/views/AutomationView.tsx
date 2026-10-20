@@ -223,7 +223,7 @@ export function AutomationView() {
         <label className="ml-auto flex items-center gap-2.5 cursor-pointer select-none group">
           <span className="flex flex-col leading-tight">
             <span className="text-[11px] font-medium text-zinc-300 group-hover:text-white transition-colors">Keep this computer awake</span>
-            <span className="text-[10px] text-zinc-600">Scheduled tasks can't fire while the display sleeps</span>
+            <span className="text-[10px] text-zinc-600">Scheduled tasks can&apos;t fire while the display sleeps</span>
           </span>
           <button
             type="button"

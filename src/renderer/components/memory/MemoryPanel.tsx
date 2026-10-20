@@ -15,6 +15,7 @@ interface MemoryEntry {
 interface MemoryStats {
   total: number;
   byType: Record<string, number>;
+  datasets?: number;
 }
 
 const TYPE_ICONS: Record<string, AppIconName> = {
@@ -105,7 +106,7 @@ export function MemoryPanel({ onClose }: MemoryPanelProps) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold mb-1 text-textMain">Memory</h1>
-          <p className="text-textMuted text-sm">Manage your AI memory and context.</p>
+          <p className="text-textMuted text-sm">{stats ? `${stats.total} ${stats.total === 1 ? 'memory' : 'memories'} across ${stats.datasets ?? 1} ${(stats.datasets ?? 1) === 1 ? 'dataset' : 'datasets'}. ` : ''}Manage your AI memory and context.</p>
         </div>
         <button onClick={onClose} className="text-textMuted hover:text-textMain p-2 rounded-lg hover:bg-bgCard transition-colors">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>

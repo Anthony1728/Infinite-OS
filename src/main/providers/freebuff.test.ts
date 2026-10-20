@@ -66,7 +66,7 @@ describe('freebuff provider', () => {
     expect(models.length).toBeGreaterThanOrEqual(10);
     expect(models.every((m) => m.provider === 'freebuff' && m.free)).toBe(true);
     expect(models.some((m) => m.id === 'z-ai/glm-5.3-flash')).toBe(true);
-  });
+  }, 30_000); // real CLI catalog call; blows the 5s default under full-suite load
 
   it('surfaces rate limits as plain errors', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {

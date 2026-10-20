@@ -36,12 +36,29 @@ function filesDir(): string {
   return join(kbDir(), 'files');
 }
 
+/**
+ * Parsed KB, keyed by the file's mtime and size.
+ *
+ * `searchKb` runs on the agent's recall path and `listKb` runs whenever the
+ * Knowledge tab paints; both re-read and re-parsed the entire store before.
+ * The file only changes through `writeAll`, which drops the cache, so the
+ * stat check is a cheap guard against an edit made outside the app.
+ */
+let cache: { entries: KbEntry[]; mtimeMs: number; size: number } | null = null;
+
 function readAll(): KbEntry[] {
   try {
     const p = kbFile();
     if (!existsSync(p)) return [];
+    const stats = statSync(p);
+    if (cache && cache.mtimeMs === stats.mtimeMs && cache.size === stats.size) {
+      // Copy: callers such as `addEntry` mutate the array they get back.
+      return cache.entries.slice();
+    }
     const raw = JSON.parse(readFileSync(p, 'utf8')) as KbEntry[];
-    return Array.isArray(raw) ? raw.filter((e) => e && typeof e.title === 'string') : [];
+    const entries = Array.isArray(raw) ? raw.filter((e) => e && typeof e.title === 'string') : [];
+    cache = { entries, mtimeMs: stats.mtimeMs, size: stats.size };
+    return entries.slice();
   } catch {
     return [];
   }
@@ -50,6 +67,7 @@ function readAll(): KbEntry[] {
 function writeAll(entries: KbEntry[]): void {
   mkdirSync(kbDir(), { recursive: true });
   writeFileSync(kbFile(), JSON.stringify(entries, null, 2), 'utf8');
+  cache = null;
 }
 
 export function listKb(): KbEntry[] {

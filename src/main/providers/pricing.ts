@@ -33,6 +33,24 @@ const PRICE_TABLE: Record<string, ModelPrice> = {
   'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
 };
 
+export type PricingStatus = 'priced' | 'free' | 'unknown';
+
+/**
+ * Local runtimes never bill, and OpenRouter's `:free` variants are zero-cost
+ * by contract. Everything else without a table entry is *unpriced*, which is
+ * not the same as free: pricing an unknown model at $0 would let the total
+ * silently understate what a provider will charge.
+ */
+const FREE_PROVIDERS = new Set(['ollama', 'lmstudio', 'llamacpp', 'llama.cpp', 'local']);
+
+/** Classify a model so callers can tell a real $0 from a missing price. */
+export function pricingStatus(provider: string | undefined, model: string | undefined): PricingStatus {
+  if (!model) return 'unknown';
+  if (/:free$/i.test(model)) return 'free';
+  if (provider && FREE_PROVIDERS.has(provider.toLowerCase())) return 'free';
+  return priceForModel(provider, model) ? 'priced' : 'unknown';
+}
+
 /** Prefix matcher: `provider/model` and bare model ids both resolve. */
 export function priceForModel(provider: string | undefined, model: string | undefined): ModelPrice | null {
   if (!model) return null;
@@ -54,8 +72,15 @@ export interface UsageSample {
   cache_read?: number;
 }
 
-/** Estimated cost in USD for one usage sample. Free/unknown pricing = 0. */
+/**
+ * Estimated cost in USD for one usage sample.
+ *
+ * Genuinely free models cost zero. Unpriced models also cost zero here, but
+ * the usage store records them separately so the UI can disclose the gap
+ * rather than presenting the number as complete.
+ */
 export function estimateCost(sample: UsageSample): number {
+  if (pricingStatus(sample.provider, sample.model) !== 'priced') return 0;
   const price = priceForModel(sample.provider, sample.model);
   if (!price) return 0;
   const cached = sample.cache_read ?? 0;

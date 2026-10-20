@@ -5,6 +5,8 @@
 
 import type { Tool, ToolResult } from './base.js';
 import { SkillsManager } from '../skills/manager.js';
+import { SkillFileStore } from '../skills/skill-store.js';
+import { loadSkillIndex, fetchSkillFile, searchSkills } from '../skills/hub.js';
 import { infiniteHome } from '../profiles/home.js';
 import { join } from 'node:path';
 
@@ -18,11 +20,21 @@ interface SkillInput {
 
 export const skillsTool: Tool = {
   name: 'Skills',
-  description: 'Browse and load reusable procedural skills (SKILL.md). Actions: list (catalog), search (query), relevant (task), invoke (skill name or id — returns the full instructions to follow). Skills are compact in the prompt; invoke loads the details only when needed.',
+  description: [
+    'Browse and load reusable procedural skills (SKILL.md).',
+    'Actions: list (catalog), search (query), relevant (task), invoke (skill name or id — returns the full instructions to follow).',
+    'Skills are compact in the prompt; invoke loads the details only when needed.',
+    'hub_search looks across a public library of ~388 expert-written skills (engineering, marketing, finance, research, productivity, C-level advisory) without installing anything.',
+    'hub_install downloads one of them into the local skill store; afterwards it is an ordinary skill you can invoke like any other.',
+    'Use hub_search first when a request calls for a process you do not already know — the library covers far more than you do.',
+  ].join(' '),
   inputSchema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['list', 'search', 'relevant', 'invoke'] },
+      action: {
+        type: 'string',
+        enum: ['list', 'search', 'relevant', 'invoke', 'hub_search', 'hub_install', 'hub_categories'],
+      },
       skill: { type: 'string', description: 'Skill name or id (for invoke).' },
       query: { type: 'string', description: 'Search text (for search).' },
       category: { type: 'string', description: 'Optional category filter (for list).' },
@@ -77,6 +89,82 @@ export const skillsTool: Tool = {
           parts.push('', skill.instructions);
           return { content: parts.join('\n') };
         }
+        // ── The public skill library ─────────────────────────────────────
+        // On demand, never bundled. The library has ~388 skills whose
+        // descriptions alone would dwarf the system prompt, and this machine
+        // runs a local model where every token costs real seconds. So nothing
+        // is loaded until the agent actually asks for it.
+        case 'hub_search': {
+          if (!input.query) return bad('hub_search requires a query — describe the process you need.');
+          const result = await loadSkillIndex(join(infiniteHome(), 'cache', 'skills-hub'));
+          if (result.index.entries.length === 0) {
+            return bad(`The skill library could not be loaded: ${result.error ?? 'unknown reason'}`);
+          }
+          const found = searchSkills(result.index, input.query, input.limit ?? 15);
+          if (found.length === 0) {
+            return bad(
+              `Nothing in the library matches "${input.query}". It covers ` +
+              `${result.index.entries.length} skills across ${new Set(result.index.entries.map(e => e.category)).size} areas. ` +
+              'Try a broader word, or action=hub_categories to see the areas.',
+            );
+          }
+          return json({
+            total_in_library: result.index.entries.length,
+            matched: found.length,
+            hint: 'Use action=hub_install with the exact id to download one, then action=invoke to load its instructions.',
+            stale: result.error,
+            skills: found.map(e => ({
+              id: e.path,
+              name: e.name,
+              category: e.category,
+              bundle: e.bundle,
+              // The bundle description, not the skill's own: the skill's own
+              // description only arrives when it is installed.
+              about: e.description,
+              keywords: e.keywords?.slice(0, 8),
+            })),
+          });
+        }
+
+        case 'hub_categories': {
+          const result = await loadSkillIndex(join(infiniteHome(), 'cache', 'skills-hub'));
+          if (result.index.entries.length === 0) {
+            return bad(`The skill library could not be loaded: ${result.error ?? 'unknown reason'}`);
+          }
+          const counts = new Map<string, number>();
+          for (const e of result.index.entries) counts.set(e.category, (counts.get(e.category) ?? 0) + 1);
+          return ok(
+            `${result.index.entries.length} skills: ` +
+            [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} (${v})`).join(', '),
+          );
+        }
+
+        case 'hub_install': {
+          if (!input.skill) return bad('hub_install requires an id — the exact path returned by hub_search.');
+          const result = await loadSkillIndex(join(infiniteHome(), 'cache', 'skills-hub'));
+          const entry = result.index.entries.find(e => e.path === input.skill || e.name === input.skill);
+          if (!entry) {
+            return bad(
+              `"${input.skill}" is not in the library. Use action=hub_search to find it, ` +
+              'and pass back the exact id it returns.',
+            );
+          }
+          const markdown = await fetchSkillFile(entry.path);
+          // Written through the same store the local skills use, so it inherits
+          // the path-traversal guard rather than bypassing it.
+          const store = new SkillFileStore(join(infiniteHome(), 'skills'));
+          const path = store.write({
+            name: entry.name,
+            description: entry.description ?? `Imported from the public skill library (${entry.category}).`,
+            category: entry.category,
+            instructions: markdown,
+          });
+          return ok(
+            `Installed "${entry.name}" (${entry.category}).\nSaved to: ${path}\n\n` +
+            'Use action=invoke with that name to load its full instructions.',
+          );
+        }
+
         default:
           return bad(`Unknown Skills action: ${input.action}`);
       }
@@ -203,4 +291,5 @@ function formatLine(s: { name: string; description: string; category: string; so
 }
 
 function json(value: unknown): ToolResult { return { content: JSON.stringify(value, null, 2) }; }
+function ok(content: string): ToolResult { return { content }; }
 function bad(content: string): ToolResult { return { content, is_error: true }; }

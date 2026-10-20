@@ -7,6 +7,49 @@ vi.mock('../settings/secrets.js', () => ({
   getAllApiKeys: async () => [] as string[],
 }));
 
+/**
+ * Provider availability is decided by what is installed on the machine running
+ * the tests — FreeBuff and the OpenCode CLI are both opt-in.
+ *
+ * That made three of these tests machine-dependent rather than behaviour tests:
+ *
+ *   - "still tries an explicitly selected provider" FAILED on any machine
+ *     without the FreeBuff CLI, because the provider was absent before the
+ *     logic under test ever ran.
+ *   - "skips keyless providers with fresh auth failures" PASSED on those same
+ *     machines for the wrong reason: the provider was absent, so the assertion
+ *     held even if the auth-failure skip were deleted entirely. A green test
+ *     proving nothing is worse than a red one.
+ *   - "includes a keyless installed-CLI candidate" passed only on machines that
+ *     happen to have OpenCode installed.
+ *
+ * Fixed by pinning availability here. The provider's own definition — free
+ * models, default model, whether it needs a key — is left real, so these still
+ * test actual behaviour.
+ */
+vi.mock('./registry.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    getProvider: (id: string) => {
+      const real = (actual.getProvider as (i: string) => unknown)(id);
+      if (!real) return undefined;
+      // Keep the real definition but guarantee at least one model, so a
+      // provider that exists but is configured empty still exercises the plan.
+      const provider = real as {
+        freeModels?: { id: string }[];
+        defaultModel?: string;
+        requiresApiKey?: boolean;
+      };
+      return {
+        ...provider,
+        freeModels: provider.freeModels?.length ? provider.freeModels : [{ id: 'test/model' }],
+        defaultModel: provider.defaultModel ?? 'test/default',
+      };
+    },
+  };
+});
+
 // Provider-health writes must never touch the real profile: a leftover
 // timestamp would make the running app skip a provider for minutes.
 process.env.INFINITE_TEST_HOME ??= mkdtempSync(join(tmpdir(), 'infinite-failover-test-'));
@@ -19,8 +62,7 @@ afterAll(() => {
 import {
   buildProviderFailoverPlan,
   classifyError,
-  isFreeTierExhausted,
-  isProviderWideFailure,
+  isFreeTierExhausted,  isProviderWideFailure,
   isRecoverableProviderError,
   isTransientStreamFailure,
   prioritizeProviderCandidates,

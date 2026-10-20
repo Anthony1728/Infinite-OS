@@ -13,7 +13,7 @@ export function OnboardingFlow() {
   const [notifications, setNotifications] = useState(true);
   const [aiMemory, setAiMemory] = useState(true);
 
-  // Map onboarding theme â†’ real Infinite OS appearance so the whole OS
+  // Map onboarding theme → real Infinite OS appearance so the whole OS
   // actually changes (dark = original Infinite classic, light = cloud,
   // midnight = onyx pure black).
   const applyOnboardingTheme = (next: 'dark' | 'light' | 'midnight') => {
@@ -154,11 +154,11 @@ export function OnboardingFlow() {
                   </button>
                 ))}
               </div>
-              {/* Live preview â€” PRIVATE to Anthony only (testexample@gmail.com). Other users see simple buttons. */}
+              {/* Live preview — PRIVATE to Anthony only (testexample@gmail.com). Other users see simple buttons. */}
               {user?.email?.toLowerCase() === 'testexample@gmail.com' && (
               <div className="mt-3 rounded-xl border border-white/[0.06] overflow-hidden">
                 <div className="px-3 py-1.5 border-b border-white/[0.06] flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-textMuted">Live Preview â€” {theme} Â· private</span>
+                  <span className="text-[10px] uppercase tracking-wider text-textMuted">Live Preview — {theme} · private</span>
                   <span className="text-[10px] text-textMuted/70">Infinite OS</span>
                 </div>
                 <div className="p-3">
@@ -166,7 +166,7 @@ export function OnboardingFlow() {
                     <div className="rounded-lg overflow-hidden border border-white/[0.06] bg-[#0b0f18]">
                       <div className="h-6 flex items-center px-2 gap-1.5 border-b border-white/[0.06] bg-[#0b0f18]">
                         <span className="w-2 h-2 rounded-full bg-red-500/80" /><span className="w-2 h-2 rounded-full bg-yellow-500/80" /><span className="w-2 h-2 rounded-full bg-green-500/80" />
-                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS â€” Classic</span>
+                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS — Classic</span>
                       </div>
                       <div className="flex h-20">
                         <div className="w-14 bg-[#0c0c10] border-r border-white/[0.06] p-1.5 space-y-1">
@@ -184,7 +184,7 @@ export function OnboardingFlow() {
                     <div className="rounded-lg overflow-hidden border border-black/10 bg-[#f8fafc]">
                       <div className="h-6 flex items-center px-2 gap-1.5 border-b border-black/5 bg-white">
                         <span className="w-2 h-2 rounded-full bg-red-400" /><span className="w-2 h-2 rounded-full bg-yellow-400" /><span className="w-2 h-2 rounded-full bg-green-400" />
-                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS â€” Light</span>
+                        <span className="ml-2 text-[9px] text-zinc-500">INFINITE OS — Light</span>
                       </div>
                       <div className="flex h-20">
                         <div className="w-14 bg-white border-r border-black/5 p-1.5 space-y-1">
@@ -202,7 +202,7 @@ export function OnboardingFlow() {
                     <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
                       <div className="h-6 flex items-center px-2 gap-1.5 border-b border-white/10 bg-black">
                         <span className="w-2 h-2 rounded-full bg-red-600" /><span className="w-2 h-2 rounded-full bg-yellow-600" /><span className="w-2 h-2 rounded-full bg-green-600" />
-                        <span className="ml-2 text-[9px] text-zinc-600">INFINITE OS â€” Midnight</span>
+                        <span className="ml-2 text-[9px] text-zinc-600">INFINITE OS — Midnight</span>
                       </div>
                       <div className="flex h-20">
                         <div className="w-14 bg-zinc-950 border-r border-white/10 p-1.5 space-y-1">
@@ -217,9 +217,9 @@ export function OnboardingFlow() {
                     </div>
                   )}
                   <div className="mt-2 text-[11px] text-textMuted/70 text-center">
-                    {theme === 'dark' && 'Original Infinite â€” dark glass, violetâ†’cyan glow'}
-                    {theme === 'light' && 'Clean light â€” soft surfaces, indigo accent'}
-                    {theme === 'midnight' && 'Pure black â€” maximum contrast, violet neon'}
+                    {theme === 'dark' && 'Original Infinite — dark glass, violet→cyan glow'}
+                    {theme === 'light' && 'Clean light — soft surfaces, indigo accent'}
+                    {theme === 'midnight' && 'Pure black — maximum contrast, violet neon'}
                   </div>
                 </div>
               </div>

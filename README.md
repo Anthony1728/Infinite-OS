@@ -22,17 +22,32 @@ npm run build:win  # + electron-builder Windows (nsis + portable)
 Requirements: Node >= 20. Ollama optional but recommended for local models
 (`minicpm-v4.6:latest`, `qwen3:4b`, `llama3.1:8b` auto-detected as local primary).
 
-## Power Center (home)
+## Power Center (home / the Infinite tab)
 
-`src/renderer/components/views/PowerCenterView.tsx` is the home screen:
+`src/renderer/components/views/PowerCenterView.tsx` is the one home surface. It is
+the former **Infinite** tab (`universe`) rebuilt: the living orbit + hero from the
+Infinite tab now carries the full Power Center feature set, and the standalone
+Power Center screen it replaced is gone.
 
-- Spotlight filters **actions + recent chats + automations** live; `⌘K` opens everything.
-- Quick Capture saves a thought offline in one keystroke (`Ctrl+Shift+Y` / `⌘⇧Y`).
-- Focus toggle sets `html[data-focus]` and genuinely dims marketing/pulse/sidebar
-  noise via `src/renderer/styles/globals.css` — chat + editor stay dominant.
+- Spotlight **jumps** to any surface (the orbit map plus the quick surfaces, shown
+  as pills while you type) and filters **recent chats + automations + pillars**
+  live; `/` focuses it, `⌘K` opens everything.
+- The orbit turns even when the OS reports `prefers-reduced-motion: reduce`
+  (Windows animations off): the rings keep a slow rotation with the chips
+  counter-rotated so their labels stay upright, and only decorative motion stops.
+  `globals.css` flattens every animation under that preference, so the orbit
+  re-asserts its own.
 - Hero greeting is pure/offline (`src/renderer/lib/greeting.ts` + `greeting.test.ts`):
   time-aware, Monday-reset, Friday-ship, weekend-build, late-night care,
   live-agent acknowledgement. Deterministic per day-of-year.
+- Live counters (chats, agents, automations, tabs), recents,
+  Quick Capture (`Ctrl+Shift+Y` / `⌘⇧Y`), system pulse + engine status.
+- Focus toggle sets `html[data-focus]` and genuinely dims marketing/pulse/sidebar
+  noise via `src/renderer/styles/globals.css` — chat + editor stay dominant.
+- Below the fold: six pillars, OS-vs-AI duality, the five-step pipeline, the
+  four-layer stack and an FAQ — every orbit node is a real navigation target.
+- Both routes resolve here: `home` (rail + palette) and `universe` (legacy deep
+  links). `InfiniteUniverseView.tsx` was folded into this file and removed.
 
 ## Keyboard map
 
@@ -44,7 +59,35 @@ Requirements: Node >= 20. Ollama optional but recommended for local models
 | `Ctrl/⌘ B` | Toggle sidebar |
 | `Ctrl/⌘ .` | Activity panel |
 | `Ctrl/⌘ /` | Shortcuts |
+| `/` | Focus Spotlight (Power Center) |
 | `Ctrl/⌘ Shift Y` | Quick Capture append |
+
+## Browser Bridge (extension)
+
+`extensions/infinite-os-bridge/` is the browser half of Infinite OS: the app
+talks to it over `ws://127.0.0.1:8765/bridge` and drives the real browser —
+logged-in sessions included.
+
+- **One wire format, spec-compliant MessagePack.** `src/main/bridge/server.ts`
+  and the extension each carry a codec and must agree byte-for-byte;
+  `src/main/bridge/msgpack.test.ts` loads the extension's real codec out of
+  `background.js` and asserts both encode identically and decode each other.
+  Integer tagging used to disagree, which silently killed every timestamped
+  frame (including `ping`).
+- **Frames are chunked, never spread** — screenshots and page HTML run to
+  megabytes, well past the argument limit of `push(...bytes)`.
+- **The response cache is invalidated by every mutating command**, so a click is
+  never followed by a read of the pre-click DOM.
+- **Top-frame by default.** Content-script messages target `frameId: 0`; pass
+  `frameId` to drive a subframe on purpose instead of broadcasting to every
+  iframe on the page.
+- **Emergency Stop works.** The extension's `agent:abort` frame is handled host
+  side: in-flight commands fail immediately and any agent run driving the
+  browser is aborted.
+- **Token hygiene.** The token in `config.js` is gitignored and the app syncs
+  it to every copy that could be loaded (source, `~/.infinite-ai`, and the
+  `%LOCALAPPDATA%` copy the installer loads). Never commit a `config.js`.
+- `config.js` holds `{ port, token }`; copy `config.example.js` if it is missing.
 
 ## Self-Evolution Engine
 

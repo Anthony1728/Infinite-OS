@@ -7,6 +7,41 @@
 import { ipcMain, Notification } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 
+/**
+ * Notifications this app has shown and not yet been dismissed.
+ *
+ * Electron has no `Notification.clearAll()`, so the previous handler just
+ * returned `{ ok: true }` and cleared nothing — the caller was told it had
+ * worked. Tracking what we create makes "clear all" real: each one is closed on
+ * request, and the caller is told how many were actually dismissed.
+ */
+const liveNotifications = new Set<Notification>();
+
+/** Close and forget every notification we are still holding. */
+function clearLiveNotifications(): number {
+  let closed = 0;
+  for (const notification of liveNotifications) {
+    try {
+      notification.close();
+      closed++;
+    } catch {
+      // Already gone — not a failure, it just was not open.
+    }
+  }
+  liveNotifications.clear();
+  return closed;
+}
+
+/** Show a notification and keep it until the user or "clear all" removes it. */
+function showTracked(options: ConstructorParameters<typeof Notification>[0]): Notification {
+  const notification = new Notification(options);
+  // Once it closes on its own, stop tracking it, or the set grows forever.
+  notification.on('close', () => liveNotifications.delete(notification));
+  liveNotifications.add(notification);
+  notification.show();
+  return notification;
+}
+
 export function registerNotificationIpc(): void {
   // Show notification
   ipcMain.handle(IPC.NOTIFICATION_SHOW, async (_event, args: {
@@ -19,77 +54,14 @@ export function registerNotificationIpc(): void {
         return { ok: false, error: 'Notifications not supported on this platform' };
       }
 
-      const notification = new Notification({
+      // Shown as a tracked notification so "clear all" can actually dismiss it.
+      showTracked({
         title: args.title,
         body: args.body,
         silent: args.silent ?? false,
       });
 
-      notification.show();
-
       return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
-  });
-
-  // Show progress notification
-  ipcMain.handle(IPC.NOTIFICATION_PROGRESS, async (_event, args: {
-    title: string;
-    body?: string;
-    progress?: number;
-  }) => {
-    try {
-      if (!Notification.isSupported()) {
-        return { ok: false, error: 'Notifications not supported on this platform' };
-      }
-
-      const notification = new Notification({
-        title: args.title,
-        body: args.body ?? `Progress: ${args.progress ?? 0}%`,
-      });
-
-      notification.show();
-      return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
-  });
-
-  // Show notification with actions
-  ipcMain.handle(IPC.NOTIFICATION_ACTION, async (_event, args: {
-    title: string;
-    body: string;
-    actions?: Array<{ type: string; text: string }>;
-  }) => {
-    try {
-      if (!Notification.isSupported()) {
-        return { ok: false, error: 'Notifications not supported on this platform' };
-      }
-
-      const notification = new Notification({
-        title: args.title,
-        body: args.body,
-        actions: args.actions?.map(a => ({ type: 'button' as const, text: a.text })),
-      });
-
-      return new Promise((resolve) => {
-        notification.on('action', (_event, index) => {
-          resolve({ ok: true, action: args.actions?.[index]?.text ?? index });
-        });
-
-        notification.on('click', () => {
-          resolve({ ok: true, action: 'click' });
-        });
-
-        notification.on('close', () => {
-          resolve({ ok: true, action: 'dismiss' });
-        });
-
-        notification.show();
-      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { ok: false, error: message };
@@ -104,9 +76,17 @@ export function registerNotificationIpc(): void {
   });
 
   // Clear all notifications
+  //
+  // Real now: closes every notification this app still has open and reports the
+  // count, instead of reporting success without having done anything.
   ipcMain.handle(IPC.NOTIFICATION_CLEAR, async () => {
-    // Note: Electron doesn't have a clearAll method,
-    // but we can track and close individual notifications
-    return { ok: true };
+    const cleared = clearLiveNotifications();
+    return { ok: true, cleared };
+  });
+
+  // How many are open right now — lets the UI tell the truth about whether
+  // "clear all" has anything to do.
+  ipcMain.handle(IPC.NOTIFICATION_ACTIVE_COUNT, async () => {
+    return { count: liveNotifications.size };
   });
 }

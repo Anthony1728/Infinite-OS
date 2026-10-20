@@ -13,7 +13,7 @@ export interface ModelSelection {
 
 // Priority order: free models that support tools, then free without tools, then paid
 // nvidia first: free-tier NIM with tool support; ollama keyless local next.
-const FREE_PROVIDER_PRIORITY = ['nvidia', 'ollama', 'opencode', 'freebuff', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom'];
+export const FREE_PROVIDER_PRIORITY = ['nvidia', 'ollama', 'opencode', 'freebuff', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom'];
 
 export function selectBestModel(
   taskType: 'code' | 'research' | 'design' | 'data' | 'seo' | 'general',

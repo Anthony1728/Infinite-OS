@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ProviderInfo } from '../../../shared/types';
+import { LocalModelPanel } from './LocalModelPanel';
+import { PerformancePanel } from './PerformancePanel';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { useUiTheme, UI_THEMES } from '../../theme/uiTheme';
 import { TEMPLATE_PRESETS, useUIStore, type UITemplate } from '../../stores/ui';
 import { syncActiveModelToMain } from '../../utils/active-model-sync';
+import { useVoiceSessionStore } from '../../stores/voice-session';
 
 const TEMPLATE_CARDS: Array<{ id: UITemplate; name: string; description: string; colors: string[] }> = [
   { id: 'infinite', name: 'Infinite', description: 'Balanced cosmic workspace', colors: ['#080b14', '#8b5cf6', '#22d3ee'] },
@@ -124,6 +127,172 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [customModel, setCustomModel] = useState('');
   const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
+  /**
+   * Whether Infinite AI is kept out of the files that version its changes.
+   *
+   * Defaults to on. It is read by the guard on every write, so the value has to
+   * be loaded here rather than assumed — a toggle that displays the wrong state
+   * is worse than no toggle, because it tells the user a protection is active
+   * when it is not.
+   */
+  const [selfProtectionEnabled, setSelfProtectionEnabled] = useState(true);
+
+  /**
+   * Token and cost totals.
+   *
+   * Every provider already reported usage per response and the pricing table
+   * knew how to turn it into money, but nothing joined them up — the app took
+   * the numbers and dropped them. This is the readout that makes them mean
+   * something.
+   */
+  const [usage, setUsage] = useState<{
+    requests: number;
+    costUsd: number;
+    unpricedRequests?: number;
+    formatted: { cost: string; input: string; output: string; note?: string };
+    byModel: { provider: string; model: string; requests: number; costUsd: number; pricing?: string }[];
+  } | null>(null);
+  const [usagePending, setUsagePending] = useState(false);
+
+  /** Background-build state, pushed from main as the build progresses. */
+  const [buildStatus, setBuildStatus] = useState<{
+    phase: 'idle' | 'building' | 'ready' | 'failed' | 'applying';
+    error?: string;
+  } | null>(null);
+  const [buildPending, setBuildPending] = useState(false);
+
+  const runBuildAction = async (action: 'buildStart' | 'buildCancel') => {
+    setBuildPending(true);
+    try {
+      const next = await window.api[action]().catch(() => null);
+      if (next && typeof next === 'object') setBuildStatus(next as typeof buildStatus);
+      else await refreshBuildStatus();
+    } finally {
+      setBuildPending(false);
+    }
+  };
+
+  const refreshBuildStatus = useCallback(async () => {
+    const s = await window.api.buildStatus().catch(() => null);
+    setBuildStatus(s && typeof s === 'object' ? s : null);
+  }, []);
+
+  // Subscribe to progress pushes, and clean up on close so a stale listener
+  // cannot keep writing to unmounted state.
+  useEffect(() => {
+    const off = window.api.onBuildStatus((s: unknown) => setBuildStatus(s as typeof buildStatus));
+    void refreshBuildStatus();
+    return () => off?.();
+  }, [refreshBuildStatus]);
+
+  const refreshUsage = useCallback(async () => {
+    const t = await window.api.usageGet().catch(() => null);
+    setUsage(t && typeof t === 'object' ? t : null);
+  }, []);
+
+  const clearUsage = async () => {
+    setUsagePending(true);
+    try {
+      await window.api.usageReset();
+      await refreshUsage();
+    } finally {
+      setUsagePending(false);
+    }
+  };
+
+  /**
+   * The self-evolution loop.
+   *
+   * The backend and the four preload calls already existed; only the UI was
+   * missing, so the feature could never be reached. State is loaded on open so
+   * the toggle shows the truth rather than an optimistic guess.
+   */
+  const [evolveRunning, setEvolveRunning] = useState(false);
+  const [evolvePending, setEvolvePending] = useState(false);
+  const [evolveStatus, setEvolveStatus] = useState<{
+    enabled?: boolean; cyclesCompleted?: number; lastRunAt?: number | null;
+    lastError?: string | null;
+  } | null>(null);
+  const [evolveSuggestions, setEvolveSuggestions] = useState<{
+    id: string; pattern: string; description: string; frequency: number;
+    confidence: number; automationProposal: string;
+  }[]>([]);
+
+  const loadEvolveSuggestions = useCallback(async () => {
+    const list = await window.api.selfEvolveSuggestions({ status: 'suggested' }).catch(() => []);
+    setEvolveSuggestions(Array.isArray(list) ? list : []);
+  }, []);
+
+  const refreshEvolveStatus = useCallback(async () => {
+    const s = await window.api.evolveLoopStatus().catch(() => null);
+    if (s && typeof s === 'object') {
+      setEvolveStatus(s as typeof evolveStatus);
+      setEvolveRunning(Boolean((s as { enabled?: boolean }).enabled));
+    }
+  }, []);
+
+  const toggleEvolveLoop = async () => {
+    setEvolvePending(true);
+    try {
+      const next = await (evolveRunning
+        ? window.api.evolveLoopStop()
+        : window.api.evolveLoopStart());
+      if (next && typeof next === 'object') setEvolveStatus(next as typeof evolveStatus);
+      setEvolveRunning(!evolveRunning);
+      // Suggestions are only meaningful once a check has run.
+      if (!evolveRunning) await loadEvolveSuggestions();
+    } catch {
+      await refreshEvolveStatus(); // fall back to what the loop actually says
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const runEvolveNow = async () => {
+    setEvolvePending(true);
+    try {
+      await window.api.evolveLoopRunNow();
+      await refreshEvolveStatus();
+      await loadEvolveSuggestions();
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const acceptEvolveSuggestion = async (id: string) => {
+    setEvolvePending(true);
+    try {
+      await window.api.selfEvolveAccept({ id });
+      await loadEvolveSuggestions();
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const dismissEvolveSuggestion = async (id: string) => {
+    setEvolvePending(true);
+    try {
+      await window.api.selfEvolveDismiss({ id });
+      setEvolveSuggestions(prev => prev.filter(s => s.id !== id));
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const toggleSelfProtection = async () => {
+    const next = !selfProtectionEnabled;
+    const cwdNow = loadCurrent().cwd || '.';
+    try {
+      await window.api.setSetting({ scope: 'user', key: 'selfProtectionEnabled', value: next, cwd: cwdNow });
+      setSelfProtectionEnabled(next);
+    } catch {
+      // Leave the displayed state alone. Flipping the label while the write
+      // failed would show protection as off when it is still on.
+    }
+  };
+  const [alwaysOnVoice, setAlwaysOnVoice] = useState(false);
+  const [alwaysOnVoicePending, setAlwaysOnVoicePending] = useState(false);
+  const voiceState = useVoiceSessionStore((s) => s.state);
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
   const [emailStatus, setEmailStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -166,13 +335,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }
       })
       .catch(() => {});
+    // Only an explicit `false` turns protection off; anything else, including a
+    // failed read, leaves it on, which matches the guard's own default.
+    window.api
+      .getSetting({ key: 'selfProtectionEnabled' })
+      .then((value: unknown) => setSelfProtectionEnabled(value !== false))
+      .catch(() => undefined);
+    // The evolve toggle must show the loop's real state on open, not a stale
+    // default — it auto-resumes across launches, so it can already be running.
+    void refreshEvolveStatus();
+    void loadEvolveSuggestions();
+    void refreshUsage();
     window.api.emailConfigGet().then((config: EmailSettings | null) => {
       if (config) {
         setEmail({ ...config, password: '' });
         setEmailSaved(true);
       }
     }).catch(() => {});
-  }, []);
+  }, [refreshEvolveStatus, loadEvolveSuggestions, refreshUsage]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -250,7 +430,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [activeProvider, providers]);
+  }, [activeProvider, providers, currentModel]);
 
   const test = async () => {
     setStatus('testing');
@@ -383,7 +563,34 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     }).catch(() => undefined);
   };
 
-  const pickPermissionProfile = async (id: PermissionProfile) => {
+  // Always-on voice: the preference lives in the main process (it owns the mic),
+// so this only reflects and flips it. Rolls back on failure like the
+// uncensored toggle — a safety-relevant switch must never lie about its state.
+// Load the live loop state once so the toggle opens on the truth.
+useEffect(() => {
+  let cancelled = false;
+  void window.api.voiceSessionState()
+    .then((state: { enabled?: boolean } | undefined) => {
+      if (!cancelled && state) setAlwaysOnVoice(state.enabled === true);
+    })
+    .catch(() => undefined);
+  return () => { cancelled = true; };
+}, []);
+
+const toggleAlwaysOnVoice = async () => {
+  const next = !alwaysOnVoice;
+  setAlwaysOnVoice(next);
+  setAlwaysOnVoicePending(true);
+  try {
+    await window.api.voiceSessionSetEnabled({ enabled: next, cwd: loadCurrent().cwd || '.' });
+  } catch {
+    setAlwaysOnVoice(!next);
+  } finally {
+    setAlwaysOnVoicePending(false);
+  }
+};
+
+const pickPermissionProfile = async (id: PermissionProfile) => {
     setPermissionProfile(id);
     saveCurrent({ cwd: loadCurrent().cwd });
     await window.api.setSetting({
@@ -638,6 +845,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </section>
             )}
 
+            {section === 'provider' && (
+              <section>
+                <div className="mb-5 pr-8">
+                  <h3 className="text-sm font-semibold text-zinc-100">Speed &amp; Cleanup</h3>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    What is slowing this computer down, measured live. Everything Infinite OS changes can be
+                    put back with one click.
+                  </p>
+                </div>
+                <PerformancePanel />
+              </section>
+            )}
+            {section === 'provider' && (
+              <section>
+                <div className="mb-5 pr-8">
+                  <h3 className="text-sm font-semibold text-zinc-100">Local Models &amp; Speed</h3>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Runs on this computer with no internet. Infinite OS tunes context, reply length and memory
+                    use to your hardware automatically, and never loads a model at startup.
+                  </p>
+                </div>
+                <LocalModelPanel />
+              </section>
+            )}
             {section === 'provider' && (
               <section>
                 <div className="mb-5 pr-8">
@@ -899,6 +1130,41 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   Full system access gives Infinite OS direct autonomy through Infinite AI, similar to Codex danger-full-access. Use it only when
                   you want the chat agent to operate across your PC without routine permission prompts.
                 </p>
+
+                {/*
+                  Self-protection, stated plainly rather than buried.
+
+                  Every change Infinite AI makes to its own source is versioned
+                  and can be rolled back, and every action it takes is recorded.
+                  A small set of files that implement that is kept out of reach,
+                  so the agent cannot quietly remove your ability to see or undo
+                  what it did. It is a user choice, not a limit on what it can
+                  build — everything else, including all of its own features, is
+                  fair game.
+                */}
+                <button
+                  type="button"
+                  onClick={() => void toggleSelfProtection()}
+                  className="mt-4 w-full text-left p-3 rounded-lg border transition-colors border-white/[0.06] hover:border-white/[0.12] bg-white/[0.02]"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium text-sm text-zinc-100">Protect Infinite OS&apos;s own undo</div>
+                    <span
+                      className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                        selfProtectionEnabled
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : 'bg-white/[0.07] text-zinc-400'
+                      }`}
+                    >
+                      {selfProtectionEnabled ? 'On' : 'Off'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                    {selfProtectionEnabled
+                      ? 'Infinite AI cannot edit the files that version its changes, record its actions, or decide what it may do. Everything else it can rewrite.'
+                      : 'Infinite AI can edit the files that version its changes, record its actions, and decide what it may do. Turn this on unless you have a reason not to.'}
+                  </div>
+                </button>
               </section>
             )}
 
@@ -907,6 +1173,320 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div className="mb-5 pr-8">
                   <h3 className="text-sm font-semibold text-zinc-100">Agent Feature Stack</h3>
                   <p className="mt-1 text-xs text-zinc-500">Capabilities inherited from each agent paradigm.</p>
+                </div>
+
+                {/*
+                  Background builds.
+
+                  The five IPC handlers and auto-update/index.ts were finished
+                  but never exposed on the preload bridge, and nothing subscribed
+                  to onBuildStatusChange — so a rebuild could start, finish or
+                  fail and the UI never learned, leaving the app looking idle
+                  while work happened or died. Now reachable and reported.
+                */}
+                <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 mb-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-100">Background builds</div>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                        Rebuild the app without closing it. Useful after Infinite AI changes Infinite
+                        OS itself — you can keep working while it compiles.
+                      </p>
+                      {buildStatus && (
+                        <p className="mt-2 text-[11px] text-zinc-400">
+                          {buildStatus.phase === 'idle' && 'Idle'}
+                          {buildStatus.phase === 'building' && 'Building…'}
+                          {buildStatus.phase === 'ready' && 'A new build is ready to apply.'}
+                          {buildStatus.phase === 'applying' && 'Applying…'}
+                          {buildStatus.phase === 'failed' && `Last build failed: ${buildStatus.error}`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      {buildStatus?.phase === 'building' ? (
+                        <button
+                          type="button"
+                          onClick={() => void runBuildAction('buildCancel')}
+                          className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-zinc-300 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void runBuildAction('buildStart')}
+                          disabled={buildPending}
+                          className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-zinc-300 hover:text-white disabled:opacity-50"
+                        >
+                          Build now
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/*
+                  Usage and cost.
+
+                  Providers always reported usage per response, and the pricing
+                  table knew how to turn it into money. Nothing joined them, so
+                  a conversation's cost was computed nowhere and shown nowhere.
+                  It is an estimate: genuinely free models are $0, and a model
+                  with no published rate contributes tokens but no cost — the
+                  note below the figures says how many replies that affects, so
+                  the total is not mistaken for a complete bill.
+                */}
+                <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 mb-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-100">Usage and cost</div>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                        What your conversations have used since these totals were last cleared. An
+                        estimate, based on the published rate for each model.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void clearUsage()}
+                      disabled={usagePending || !usage?.requests}
+                      className="mt-0.5 shrink-0 rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-zinc-300 hover:text-white disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {usage && usage.requests > 0 ? (
+                    <>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <div className="rounded-lg bg-white/[0.02] p-2">
+                          <div className="text-[10px] text-zinc-500">Estimated cost</div>
+                          <div className="mt-0.5 text-sm font-medium text-zinc-100">{usage.formatted.cost}</div>
+                        </div>
+                        <div className="rounded-lg bg-white/[0.02] p-2">
+                          <div className="text-[10px] text-zinc-500">Input tokens</div>
+                          <div className="mt-0.5 text-sm font-medium text-zinc-100">{usage.formatted.input}</div>
+                        </div>
+                        <div className="rounded-lg bg-white/[0.02] p-2">
+                          <div className="text-[10px] text-zinc-500">Output tokens</div>
+                          <div className="mt-0.5 text-sm font-medium text-zinc-100">{usage.formatted.output}</div>
+                        </div>
+                      </div>
+
+                      {usage.formatted.note && (
+                        <p className="mt-2 text-[11px] text-amber-300/90">{usage.formatted.note}</p>
+                      )}
+
+                      {usage.byModel.length > 0 && (
+                        <div className="mt-3 space-y-1 border-t border-white/[0.06] pt-3">
+                          {usage.byModel.slice(0, 6).map((m) => (
+                            <div key={`${m.provider}/${m.model}`} className="flex items-center justify-between gap-3 text-[11px]">
+                              <span className="truncate text-zinc-400" title={`${m.provider}/${m.model}`}>
+                                {m.model}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-zinc-500">
+                                {m.requests} req{m.requests === 1 ? '' : 's'}
+                                {m.costUsd > 0 && ` · $${m.costUsd.toFixed(4)}`}
+                                {m.pricing === 'unknown' && ' · no price'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-3 text-[11px] text-zinc-500">
+                      Nothing recorded yet. Totals appear after your first reply.
+                    </p>
+                  )}
+                </div>
+
+                {/*
+                  Evolve continuously.
+
+                  The backend has been finished and tested for a long time
+                  (`brain/evolution-loop.ts`, `brain/self-evolution.ts`) and the
+                  four IPC calls were already exposed on the preload bridge — but
+                  nothing ever called them, and the comment in `ipc/index.ts`
+                  described a Settings toggle that was never built. So the whole
+                  feature was unreachable: Infinite OS could notice "you do this
+                  every week" and suggest automating it, and no user could ever
+                  see it.
+                */}
+                <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 mb-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-100">Evolve continuously</div>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                        Infinite OS watches how you actually work and suggests turning repeated things into
+                        skills — “you do this every week, want me to automate it?” Runs on a timer in the
+                        background and only ever suggests; nothing is created without you saying yes.
+                      </p>
+                      {evolveStatus && (
+                        <p className="mt-2 text-[11px] text-zinc-400">
+                          {evolveStatus.enabled ? 'Running' : 'Stopped'}
+                          {evolveStatus.lastRunAt ? ` · last check ${new Date(evolveStatus.lastRunAt).toLocaleString()}` : ' · not run yet'}
+                          {evolveStatus.cyclesCompleted ? ` · ${evolveStatus.cyclesCompleted} check${evolveStatus.cyclesCompleted === 1 ? '' : 's'}` : ''}
+                          {evolveStatus.lastError ? ` · last error: ${evolveStatus.lastError}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={evolveRunning}
+                      aria-label="Evolve continuously"
+                      disabled={evolvePending}
+                      onClick={() => void toggleEvolveLoop()}
+                      title={evolveRunning ? 'Turn OFF to stop the background checks' : 'Turn ON to look for repeated work to automate'}
+                      className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
+                        evolveRunning ? 'border-emerald-400/40 bg-emerald-500/80' : 'border-white/[0.12] bg-white/[0.06]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-transform ${
+                          evolveRunning ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void runEvolveNow()}
+                      disabled={evolvePending}
+                      className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-[11px] text-zinc-300 hover:text-white disabled:opacity-50"
+                    >
+                      Check now
+                    </button>
+                    {evolveRunning && (
+                      <button
+                        type="button"
+                        onClick={() => void loadEvolveSuggestions()}
+                        disabled={evolvePending}
+                        className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-[11px] text-zinc-300 hover:text-white disabled:opacity-50"
+                      >
+                        Refresh suggestions
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Suggestions are only shown after a real check, so this is
+                      never an empty box sitting on the settings page. */}
+                  {evolveSuggestions.length > 0 && (
+                    <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
+                      {evolveSuggestions.map((s) => (
+                        <div key={s.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                          <div className="text-xs font-medium text-zinc-200">{s.pattern}</div>
+                          {s.description && <p className="mt-1 text-[11px] text-zinc-500">{s.description}</p>}
+                          <p className="mt-1 text-[10px] text-zinc-500">
+                            seen {s.frequency}× · {Math.round(s.confidence * 100)}% confident
+                            {s.automationProposal ? ` · ${s.automationProposal}` : ''}
+                          </p>
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void acceptEvolveSuggestion(s.id)}
+                              disabled={evolvePending}
+                              className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+                            >
+                              Create skill
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void dismissEvolveSuggestion(s.id)}
+                              disabled={evolvePending}
+                              className="rounded-lg px-2 py-1 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+                            >
+                              Not interested
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Always-on voice ─────────────────────────────────────── */}
+                <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 mb-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-zinc-100">Always-on voice</div>
+                      <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                        Infinite AI keeps listening with the app in the background — no need to sit on the Voice page. It hears you in any
+                        section, runs the same agent with your full tool access, and answers out loud.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={alwaysOnVoice}
+                      aria-label="Always-on voice"
+                      disabled={alwaysOnVoicePending}
+                      onClick={() => void toggleAlwaysOnVoice()}
+                      title={alwaysOnVoice ? 'Turn OFF to release the microphone' : 'Turn ON to let Infinite AI listen in the background'}
+                      className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
+                        alwaysOnVoice ? 'border-emerald-400/40 bg-emerald-500/80' : 'border-white/[0.12] bg-white/[0.06]'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-white transition-all ${
+                          alwaysOnVoice ? 'left-[18px]' : 'left-[3px] bg-zinc-500'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${
+                        alwaysOnVoice && voiceState.listening
+                          ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-300'
+                          : 'border-white/[0.08] bg-white/[0.03] text-zinc-400'
+                      }`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${alwaysOnVoice && voiceState.listening ? 'animate-pulse bg-emerald-400' : 'bg-zinc-600'}`} />
+                      {alwaysOnVoice
+                        ? voiceState.listening
+                          ? 'Listening now'
+                          : voiceState.phase === 'error'
+                            ? 'Mic unavailable'
+                            : 'Starting…'
+                        : 'Off'}
+                    </span>
+                    {alwaysOnVoice && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void window.api.voiceSessionPause()}
+                          className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                        >
+                          Pause
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void window.api.voiceSessionResume()}
+                          className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                        >
+                          Resume
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void window.api.voiceSessionSay({ text: 'Infinite AI is listening.' })}
+                          className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                        >
+                          Test voice
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {alwaysOnVoice && voiceState.error && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-rose-300">{voiceState.error}</p>
+                  )}
+                  {alwaysOnVoice && (
+                    <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+                      Wake word “{voiceState.wakeWord}” · stop anytime by saying “stop listening”. Runs while Infinite OS is open; the
+                      microphone is released the moment you turn this off.
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-zinc-400">
                   <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">

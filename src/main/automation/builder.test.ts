@@ -105,4 +105,52 @@ describe('automation run progress', () => {
     expect(events.some((event) => event.type === 'action_failed')).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: 'run_completed', status: 'failed' });
   });
+
+  /**
+   * The step shape the Workflow Builder UI produces must actually execute.
+   *
+   * The editor used to write `config.command` and never a tool name, so every
+   * Tool Call step it saved had `config.tool === undefined`, missed the registry
+   * lookup, and did nothing while looking correctly configured. These pin the
+   * contract between the editor (`tool` + `input`) and the executor.
+   */
+  it('runs a tool_call step built the way the editor builds it', async () => {
+    const { toolRegistry } = await import('../tools/base.js');
+    let received: unknown;
+    toolRegistry.register({
+      name: 'TestWorkflowTool',
+      description: 'Records what it was given.',
+      permission: 'allow',
+      inputSchema: { type: 'object', properties: {} },
+      async execute(input: unknown) {
+        received = input;
+        return { content: 'ran' };
+      },
+    });
+
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'UI-shaped tool call',
+      trigger: { type: 'manual', config: {} },
+      // Exactly what StepConfigEditor now saves.
+      actions: [{ id: 'call', type: 'tool_call', config: { tool: 'TestWorkflowTool', input: { command: 'npm test' } }, onError: 'stop' }],
+    });
+
+    const run = await builder.runWorkflow(workflow.id, () => {});
+    expect(run.status).toBe('completed');
+    // The tool must have been found AND given the input the editor collected.
+    expect(received).toEqual({ command: 'npm test' });
+  });
+
+  it('fails visibly when a tool_call step has no tool, rather than doing nothing', async () => {
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'Missing tool',
+      trigger: { type: 'manual', config: {} },
+      actions: [{ id: 'call', type: 'tool_call', config: { command: 'npm test' }, onError: 'stop' }],
+    });
+    const run = await builder.runWorkflow(workflow.id, () => {});
+    // A step with only a `command` and no tool cannot run — it must say so.
+    expect(run.status).toBe('failed');
+  });
 });

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { BrowserWindow } from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +47,13 @@ class BrowserOperator {
 
   async navigate(url: string, action = 'Navigate Chrome'): Promise<OperatorResult> {
     const steps: string[] = [];
-    const mode = getAutomationDisplayState().mode;
+    // A visible Chrome window would appear on top of Infinite OS. In full screen
+    // that is the worst case possible — the user loses the entire app to a
+    // window they did not ask for — so full screen forces the hidden profile no
+    // matter what the display preference says.
+    const fullscreen = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isFullScreen());
+    const mode = fullscreen ? 'background' : getAutomationDisplayState().mode;
+    if (fullscreen) steps.push('Infinite OS is full screen — browser automation stays in the background.');
     try {
       const page = await this.ensurePage(steps, mode);
       steps.push(`CDP navigate: ${url}`);
@@ -59,8 +66,20 @@ class BrowserOperator {
       return { ok: true, mode: 'cdp', action, url: finalUrl, title, steps, displayMode: mode };
     } catch (error) {
       steps.push(`CDP unavailable: ${(error as Error).message}`);
-      if (mode === 'background') {
-        return { ok: false, mode: 'cdp', displayMode: mode, action, url, error: 'Background browser automation could not attach. Physical input was not used because Infinite OS must remain visible.', steps };
+      // Never fall back to desktop automation of a real Chrome window while the
+      // app is full screen: that opens a window over the app and moves the
+      // mouse, which is precisely what must not happen.
+      if (mode === 'background' || fullscreen) {
+        return {
+          ok: false,
+          mode: 'cdp',
+          displayMode: mode,
+          action,
+          url,
+          error:
+            'Background browser automation could not attach. Physical input was not used because Infinite OS must stay on top — use the InAppBrowser tool instead, which browses inside the app.',
+          steps,
+        };
       }
       return this.keyboardFallback(url, action, steps);
     }

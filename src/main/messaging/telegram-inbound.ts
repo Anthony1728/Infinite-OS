@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { infiniteHome } from '../profiles/home.js';
 import { settings } from '../settings/store.js';
+import { parseModelCommand } from '../brain/model-command.js';
+import { answerModelCommand } from '../brain/model-switch.js';
 import { getApiKey } from '../settings/secrets.js';
 import { messagingTool } from '../tools/messaging.js';
 import {
@@ -148,6 +150,15 @@ export async function defaultRunTurn(
   deps: InboundDeps = {},
 ): Promise<string> {
   const get: SettingsGetter = deps.getSetting ?? ((key) => settings.get(key));
+  // Same fast path as WhatsApp: model commands are handled by the Brain itself,
+  // before any model is invoked, so a dead model can still be replaced by
+  // asking in plain language. Falls through to the normal turn on error.
+  const command = parseModelCommand(text);
+  if (command) {
+    try {
+      return await answerModelCommand(command, { getSetting: get });
+    } catch { /* fall through to the agent turn */ }
+  }
   let active;
   try {
     active = resolveActiveModel(get);

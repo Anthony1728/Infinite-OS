@@ -810,23 +810,26 @@
   };
 
   // ── Message listener ─────────────────────────────────────────────────────────
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (sender?.id && sender.id !== chrome.runtime.id) return false;
     if (msg?.type === 'bridge-content-op') {
       const { op, params } = msg;
-      if (fastOps[op]) {
+      const fn = fastOps[op];
+      if (fn) {
         try {
-          const result = fastOps[op](params || {});
-          sendResponse({ ok: !result.error, data: result });
+          const result = fn(params || {});
+          // The error string has to travel with the failure: the worker decides
+          // whether to surface it or fall back to script injection based on this
+          // field, and a bare ok:false made every real failure look like
+          // "content script missing".
+          if (result && result.error) sendResponse({ ok: false, error: String(result.error) });
+          else sendResponse({ ok: true, data: result });
         } catch (e) {
           sendResponse({ ok: false, error: String(e?.message || e) });
         }
       } else {
         sendResponse({ ok: false, error: 'Unknown content op: ' + op });
       }
-      return true;
-    }
-    if (msg?.type === 'bridge-ping') {
-      sendResponse({ ok: true, data: { pong: Date.now(), contentScript: true } });
       return true;
     }
     return false;

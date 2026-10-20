@@ -19,11 +19,13 @@
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web && npm run typecheck:e2e",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run build",
     "test:e2e": "playwright test",
     "exec": "node scripts/exec.mjs",
     "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps"
@@ -38,8 +40,15 @@
       "out/**/*",
       "resources/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "Infinite OS/pc-live-map",
+        "to": "pc-live-map"
+      }
+    ],
     "asarUnpack": [
-      "node_modules/@vscode/ripgrep-win32-x64/**"
+      "node_modules/@vscode/ripgrep-win32-x64/**",
+      "resources/scripts/**"
     ],
     "win": {
       "icon": "resources/icon.ico",

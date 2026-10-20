@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from './stores/auth';
 import { useSessionStore } from './stores/session';
 import { useAgentsStore } from './stores/agents';
@@ -6,6 +6,7 @@ import { useBrainStore } from './stores/brain';
 import { useAiTabsStore } from './stores/aiTabs';
 import { useLayoutStore } from './stores/layout';
 import { useEditorStore } from './stores/editor';
+import { useChatStore } from './stores/chat';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
 import { OnboardingFlow } from './components/auth/OnboardingFlow';
@@ -29,6 +30,11 @@ import { StatusBar } from './components/layout/StatusBar';
 import { InfiniteLogo } from './components/brand/InfiniteLogo';
 import { ShortcutsModal } from './components/modals/ShortcutsModal';
 import { syncActiveModelToMain } from './utils/active-model-sync';
+import { useVoiceSessionStore } from './stores/voice-session';
+import { VoiceHud } from './components/voice/VoiceHud';
+import { QuestionOverlay } from './components/chat/QuestionOverlay';
+import { ResumeBanner } from './components/chat/ResumeBanner';
+import { attachFullscreen, useFullscreenStore } from './stores/fullscreen';
 
 type AuthView = 'login' | 'register';
 
@@ -51,33 +57,82 @@ async function openQuickCapturePrompt(): Promise<void> {
 }
 const LOCAL_PRIMARY_MIGRATION = 'infinite:local-primary-minicpm-v46';
 
+/** Cross-fade out of the startup surface, shared by the timer and the style. */
+const STARTUP_FADE_MS = 320;
+
 function BriefLoading({ onComplete }: { onComplete: () => void }) {
-  const [progress, setProgress] = useState(0);
+  // Starts at the same 40% the static splash bar rests at, so the cross-fade
+  // between the two is invisible instead of a full→empty jump.
+  const [progress, setProgress] = useState(40);
   const [statusText, setStatusText] = useState('Restoring workspace…');
+  const [leaving, setLeaving] = useState(false);
+  // `onComplete` is a fresh arrow on every App render. Depending on it directly
+  // restarted this whole timer on each re-render — which reset the hold clock,
+  // re-armed the interval, and stacked another pair of unmount timeouts. Read it
+  // through a ref instead so the effect genuinely runs once.
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
-    const statusTexts = ['Restoring workspace…', 'Loading sessions…', 'Initializing AI engine…', 'Checking model providers…', 'Almost ready…'];
-    // Speed: 2× faster than before (was 90ms*10 = 900ms). Now 45ms*6 ≈ 270ms,
-    // and we jump to 100 as soon as the interval hits, so the OS feels instant.
+    // Tell the boot splash the React surface is on screen so it can fade out
+    // on top of us — same mark, same position, no jump.
+    window.dispatchEvent(new Event('infinite:startup-painted'));
+  }, []);
+
+  useEffect(() => {
+    const statusTexts = [
+      'Restoring workspace…',
+      'Loading sessions…',
+      'Initializing AI engine…',
+      'Checking model providers…',
+      'Almost ready…',
+    ];
+    // How long this surface stays up. This is the part of boot the user actually
+    // watches: the mark with light running around it. It used to be 420ms, and
+    // combined with a splash that faded the instant React painted, the whole
+    // startup read as a flash rather than an arrival — so it was raised. 1400ms
+    // then overshot in the other direction: with the static splash already
+    // holding the mark for its own MIN_SPLASH_MS, every launch paid more than
+    // two seconds of intros. 700ms keeps a beat of brand presence while the
+    // workspace genuinely finishes restoring, and no longer.
+    const MIN_VISIBLE_MS = 700;
+    const FADE_MS = STARTUP_FADE_MS;
+    const startedAt = Date.now();
+    const timeouts: number[] = [];
+
     const interval = setInterval(() => {
       setProgress((prev) => {
-        const newProgress = Math.min(100, prev + 18);
-        if (newProgress >= 100) {
+        const next = Math.min(100, prev + 7);
+        if (next >= 100) {
           clearInterval(interval);
-          setTimeout(onComplete, 20);
+          const hold = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
+          // Fade out before unmounting so the shell fades in underneath — a hard
+          // cut here reads as a blink.
+          timeouts.push(window.setTimeout(() => setLeaving(true), hold));
+          timeouts.push(window.setTimeout(() => onCompleteRef.current(), hold + FADE_MS));
           return 100;
         }
-        const textIndex = Math.min(Math.floor(newProgress / 25), statusTexts.length - 1);
+        // Spread the five stages evenly across the 40→100 span, so each one is
+        // actually reached instead of two of them being skipped every time.
+        const span = (next - 40) / 60;
+        const textIndex = Math.min(Math.floor(span * statusTexts.length), statusTexts.length - 1);
         setStatusText(statusTexts[textIndex]);
-        return newProgress;
+        return next;
       });
-    }, 45);
-    return () => clearInterval(interval);
-  }, [onComplete]);
+      // Six steps a second: the bar reaches full at ~540ms, so the MIN_VISIBLE
+      // hold is what decides when the surface leaves rather than the animation.
+    }, 60);
+
+    return () => {
+      clearInterval(interval);
+      for (const id of timeouts) window.clearTimeout(id);
+    };
+  }, []);
 
   return (
     <div
-      className="os-startup-loading min-h-screen bg-[#08080b] flex flex-col items-center justify-center animate-fade-in"
+      className={`os-startup-loading min-h-screen bg-[#08080b] flex flex-col items-center justify-center transition-opacity ${leaving ? 'opacity-0' : 'opacity-100'}`}
+      style={{ transitionDuration: `${STARTUP_FADE_MS}ms` }}
       role="status"
       aria-live="polite"
     >
@@ -142,12 +197,82 @@ export function App() {
   const [deployOpen, setDeployOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const fullscreen = useFullscreenStore((s) => s.fullscreen);
   const [experienceSettingsOpen, setExperienceSettingsOpen] = useState(false);
   const [experienceSettingsSection, setExperienceSettingsSection] = useState<ExperienceSettingsSection>('profile');
   const [startupLoading, setStartupLoading] = useState(true);
   const aiTabs = useAiTabsStore((state) => state.tabs);
   const hydrateAiTabs = useAiTabsStore((state) => state.hydrate);
   const editorFile = useEditorStore((state) => state.openFile);
+
+  // The chat stream listener must be attached at app level: views other than
+  // ChatView (e.g. the Voice tab) send messages through the same pipeline and
+  // would otherwise never receive stream events.
+  useEffect(() => {
+    useChatStore.getState().initStreamListener();
+  }, []);
+
+  // Always-on voice: subscribe once, here, so the HUD and the Voice page both
+  // read the same main-process state from any view.
+  useEffect(() => {
+    const dispose = useVoiceSessionStore.getState().attach();
+    return () => dispose();
+  }, []);
+
+  // Tabs. Main emits over a real channel now, and the tab it creates is opened
+  // here — which is what lets the agent show the user a page from any view,
+  // including while the user is on the Voice screen with no keyboard in reach.
+  useEffect(() => {
+    const api = window.api as unknown as {
+      onTabCreate?: (cb: (tab: unknown) => void) => () => void;
+      onTabUpdate?: (cb: (patch: { tabId: string; changes: Record<string, unknown>; metadata?: Record<string, unknown> }) => void) => () => void;
+      tabIndexReplace?: (args: { tabs: unknown[] }) => Promise<unknown>;
+      tabIndexUpsert?: (args: { tab: unknown }) => Promise<unknown>;
+      tabIndexRemove?: (args: { id: string }) => Promise<unknown>;
+    };
+    const store = useAiTabsStore.getState();
+    const offCreate = api.onTabCreate?.((tab) => {
+      const created = store.createTab(tab as Parameters<typeof store.createTab>[0]);
+      // Open it, so the user sees what the agent just showed them.
+      setActiveView(created.id);
+    });
+    const offUpdate = api.onTabUpdate?.((patch) => {
+      useAiTabsStore.getState().updateTab(patch.tabId, {
+        ...(patch.changes as Record<string, unknown>),
+        metadata: patch.metadata,
+      });
+    });
+
+    // Mirror the open tabs into main. Without this the agent cannot list tabs
+    // or read their real address — they lived only in renderer localStorage.
+    const mirror = (list: typeof aiTabs) => {
+      void api.tabIndexReplace?.({
+        tabs: list.map((t) => ({
+          id: t.id,
+          title: t.title,
+          kind: t.kind,
+          url: (t.metadata as Record<string, unknown> | undefined)?.browserUrl as string | undefined,
+          prompt: t.prompt,
+          filePath: t.filePath,
+          openedByAgent: (t.metadata as Record<string, unknown> | undefined)?.openedByAgent === true,
+        })),
+      });
+    };
+    mirror(aiTabs);
+    const unsubscribe = useAiTabsStore.subscribe((state, prev) => {
+      if (state.tabs !== prev.tabs) mirror(state.tabs);
+    });
+
+    return () => {
+      offCreate?.();
+      offUpdate?.();
+      unsubscribe();
+    };
+  }, [aiTabs]);
+
+  // Full screen: subscribe once so the title bar can get out of the way and
+  // every surface reads the same state.
+  useEffect(() => attachFullscreen(), []);
 
   // Right panel only opens via bell icon click, never auto-opens
 
@@ -200,15 +325,23 @@ export function App() {
   // only live in renderer localStorage. Push the current pick to the main
   // store once per launch so background turns (WhatsApp, Telegram, scheduled
   // runs) answer on the selected model from the very first message.
+  // Main wins when it already has a selection: the Brain may have
+  // auto-switched away from a dead model mid-run, and a stale local pick must
+  // never revert that. (Every deliberate Settings change syncs immediately.)
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('infinite:current');
-      if (!raw) return;
-      const current = JSON.parse(raw) as { provider?: unknown; model?: unknown; cwd?: unknown };
-      if (current.provider || current.model) syncActiveModelToMain(current);
-    } catch {
-      /* a corrupt selection must never block startup */
-    }
+    void (async () => {
+      try {
+        const raw = localStorage.getItem('infinite:current');
+        if (!raw) return;
+        const current = JSON.parse(raw) as { provider?: unknown; model?: unknown; cwd?: unknown };
+        if (!current.provider && !current.model) return;
+        const inMain = await window.api.getSetting({ key: 'provider' }).catch(() => null);
+        if (typeof inMain === 'string' && inMain.trim()) return;
+        syncActiveModelToMain(current);
+      } catch {
+        /* a corrupt selection must never block startup */
+      }
+    })();
   }, []);
   // Netflix-style isolation, renderer side: device storage (provider pick,
   // bot chats, tabs, history, workspace UI) belongs to one account. When the
@@ -352,7 +485,7 @@ export function App() {
   return (
     <ErrorBoundary>
     <div className="app-shell h-screen w-full flex flex-col overflow-hidden text-[12px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
-      <TitleBar />
+      <TitleBar fullscreen={fullscreen} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {uiTheme === 'classic' ? (
         <SidebarClassic
@@ -386,6 +519,9 @@ export function App() {
         </main>
         <StatusBar />
       </div>
+      {/* Always-on voice readout — mounted at the shell so it follows you into
+          every view. Renders nothing while the setting is off. */}
+      <VoiceHud onOpenVoice={() => setActiveView('voice')} />
             {(activeView === 'chats' || activeView === 'research') && (
         <div
           className={`os-activity-panel-shell ${rightPanelOpen ? 'is-open' : 'is-closed'}`}
@@ -414,6 +550,13 @@ export function App() {
         }}
       />
       {deployOpen && <DeployModal onClose={() => setDeployOpen(false)} />}
+      {/* A blocked agent's question must be answerable from ANY section, so this
+          is mounted at the shell rather than inside ChatView. */}
+      <QuestionOverlay />
+      {/* Global, like the question overlay: a restart happens wherever the user
+          happens to be, so "here is what I had done" must not be hidden inside
+          the chat view they may not be looking at. */}
+      <ResumeBanner />
       {settingsOpen && (uiTheme === 'classic'
         ? <SettingsModalClassic onClose={() => setSettingsOpen(false)} />
         : <SettingsModal onClose={() => setSettingsOpen(false)} />)}

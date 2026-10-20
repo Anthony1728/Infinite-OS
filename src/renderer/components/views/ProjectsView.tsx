@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BriefcaseBusiness, Code2, FolderOpen, Megaphone, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { useNotificationStore } from '../../stores/notifications';
 
@@ -61,6 +61,18 @@ function safeFolderName(name: string): string {
   return stripControlChars(name.trim()).replace(/[<>:"/\\|?*]/g, '-').replace(/\s+/g, ' ').slice(0, 80) || 'New Project';
 }
 
+/**
+ * Projects are read from the SAME store the Board uses.
+ *
+ * These two sections used to keep completely separate data — this one a JSON
+ * array in localStorage, Board a file in the profile home. Creating a project in
+ * either produced nothing in the other, so the app looked like it had two
+ * competing project systems doing the same job.
+ *
+ * Now there is one record. `path` is what marks a project as having files, so
+ * this section lists projects-with-files and Board lists all of them; creating
+ * here also creates the board, and vice versa.
+ */
 function loadProjects(): ManagedProject[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as ManagedProject[]; }
   catch { return []; }
@@ -94,14 +106,53 @@ export function ProjectsView({ onOpenWorkspace }: { onOpenWorkspace: () => void 
   const [form, setForm] = useState({ name: '', description: '', kind: 'business' as ProjectKind, parent: currentRoot() });
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(projects)); }, [projects]);
+  /**
+   * Reload from the shared store.
+   *
+   * Reading from disk rather than a renderer-local cache is the whole point:
+   * Board can create a project, and this section has to show it without the
+   * user doing anything.
+   */
+  const refresh = useCallback(async () => {
+    try {
+      const shared = (await window.api.projectsWithFiles()) as Array<{
+        id: string; name: string; description: string; path?: string; kind?: string;
+        status?: 'active' | 'closed'; createdAt: number; updatedAt?: number;
+      }>;
+      const next: ManagedProject[] = shared
+        .filter((p) => Boolean(p.path))
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          kind: (p.kind as ProjectKind) ?? 'general',
+          path: p.path as string,
+          status: p.status ?? 'active',
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt ?? p.createdAt,
+        }));
+      setProjects(next);
+    } catch {
+      // A store that cannot be read leaves whatever was on screen rather than
+      // blanking the section.
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const visible = useMemo(() => projects
     .filter((project) => project.status === (showClosed ? 'closed' : 'active'))
     .filter((project) => `${project.name} ${project.description} ${project.kind}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => b.updatedAt - a.updatedAt), [projects, query, showClosed]);
 
-  const update = (id: string, values: Partial<ManagedProject>) => setProjects((items) => items.map((item) => item.id === id ? { ...item, ...values, updatedAt: Date.now() } : item));
+  const update = (id: string, values: Partial<ManagedProject>) => {
+    setProjects((items) => items.map((item) => item.id === id ? { ...item, ...values, updatedAt: Date.now() } : item));
+    // Push the change to the shared record so Board reflects it too.
+    void window.api
+      .projectsUpdate({ id, updates: values as Record<string, unknown> })
+      .then(() => refresh())
+      .catch(() => undefined);
+  };
   const notifyError = (title: string, error: unknown) => addToast({ type: 'error', title, message: error instanceof Error ? error.message : String(error) });
 
   const chooseParent = async () => {
@@ -121,10 +172,18 @@ export function ProjectsView({ onOpenWorkspace }: { onOpenWorkspace: () => void 
         const write = await window.api.fileWrite({ path: joinPath(path, file.name), content: file.content }) as { error?: string };
         if (write?.error) throw new Error(write.error);
       }
-      setProjects((items) => [{ id: crypto.randomUUID(), name: form.name.trim(), description: form.description.trim(), kind: form.kind, path, status: 'active', createdAt: Date.now(), updatedAt: Date.now() }, ...items]);
+      // One record, so the project appears in Board immediately and the two
+      // sections cannot disagree about what exists.
+      await window.api.projectsCreate({
+        name: form.name.trim(),
+        description: form.description.trim(),
+        kind: form.kind,
+        path,
+      });
+      await refresh();
       setForm({ name: '', description: '', kind: 'business', parent: currentRoot() });
       setShowCreate(false);
-      addToast({ type: 'success', title: 'Project created', message: `${form.kind} project files are ready.` });
+      addToast({ type: 'success', title: 'Project created', message: `${form.kind} project files are ready, and it is now on your board.` });
     } catch (error) { notifyError('Could not create project', error); }
     finally { setBusy(false); }
   };
@@ -134,7 +193,10 @@ export function ProjectsView({ onOpenWorkspace }: { onOpenWorkspace: () => void 
     if (!path) return;
     const existing = projects.find((project) => project.path.toLowerCase() === path.toLowerCase());
     if (existing) { update(existing.id, { status: 'active' }); return; }
-    setProjects((items) => [{ id: crypto.randomUUID(), name: basename(path), description: 'Existing folder', kind: 'general', path, status: 'active', createdAt: Date.now(), updatedAt: Date.now() }, ...items]);
+    // Registering an existing folder also puts it on the board, rather than
+    // creating a second, unrelated record somewhere else.
+    await window.api.projectsCreate({ name: basename(path), description: 'Existing folder', kind: 'general', path });
+    await refresh();
   };
 
   const openInWorkspace = (project: ManagedProject) => {

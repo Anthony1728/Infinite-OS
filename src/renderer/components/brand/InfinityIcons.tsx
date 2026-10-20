@@ -565,6 +565,16 @@ export const INF_ICONS = {
     segs: [{ d: 'M4 6.8h16M4 12h10.5M4 17.2h16' }],
     circles: [[18.4, 12, 1.35]],
   },
+
+  // Pen and ink — spelling tutor
+  'inf.spell': {
+    segs: [
+      { d: 'M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c1.5 0 3-.3 4.3-.9' },
+      { d: 'M17.5 6.5L21 10l-3.5 3.5' },
+      { d: 'M14 9l1 1', tone: 0.5 },
+    ],
+    circles: [[12, 12, 9.5]],
+  },
 } satisfies Record<string, InfinityIconDef>;
 
 export type InfinityIconName = keyof typeof INF_ICONS;

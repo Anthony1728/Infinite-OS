@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -107,9 +107,45 @@ describe('LearningMemoryStore', () => {
     expect(learned?.content).not.toContain('supersecretvalue');
     expect(learned?.content).toContain('[REDACTED]');
 
+    // Writes are batched (see `saveIntervalMs`), so flush before reading back.
+    store.flush();
+
     const restored = new LearningMemoryStore({ dataDir: directory, now: () => START });
     expect(restored.getStats().total).toBe(1);
     expect(restored.getById(learned!.id)?.content).toBe(learned?.content);
+  });
+
+  it('batches writes instead of rewriting the store after every ingest', () => {
+    const directory = dataDir();
+    const store = new LearningMemoryStore({ dataDir: directory, now: () => START });
+    const storeFile = join(directory, 'learning-memory.json');
+
+    store.ingest({
+      type: 'tool', toolName: 'Terminal', input: 'run tests', result: 'All focused tests passed successfully.', success: true,
+    });
+    store.ingest({
+      type: 'tool', toolName: 'Editor', input: 'patch file', result: 'The file was patched and validation passed.', success: true,
+    });
+
+    // Nothing hits the disk mid-burst: no full-store rewrite per tool result.
+    expect(existsSync(storeFile)).toBe(false);
+    expect(store.getStats().total).toBe(2);
+
+    store.flush();
+    expect(existsSync(storeFile)).toBe(true);
+    expect(new LearningMemoryStore({ dataDir: directory }).getStats().total).toBe(2);
+  });
+
+  it('writes through when batching is turned off', () => {
+    const directory = dataDir();
+    const store = new LearningMemoryStore({ dataDir: directory, now: () => START, saveIntervalMs: 0 });
+
+    store.ingest({
+      type: 'tool', toolName: 'Terminal', input: 'run tests', result: 'All focused tests passed successfully.', success: true,
+    });
+
+    expect(existsSync(join(directory, 'learning-memory.json'))).toBe(true);
+    store.flush();
   });
 
   it('retrieves by intent and suppresses stale facts by default', () => {

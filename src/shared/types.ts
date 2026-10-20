@@ -5,6 +5,18 @@ export type Role = 'user' | 'assistant' | 'system' | 'tool';
 
 export type ContentBlock =
   | { type: 'text'; text: string }
+  /**
+   * The model's reasoning, kept separate from the answer.
+   *
+   * This is a distinct block rather than text inside the answer because the two
+   * are different things: reasoning is shown to the user as "what I was
+   * thinking", collapsible and dismissible, and it is NOT sent back to the model
+   * on the next turn (its own transcript already carries it). Inlining it as
+   * text meant providers that emit a reasoning channel had it silently deleted
+   * by a stripper, so the user saw a long pause and then an answer with no
+   * explanation of where the time went.
+   */
+  | { type: 'thinking'; text: string; signature?: string }
   | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } }
   | { type: 'file'; name: string; mimeType: string; data: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
@@ -77,6 +89,10 @@ export interface Session {
   preview?: string;
   pinned?: boolean;
   folder?: string;
+  /** Filed in the archive. The transcript is untouched; only this flag changes. */
+  archived?: boolean;
+  /** When it was filed, so the archive can be ordered by that rather than by last edit. */
+  archived_at?: number;
   parent_session_id?: string;
   branch_message_id?: string;
   // OpenClaw session enhancements

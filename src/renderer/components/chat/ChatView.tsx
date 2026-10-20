@@ -6,6 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
 import { inferExecutionMode, useChatStore, type ChatExecutionMode } from '../../stores/chat';
+import { ThinkingPanel } from './ThinkingPanel';
 import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
 import { useAuthStore } from '../../stores/auth';
@@ -17,6 +18,7 @@ import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
 import { ToolCallCard } from '../tools/ToolCallCard';
 import { LiveActivityFeed } from './LiveActivityFeed';
+import { MediaBlocks } from './MediaBlocks';
 import { QuizRenderer } from './QuizRenderer';
 import { PairPanel, type PairSection } from './PairPanel';
 import { BrainLearningPanel } from './BrainLearningPanel';
@@ -1211,6 +1213,8 @@ function InputBar({
   } = useVoiceAssistant();
   const agentTypes = useAgentsStore((state) => state.types);
   const announceUncensoredMode = useChatStore((state) => state.announceUncensoredMode);
+  const untilDone = useChatStore((state) => state.untilDone);
+  const setUntilDone = useChatStore((state) => state.setUntilDone);
   const activeMode = CHAT_MODE_OPTIONS.find((option) => option.id === mode) ?? CHAT_MODE_OPTIONS[1];
   const selectedAgent = agentTypes.find((agent) => agent.id === selectedAgentId);
 
@@ -1927,6 +1931,22 @@ function InputBar({
           </div>
 
           <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setUntilDone(!untilDone)}
+            aria-pressed={untilDone}
+            title="Keep working until done — raises this run's turn budget and instructs the agent to finish and verify every item before replying. Quality over speed."
+            className={`flex h-8 items-center gap-1.5 rounded-lg px-2 text-[10px] transition-colors ${
+              untilDone
+                ? 'bg-violet-500/20 text-violet-200 ring-1 ring-violet-400/40'
+                : 'text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-300'
+            }`}
+          >
+            <span className={`text-sm leading-none ${untilDone ? 'text-violet-300' : 'text-zinc-600'}`} aria-hidden="true">
+              ∞
+            </span>
+            Until done
+          </button>
           <div className="relative flex items-center gap-1.5">
             {(isListening || dictationError) && (
               <div className="os-dictation-status absolute bottom-11 right-0 z-40 w-72 rounded-xl border p-3 shadow-2xl" role="status">
@@ -2040,8 +2060,6 @@ function RealChat({
   const abortChat = useChatStore((s) => s.abort);
   const sessions = useChatStore((s) => s.sessions);
   const selectSession = useChatStore((s) => s.selectSession);
-  const pendingQuestion = useChatStore((s) => s.pendingQuestion);
-  const resolveQuestion = useChatStore((s) => s.resolveQuestion);
   const abortedCheckpoint = useChatStore((s) => s.abortedCheckpoint);
   const undoAbortedRun = useChatStore((s) => s.undoAbortedRun);
   const [isOnline, setIsOnline] = useState(false);
@@ -2052,8 +2070,7 @@ function RealChat({
     let inputTokens = 0;
     let outputTokens = 0;
     let cacheRead = 0;
-    let cost = 0;
-    const models = new Set<string>();
+    let cost = 0;    const models = new Set<string>();
     for (const m of messages) {
       if (m.usage) {
         inputTokens += m.usage.input ?? 0;
@@ -2239,20 +2256,10 @@ function RealChat({
             <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
           ))}
           {showThinking && <ThinkingBubble />}
-          {pendingQuestion && (
-            <div className="my-2 space-y-2">
-              {pendingQuestion.questions.map((q, i) => (
-                <InteractiveQuestion
-                  key={q.id}
-                  block={{ questionId: q.id, header: q.header, question: q.question, multiple: q.multiple, options: q.options }}
-                  answeredCount={i}
-                  totalCount={pendingQuestion.questions.length}
-                  onAnswer={(answer) => void resolveQuestion({ [q.id]: answer })}
-                  onSkip={() => void resolveQuestion({}, { [q.id]: true })}
-                />
-              ))}
-            </div>
-          )}
+          {/* A pending AskUserQuestion is rendered by the global QuestionOverlay
+              (mounted in App.tsx) so it is reachable from every section, not just
+              Chats. Rendering it here as well would show two sets of buttons for
+              one blocked tool call. */}
           {abortedCheckpoint && !streaming && (
             <div className="my-2 flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-4 py-3">
               <svg className="h-4 w-4 flex-shrink-0 text-amber-300/80" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
@@ -2325,12 +2332,29 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const textBlocks = message.content.filter((b) => b.type === 'text');
+  // The model's reasoning. Kept separate from `textBlocks` so it can be shown
+  // as a collapsible "thinking" panel above the answer instead of being
+  // indistinguishable from it.
+  const thinkingBlocks = message.content.filter((b) => b.type === 'thinking');
+  const thinkingText = thinkingBlocks
+    .map((b) => (b.type === 'thinking' ? b.text : ''))
+    .join('')
+    .trim();
   const toolUseBlocks = message.content.filter((b) => b.type === 'tool_use');
   const imageBlocks = message.content.filter((b) => b.type === 'image');
+  // Tool-generated media (ImageGenerator/VideoGen/MusicGen) arrives as `file`
+  // blocks carrying a mediaPath; those render inline via MediaBlocks.
+  const mediaBlocks = message.content.filter(
+    (b) => b.type === 'file' && 'mediaPath' in b,
+  ) as Array<Extract<ContentBlock, { type: 'file' }> & { mediaPath: string; mediaKind: 'image' | 'video' | 'audio' }>;
   const questionBlocks = message.content.filter((b) => b.type === 'question') as Array<{ type: 'question'; question: string; options: Array<{ label: string; description?: string }>; allowCustom?: boolean; questionId: string }>;
   const pairSections = message.content.filter((b) => b.type === 'pair') as PairSection[];
   const quizBlocks = message.content.filter((b) => b.type === 'quiz') as Array<{ type: 'quiz'; quizId: string; title: string; description?: string; questions: Array<{ id: string; question: string; options: Array<{ label: string; text: string; isCorrect: boolean }>; explanation?: string }> }>;
   const hasText = textBlocks.some((b) => b.type === 'text' && (b as { text: string }).text.trim());
+  // "Still thinking" means the trace is growing and no answer has started yet —
+  // exactly the state that used to look like a hang. Declared after `hasText`
+  // because it depends on it.
+  const thinkingLive = isAssistant && Boolean(thinkingText) && !hasText;
   const plainText = textBlocks
     .map((block) => (block.type === 'text' ? block.text : ''))
     .filter(Boolean)
@@ -2351,7 +2375,18 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
   );
 
   if (isToolResult) return null;
-  if (!hasText && imageBlocks.length === 0 && toolUseBlocks.length === 0 && quizBlocks.length === 0 && pairSections.length === 0) return null;
+  // A message that is only a reasoning trace still has to render: on a local
+  // model the whole point of showing thinking is that the user can watch it
+  // while the answer is still being produced.
+  if (
+    !hasText &&
+    thinkingBlocks.length === 0 &&
+    imageBlocks.length === 0 &&
+    mediaBlocks.length === 0 &&
+    toolUseBlocks.length === 0 &&
+    quizBlocks.length === 0 &&
+    pairSections.length === 0
+  ) return null;
 
   const contextMenuItems: ContextMenuItem[] = [
     {
@@ -2558,9 +2593,16 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
           // Chronological flow: text and tool calls render in the exact order
           // they happened (newest at the bottom) — never text-first grouping,
           // so follow-up narration after tools reads naturally without scrolling up.
-          message.content
-            .filter((b) => b.type === 'text' || b.type === 'tool_use')
+          <>
+          {/* The reasoning, above everything else in the bubble: it is what the
+              model did first, and while it streams it is the only thing on screen.
+              Collapsed automatically once the answer starts, so a long trace
+              never pushes the actual response out of view. */}
+          {thinkingText && <ThinkingPanel text={thinkingText} streaming={thinkingLive} />}
+          {message.content
+            .filter((b) => b.type === 'text' || b.type === 'tool_use' || b.type === 'thinking')
             .map((block, i) => {
+              if (block.type === 'thinking') return null;
               if (block.type === 'tool_use') {
                 const tu = block as { id: string; name: string; input: unknown };
                 const isRunning = runningToolIds?.has(tu.id) ?? false;
@@ -2653,6 +2695,8 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               </div>
             );
           })
+          }
+          </>
         )}
         {questionBlocks.length > 0 && (
           <div className="mt-2 space-y-2">
@@ -2710,6 +2754,8 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
             ))}
           </div>
         )}
+        {/* Tool-generated media: inline image/video/audio previews with fullscreen lightbox. */}
+        {mediaBlocks.length > 0 && <MediaBlocks blocks={mediaBlocks} />}
         {/* Tool calls render inline in the chronological flow above, not here. */}
       </div>
     </div>

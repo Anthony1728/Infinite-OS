@@ -16,9 +16,11 @@
 
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs';
 import { infiniteHome } from '../profiles/home.js';
 import { settings } from '../settings/store.js';
+import { parseModelCommand } from '../brain/model-command.js';
+import { answerModelCommand } from '../brain/model-switch.js';
 import * as sessionStore from '../session/store.js';
 import { setPermissionRelay } from '../agent/permission-prompt.js';
 import {
@@ -209,6 +211,41 @@ export function appendDebugLog(line: string): void {
   } catch { /* logging must never break the link */ }
 }
 
+/**
+ * Per-reply turn budget: short conversational self-chat gets a tight ceiling
+ * so a stuck retry loop can't delay the answer, while real tasks keep a
+ * working-size budget. The selected model and its tools are unchanged either
+ * way — this only bounds worst-case latency.
+ */
+export function whatsappTurnBudget(text: string): { maxTurns: number; wallClockMs: number } {
+  const trimmed = text.trim();
+  const looksLikeTask =
+    trimmed.length > 240 ||
+    /\b(build|create|make|deploy|fix|bug|implement|write|generate|set ?up|launch|design|research|analy[sz]e|schedule|automate|update|refactor|install|migrate|plan|project)\b/i.test(trimmed);
+  return looksLikeTask
+    ? { maxTurns: 30, wallClockMs: 15 * 60_000 }
+    : { maxTurns: 6, wallClockMs: 3 * 60_000 };
+}
+
+/**
+ * Quiet logger for the WhatsApp socket. Baileys logs pairing-timeout noise at
+ * info level with a stack trace ("QR refs attempts ended" every ~3 min while
+ * a QR waits to be scanned), which spams the terminal during a perfectly
+ * normal wait. Warnings and errors still pass through, and every connection
+ * event is already recorded in our own debug.log.
+ */
+const socketLogger = {
+  level: 'warn',
+  trace: () => {},
+  debug: () => {},
+  info: () => {},
+  warn: (...args: unknown[]) => console.warn('[whatsapp]', ...args),
+  error: (...args: unknown[]) => console.error('[whatsapp]', ...args),
+  fatal: (...args: unknown[]) => console.error('[whatsapp]', ...args),
+  silent: () => {},
+  child: () => socketLogger,
+};
+
 class WhatsAppLink {
   private state: WhatsAppLinkState = 'off';
   private sock: WhatsAppSocket | null = null;
@@ -239,12 +276,20 @@ class WhatsAppLink {
     return join(infiniteHome(), 'whatsapp-link');
   }
 
-  /** True when a previous pairing left creds on disk (auto-resume candidate). */
+  /**
+   * True when a previous pairing left *linked* creds on disk (auto-resume
+   * candidate). Only `creds.json` with a resolved identity counts — baileys
+   * itself picks login vs. the QR registration flow on `creds.me`. The debug
+   * log and half-finished pairings must not count: "directory not empty" made
+   * every boot silently restart a QR flow nobody was watching, which then
+   * died with "QR refs attempts ended" and retried forever.
+   */
   hasLinkedCreds(): boolean {
     try {
-      const dir = this.credsDir();
-      if (!existsSync(dir)) return false;
-      return readdirSync(dir).length > 0;
+      const p = join(this.credsDir(), 'creds.json');
+      if (!existsSync(p)) return false;
+      const parsed = JSON.parse(readFileSync(p, 'utf8')) as { me?: { id?: string } | null };
+      return !!parsed?.me?.id;
     } catch {
       return false;
     }
@@ -381,6 +426,7 @@ class WhatsAppLink {
             return makeWASocket({
               auth: authState as never,
               browser: Browsers.macOS('Infinite OS'),
+              logger: socketLogger as never,
               syncFullHistory: false,
               markOnlineOnConnect: false,
             }) as unknown as WhatsAppSocket;
@@ -422,6 +468,10 @@ class WhatsAppLink {
       } catch {
         this.qrDataUrl = null;
       }
+      // A fresh QR supersedes any stale pairing error (e.g. the previous
+      // round's timeout or the 45s connect watchdog) — don't render it red
+      // next to a code that is perfectly scannable.
+      this.lastError = null;
       this.setState('qr');
       return;
     }
@@ -450,8 +500,13 @@ class WhatsAppLink {
         this.setState('closed');
         return;
       }
-      this.lastError = `Connection closed${code ? ` (${code})` : ''}.`;
-      appendDebugLog(`event connection=close code=${code ?? 'unknown'}`);
+      // QR pairing refs expire every ~2.5 min until the phone scans — routine
+      // while unlinked, and a fresh round follows in seconds. Showing it as a
+      // red "Connection closed (408)" error would scare users during a normal
+      // wait; the retry below is exactly what should happen.
+      const pairingRefresh = code === 408 && !this.owner;
+      this.lastError = pairingRefresh ? null : `Connection closed${code ? ` (${code})` : ''}.`;
+      appendDebugLog(`event connection=close code=${code ?? 'unknown'}${pairingRefresh ? ' (QR refs expired during pairing, retrying)' : ''}`);
       this.setState('closed');
       if (this.wantOn) {
         this.setState('connecting');
@@ -540,8 +595,7 @@ class WhatsAppLink {
         const answer = deps.runTurn ? await deps.runTurn(text, remoteJid) : await this.defaultRunTurn(text, log, remoteJid, deps);
         try {
           await this.sock.sendPresenceUpdate?.('paused', remoteJid);
-        } catch { /* presence is cosmetic */ }
-        this.lastTurn = { at: now(), ok: true, error: null };
+        } catch { /* presence is cosmetic */ }        this.lastTurn = { at: now(), ok: true, error: null };
         appendDebugLog(`turn ok chars=${answer.length}`);
         const sent = await this.sock.sendMessage(remoteJid, { text: answer.slice(0, 4000) });
         const sentId = sent?.key?.id;
@@ -601,6 +655,19 @@ class WhatsAppLink {
     let active: ActiveModel;
     try {
       const get: SettingsGetter = deps?.getSetting ?? ((key) => settings.get(key));
+      // Model commands are answered by the Brain BEFORE any model is invoked:
+      // when the active model is dead, the agent itself cannot understand
+      // "switch to a working model", so the request must not reach a model at
+      // all. On any unexpected error, fall through to the normal turn.
+      const command = parseModelCommand(text);
+      if (command) {
+        log('[whatsapp-link] model command', command.kind);
+        try {
+          return await answerModelCommand(command, { getSetting: get });
+        } catch (e) {
+          log('[whatsapp-link] model command failed, falling through:', (e as Error).message);
+        }
+      }
       active = resolveActiveModel(get);
     } catch (e) {
       if (e instanceof NoActiveModelError) {
@@ -613,10 +680,11 @@ class WhatsAppLink {
     log('[whatsapp-link] turn start via', `${provider}/${model}`, 'cwd:', cwd);
     this.ensurePermissionRelay();
     const runAgent = deps?.runAgentImpl ?? (await import('../agent/loop.js')).runAgent;
-    const ctrl = new AbortController();
-    // Long-running builds/launches from the phone need more than a chat reply:
-    // 20 minutes covers a LaunchProduct run end-to-end.
-    const timer = setTimeout(() => ctrl.abort(), 20 * 60_000);
+    const budget = whatsappTurnBudget(text);    const ctrl = new AbortController();
+    // Long-running builds/launches from the phone need more than a chat reply —
+    // but the run also respects the per-message budget so simple answers
+    // can't be delayed by a runaway retry loop.
+    const timer = setTimeout(() => ctrl.abort(), Math.max(budget.wallClockMs, 20 * 60_000));
     try {
       // Stable per-contact session, PERSISTED in the session store so history
       // survives restarts and the desktop transcript shows the phone-driven work.
@@ -624,7 +692,9 @@ class WhatsAppLink {
         ? (this.conversationSessionIds.get(remoteJid) ?? await this.resolvePersistentSession(remoteJid))
         : `whatsapp-${Date.now()}`;
       if (remoteJid) this.conversationSessionIds.set(remoteJid, sessionId);
-      const history = await sessionStore.loadMessages(sessionId).catch(() => []);
+      // Cap the carried history: the last ~24 messages keep the thread's
+      // context while keeping the first-token latency on phone replies low.
+      const history = (await sessionStore.loadMessages(sessionId).catch(() => [])).slice(-24);
       const userMessage = {
         id: crypto.randomUUID(),
         role: 'user',
@@ -639,16 +709,16 @@ class WhatsAppLink {
       }
       const completed = await runAgent([...history] as never, userMessage, {
         sessionId,
-        cwd,
-        provider,
+        cwd,        provider,
         model,
         signal: ctrl.signal,
+        maxTurns: budget.maxTurns,
+        wallClockMs: budget.wallClockMs,
         onEvent: (e) => this.mirrorToDesktop(sessionId, e),
       });
       if (remoteJid) this.pendingApprovals.delete(remoteJid);
       for (const m of completed.slice(history.length + 1)) {
-        await sessionStore.appendMessage(sessionId, m).catch(() => undefined);
-      }
+        await sessionStore.appendMessage(sessionId, m).catch(() => undefined);      }
       const last = [...completed].reverse().find((m) => m.role === 'assistant');
       const blocks = (last?.content ?? []) as Array<{ type?: string; text?: string }>;
       const answer = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n\n').trim();

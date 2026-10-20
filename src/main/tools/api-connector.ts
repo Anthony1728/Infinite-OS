@@ -2,6 +2,7 @@ import type { Tool, ToolResult } from './base.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { infiniteHome } from '../profiles/home.js';
+import { findOperation, importSpec, invokeOperation, listSpecs, loadSpec } from './openapi.js';
 
 interface APIProvider {
   id: string;
@@ -814,26 +815,36 @@ function maskKey(key: string): string {
 export const apiConnectorTool: Tool = {
   name: 'APIConnector',
   description:
-    'Universal API connector: paste any API key to auto-detect the provider, test the connection, and save it. Supports 50+ providers including OpenAI, Anthropic, Google, AWS, Stripe, GitHub, Twitter, Discord, Slack, Twilio, SendGrid, and more. Auto-detects API key format and configures authentication automatically.',
+    'Universal API connector: detect/connect provider keys, test connections, and import OpenAPI JSON to list and invoke operations. Supports 50+ providers including OpenAI, Anthropic, Google, AWS, Stripe, GitHub, Twitter, Discord, Slack, Twilio, and SendGrid.',
   permission: 'ask',
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['detect', 'connect', 'list', 'test', 'delete', 'providers'],
-        description: 'Action: detect (identify provider from key), connect (test + save), list (saved connections), test (verify saved connection), delete (remove connection), providers (list supported providers)',
+        enum: ['detect', 'connect', 'list', 'test', 'delete', 'providers', 'import_openapi', 'operations', 'invoke'],
+        description: 'detect/connect/list/test/delete/providers, or import_openapi → operations → invoke',
       },
       apiKey: { type: 'string', description: 'API key to detect or connect' },
       providerId: { type: 'string', description: 'Provider ID (for manual selection)' },
       baseUrl: { type: 'string', description: 'Custom base URL override' },
-      connectionId: { type: 'string', description: 'Connection ID for test/delete' },
+      connectionId: { type: 'string', description: 'Saved connection or auth source' },
       category: { type: 'string', description: 'Filter providers by category' },
+      spec: { type: 'string', description: 'OpenAPI JSON text' },
+      specUrl: { type: 'string', description: 'OpenAPI JSON URL' },
+      specId: { type: 'string', description: 'Imported spec ID' },
+      operationId: { type: 'string' },
+      method: { type: 'string' },
+      path: { type: 'string' },
+      params: { type: 'object', description: 'Path/query parameters' },
+      body: { description: 'JSON request body' },
+      headers: { type: 'object' },
+      query: { type: 'string', description: 'Filter operation list' },
     },
     required: ['action'],
   },
 
-  async execute(args): Promise<ToolResult> {
+  async execute(args, ctx): Promise<ToolResult> {
     const input = args as {
       action: string;
       apiKey?: string;
@@ -841,6 +852,16 @@ export const apiConnectorTool: Tool = {
       baseUrl?: string;
       connectionId?: string;
       category?: string;
+      spec?: string;
+      specUrl?: string;
+      specId?: string;
+      operationId?: string;
+      method?: string;
+      path?: string;
+      params?: Record<string, unknown>;
+      body?: unknown;
+      headers?: Record<string, string>;
+      query?: string;
     };
 
     try {
@@ -1006,6 +1027,63 @@ export const apiConnectorTool: Tool = {
           }
           lines.push('Paste any API key and use "detect" or "connect" to auto-detect.');
           return { content: lines.join('\n') };
+        }
+
+        case 'import_openapi': {
+          if (!input.spec && !input.specUrl) return { content: 'spec or specUrl is required', is_error: true };
+          const spec = await importSpec({ spec: input.spec, specUrl: input.specUrl, signal: ctx?.abortSignal });
+          return {
+            content: JSON.stringify({
+              specId: spec.id,
+              title: spec.title,
+              version: spec.version,
+              server: spec.server,
+              operations: spec.operations.length,
+              next: 'Use operations to inspect, then invoke with operationId or method + path.',
+            }, null, 2),
+          };
+        }
+
+        case 'operations': {
+          if (!input.specId) return { content: JSON.stringify(listSpecs(), null, 2) };
+          const spec = loadSpec(input.specId);
+          const query = input.query?.trim().toLowerCase() ?? '';
+          const operations = spec.operations
+            .filter((operation) => !query || [operation.method, operation.path, operation.operationId ?? '', operation.summary ?? ''].join(' ').toLowerCase().includes(query))
+            .slice(0, 200);
+          return { content: JSON.stringify({ specId: spec.id, title: spec.title, server: spec.server, operations }, null, 2) };
+        }
+
+        case 'invoke': {
+          if (!input.specId) return { content: 'specId is required', is_error: true };
+          const spec = loadSpec(input.specId);
+          let auth: { header: string; value: string } | undefined;
+          let baseUrl = input.baseUrl;
+          if (input.connectionId) {
+            const conn = loadConnections().find((c) => c.id === input.connectionId);
+            if (!conn) return { content: `Connection not found: ${input.connectionId}`, is_error: true };
+            const provider = PROVIDERS.find((p) => p.id === conn.providerId);
+            if (!provider) return { content: `Unknown provider: ${conn.providerId}`, is_error: true };
+            auth = { header: provider.authHeader, value: provider.authFormat(conn.apiKey) };
+            if (!baseUrl && !spec.server) baseUrl = conn.baseUrl;
+          }
+          const operation = findOperation(spec, input);
+          const result = await invokeOperation(spec, {
+            specId: spec.id,
+            operationId: input.operationId,
+            method: input.method,
+            path: input.path,
+            params: input.params,
+            body: input.body,
+            headers: input.headers,
+            baseUrl,
+            auth,
+            signal: ctx?.abortSignal,
+          });
+          return {
+            content: JSON.stringify({ specId: spec.id, operation: { method: operation.method, path: operation.path, operationId: operation.operationId }, ...result }, null, 2),
+            ...(result.ok ? {} : { is_error: true }),
+          };
         }
 
         default:

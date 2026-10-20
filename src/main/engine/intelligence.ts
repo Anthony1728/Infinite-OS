@@ -84,6 +84,8 @@ export class IntelligenceEngine {
   private lastInteractionAt: number = 0;
   private _hasApiKey: boolean = false;
   private _ollamaAvailable: boolean = false;
+  /** Shared by concurrent `initialize()` callers; see that method. */
+  private initInFlight: Promise<void> | null = null;
 
   constructor(config?: Partial<EngineConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -94,8 +96,25 @@ export class IntelligenceEngine {
 
   // ── Lifecycle ──
 
-  /** Call when app starts — detect what's available */
+  /**
+   * Call when app starts — detect what's available.
+   *
+   * Boot reaches this from two places within the same tick: the model warm-up
+   * and the engine startup log. `isAvailable()` is a live HTTP probe of Ollama
+   * with a 1.5 s timeout, so letting both run meant every launch made two
+   * probes and could log two different answers. Concurrent callers now share
+   * one in-flight probe; a later call (say, after the user starts Ollama)
+   * still re-detects.
+   */
   async initialize(): Promise<void> {
+    if (this.initInFlight) return this.initInFlight;
+    this.initInFlight = this.detectProviders().finally(() => {
+      this.initInFlight = null;
+    });
+    return this.initInFlight;
+  }
+
+  private async detectProviders(): Promise<void> {
     // Check for Ollama availability
     try {
       const ollama = getOllamaBrain();

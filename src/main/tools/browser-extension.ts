@@ -71,16 +71,19 @@ function commandFor(action: string): string {
       return 'focus';
     case 'clear':
       return 'clear';
+    // These four were sent camelCase while the extension's dispatcher only ever
+    // matched snake_case, so they always failed with "Unknown command". The
+    // extension now accepts both spellings; the canonical name is sent here.
     case 'set_value':
-      return 'setValue';
+      return 'set_value';
     case 'get_value':
-      return 'getValue';
+      return 'get_value';
     case 'get_element':
-      return 'getElement';
+      return 'get_element';
     case 'get_elements':
-      return 'getElements';
+      return 'get_elements';
     case 'right_click':
-      return 'context_menu';
+      return 'right_click';
     case 'drag':
       return 'drag';
     case 'cookie_get':
@@ -107,7 +110,7 @@ function commandFor(action: string): string {
 export const browserExtensionTool: Tool = {
   name: 'browser_extension',
   description:
-    'PRIMARY browser control — ALWAYS use this FIRST for any web/browser task. Drives the user\'s EXISTING Chrome/Edge via the Infinite OS Bridge extension (localhost:8765). Fast DOM control with logged-in sessions. The tool auto-retries if the extension is temporarily unreachable, then falls back to Operator (CDP) silently. Actions: navigate, inspect, click, click_text, type, fill, press, scroll, extract_text, extract_links, extract_forms, screenshot, execute_js, highlight, list_tabs, new_tab, activate_tab, close_tab, reload, back, forward, wait, hover, focus, clear, set_value, get_value, get_element, get_elements, select, right_click, drag, cookie_get, cookie_set, clipboard_read, clipboard_write, storage_get, storage_set, batch, console_log, get_page_performance.',
+    'PRIMARY browser control — ALWAYS use this FIRST for any web/browser task. Drives the user\'s EXISTING Chrome/Edge via the Infinite OS Bridge extension (localhost:8765). Fast DOM control with logged-in sessions. The tool auto-retries if the extension is temporarily unreachable, then falls back to Operator (CDP) silently. The action enum below is the authoritative list of what it can do.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -115,14 +118,14 @@ export const browserExtensionTool: Tool = {
         type: 'string',
         enum: [...ACTIONS],
         description:
-          'What to do. navigate=go to a URL; inspect=page state + snapshot + screenshot; click=click by CSS selector; click_text=click by visible text; type=set text into a selector; fill=set multiple fields (map of selector->value); press=press a key (Enter, Tab, Escape, ArrowDown…); scroll=direction (down/up/top/bottom) + optional pixels; extract_text/extract_links/extract_forms=read page content; screenshot=capture the visible tab as base64 PNG; execute_js=run JS in the page; highlight=flash an element; list_tabs/new_tab/activate_tab/close_tab=tab control; reload/back/forward=history; wait=pause ms; hover=mouseover element; focus=focus an element; clear=clear input value; set_value=set input value; get_value=get input value; get_element/get_elements=get element info; select=select dropdown option; right_click=right-click an element by CSS selector; drag=drag from one element to another (fromSelector, toSelector); cookie_get/cookie_set=manage cookies; clipboard_read/clipboard_write=clipboard operations; storage_get/storage_set=extension local storage; batch=run multiple DOM ops in one round-trip (ops: [{op, params}]); console_log=capture browser console via debugger API (duration: ms); get_page_performance=page load metrics.',
+          'What to do. navigate→url; inspect→page state+snapshot+screenshot; click/right_click/highlight/hover/focus/clear→selector; click_text→text; type→selector+text; fill→fields map; press→key; scroll→direction+pixels; extract_text/links/forms→page content; screenshot→base64 PNG; execute_js→script; list_tabs/new_tab/activate_tab/close_tab→tabId; reload/back/forward→history; wait→ms; set_value/get_value→selector+value; get_element/get_elements→selector; select→dropdown option; drag→fromSelector+toSelector; cookie_get/cookie_set→name/domain/path/value; clipboard_read/clipboard_write→text; storage_get→keys, storage_set→data; batch→ops [{op,params}]; console_log→duration ms; get_page_performance→metrics.',
       },
       url: { type: 'string', description: 'URL for navigate/new_tab.' },
-      selector: { type: 'string', description: 'CSS selector for click/type/highlight/hover/focus/clear/set_value/get_value/get_element/get_elements/right_click.' },
-      text: { type: 'string', description: 'Visible text for click_text, or value for type.' },
-      value: { type: 'string', description: 'Value for type, set_value, or cookie_set.' },
-      fromSelector: { type: 'string', description: 'CSS selector for the drag source element.' },
-      toSelector: { type: 'string', description: 'CSS selector for the drag target element.' },
+      selector: { type: 'string', description: 'CSS selector of the element to act on.' },
+      text: { type: 'string', description: 'Visible text to click, or value to type.' },
+      value: { type: 'string', description: 'Value to set.' },
+      fromSelector: { type: 'string', description: 'CSS selector of the drag source element.' },
+      toSelector: { type: 'string', description: 'CSS selector of the drag target element.' },
       fields: {
         type: 'object',
         description: 'Map of selector -> value for fill (e.g. {"#email":"a@b.com","#pass":"secret"}).',

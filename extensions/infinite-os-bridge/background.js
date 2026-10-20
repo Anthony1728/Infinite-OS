@@ -20,137 +20,173 @@ try {
   }
 } catch (_e) {}
 
-// ── MessagePack encoder/decoder (lightweight subset for our protocol) ───────────
+// ── MessagePack codec ─────────────────────────────────────────────────────────
+// Spec-compliant (https://msgpack.org) so this codec and the Infinite OS bridge
+// server always agree. The old subset tagged 16-bit ints as 0xd2 and 32-bit ints
+// as 0xd3 while the reader only understood 0xd2-as-int32, so every value outside
+// fixint range — every Date.now(), every tab id above 32767 — produced an
+// undecodable frame that was silently dropped (that is why ping/latency and any
+// timestamped payload never came back). Bytes are appended in blocks instead of
+// spread, so megabyte screenshots no longer overflow the call stack.
 const MSGPACK = {
   encode(obj) {
-    const bytes = [];
+    const chunks = [];
+    const textEncoder = new TextEncoder();
+    let head = [];
+    function flush() {
+      if (head.length) {
+        chunks.push(new Uint8Array(head));
+        head = [];
+      }
+    }
+    function byte(b) {
+      head.push(b & 0xff);
+      if (head.length >= 8192) flush();
+    }
+    function raw(src) {
+      flush();
+      chunks.push(src);
+    }
+    function u16(v) { byte(v >> 8); byte(v); }
+    function u32(v) { byte(v >>> 24); byte((v >>> 16) & 0xff); byte((v >>> 8) & 0xff); byte(v & 0xff); }
+    function u64(v) {
+      const hi = Math.floor(v / 4294967296);
+      u32(hi);
+      u32(v >>> 0);
+    }
+    function f64(val) {
+      const b = new ArrayBuffer(8);
+      new DataView(b).setFloat64(0, val, false);
+      raw(new Uint8Array(b));
+    }
     function write(val) {
-      if (val === null) { bytes.push(0xc0); return; }
-      if (val === undefined) { bytes.push(0xc0); return; }
-      if (typeof val === 'boolean') { bytes.push(val ? 0xc3 : 0xc2); return; }
+      if (val === null || val === undefined) { byte(0xc0); return; }
+      if (typeof val === 'boolean') { byte(val ? 0xc3 : 0xc2); return; }
       if (typeof val === 'number') {
-        if (Number.isInteger(val)) {
-          if (val >= 0 && val <= 127) { bytes.push(val); return; }
-          if (val >= -32 && val <= -1) { bytes.push(0xe0 | (val & 0x1f)); return; }
-          if (val >= -32768 && val <= 32767) { bytes.push(0xd2, (val >> 8) & 0xff, val & 0xff); return; }
-          if (val >= -2147483648 && val <= 2147483647) { bytes.push(0xd3, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff); return; }
-          bytes.push(0xcf); writeFloat64(val); return;
+        if (Number.isInteger(val) && Number.isSafeInteger(val)) {
+          if (val >= 0) {
+            if (val <= 0x7f) { byte(val); return; }
+            if (val <= 0xff) { byte(0xcc); byte(val); return; }
+            if (val <= 0xffff) { byte(0xcd); u16(val); return; }
+            if (val <= 0xffffffff) { byte(0xce); u32(val); return; }
+            byte(0xcf); u64(val); return;
+          }
+          if (val >= -32) { byte(0xe0 | (val & 0x1f)); return; }
+          if (val >= -0x80) { byte(0xd0); byte(val & 0xff); return; }
+          if (val >= -0x8000) { byte(0xd1); u16(val & 0xffff); return; }
+          if (val >= -0x80000000) { byte(0xd2); u32(val >>> 0); return; }
+          byte(0xd3); u64(BigInt.asUintN(64, BigInt(val))); return;
         }
-        bytes.push(0xcb); writeFloat64(val); return;
+        byte(0xcb); f64(val); return;
       }
       if (typeof val === 'string') {
-        const utf8 = new TextEncoder().encode(val);
+        const utf8 = textEncoder.encode(val);
         const len = utf8.length;
-        if (len <= 31) { bytes.push(0xa0 | len); }
-        else if (len <= 255) { bytes.push(0xd9, len); }
-        else if (len <= 65535) { bytes.push(0xda, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdb, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-        bytes.push(...utf8);
+        if (len <= 31) byte(0xa0 | len);
+        else if (len <= 0xff) { byte(0xd9); byte(len); }
+        else if (len <= 0xffff) { byte(0xda); u16(len); }
+        else { byte(0xdb); u32(len); }
+        raw(utf8);
+        return;
+      }
+      if (val instanceof Uint8Array || val instanceof ArrayBuffer) {
+        const src = val instanceof ArrayBuffer ? new Uint8Array(val) : val;
+        const len = src.length;
+        if (len <= 0xff) { byte(0xc4); byte(len); }
+        else if (len <= 0xffff) { byte(0xc5); u16(len); }
+        else { byte(0xc6); u32(len); }
+        raw(src);
         return;
       }
       if (Array.isArray(val)) {
         const len = val.length;
-        if (len <= 15) { bytes.push(0x90 | len); }
-        else if (len <= 65535) { bytes.push(0xdc, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        if (len <= 15) byte(0x90 | len);
+        else if (len <= 0xffff) { byte(0xdc); u16(len); }
+        else { byte(0xdd); u32(len); }
         for (const item of val) write(item);
         return;
       }
       if (typeof val === 'object') {
         const keys = Object.keys(val);
         const len = keys.length;
-        if (len <= 15) { bytes.push(0x80 | len); }
-        else if (len <= 65535) { bytes.push(0xde, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        if (len <= 15) byte(0x80 | len);
+        else if (len <= 0xffff) { byte(0xde); u16(len); }
+        else { byte(0xdf); u32(len); }
         for (const key of keys) { write(key); write(val[key]); }
         return;
       }
-      // Fallback to JSON
-      const json = JSON.stringify(val);
-      const utf8 = new TextEncoder().encode(json);
-      bytes.push(0xdb, 0, 0, 0, 0, ...utf8); // placeholder, not exact
-    }
-    function writeFloat64(val) {
-      const buf = new ArrayBuffer(8);
-      new DataView(buf).setFloat64(0, val, false);
-      bytes.push(...new Uint8Array(buf));
+      // Functions/symbols have no MessagePack form — nil keeps the stream sane.
+      byte(0xc0);
     }
     write(obj);
-    return new Uint8Array(bytes);
+    flush();
+    if (chunks.length === 1) return chunks[0];
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    const out = new Uint8Array(total);
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.length; }
+    return out;
   },
 
   decode(bytes) {
+    const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const textDecoder = new TextDecoder();
     let offset = 0;
+    function need(n) { return offset + n <= buf.length; }
+    function readStr(len) {
+      const s = textDecoder.decode(buf.subarray(offset, offset + len));
+      offset += len;
+      return s;
+    }
+    function readBin(len) {
+      const s = buf.slice(offset, offset + len);
+      offset += len;
+      return s;
+    }
     function read() {
-      if (offset >= bytes.length) return undefined;
-      const b = bytes[offset++];
-      // nil
-      if (b === 0xc0) return null;
-      // boolean
-      if (b === 0xc2) return false;
-      if (b === 0xc3) return true;
-      // positive fixint
-      if ((b & 0x80) === 0x00) return b;
-      // negative fixint
-      if ((b & 0xe0) === 0xe0) return b - 0x100;
-      // fixstr
-      if ((b & 0xe0) === 0xa0) {
-        const len = b & 0x1f;
-        const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
-        offset += len;
-        return str;
-      }
-      // fixarray
-      if ((b & 0xf0) === 0x90) {
-        const len = b & 0x0f;
-        const arr = [];
-        for (let i = 0; i < len; i++) arr.push(read());
-        return arr;
-      }
-      // fixmap
+      if (offset >= buf.length) return undefined;
+      const b = buf[offset++];
+      if (b <= 0x7f) return b;
+      if (b >= 0xe0) return b - 0x100;
       if ((b & 0xf0) === 0x80) {
-        const len = b & 0x0f;
         const obj = {};
-        for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
+        for (let i = 0; i < (b & 0x0f); i++) obj[read()] = read();
         return obj;
       }
-      // str 8/16/32
-      if (b === 0xd9 || b === 0xda || b === 0xdb) {
-        let len = 0;
-        if (b === 0xd9) len = bytes[offset++];
-        else if (b === 0xda) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
-        const str = new TextDecoder().decode(bytes.slice(offset, offset + len));
-        offset += len;
-        return str;
-      }
-      // array 16/32
-      if (b === 0xdc || b === 0xdd) {
-        let len = 0;
-        if (b === 0xdc) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
+      if ((b & 0xf0) === 0x90) {
         const arr = [];
-        for (let i = 0; i < len; i++) arr.push(read());
+        for (let i = 0; i < (b & 0x0f); i++) arr.push(read());
         return arr;
       }
-      // map 16/32
-      if (b === 0xde || b === 0xdf) {
-        let len = 0;
-        if (b === 0xde) { len = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; }
-        else { len = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; }
-        const obj = {};
-        for (let i = 0; i < len; i++) { const k = read(); obj[k] = read(); }
-        return obj;
+      if ((b & 0xe0) === 0xa0) return readStr(b & 0x1f);
+      switch (b) {
+        case 0xc0: return null;
+        case 0xc2: return false;
+        case 0xc3: return true;
+        case 0xc4: if (!need(1)) return undefined; return readBin(buf[offset++]);
+        case 0xc5: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; return readBin(l); }
+        case 0xc6: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; return readBin(l); }
+        case 0xca: if (!need(4)) return undefined; { const v = view.getFloat32(offset); offset += 4; return v; }
+        case 0xcb: if (!need(8)) return undefined; { const v = view.getFloat64(offset); offset += 8; return v; }
+        case 0xcc: if (!need(1)) return undefined; { const v = view.getUint8(offset); offset += 1; return v; }
+        case 0xcd: if (!need(2)) return undefined; { const v = view.getUint16(offset); offset += 2; return v; }
+        case 0xce: if (!need(4)) return undefined; { const v = view.getUint32(offset); offset += 4; return v; }
+        case 0xcf: if (!need(8)) return undefined; { const v = view.getBigUint64(offset); offset += 8; return Number(v); }
+        case 0xd0: if (!need(1)) return undefined; { const v = view.getInt8(offset); offset += 1; return v; }
+        case 0xd1: if (!need(2)) return undefined; { const v = view.getInt16(offset); offset += 2; return v; }
+        case 0xd2: if (!need(4)) return undefined; { const v = view.getInt32(offset); offset += 4; return v; }
+        case 0xd3: if (!need(8)) return undefined; { const v = view.getBigInt64(offset); offset += 8; return Number(v); }
+        case 0xd9: if (!need(1)) return undefined; return readStr(buf[offset++]);
+        case 0xda: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; return readStr(l); }
+        case 0xdb: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; return readStr(l); }
+        case 0xdc: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; const arr = []; for (let i = 0; i < l; i++) arr.push(read()); return arr; }
+        case 0xdd: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; const arr = []; for (let i = 0; i < l; i++) arr.push(read()); return arr; }
+        case 0xde: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; const obj = {}; for (let i = 0; i < l; i++) obj[read()] = read(); return obj; }
+        case 0xdf: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; const obj = {}; for (let i = 0; i < l; i++) obj[read()] = read(); return obj; }
+        default: return null;
       }
-      // int 8/16/32
-      if (b === 0xd0) return bytes[offset++]; // int8
-      if (b === 0xd1) { const v = (bytes[offset] << 8) | bytes[offset + 1]; offset += 2; return v > 32767 ? v - 65536 : v; }
-      if (b === 0xd2) { const v = (bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]; offset += 4; return v; }
-      // float 32/64
-      if (b === 0xca) { const buf = bytes.slice(offset, offset + 4); offset += 4; return new DataView(buf.buffer).getFloat32(0, false); }
-      if (b === 0xcb) { const buf = bytes.slice(offset, offset + 8); offset += 8; return new DataView(buf.buffer).getFloat64(0, false); }
-      // Fallback: try JSON
-      try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return null; }
     }
     return read();
   },
@@ -163,6 +199,8 @@ let manualClose = false;
 let lastPong = 0;
 let latencyMs = 0;
 let pingPending = false;
+let pingMisses = 0;
+let connectingSince = 0;
 let connectionAttempts = 0;
 let useBinaryProtocol = false;
 
@@ -208,6 +246,20 @@ const CACHEABLE = new Set([
   'get_page_html', 'get_element', 'get_elements',
   'get_history', 'get_downloads', 'get_windows',
 ]);
+
+// Anything that changes page/tab/browser state voids every cached read.
+const MUTATING = new Set([
+  'navigate', 'click', 'click_text', 'right_click', 'double_click',
+  'fill', 'type', 'press', 'set_value', 'select_option', 'check', 'uncheck',
+  'upload_file', 'drag', 'scroll', 'hover', 'context_menu',
+  'new_tab', 'close_tab', 'switch_tab', 'reload', 'go_back', 'go_forward',
+  'execute_js', 'fill_form', 'batch',
+  'clear_cookies', 'set_cookie', 'clear_history', 'clear_downloads',
+]);
+
+function invalidateCache() {
+  if (cache.size) cache.clear();
+}
 
 // ── Pending requests ──────────────────────────────────────────────────────────
 const pending = new Map();
@@ -264,6 +316,7 @@ function connect() {
     try {
       ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
+      connectingSince = Date.now();
     } catch (e) {
       setConnected(false, String(e?.message || e));
       scheduleReconnect();
@@ -275,6 +328,8 @@ function connect() {
       latencyMs = 0;
       status.latencyMs = 0;
       pingPending = false;
+      pingMisses = 0;
+      connectingSince = 0;
       setConnected(true);
       send({
         type: 'hello',
@@ -322,6 +377,23 @@ function scheduleReconnect() {
   connectionAttempts++;
 }
 
+// A half-open (zombie) socket stays readyState=OPEN locally while nothing
+// flows over it: the server's /status shows connected with empty metadata and
+// every command times out. Tear it down so the reconnect loop can replace it.
+function forceReconnect(reason) {
+  manualClose = false;
+  stopKeepalive();
+  const old = ws;
+  ws = null;
+  if (old) {
+    old.onclose = null;
+    old.onerror = null;
+    try { old.close(); } catch {}
+  }
+  setConnected(false, reason || 'connection stalled');
+  connect();
+}
+
 function send(obj) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       if (useBinaryProtocol) {
@@ -343,7 +415,15 @@ function startKeepalive() {
     pingPending = true;
     send({ type: 'ping-server' });
     setTimeout(() => {
-      if (pingPending) { latencyMs = -1; status.latencyMs = latencyMs; }
+      if (pingPending) {
+        pingMisses++;
+        latencyMs = -1;
+        status.latencyMs = latencyMs;
+        // Two unanswered pings (~30s) = half-open socket. Tear it down so the
+        // reconnect loop can replace it — otherwise the zombie stays "OPEN"
+        // locally and every bridge command times out forever.
+        if (pingMisses >= 2) forceReconnect('keepalive timeout');
+      }
     }, 3000);
   }, KEEPALIVE_INTERVAL_MS);
 }
@@ -355,6 +435,7 @@ function stopKeepalive() {
 async function handleIncoming(msg) {
   if (msg?.type === 'pong-server') {
     pingPending = false;
+    pingMisses = 0;
     lastPong = Date.now();
     latencyMs = msg.time ? lastPong - msg.time : 0;
     status.latencyMs = latencyMs;
@@ -392,13 +473,45 @@ async function execOnContentScript(tabId, op, params) {
 }
 
 // ── Command dispatch ──────────────────────────────────────────────────────────
-async function handleCommand(command, params) {
-  // Fast-path: cached commands
+// Infinite AI has historically sent some commands in camelCase. Accept both
+// spellings so no action can ever die on a naming mismatch.
+const COMMAND_ALIASES = {
+  setValue: 'set_value',
+  getValue: 'get_value',
+  getElement: 'get_element',
+  getElements: 'get_elements',
+  getPageText: 'get_page_text',
+  getPageHtml: 'get_page_html',
+  getPageLinks: 'get_page_links',
+  getFormFields: 'get_form_fields',
+  listTabs: 'list_tabs',
+  getActiveTab: 'get_active_tab',
+  newTab: 'new_tab',
+  closeTab: 'close_tab',
+  switchTab: 'switch_tab',
+  clickText: 'click_text',
+  rightClick: 'right_click',
+  getCookies: 'get_cookies',
+  clearCookies: 'clear_cookies',
+  getHistory: 'get_history',
+  clearHistory: 'clear_history',
+  getDownloads: 'get_downloads',
+  fillForm: 'fill_form',
+  runScript: 'execute_js',
+  executeJs: 'execute_js',
+};
+
+async function handleCommand(rawCommand, params) {
+  const command = COMMAND_ALIASES[rawCommand] || rawCommand;
+  // Fast-path: cached commands. The cache is dropped by every mutating
+  // command below (see MUTATING), so a click can never be followed by a
+  // read of the pre-click DOM.
   if (CACHEABLE.has(command)) {
     const key = cacheKey(command, params);
     const cached = cacheGet(key);
     if (cached) return cached;
   }
+  if (MUTATING.has(command)) invalidateCache();
 
   let result;
   switch (command) {
@@ -637,7 +750,10 @@ async function handleCommand(command, params) {
     }
 
     case 'cookie_get': {
-      const cookies = await chrome.cookies.getAll({ url: params.url || '', name: params.name });
+      // An empty `url` is rejected by Chrome — the key must be omitted instead.
+      const cookieQuery = { ...(params.url ? { url: params.url } : params.domain ? { domain: params.domain } : {}) };
+      if (params.name) cookieQuery.name = params.name;
+      const cookies = await chrome.cookies.getAll(cookieQuery);
       result = {
         cookies: cookies.map(c => ({
           name: c.name, value: c.value, domain: c.domain,
@@ -1084,24 +1200,13 @@ async function handleCommand(command, params) {
     }
 
     case 'get_webgl_info': {
+      // There is no DOM in a service worker, so this has to run in the page.
+      // Delegating makes the command actually work instead of always answering
+      // "not available".
       try {
-        const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-        if (!gl) {
-          result = { error: 'WebGL not available' };
-          break;
-        }
-        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        result = {
-          vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
-          renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
-          version: gl.getParameter(gl.VERSION),
-          shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
-          maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
-          maxViewportDims: gl.getParameter(gl.MAX_VIEWPORT_DIMS),
-        };
-      } catch {
-        result = { error: 'WebGL info not available' };
+        result = await pageOp('getWebglInfo', {});
+      } catch (err) {
+        result = { error: String(err?.message || err) };
       }
       break;
     }
@@ -1296,38 +1401,73 @@ async function handleCommand(command, params) {
 }
 
 // ── Content script operations (fast path — no script injection) ────────────────
-async function contentScriptOp(op, params) {
+// Browser-internal pages (chrome://, edge://, the web store, other extensions)
+// genuinely cannot be scripted. about:blank is allowed through: it is what a
+// freshly opened tab is, and the navigate/click that follows takes over.
+const SCRIPTABLE_URL = /^(https?|file|about):/i;
+function assertScriptable(url) {
+  const raw = String(url || '');
+  if (!raw) throw new Error('That tab has no address yet — navigate it first.');
+  if (!SCRIPTABLE_URL.test(raw)) {
+    const scheme = raw.split(':')[0] || 'this';
+    throw new Error(`Infinite AI cannot drive ${scheme}: pages (the browser protects them). Open a normal web page and try again.`);
+  }
+}
+
+async function contentScriptOp(op, params, frameId) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id) throw new Error('No active tab available');
-  if (!/^(https?|file):/.test(String(tab.url || ''))) throw new Error(`Cannot automate protected page: ${tab.url}`);
+  assertScriptable(tab.url);
 
-  // Try content script first (fastest path)
+  // Try the content script first (fastest path). The frame is explicit rather
+  // than broadcast: without it Chrome answers from every frame, so one click
+  // would also fire inside ad/news/recaptcha iframes and the reply could come
+  // from any of them. Callers can still target a subframe on purpose.
+  // Callers can target a subframe on purpose by passing params.frameId; the
+  // top frame is the default so a broadcast never happens by accident.
+  const frame = Number.isInteger(frameId)
+    ? frameId
+    : params && Number.isInteger(params.frameId)
+      ? params.frameId
+      : 0;
+  const target = { frameId: frame };
   try {
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: 'bridge-content-op',
-      op,
-      params,
-    });
+    const response = await chrome.tabs.sendMessage(
+      tab.id,
+      { type: 'bridge-content-op', op, params },
+      target,
+    );
     if (response?.ok) return response.data;
     if (response?.error) throw new Error(response.error);
-  } catch {
-    // Content script not injected — fall back to script injection
+  } catch (err) {
+    // A real failure inside the page is reported as-is; only a missing content
+    // script (no receiver / detached frame) falls through to injection.
+    if (err instanceof Error && /Cannot drive|No active tab/.test(err.message)) throw err;
   }
 
   // Fallback: inject PAGE_EXEC via scripting API
-  return pageOp(op, params);
+  return pageOp(op, params, frame);
 }
 
 // ── Page automation helpers (fallback — script injection) ──────────────────────
-async function pageOp(op, params) {
+async function pageOp(op, params, frameId) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id) throw new Error('No active tab available');
-  if (!/^(https?|file):/.test(String(tab.url || ''))) throw new Error(`Cannot automate protected page: ${tab.url}`);
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id, allFrames: false },
-    func: PAGE_EXEC,
-    args: [op, params],
-  });
+  assertScriptable(tab.url);
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: Number.isInteger(frameId) ? { tabId: tab.id, frameIds: [frameId] } : { tabId: tab.id, allFrames: false },
+      func: PAGE_EXEC,
+      args: [op, params],
+    });
+  } catch (err) {
+    // A blank tab cannot host an injected script until it has a real origin.
+    if (/Cannot access|frame with ID|Cannot script|about:blank/i.test(String(err?.message || err))) {
+      throw new Error('That tab has no page loaded yet — navigate it first, then run the command again.');
+    }
+    throw err;
+  }
   const last = results?.[results.length - 1];
   if (!last) throw new Error('No execution result');
   if (last.result?.__error) throw new Error(last.result.__error);
@@ -1677,15 +1817,11 @@ const PAGE_EXEC = function (op, params) {
       return out({ value: el.value || el.textContent || '' });
     }
     case 'batch': {
-      const ops = (params.ops || []);
-      const results = [];
-      for (const item of ops) {
-        if (item && typeof item.op === 'string') {
-          try { results.push({ op: item.op, ...PAGE_EXEC(item.op, item.params || {}) }); }
-          catch (e) { results.push({ op: item.op, __error: String(e?.message || e) }); }
-        }
-      }
-      return out({ results });
+      // Batching is owned by the service worker (handleCommand runs each op
+      // through the fastest available path). A page-context batch could not
+      // recurse into itself here — executeScript serializes this function body
+      // only, so the name PAGE_EXEC does not exist inside the page.
+      return out({ __error: 'batch runs in the extension worker, not the page context' });
     }
     case 'getFormData': {
       const forms = Array.from(document.forms).map(f => {
@@ -1739,6 +1875,20 @@ const PAGE_EXEC = function (op, params) {
         return { headers, rows: body, rowCount: rows.length - 1 };
       });
       return out({ tables: data });
+    }
+    case 'getWebglInfo': {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return fail('WebGL is not available on this page');
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      return out({
+        vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+        renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+        version: gl.getParameter(gl.VERSION),
+        shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+        maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+        maxViewportDims: Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS) || []),
+      });
     }
     case 'getPageMeta': {
       const meta = {};
@@ -1803,6 +1953,13 @@ function ensureAlarm() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name !== ALARM_NAME) return;
+  // A stuck CONNECTING socket blocks connect()'s early-return forever, so a
+  // handshake that never completes used to wedge the bridge until Chrome
+  // restarted. Replace it; otherwise just ensure we are connected.
+  if (ws && ws.readyState === WebSocket.CONNECTING && connectingSince && Date.now() - connectingSince > 15000) {
+    forceReconnect('handshake stalled');
+    return;
+  }
   if (!ws || ws.readyState !== WebSocket.OPEN) connect();
 });
 
@@ -1810,16 +1967,11 @@ chrome.runtime.onStartup.addListener(() => { ensureAlarm(); connect(); });
 chrome.runtime.onInstalled.addListener(() => { ensureAlarm(); connect(); });
 chrome.runtime.onSuspend.addListener(() => { ensureAlarm(); });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type === 'get-status') { sendResponse(status); return false; }
-  if (msg?.type === 'content-script-ready') {
-    status.contentScriptsReady++;
-    return false;
-  }
-  if (msg?.type === 'reconnect') {
-connect();
-
-// ── Detach helpers ──────────────────────────────────────────────────────────
+// ── Detach helpers ────────────────────────────────────────────────────────────
+// Module scope on purpose: these used to live inside the `reconnect` branch of
+// the message listener, so `detach-debugger` (the popup's Emergency Stop) threw
+// "not a function" on any service-worker start that had not handled `reconnect`
+// first — the stop button silently did nothing.
 async function detachAllDebuggedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
@@ -1835,23 +1987,48 @@ async function detachAllDebuggedTabs() {
     }
   } catch {}
 }
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Only this extension may drive the bridge. Without this guard any other
+  // installed extension could read cookies/history, run script in your pages and
+  // attach the debugger by sending {type:'exec'}.
+  if (sender?.id && sender.id !== chrome.runtime.id) return false;
+
+  if (msg?.type === 'get-status') { sendResponse(status); return false; }
+  if (msg?.type === 'content-script-ready') {
+    status.contentScriptsReady++;
+    return false;
+  }
+  if (msg?.type === 'reconnect') {
+    connect();
     sendResponse({ ok: true });
     return false;
   }
   if (msg?.type === 'detach-debugger') {
-    detachAllDebuggedTabs();
+    void detachAllDebuggedTabs();
+    // Stay down: without this the close below immediately reconnected, so
+    // "Emergency Stop" could never hold.
+    manualClose = true;
     setConnected(false, 'detached by user');
-    if (typeof ws !== 'undefined' && ws) { try { ws.close(); } catch {} }
+    if (ws) { try { ws.close(); } catch {} }
+    invalidateCache();
     sendResponse({ ok: true });
     return false;
   }
   if (msg?.type === 'agent:abort') {
-    // Inform the host bridge that the user pressed Emergency Stop.
-    if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
-      try {
-        ws.send(JSON.stringify({ id: 'agent:abort-' + Date.now(), type: 'agent:abort', reason: msg.reason || 'emergency-stop' }));
-      } catch {}
-    }
+    // Tell the host the run was aborted (goes out in whichever wire format is
+    // active — a raw JSON frame on a binary socket is undecodable).
+    send({
+      type: 'agent:abort',
+      reason: msg.reason || 'emergency-stop',
+    });
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg?.type === 'resume-bridge') {
+    // Undo Emergency Stop: allow the reconnect loop to run again.
+    manualClose = false;
+    connect();
     sendResponse({ ok: true });
     return false;
   }

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { useChatStore } from '../../stores/chat';
 import {
   Globe,
   ArrowLeft,
@@ -21,6 +22,7 @@ import {
   Activity,
   X,
 } from 'lucide-react';
+import { LiveDesktopStrip } from './LiveDesktopStrip';
 
 interface ActivityLogEntry {
   id: string;
@@ -72,6 +74,26 @@ export function BrowserControlView() {
     ].slice(0, 200));
   }, []);
 
+  /**
+   * Every automation control here hands the job to the agent.
+   *
+   * These handlers used to write a line into the local activity log and claim
+   * success. They never touched the page: the extract button literally returned
+   * the placeholder string `[Extracted content from "…"]` as though it were real
+   * data. Buttons that lie are worse than buttons that are absent, so they now
+   * do the real thing — the agent runs the InAppBrowser, which is a genuine
+   * browser inside this app, and the log records what was asked and that it was
+   * dispatched rather than inventing an outcome.
+   */
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const runViaAgent = useCallback(
+    (action: string, detail: string, instruction: string) => {
+      addLog(action, detail, 'Sent to Infinite AI — result appears in Chats');
+      void sendMessage(instruction);
+    },
+    [addLog, sendMessage],
+  );
+
   const handleNavigate = () => {
     let target = url.trim();
     if (!target || target === 'https://') return;
@@ -80,49 +102,46 @@ export function BrowserControlView() {
     }
     setCurrentUrl(target);
     setPageTitle(target);
-    addLog('Navigate', target, 'Page loaded');
+    runViaAgent('Navigate', target, `Open ${target} in the in-app browser and tell me what the page says.`);
   };
 
-  const handleBack = () => {
-    addLog('Navigate', 'Back', 'Navigated back');
-  };
+  const handleBack = () => runViaAgent('Navigate', 'Back', `Go back one page in the in-app browser.`);
 
-  const handleForward = () => {
-    addLog('Navigate', 'Forward', 'Navigated forward');
-  };
+  const handleForward = () => runViaAgent('Navigate', 'Forward', `Go forward one page in the in-app browser.`);
 
   const handleRefresh = () => {
-    if (currentUrl) {
-      addLog('Navigate', 'Refresh', 'Page refreshed');
-    }
+    if (currentUrl) runViaAgent('Navigate', 'Refresh', `Reload ${currentUrl} in the in-app browser.`);
   };
 
   const handleClick = () => {
-    if (!clickSelector.trim()) return;
-    addLog('Click', clickSelector, `Clicked element: ${clickSelector}`);
+    const selector = clickSelector.trim();
+    if (!selector) return;
+    runViaAgent('Click', selector, `In the in-app browser, click the element matching the CSS selector "${selector}".`);
     setClickSelector('');
   };
 
   const handleFill = () => {
-    if (!fillSelector.trim()) return;
-    addLog('Fill', `${fillSelector} = "${fillValue}"`, `Filled ${fillSelector} with "${fillValue}"`);
+    const selector = fillSelector.trim();
+    if (!selector) return;
+    runViaAgent('Fill', `${selector} = "${fillValue}"`, `In the in-app browser, type "${fillValue}" into the element matching "${selector}".`);
     setFillSelector('');
     setFillValue('');
   };
 
   const handleExtract = () => {
-    if (!extractSelector.trim()) return;
-    addLog('Extract', extractSelector, `Extracted from ${extractSelector}`);
-    setExtractResult(`[Extracted content from "${extractSelector}"]`);
+    const selector = extractSelector.trim();
+    if (!selector) return;
+    // No fabricated result: the real text arrives from the agent in Chats.
+    setExtractResult('Sent to Infinite AI — the real extracted text appears in Chats.');
+    runViaAgent('Extract', selector, `In the in-app browser, read the text of the element matching "${selector}" and give me exactly what it says.`);
   };
 
-  const handleScreenshot = () => {
-    addLog('Screenshot', 'Full page', 'Screenshot captured');
-  };
+  const handleScreenshot = () => runViaAgent('Screenshot', 'Full page', 'Take a screenshot of the current page in the in-app browser and describe it.');
 
   const handleExecuteScript = () => {
-    if (!scriptCode.trim()) return;
-    addLog('Script', scriptCode.slice(0, 60), 'Script executed');
+    const code = scriptCode.trim();
+    if (!code) return;
+    runViaAgent('Script', code.slice(0, 60), `Run this in the in-app browser and tell me the result:\n\n${code}`);
     setScriptCode('');
   };
 
@@ -514,6 +533,12 @@ export function BrowserControlView() {
                   Clear All Steps
                 </button>
               )}
+            </div>
+
+            <div className="p-4 border-b border-white/10">
+              {/* Replaces the standalone "Live Computer" page — same capability,
+                  no extra screen. */}
+              <LiveDesktopStrip />
             </div>
 
             <div className="p-4">

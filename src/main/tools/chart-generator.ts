@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Tool, ToolContext, ToolResult } from './base.js';
+import { outputDirectoryDenial } from './write-guard.js';
 
 const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || '.', 'infinite-charts');
 
@@ -323,6 +324,8 @@ export const chartGeneratorTool: Tool = {
           if (a.format === 'png') {
             const pngBuffer = await generatePNG(a);
             const outDir = a.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
             await mkdir(outDir, { recursive: true });
             const filename = a.filename || `chart-${randomUUID().slice(0, 8)}.png`;
             const filePath = join(outDir, filename);
@@ -331,6 +334,8 @@ export const chartGeneratorTool: Tool = {
           }
           const svg = generateSVG(a);
           const outDir = a.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, _ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
           await mkdir(outDir, { recursive: true });
           const filename = a.filename || `chart-${randomUUID().slice(0, 8)}.svg`;
           const filePath = join(outDir, filename);

@@ -15,7 +15,7 @@ vi.mock('../session/store.js', () => ({
   createSession: async (s: { title?: string }) => ({ id: `sess-${String(s.title ?? '').length}-${Date.now()}` }),
 }));
 
-import { whatsAppLink } from './whatsapp-link.js';
+import { whatsAppLink, whatsappTurnBudget } from './whatsapp-link.js';
 
 let testHome = '';
 const savedEnv: Record<string, string | undefined> = {};
@@ -71,6 +71,18 @@ const assistantReply = (text: string) => [{
   timestamp: Date.now(),
 }];
 
+/**
+ * Poll until `cond` is true. Fixed sleeps flake under full-suite load: the
+ * handler's dynamic imports can take longer than any fixed guess.
+ */
+async function waitFor(cond: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error(`waitFor: condition not met within ${timeoutMs}ms`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe('whatsapp turn model selection', () => {
   it('runs the turn on the selected provider/model/cwd, never Ollama', async () => {
     const { handlers, sent, sock } = mockSocket();
@@ -91,7 +103,7 @@ describe('whatsapp turn model selection', () => {
     });
     handlers.get('connection.update')!({ connection: 'open' });
     handlers.get('messages.upsert')!({ type: 'notify', messages: [selfMsg('m1', 'hello pc')] });
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => seen.length > 0 && sent.length > 0);
 
     expect(seen).toHaveLength(1);
     expect(seen[0].provider).toBe('nvidia');
@@ -112,11 +124,61 @@ describe('whatsapp turn model selection', () => {
     });
     handlers.get('connection.update')!({ connection: 'open' });
     handlers.get('messages.upsert')!({ type: 'notify', messages: [selfMsg('m2', 'hello?')] });
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => sent.length > 0);
 
     expect(ran).toBe(0);
     expect(sent).toHaveLength(1);
     expect(sent[0].text).toMatch(/No AI provider selected/);
     expect(sent[0].text).toMatch(/Settings → AI Provider/);
+  });
+});
+
+describe('whatsapp turn budget', () => {
+  it('gives conversational self-chat a tight ceiling so replies come back fast', () => {
+    expect(whatsappTurnBudget('hello pc')).toEqual({ maxTurns: 6, wallClockMs: 3 * 60_000 });
+    expect(whatsappTurnBudget('what files changed today?')).toEqual({ maxTurns: 6, wallClockMs: 3 * 60_000 });
+    expect(whatsappTurnBudget('thanks!')).toEqual({ maxTurns: 6, wallClockMs: 3 * 60_000 });
+  });
+
+  it('gives real tasks a working-size budget', () => {
+    expect(whatsappTurnBudget('build me a dashboard and deploy it')).toEqual({
+      maxTurns: 30,
+      wallClockMs: 15 * 60_000,
+    });
+    expect(whatsappTurnBudget('research competitors and write a plan')).toEqual({
+      maxTurns: 30,
+      wallClockMs: 15 * 60_000,
+    });
+    // Long messages are always treated as tasks regardless of wording.
+    expect(whatsappTurnBudget('x'.repeat(300)).maxTurns).toBe(30);
+  });
+
+  it('passes the per-message budget into the agent run', async () => {
+    const { handlers, sent, sock } = mockSocket();
+    const seen: Array<{ maxTurns?: number; wallClockMs?: number }> = [];
+    await whatsAppLink.start({
+      makeSocket: async () => sock,
+      loadAuth: async () => ({ state: {}, saveCreds: async () => undefined }),
+      getSetting: ((key: string) =>
+        ({ provider: 'nvidia', model: 'meta/llama-3.3-70b-instruct', cwd: 'C:/work' })[key] as unknown) as never,
+      runAgentImpl: (async (
+        _h: never,
+        _u: never,
+        opts: { maxTurns?: number; wallClockMs?: number },
+      ) => {
+        seen.push({ maxTurns: opts.maxTurns, wallClockMs: opts.wallClockMs });
+        return assistantReply('ok') as never[];
+      }) as never,
+    });
+    handlers.get('connection.update')!({ connection: 'open' });
+
+    handlers.get('messages.upsert')!({ type: 'notify', messages: [selfMsg('b1', 'hello pc')] });
+    await waitFor(() => seen.length >= 1 && sent.length >= 1);
+    handlers.get('messages.upsert')!({ type: 'notify', messages: [selfMsg('b2', 'build me a landing page')] });
+    await waitFor(() => seen.length >= 2 && sent.length >= 2);
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual({ maxTurns: 6, wallClockMs: 3 * 60_000 });
+    expect(seen[1]).toEqual({ maxTurns: 30, wallClockMs: 15 * 60_000 });
   });
 });

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Plus, Trash2, Play, Save, Zap, Terminal, Clock, Brain,
   FileCode, MonitorSmartphone, Bell, GitBranch, ChevronRight,
@@ -29,7 +29,16 @@ function generateId(): string {
 
 function getStepConfig(step: WorkflowStep): string {
   switch (step.type) {
-    case 'tool_call': return (step.config.command as string) || 'shell command';
+    // Read the keys the executor uses, not the `command` this editor used to
+    // write and never read back. A step with no tool yet says so, so an
+    // unconfigured step is visible as such instead of reading "shell command".
+    case 'tool_call': {
+      const tool = (step.config.tool as string) || '';
+      if (!tool) return 'no tool chosen';
+      const input = step.config.input as Record<string, unknown> | undefined;
+      const detail = typeof input?.command === 'string' ? String(input.command) : '';
+      return detail ? `${tool}: ${detail.slice(0, 40)}` : tool;
+    }
     case 'agent_run': return (step.config.task as string) || 'AI task';
     case 'delay': return `Wait ${step.config.ms || 1000}ms`;
     case 'condition': return (step.config.condition as string) || 'condition';
@@ -49,7 +58,65 @@ function StepConfigEditor({ step, onUpdate, onClose }: {
   const [label, setLabel] = useState(step.label);
   const [onError, setOnError] = useState(step.onError);
 
+  // A Tool Call step is executed by looking up `config.tool` in the real tool
+  // registry and passing `config.input` to it (see builder.ts). This editor used
+  // to collect a single shell `command` string and never a tool name at all, so
+  // every step built here had `config.tool === undefined`, the lookup missed,
+  // and the step did nothing at all while appearing correctly configured. The
+  // fields below are the ones the executor actually reads.
+  const [availableTools, setAvailableTools] = useState<Array<{ name: string; description?: string }>>([]);
+  const [inputText, setInputText] = useState(() => {
+    const existing = step.config.input as Record<string, unknown> | undefined;
+    return existing ? JSON.stringify(existing, null, 2) : '';
+  });
+  const [inputError, setInputError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.api
+      .listTools()
+      .then((list: Array<{ name: string; description?: string }>) => {
+        if (cancelled || !Array.isArray(list)) return;
+        // Sorted by name so the list is stable between openings.
+        setAvailableTools([...list].sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Parse the JSON input, reporting the problem instead of saving junk. */
+  const parseInput = (): Record<string, unknown> | null => {
+    const raw = inputText.trim();
+    if (!raw) return {};
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        setInputError('Input must be a JSON object, e.g. {"command":"npm test"}');
+        return null;
+      }
+      setInputError('');
+      return parsed as Record<string, unknown>;
+    } catch (e) {
+      setInputError(`Invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  };
+
   const handleSave = () => {
+    if (step.type === 'tool_call') {
+      const toolName = String(config.tool ?? '');
+      if (!toolName) {
+        setInputError('Pick the tool this step should run.');
+        return;
+      }
+      const input = parseInput();
+      if (input === null) return;
+      onUpdate({ config: { ...config, tool: toolName, input }, label, onError });
+      onClose();
+      return;
+    }
     onUpdate({ config, label, onError });
     onClose();
   };
@@ -70,12 +137,41 @@ function StepConfigEditor({ step, onUpdate, onClose }: {
               className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           {step.type === 'tool_call' && (
-            <div>
-              <label className="block text-sm font-medium text-white/60 mb-1">Command</label>
-              <textarea value={(config.command as string) || ''} rows={3}
-                onChange={(e) => setConfig({ ...config, command: e.target.value })}
-                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-white/60 mb-1">Tool</label>
+                <select
+                  value={(config.tool as string) || ''}
+                  onChange={(e) => {
+                    const tool = e.target.value;
+                    // One click for a shell command, which is what this editor
+                    // used to *pretend* to collect.
+                    if (tool === 'Bash') setInputText(JSON.stringify({ command: '' }, null, 2));
+                    setConfig({ ...config, tool });
+                  }}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">— choose a tool —</option>
+                  {availableTools.map(t => (
+                    <option key={t.name} value={t.name}>{t.name}</option>
+                  ))}
+                </select>
+                {typeof config.tool === 'string' && config.tool && (
+                  <p className="mt-1 text-xs text-white/40">
+                    {availableTools.find(t => t.name === config.tool)?.description?.slice(0, 160) ?? ''}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/60 mb-1">Input (JSON)</label>
+                <textarea
+                  value={inputText}
+                  rows={4}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder={'{\n  "command": "npm test"\n}'}
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                {inputError && <p className="mt-1 text-xs text-red-400">{inputError}</p>}
+              </div>
+            </>
           )}
           {step.type === 'agent_run' && (
             <div>

@@ -3,7 +3,7 @@
 // via Write/Edit tools, it sets an allow-window so the watcher ignores that change.
 // External edits (manual VS Code, notepad, etc.) trigger a warning notification.
 
-import { watch, statSync, type FSWatcher } from 'node:fs';
+import { watch, statSync, readdirSync, type FSWatcher, type Dirent } from 'node:fs';
 import { join, relative } from 'node:path';
 
 let watcher: FSWatcher | null = null;
@@ -50,10 +50,41 @@ export function setViolationHandler(handler: (file: string) => void): void {
   onViolation = handler;
 }
 
+/**
+ * Record every current mtime as the baseline before watching (test seam).
+ * Windows recursive watch fires spurious "change" events on files that never
+ * changed (AV scans, dev-server reads) — without a baseline, the *first* event
+ * for any path would look like an external edit and warn on every launch
+ * (e.g. `src/renderer/index.html` untouched for weeks).
+ */
+export function seedMtimes(dir: string, cwd: string): void {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // dir may not exist — nothing to baseline
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue; // same filter as the watcher
+      seedMtimes(full, cwd);
+    } else if (entry.isFile()) {
+      const rel = relative(cwd, full).replace(/\\/g, '/');
+      try {
+        noteMtime(rel, statSync(full).mtimeMs);
+      } catch {
+        /* raced away between readdir and stat */
+      }
+    }
+  }
+}
+
 export function startGuard(cwd: string): void {
   if (watcher) return;
   const srcDir = join(cwd, 'src');
   try {
+    seedMtimes(srcDir, cwd); // baseline first: only *advancing* mtimes warn
     watcher = watch(srcDir, { recursive: true }, (_event, filename) => {
       if (!filename) return;
       const fullPath = join(srcDir, filename as string);

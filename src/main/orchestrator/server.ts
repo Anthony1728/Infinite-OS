@@ -18,11 +18,27 @@ const HOST = process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
 
 let agent: CoreAgent | null = null;
 
+// Connected global SSE clients (see GET /api/events). Each receives every
+// OrchestratorEvent as an SSE `event` frame so external consumers can watch
+// agent runs without polling /api/tasks.
+const sseClients = new Set<(frame: string) => void>();
+
+function broadcastEvent(event: unknown): void {
+  const frame = `data: ${JSON.stringify(event)}\n\n`;
+  for (const send of sseClients) {
+    try {
+      send(frame);
+    } catch {
+      sseClients.delete(send);
+    }
+  }
+}
+
 function getAgent(): CoreAgent {
   if (!agent) {
     agent = createCoreAgent({
-      onEvent: (_event) => {
-        // Broadcast to SSE clients (TODO: implement SSE)
+      onEvent: (event) => {
+        broadcastEvent(event);
       },
     });
     // Register built-in tools
@@ -76,6 +92,47 @@ export async function startOrchestratorServer(): Promise<void> {
       timestamp: Date.now(),
       uptime: process.uptime(),
     };
+  });
+
+  // Global event stream (SSE). Broadcasts every OrchestratorEvent emitted by
+  // the agent (start, text_delta, tool_call, tool_result, complete, error).
+  // Clients receive frames as `data: <json>\\n\\n`; a keep-alive comment is
+  // sent every 15s so proxies do not drop idle connections.
+  fastify.get('/api/events', async (request, reply) => {
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (frame: string) => {
+      try {
+        reply.raw.write(frame);
+      } catch {
+        // client gone; cleanup handled by 'close'
+      }
+    };
+
+    // Replay nothing (stateless); clients poll /api/tasks for current state.
+    sseClients.add(send);
+
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(': keep-alive\n\n');
+      } catch {
+        // ignore
+      }
+    }, 15000);
+
+    // Keep the connection open until the client disconnects.
+    return new Promise<void>((resolve) => {
+      request.raw.on('close', () => {
+        clearInterval(heartbeat);
+        sseClients.delete(send);
+        resolve();
+      });
+    });
   });
 
   // List available tools

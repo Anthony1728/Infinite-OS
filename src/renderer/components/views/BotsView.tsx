@@ -283,7 +283,9 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
         </div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+      {/* No pt/pr here: .card-grid-animated owns the glow clearance, and any
+          inset padding on the scroller re-cuts the card shadow. */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
         {loading ? (
           <div className="py-16 text-center text-sm text-zinc-500">Loading bots…</div>
         ) : visible.length === 0 ? (
@@ -304,7 +306,7 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 card-grid-animated pb-6">
             {visible.map((b) => {
               const busy = busyIds.has(b.id);
               const dimmed = hidden.includes(b.id);

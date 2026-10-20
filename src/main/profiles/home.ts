@@ -28,12 +28,16 @@ function sanitizeUid(uid: string): string {
 
 /** Test hook — point the profile home at a temp dir. */
 export function infiniteHome(): string {
-  if (cached) return cached;
+  // The test override wins on EVERY call and is checked before the cache —
+  // otherwise a module-scope caller (e.g. session/store.ts resolving DIR at
+  // import time) pins the real profile first and silently defeats every
+  // test's temp home, writing test artifacts into the user's real data.
   const testOverride = process.env.INFINITE_TEST_HOME;
   if (testOverride) {
     cached = testOverride;
     return cached;
   }
+  if (cached) return cached;
   const base = join(homedir(), '.infinite-ai');
   try {
     const raw = readFileSync(join(base, ACTIVE_PROFILE_FILE), 'utf8');

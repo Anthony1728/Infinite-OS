@@ -1,12 +1,5 @@
 import type { Tool, ToolResult } from './base.js';
-import { BusinessOS } from '../business/crm.js';
-
-let businessOS: BusinessOS | null = null;
-
-function getBusinessOS(): BusinessOS {
-  if (!businessOS) businessOS = new BusinessOS();
-  return businessOS;
-}
+import { getBusinessOS } from '../business/crm.js';
 
 const ACTIONS = [
   'analyze_pipeline',

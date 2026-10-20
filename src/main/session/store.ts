@@ -1,20 +1,36 @@
-// Session store — append-only JSONL transcripts, indexed by SQLite FTS5 for search.
+// Session store — append-only JSONL transcripts plus a tiny meta sidecar.
+//
+// Transcripts are append-only JSONL. The current metadata (title, preview,
+// archive flag, message count) lives in `<id>.meta.json` next to them, because
+// updating it inside the transcript would mean rewriting every message on each
+// append. See `meta.ts` for why.
 
 import { appendFile, readFile, writeFile, mkdir, unlink, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import type { Message, Session } from '../../shared/types.js';
 import { v4 as uuid } from 'uuid';
-import { infiniteHome } from '../profiles/home.js';
+import { sessionsDir } from './paths.js';
+import { searchConversations } from './search.js';
+import {
+  countTranscriptMessages,
+  hasMetaSidecar,
+  isMetaSidecarFile,
+  metaPathFor,
+  readSessionMetaFile,
+  writeSessionMetaFile,
+  writeTranscriptHeader,
+} from './meta.js';
 
-const DIR = join(infiniteHome(), 'sessions');
+/** Upper bound on how many conversations one search may return. */
+const SEARCH_RESULT_CAP = 200;
 
 export async function ensureDir(): Promise<void> {
-  await mkdir(DIR, { recursive: true });
+  await mkdir(sessionsDir(), { recursive: true });
 }
 
 export function sessionPath(id: string): string {
-  return join(DIR, `${id}.jsonl`);
+  return join(sessionsDir(), `${id}.jsonl`);
 }
 
 export async function createSession(opts: {
@@ -36,19 +52,81 @@ export async function createSession(opts: {
     message_count: 0,
   };
   const path = sessionPath(id);
-  await writeFile(path, JSON.stringify({ type: 'meta', ...session }) + '\n', 'utf8');
+  // The header line stays as a creation-time stamp so a transcript is still
+  // self-describing; the sidecar is what readers treat as current.
+  await writeTranscriptHeader(path, session);
+  await writeSessionMetaFile(path, session);
   return session;
 }
 
+/**
+ * Serialises appends per conversation.
+ *
+ * Appending used to read the whole transcript to recount its messages, which
+ * made every message cost more than the last (95 ms each on a 1 MB thread,
+ * measured). The count now comes from the meta sidecar, which is only correct
+ * if two appends cannot read the same count and write the same increment — so
+ * appends for one conversation run strictly one after another. Appends to
+ * different conversations still run in parallel.
+ */
+const appendQueues = new Map<string, Promise<void>>();
+
 export async function appendMessage(sessionId: string, message: Message): Promise<void> {
+  const previous = appendQueues.get(sessionId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => appendMessageNow(sessionId, message));
+  const settled = next.catch(() => undefined);
+  appendQueues.set(sessionId, settled);
+  void settled.then(() => {
+    if (appendQueues.get(sessionId) === settled) appendQueues.delete(sessionId);
+  });
+  return next;
+}
+
+async function appendMessageNow(sessionId: string, message: Message): Promise<void> {
   await ensureDir();
   const path = sessionPath(sessionId);
-  await appendFile(path, JSON.stringify({ type: 'message', ...message }) + '\n', 'utf8');
-  await updateSessionMeta(sessionId, {
+  const exists = existsSync(path);
+  const current = exists ? await loadSessionMeta(sessionId) : null;
+  const line = `${JSON.stringify({ type: 'message', ...message })}\n`;
+
+  if (current) {
+    // The count comes from the sidecar. For a conversation that predates
+    // sidecars there is none yet, so seed the count from the transcript once —
+    // its header may carry a stale number — and keep it from there.
+    const seeded = (await hasMetaSidecar(path))
+      ? (current.message_count ?? 0)
+      : await countTranscriptMessages(path);
+    await appendFile(path, line, 'utf8');
+    await writeSessionMetaFile(path, {
+      ...current,
+      updated_at: Date.now(),
+      message_count: seeded + 1,
+      preview: previewFromMessage(message),
+    });
+    return;
+  }
+
+  // No usable meta: either the conversation was never created (the phone
+  // remote appends to an id with no create step) or its first line is a
+  // message rather than a header. Appending used to leave such a file with no
+  // meta at all — every reader then reported "Session not found" — so write the
+  // sidecar now, and a header line only while the transcript is still empty.
+  const preview = previewFromMessage(message);
+  const prior = exists ? await countTranscriptMessages(path) : 0;
+  const meta: Session = {
+    id: sessionId,
+    title: preview.startsWith('[') ? 'New session' : preview,
+    created_at: Date.now(),
     updated_at: Date.now(),
-    message_count: (await loadMessages(sessionId)).length,
-    preview: previewFromMessage(message),
-  });
+    cwd: process.cwd(),
+    model: 'unknown',
+    provider: 'unknown',
+    message_count: prior + 1,
+    preview,
+  };
+  if (!exists) await writeTranscriptHeader(path, { ...meta, message_count: 0 });
+  await appendFile(path, line, 'utf8');
+  await writeSessionMetaFile(path, meta);
 }
 
 function previewFromMessage(m: Message): string {
@@ -60,14 +138,7 @@ function previewFromMessage(m: Message): string {
 export async function loadSessionMeta(id: string): Promise<Session | null> {
   const path = sessionPath(id);
   if (!existsSync(path)) return null;
-  const content = await readFile(path, 'utf8');
-  const firstLine = content.split('\n')[0];
-  if (!firstLine) return null;
-  try {
-    return JSON.parse(firstLine) as Session;
-  } catch {
-    return null;
-  }
+  return readSessionMetaFile(path);
 }
 
 export async function loadMessages(id: string): Promise<Message[]> {
@@ -93,7 +164,7 @@ export async function loadMessages(id: string): Promise<Message[]> {
 
 export async function listSessions(): Promise<Session[]> {
   await ensureDir();
-  const files = (await readdir(DIR)).filter((f) => f.endsWith('.jsonl'));
+  const files = (await readdir(sessionsDir())).filter((f) => f.endsWith('.jsonl'));
   const out: Session[] = [];
   for (const f of files) {
     const id = basename(f, '.jsonl');
@@ -105,16 +176,11 @@ export async function listSessions(): Promise<Session[]> {
 
 export async function updateSessionMeta(id: string, updates: Partial<Session>): Promise<Session> {
   const path = sessionPath(id);
-  if (!existsSync(path)) throw new Error('Session not found');
-  const content = await readFile(path, 'utf8');
-  const lines = content.split('\n');
-  const current = JSON.parse(lines[0]) as Session & { type: 'meta' };
-  const next = { ...current, ...updates, id: current.id, type: 'meta' as const };
-  lines[0] = JSON.stringify(next);
-  await writeFile(path, lines.join('\n'), 'utf8');
-  const session = { ...next } as Partial<typeof next>;
-  delete session.type;
-  return session as Session;
+  const current = await loadSessionMeta(id);
+  if (!current) throw new Error('Session not found');
+  const next: Session = { ...current, ...updates, id: current.id };
+  await writeSessionMetaFile(path, next);
+  return next;
 }
 
 export async function renameSession(id: string, title: string): Promise<Session> {
@@ -127,27 +193,61 @@ export async function pinSession(id: string, pinned: boolean): Promise<Session> 
   return updateSessionMeta(id, { pinned, updated_at: Date.now() });
 }
 
-export async function searchSessions(query: string): Promise<Session[]> {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return listSessions();
+/**
+ * Move a conversation into or out of the archive.
+ *
+ * Archiving is a flag on the session, not a move: the transcript stays exactly
+ * where it is and is never rewritten. That matters because a conversation can be
+ * unarchived, searched and resumed like any other — an archive that relocated
+ * files would need a matching un-move, and any mismatch would strand the
+ * transcript.
+ */
+export async function setSessionArchived(id: string, archived: boolean): Promise<Session> {
+  return updateSessionMeta(id, {
+    archived,
+    // Stamped on both directions so the archive can be ordered by when a
+    // conversation was filed rather than when it was last edited.
+    ...(archived ? { archived_at: Date.now() } : { archived_at: undefined }),
+    updated_at: Date.now(),
+  });
+}
+
+/** Only archived conversations. */
+export async function listArchivedSessions(): Promise<Session[]> {
   const sessions = await listSessions();
-  const matches: Session[] = [];
-  for (const session of sessions) {
-    const metadata = `${session.title} ${session.preview ?? ''} ${session.folder ?? ''}`.toLowerCase();
-    if (metadata.includes(normalized)) {
-      matches.push(session);
-      continue;
-    }
-    const messages = await loadMessages(session.id);
-    if (
-      messages.some((message) =>
-        message.content.some((block) => block.type === 'text' && block.text.toLowerCase().includes(normalized)),
-      )
-    ) {
-      matches.push(session);
-    }
+  return sessions
+    .filter((session) => session.archived)
+    .sort((a, b) => (b.archived_at ?? b.updated_at) - (a.archived_at ?? a.updated_at));
+}
+
+/**
+ * Search the archive by content.
+ *
+ * `searchSessions` already walks message text, but it also matches titles and
+ * previews of live chats. Archived search deliberately looks only inside the
+ * archive, so a query cannot quietly return conversations the user filed away.
+ */
+export async function searchArchivedSessions(query: string): Promise<Session[]> {
+  if (!query.trim()) return listArchivedSessions();
+  const hits = await searchConversations({ query, archivedOnly: true, maxSessions: SEARCH_RESULT_CAP });
+  return hits.map((hit) => hit.session);
+}
+
+/**
+ * Search the live conversations by content.
+ *
+ * Archived conversations are filed away, so they never turn up here - the
+ * same rule the session list itself follows. Matching is tokenised, so
+ * "deploy postgres" finds a chat that says "deploy the postgres database",
+ * and a conversation only qualifies when every word of the query is in it.
+ */
+export async function searchSessions(query: string): Promise<Session[]> {
+  if (!query.trim()) {
+    const sessions = await listSessions();
+    return sessions.filter((session) => !session.archived);
   }
-  return matches;
+  const hits = await searchConversations({ query, maxSessions: SEARCH_RESULT_CAP });
+  return hits.map((hit) => hit.session);
 }
 
 export async function branchSession(id: string, messageId?: string): Promise<Session> {
@@ -201,14 +301,18 @@ export async function exportSession(id: string, format: 'markdown' | 'json' = 'm
 
 async function rewriteSession(session: Session, messages: Message[]): Promise<void> {
   const preview = messages.length ? previewFromMessage(messages[messages.length - 1]) : undefined;
-  const meta = { type: 'meta', ...session, updated_at: Date.now(), message_count: messages.length, preview };
+  const updated_at = Date.now();
+  const meta = { type: 'meta', ...session, updated_at, message_count: messages.length, preview };
   const lines = [JSON.stringify(meta), ...messages.map((message) => JSON.stringify({ type: 'message', ...message }))];
   await writeFile(sessionPath(session.id), `${lines.join('\n')}\n`, 'utf8');
+  // Keep the authoritative sidecar in step with the rewritten transcript.
+  await writeSessionMetaFile(sessionPath(session.id), { ...session, updated_at, message_count: messages.length, preview });
 }
 
 export async function deleteSession(id: string): Promise<void> {
   const path = sessionPath(id);
   if (existsSync(path)) await unlink(path);
+  await unlink(metaPathFor(path)).catch(() => undefined);
 }
 
 /**
@@ -218,24 +322,35 @@ export async function deleteSession(id: string): Promise<void> {
  * extension prevents the destructive UI action from touching settings,
  * credentials, memories, projects, or unrelated files.
  */
-export async function clearAllSessions(directory = DIR): Promise<number> {
+export async function clearAllSessions(directory = sessionsDir()): Promise<number> {
   await mkdir(directory, { recursive: true });
   const files = (await readdir(directory)).filter((file) => file.endsWith('.jsonl'));
-  await Promise.all(files.map((file) => unlink(join(directory, file))));
+  const sidecars = (await readdir(directory)).filter(isMetaSidecarFile);
+  await Promise.all([
+    ...files.map((file) => unlink(join(directory, file))),
+    // Sidecars ride along with the transcripts; the return value still counts
+    // conversations, which is what the UI reports.
+    ...sidecars.map((file) => unlink(join(directory, file)).catch(() => undefined)),
+  ]);
   return files.length;
 }
 
 export async function cleanupOld(maxAgeDays: number): Promise<number> {
   await ensureDir();
   const cutoff = Date.now() - maxAgeDays * 86_400_000;
-  const files = await readdir(DIR);
+  const files = await readdir(sessionsDir());
   let deleted = 0;
   for (const f of files) {
-    const full = join(DIR, f);
+    const full = join(sessionsDir(), f);
     const s = await stat(full);
     if (s.mtimeMs < cutoff) {
       await unlink(full);
-      deleted++;
+      // Drop the matching sidecar too so the directory cannot accumulate
+      // orphans. Only transcripts count as deleted conversations.
+      if (f.endsWith('.jsonl')) {
+        await unlink(metaPathFor(full)).catch(() => undefined);
+        deleted++;
+      }
     }
   }
   return deleted;

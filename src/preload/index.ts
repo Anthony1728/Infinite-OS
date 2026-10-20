@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc.js';
 
 const api = {
-  sendMessage: (args: { sessionId: string; message: unknown; displayMessage?: unknown; provider: string; model: string; cwd: string; planMode?: boolean }) =>
+  sendMessage: (args: { sessionId: string; message: unknown; displayMessage?: unknown; provider: string; model: string; cwd: string; planMode?: boolean; background?: boolean; untilDone?: boolean }) =>
     ipcRenderer.invoke(IPC.CHAT_SEND, args),
   resolvePlan: (args: { sessionId: string; approved: boolean }) => ipcRenderer.invoke(IPC.CHAT_PLAN_RESOLVE, args),
   resolveQuestion: (args: { id: string; answers: Record<string, string>; skipped: Record<string, boolean> }) =>
@@ -32,6 +32,12 @@ const api = {
   clearAllSessions: () => ipcRenderer.invoke(IPC.SESSION_CLEAR_ALL),
   renameSession: (args: { sessionId: string; title: string }) => ipcRenderer.invoke(IPC.SESSION_RENAME, args),
   pinSession: (args: { sessionId: string; pinned: boolean }) => ipcRenderer.invoke(IPC.SESSION_PIN, args),
+
+  // ── Archive ──────────────────────────────────────────────────────────────
+  archiveSession: (args: { sessionId: string; archived: boolean }) =>
+    ipcRenderer.invoke(IPC.SESSION_ARCHIVE_SET, args),
+  archiveList: () => ipcRenderer.invoke(IPC.SESSION_ARCHIVE_LIST),
+  archiveSearch: (args: { query: string }) => ipcRenderer.invoke(IPC.SESSION_ARCHIVE_SEARCH, args),
   searchSessions: (args: { query: string }) => ipcRenderer.invoke(IPC.SESSION_SEARCH, args),
   branchSession: (args: { sessionId: string; messageId?: string }) => ipcRenderer.invoke(IPC.SESSION_BRANCH, args),
   updateSessionMessage: (args: { sessionId: string; messageId: string; content: unknown }) =>
@@ -58,6 +64,52 @@ const api = {
   opencodeCliUpgrade: () => ipcRenderer.invoke(IPC.OPENCODE_CLI_UPGRADE),
   opencodeServerRestart: () => ipcRenderer.invoke(IPC.OPENCODE_SERVER_RESTART),
 
+  // Continuous self-evolution loop (Settings → Self-Evolve)
+  evolveLoopStart: (args?: { intervalMs?: number }) => ipcRenderer.invoke(IPC.EVOLVE_LOOP_START, args ?? {}),
+  evolveLoopStop: () => ipcRenderer.invoke(IPC.EVOLVE_LOOP_STOP),
+  evolveLoopStatus: () => ipcRenderer.invoke(IPC.EVOLVE_LOOP_STATUS),
+
+  // Self-Evolution Engine. These handlers were registered in main but never
+  // exposed here, so the renderer had no way to call them and the feature was
+  // unreachable — the same bug as FreeBuff, where the code was finished and
+  // tested and simply never wired to anything the user can reach.
+  selfEvolveAnalyze: () => ipcRenderer.invoke(IPC.SELF_EVOLVE_ANALYZE),
+  selfEvolveSuggestions: (args?: { status?: 'suggested' | 'accepted' | 'dismissed' }) =>
+    ipcRenderer.invoke(IPC.SELF_EVOLVE_SUGGESTIONS, args ?? {}),
+  selfEvolveAccept: (args: { id: string }) => ipcRenderer.invoke(IPC.SELF_EVOLVE_ACCEPT, args),
+  selfEvolveDismiss: (args: { id: string }) => ipcRenderer.invoke(IPC.SELF_EVOLVE_DISMISS, args),
+  selfEvolveStatus: () => ipcRenderer.invoke(IPC.SELF_EVOLVE_STATUS),
+  selfEvolvePrompt: () => ipcRenderer.invoke(IPC.SELF_EVOLVE_PROMPT),
+  selfEvolveEvolve: () => ipcRenderer.invoke(IPC.SELF_EVOLVE_EVOLVE),
+
+  /**
+   * Background builds. The five handlers existed in main with no preload
+   * exposure and no caller, so the whole feature was unreachable.
+   */
+  buildStart: () => ipcRenderer.invoke(IPC.BUILD_START),
+  buildStatus: () => ipcRenderer.invoke(IPC.BUILD_STATUS),
+  buildCancel: () => ipcRenderer.invoke(IPC.BUILD_CANCEL),
+  buildHasUpdate: () => ipcRenderer.invoke(IPC.BUILD_HAS_UPDATE),
+  buildClearUpdate: () => ipcRenderer.invoke(IPC.BUILD_CLEAR_UPDATE),
+  onBuildStatus: (cb: (status: unknown) => void) => {
+    const listener = (_e: unknown, status: unknown) => cb(status);
+    ipcRenderer.on(IPC.BUILD_STATUS_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC.BUILD_STATUS_CHANGED, listener);
+  },
+
+  /** Token and cost totals across conversations. */
+  usageGet: () => ipcRenderer.invoke(IPC.USAGE_GET),
+  usageReset: () => ipcRenderer.invoke(IPC.USAGE_RESET),
+  evolveLoopRunNow: () => ipcRenderer.invoke(IPC.EVOLVE_LOOP_RUN_NOW),
+
+  // Self-apply: rebuild + relaunch so packaged builds load self-edits
+  selfApplyRun: () => ipcRenderer.invoke(IPC.SELF_APPLY_RUN),
+  selfApplyStatus: () => ipcRenderer.invoke(IPC.SELF_APPLY_STATUS),
+  onSelfApplyEvent: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.SELF_APPLY_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.SELF_APPLY_EVENT, handler);
+  },
   listTools: () => ipcRenderer.invoke(IPC.TOOLS_LIST),
 
   // Action audit log (query the agent's black-box record)
@@ -246,6 +298,54 @@ const api = {
   automationCancelRun: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CANCEL_RUN, args),
   automationCreateFromNL: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CREATE_FROM_NL, args),
 
+  // Workers
+  workerList: () => ipcRenderer.invoke(IPC.WORKERS_LIST),
+  workerGet: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_GET, args),
+  workerCreate: (args: unknown) => ipcRenderer.invoke(IPC.WORKERS_CREATE, args),
+  workerUpdate: (args: { workerId: string; input: unknown }) => ipcRenderer.invoke(IPC.WORKERS_UPDATE, args),
+  workerDelete: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_DELETE, args),
+  workerRun: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_RUN, args),
+  workerPause: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_PAUSE, args),
+  workerResume: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_RESUME, args),
+  workerCancel: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_CANCEL, args),
+  workerInterject: (args: { workerId: string; message: string }) => ipcRenderer.invoke(IPC.WORKERS_INTERJECT, args),
+  workerHistory: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_HISTORY, args),
+  workerOpenFolder: (args: { workerId: string }) => ipcRenderer.invoke(IPC.WORKERS_OPEN_FOLDER, args),
+  workerBackgroundGet: () => ipcRenderer.invoke(IPC.WORKERS_BACKGROUND_GET),
+  workerBackgroundSet: (args: { enabled: boolean }) => ipcRenderer.invoke(IPC.WORKERS_BACKGROUND_SET, args),
+  onWorkerEvent: (cb: (event: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.WORKERS_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.WORKERS_EVENT, handler);
+  },
+
+  // Teaching mode
+  teachStart: (args?: unknown) => ipcRenderer.invoke(IPC.TEACH_START, args),
+  teachStop: (args: { recordingId: string }) => ipcRenderer.invoke(IPC.TEACH_STOP, args),
+  teachNarrate: (args: { recordingId: string; text: string }) => ipcRenderer.invoke(IPC.TEACH_NARRATE, args),
+  teachRename: (args: { recordingId: string; name: string }) => ipcRenderer.invoke(IPC.TEACH_RENAME, args),
+  teachList: () => ipcRenderer.invoke(IPC.TEACH_LIST),
+  teachGet: (args: { recordingId: string }) => ipcRenderer.invoke(IPC.TEACH_GET, args),
+  teachDelete: (args: { recordingId: string }) => ipcRenderer.invoke(IPC.TEACH_DELETE, args),
+  teachCompile: (args: { recordingId: string }) => ipcRenderer.invoke(IPC.TEACH_COMPILE, args),
+  teachFrame: (args: { recordingId: string; path?: string }) => ipcRenderer.invoke(IPC.TEACH_FRAME, args),
+  teachUpdateSteps: (args: { recordingId: string; steps: unknown }) => ipcRenderer.invoke(IPC.TEACH_UPDATE_STEPS, args),
+  teachCreateWorker: (args: unknown) => ipcRenderer.invoke(IPC.TEACH_CREATE_WORKER, args),
+  onTeachEvent: (cb: (event: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.TEACH_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.TEACH_EVENT, handler);
+  },
+
+  // App catalog + credential vault
+  appsList: (args?: { query?: string }) => ipcRenderer.invoke(IPC.APPS_LIST, args ?? {}),
+  appsInstall: (args: { wingetId: string }) => ipcRenderer.invoke(IPC.APPS_INSTALL, args),
+  appsLaunch: (args: { appId: string }) => ipcRenderer.invoke(IPC.APPS_LAUNCH, args),
+  vaultList: (args?: { workerId?: string }) => ipcRenderer.invoke(IPC.VAULT_LIST, args ?? {}),
+  vaultAdd: (args: unknown) => ipcRenderer.invoke(IPC.VAULT_ADD, args),
+  vaultAuthorize: (args: { entryId: string; workerIds: string[] }) => ipcRenderer.invoke(IPC.VAULT_AUTHORIZE, args),
+  vaultDelete: (args: { entryId: string }) => ipcRenderer.invoke(IPC.VAULT_DELETE, args),
+
   // Phone remote
   remotePhoneInfo: () => ipcRenderer.invoke(IPC.REMOTE_PHONE_INFO),
 
@@ -293,10 +393,54 @@ const api = {
   businessUpdateDealStage: (args: unknown) => ipcRenderer.invoke(IPC.BUSINESS_UPDATE_DEAL_STAGE, args),
   businessListDeals: () => ipcRenderer.invoke(IPC.BUSINESS_LIST_DEALS),
   businessAnalytics: () => ipcRenderer.invoke(IPC.BUSINESS_ANALYTICS),
+
+  // Tasks are real records now, shared with the agent rather than living in the
+  // renderer's memory where a reload lost them.
+  businessListTasks: (args?: { status?: string; assignee?: string }) => ipcRenderer.invoke(IPC.BUSINESS_LIST_TASKS, args ?? {}),
+  businessCreateTask: (args: Record<string, unknown>) => ipcRenderer.invoke(IPC.BUSINESS_CREATE_TASK, args),
+  businessUpdateTask: (args: { id: string; updates: Record<string, unknown> }) => ipcRenderer.invoke(IPC.BUSINESS_UPDATE_TASK, args),
+  businessDeleteTask: (args: { id: string }) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_TASK, args),
+  businessOverview: () => ipcRenderer.invoke(IPC.BUSINESS_OVERVIEW),
+  businessSearch: (args: { query: string }) => ipcRenderer.invoke(IPC.BUSINESS_SEARCH, args),
+  businessActivities: (args?: { type?: string; entityId?: string; limit?: number }) =>
+    ipcRenderer.invoke(IPC.BUSINESS_ACTIVITIES, args ?? {}),
+  businessAddNote: (args: { text: string; entityId?: string; entityName?: string }) =>
+    ipcRenderer.invoke(IPC.BUSINESS_ADD_NOTE, args),
+  businessContactDetail: (args: { id: string }) => ipcRenderer.invoke(IPC.BUSINESS_CONTACT_DETAIL, args),
+  businessAttention: () => ipcRenderer.invoke(IPC.BUSINESS_ATTENTION),
+  businessDeleteLead: (args: { id: string }) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_LEAD, args),
+  businessDeleteInvoice: (args: { id: string }) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_INVOICE, args),
+  businessDeleteDeal: (args: { id: string }) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_DEAL, args),
+  businessLogSentEmail: (args: { from: string; to: string; subject: string; body: string }) =>
+    ipcRenderer.invoke(IPC.BUSINESS_LOG_SENT_EMAIL, args),
   businessStats: () => ipcRenderer.invoke(IPC.BUSINESS_STATS),
   businessListEmails: () => ipcRenderer.invoke(IPC.BUSINESS_LIST_EMAILS),
   businessSaveEmail: (args: unknown) => ipcRenderer.invoke(IPC.BUSINESS_SAVE_EMAIL, args),
   businessDeleteEmail: (args: unknown) => ipcRenderer.invoke(IPC.BUSINESS_DELETE_EMAIL, args),
+
+  // ── Project board ────────────────────────────────────────────────────────
+  // Backed by the same store the `Project` tool uses, so the board the user
+  // drags cards on and the tasks the agent creates are the same records.
+  projectsList: (args?: { workspace?: string }) => ipcRenderer.invoke(IPC.PROJECTS_LIST, args ?? {}),
+  projectsCreate: (args: { name: string; workspace?: string; description?: string; board?: string[]; path?: string; kind?: string }) =>
+    ipcRenderer.invoke(IPC.PROJECTS_CREATE, args),
+  // One shared project record behind both Projects and Board.
+  projectsUpdate: (args: { id: string; updates: Record<string, unknown> }) => ipcRenderer.invoke(IPC.PROJECTS_UPDATE, args),
+  projectsDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.PROJECTS_DELETE, args),
+  projectsWithFiles: () => ipcRenderer.invoke(IPC.PROJECTS_WITH_FILES),
+  projectsBoard: (args: { projectId: string }) => ipcRenderer.invoke(IPC.PROJECTS_BOARD, args),
+  projectsListAll: () => ipcRenderer.invoke(IPC.PROJECTS_LIST_ALL),
+  projectsCreateTask: (args: Record<string, unknown>) => ipcRenderer.invoke(IPC.PROJECTS_CREATE_TASK, args),
+  projectsUpdateTask: (args: { id: string; updates: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.PROJECTS_UPDATE_TASK, args),
+  projectsDeleteTask: (args: { id: string }) => ipcRenderer.invoke(IPC.PROJECTS_DELETE_TASK, args),
+  projectsAddChecklist: (args: { taskId: string; text: string }) => ipcRenderer.invoke(IPC.PROJECTS_ADD_CHECKLIST, args),
+  projectsToggleChecklist: (args: { taskId: string; index: number }) => ipcRenderer.invoke(IPC.PROJECTS_TOGGLE_CHECKLIST, args),
+  projectsAddComment: (args: { taskId: string; text: string }) => ipcRenderer.invoke(IPC.PROJECTS_ADD_COMMENT, args),
+  projectsAnalytics: (args?: { projectId?: string }) => ipcRenderer.invoke(IPC.PROJECTS_ANALYTICS, args ?? {}),
+
+  // Runs cut off by a restart, with what they had really done.
+  resumeInterrupted: () => ipcRenderer.invoke(IPC.RESUME_INTERRUPTED),
 
   // Plugin Store
   pluginInstall: (args: unknown) => ipcRenderer.invoke(IPC.PLUGIN_INSTALL, args),
@@ -398,6 +542,23 @@ const api = {
     return () => ipcRenderer.removeListener(IPC.CREW_EVENT, handler);
   },
 
+  // Session Board — kanban management of parallel agent sessions
+  sessionBoardCreate: (args: { title: string; options?: unknown }) =>
+    ipcRenderer.invoke(IPC.SESSION_BOARD_CREATE, args),
+  sessionBoardStart: (args: { sessionId: string; task: string; agentId?: string; model?: string; provider?: string }) =>
+    ipcRenderer.invoke(IPC.SESSION_BOARD_START, args),
+  sessionBoardCancel: (args: { sessionId: string }) =>
+    ipcRenderer.invoke(IPC.SESSION_BOARD_CANCEL, args),
+  sessionBoardInterject: (args: { sessionId: string; message: string }) =>
+    ipcRenderer.invoke(IPC.SESSION_BOARD_INTERJECT, args),
+  sessionBoardList: () => ipcRenderer.invoke(IPC.SESSION_BOARD_LIST),
+  sessionBoardGet: (args: { sessionId: string }) => ipcRenderer.invoke(IPC.SESSION_BOARD_GET, args),
+  onSessionBoardEvent: (cb: (e: unknown) => void) => {
+    const handler = (_e: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.SESSION_BOARD_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.SESSION_BOARD_EVENT, handler);
+  },
+
   // Model Selector
   modelSelect: (args: { taskType?: string }) => ipcRenderer.invoke(IPC.MODEL_SELECT, args),
   modelFreeList: () => ipcRenderer.invoke(IPC.MODEL_FREE_LIST),
@@ -421,6 +582,74 @@ const api = {
   voiceHistory: () => ipcRenderer.invoke(IPC.VOICE_HISTORY),
   voiceClearHistory: () => ipcRenderer.invoke(IPC.VOICE_CLEAR_HISTORY),
   voiceSpeak: (args: { text: string }) => ipcRenderer.invoke(IPC.VOICE_SPEAK, args),
+
+  // Loopback static server. Used by the Tabs section to show a file the agent
+  // produced (a generated site, a test page, a built project) inside the app
+  // instead of launching the user's default browser over it.
+  workspaceServe: (args: { root: string }) => ipcRenderer.invoke(IPC.WORKSPACE_SERVE, args),
+  workspaceUrlFor: (args: { path: string }) => ipcRenderer.invoke(IPC.WORKSPACE_URL_FOR, args),
+
+  // ── In-app browser (Tabs section) ─────────────────────────────────────────
+  // Main owns the guest as a WebContentsView child of the window, so browsing
+  // happens inside Infinite OS. The renderer only measures its box and reports
+  // bounds — it never creates a surface of its own.
+  tabBrowserCreate: (args: { viewId: string; url: string; bounds: { x: number; y: number; width: number; height: number } }) =>
+    ipcRenderer.invoke(IPC.TAB_BROWSER_CREATE, args),
+  tabBrowserBounds: (args: { viewId: string; bounds: { x: number; y: number; width: number; height: number } }) =>
+    ipcRenderer.invoke(IPC.TAB_BROWSER_BOUNDS, args),
+  tabBrowserNavigate: (args: { viewId: string; url: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_NAVIGATE, args),
+  tabBrowserBack: (args: { viewId: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_BACK, args),
+  tabBrowserForward: (args: { viewId: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_FORWARD, args),
+  tabBrowserReload: (args: { viewId: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_RELOAD, args),
+  tabBrowserState: (args: { viewId: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_STATE, args),
+  tabBrowserClose: (args: { viewId: string }) => ipcRenderer.invoke(IPC.TAB_BROWSER_CLOSE, args),
+  onTabBrowserEvent: (
+    cb: (payload: { viewId: string; url?: string; title?: string; canGoBack?: boolean; canGoForward?: boolean; loading?: boolean; error?: string | null }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: unknown) =>
+      cb(payload as { viewId: string; url?: string; title?: string; canGoBack?: boolean; canGoForward?: boolean; loading?: boolean; error?: string | null });
+    ipcRenderer.on(IPC.TAB_BROWSER_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.TAB_BROWSER_EVENT, handler);
+  },
+  onTabCreate: (cb: (tab: unknown) => void) => {
+    const handler = (_event: unknown, payload: unknown) => cb(payload);
+    ipcRenderer.on(IPC.TAB_CREATE, handler);
+    return () => ipcRenderer.removeListener(IPC.TAB_CREATE, handler);
+  },
+  onTabUpdate: (cb: (patch: { tabId: string; changes: Record<string, unknown>; metadata?: Record<string, unknown> }) => void) => {
+    const handler = (_event: unknown, payload: unknown) => cb(payload as { tabId: string; changes: Record<string, unknown>; metadata?: Record<string, unknown> });
+    ipcRenderer.on(IPC.TAB_UPDATE, handler);
+    return () => ipcRenderer.removeListener(IPC.TAB_UPDATE, handler);
+  },
+  // Mirror the renderer's tabs into main so the agent can list them and read
+  // their real address.
+  tabIndexReplace: (args: { tabs: unknown[] }) => ipcRenderer.invoke(IPC.TAB_INDEX_REPLACE, args),
+  tabIndexUpsert: (args: { tab: unknown }) => ipcRenderer.invoke(IPC.TAB_INDEX_UPSERT, args),
+  tabIndexRemove: (args: { id: string }) => ipcRenderer.invoke(IPC.TAB_INDEX_REMOVE, args),
+
+  // ── Always-on voice ───────────────────────────────────────────────────────
+  // The listening loop runs in the main process, so the microphone (and the
+  // agent answering it) survive every view change. The renderer only observes
+  // state and sends control intents.
+  voiceSessionState: () => ipcRenderer.invoke(IPC.VOICE_SESSION_STATE),
+  voiceSessionSetEnabled: (args: { enabled: boolean; cwd?: string }) =>
+    ipcRenderer.invoke(IPC.VOICE_SESSION_SET_ENABLED, args),
+  voiceSessionPause: () => ipcRenderer.invoke(IPC.VOICE_SESSION_PAUSE),
+  voiceSessionResume: () => ipcRenderer.invoke(IPC.VOICE_SESSION_RESUME),
+  voiceSessionInterrupt: () => ipcRenderer.invoke(IPC.VOICE_SESSION_INTERRUPT),
+  voiceSessionSay: (args: { text: string }) => ipcRenderer.invoke(IPC.VOICE_SESSION_SAY, args),
+  onVoiceSession: (
+    cb: (state: {
+      enabled: boolean; listening: boolean; phase: string; interim: string;
+      engine: string | null; wakeWord: string; error: string | null;
+      sessionId: string; speaking: boolean; muted: boolean;
+    }, utterance?: { text: string; at: number }) => void,
+  ) => {
+    const handler = (_event: unknown, payload: unknown, utterance?: { text: string; at: number }) =>
+      cb(payload as never, utterance);
+    ipcRenderer.on(IPC.VOICE_SESSION_EVENT, handler);
+    return () => ipcRenderer.removeListener(IPC.VOICE_SESSION_EVENT, handler);
+  },
 
   // Video Clipping
   videoCreateProject: (args: { name: string; sourceFile: string; description?: string }) =>
@@ -648,16 +877,54 @@ const api = {
     ipcRenderer.invoke(IPC.OLLAMA_RECORD_CONVERSATION, args),
   ollamaSystemPrompt: () => ipcRenderer.invoke(IPC.OLLAMA_SYSTEM_PROMPT),
 
+  // Local model performance: what this machine can run, what is installed, what
+  // is currently pinned in RAM, and the controls to free it.
+  ollamaCapability: () => ipcRenderer.invoke(IPC.OLLAMA_CAPABILITY),
+  ollamaLocalModels: () => ipcRenderer.invoke(IPC.OLLAMA_MODELS_LOCAL),
+  ollamaLoaded: () => ipcRenderer.invoke(IPC.OLLAMA_LOADED),
+  ollamaPreload: (args: { model: string }) => ipcRenderer.invoke(IPC.OLLAMA_PRELOAD, args),
+  ollamaUnload: (args: { model: string }) => ipcRenderer.invoke(IPC.OLLAMA_UNLOAD, args),
+  ollamaHealth: () => ipcRenderer.invoke(IPC.OLLAMA_HEALTH),
+
+  // ── Boot optimization ────────────────────────────────────────────────────
+  // Applies ONE finding at a time, and the handler refuses anything report-only.
+  // There is deliberately no "optimize everything" call.
+  optimizeAnalyse: (args?: { busyNames?: string[] }) => ipcRenderer.invoke(IPC.OPTIMIZE_ANALYSE, args ?? {}),
+  optimizeApply: (args: { finding: unknown; approved?: boolean }) => ipcRenderer.invoke(IPC.OPTIMIZE_APPLY, args),
+  optimizeUndoList: () => ipcRenderer.invoke(IPC.OPTIMIZE_UNDO_LIST),
+  optimizeUndo: (args: { entry: unknown }) => ipcRenderer.invoke(IPC.OPTIMIZE_UNDO, args),
+  optimizeUndoAll: () => ipcRenderer.invoke(IPC.OPTIMIZE_UNDO_ALL),
+  optimizeDismiss: () => ipcRenderer.invoke(IPC.OPTIMIZE_DISMISS),
+  optimizeSeen: () => ipcRenderer.invoke(IPC.OPTIMIZE_SEEN),
+  optimizeAutoEnabled: () => ipcRenderer.invoke(IPC.OPTIMIZE_AUTO_ENABLED),
+
   // ── OCR ──
   ocrRecognize: (args: { imagePath: string }) => ipcRenderer.invoke('ocr:recognize', args),
   ocrAnalyze: (args: { imagePath: string; prompt: string }) => ipcRenderer.invoke('ocr:analyze', args),
   ocrStatus: () => ipcRenderer.invoke('ocr:status'),
 
   // ── Voice ──
-  voiceSTT: (args: { audioBuffer: string; format: string }) => ipcRenderer.invoke('voice:stt', args),
-  voiceTTS: (args: { text: string; voice?: string }) => ipcRenderer.invoke('voice:tts', args),
+  voiceSTT: (args: { audioBuffer: string; format: string; local?: boolean; language?: string }) =>
+    ipcRenderer.invoke('voice:stt', args),
+  voiceTTS: (args: {
+    text: string;
+    voice?: string;
+    source?: 'local' | 'kokoro' | 'auto' | 'openrouter' | 'openai' | 'edge';
+    model?: string;
+  }) => ipcRenderer.invoke('voice:tts', args) as Promise<{ audio: string; provider: string }>,
   voiceStatus: () => ipcRenderer.invoke('voice:status'),
+  voiceWarmup: (args?: { which?: 'stt' | 'tts' | 'both' }) =>
+    ipcRenderer.invoke('voice:warmup', args ?? {}) as Promise<{ stt: boolean; tts: boolean }>,
   voiceSetKey: (args: { apiKey: string }) => ipcRenderer.invoke('voice:setKey', args),
+  voiceKeysGet: () =>
+    ipcRenderer.invoke('voice:keys:get') as Promise<{
+      stt: boolean;
+      tts: boolean;
+      sttSource: 'dedicated' | 'provider' | 'openrouter' | null;
+      ttsSource: 'dedicated' | 'provider' | 'openrouter' | null;
+    }>,
+  voiceKeysSet: (args: { sttKey?: string; ttsKey?: string; clearStt?: boolean; clearTts?: boolean }) =>
+    ipcRenderer.invoke('voice:keys:set', args) as Promise<{ ok: boolean }>,
 
   // ── Credentials ──
   credSave: (args: { id: string; service: string; apiKey: string }) => ipcRenderer.invoke('cred:save', args),
@@ -741,6 +1008,7 @@ const api = {
     ipcRenderer.invoke(IPC.NOTIFICATION_SHOW, args),
   notificationStatus: () => ipcRenderer.invoke(IPC.NOTIFICATION_STATUS),
   notificationClear: () => ipcRenderer.invoke(IPC.NOTIFICATION_CLEAR),
+  notificationActiveCount: () => ipcRenderer.invoke(IPC.NOTIFICATION_ACTIVE_COUNT),
 
   // Interactive Terminal (PTY)
   terminalCreateSession: (args?: { cols?: number; rows?: number; cwd?: string }) =>
@@ -939,7 +1207,13 @@ const api = {
   computerGetClipboard: () => ipcRenderer.invoke('computer:getClipboard'),
   computerSetClipboard: (args: { text: string }) => ipcRenderer.invoke('computer:setClipboard', args),
   computerExecute: (args: { command: string; cwd?: string }) => ipcRenderer.invoke('computer:execute', args),
-  computerStats: () => ipcRenderer.invoke(IPC.COMPUTER_STATS),
+  // Computer control IS exposed below, on the `computer:*` channels registered by
+  // ipc/computer-automation.ts (computerMoveMouse, computerClick, ...). Those are
+  // live and used by the renderer.
+  //
+  // What was removed is the separate `COMPUTER_*` constant family — a second
+  // implementation of the same capability, registered with no preload exposure
+  // and no caller. It duplicated this one and could never run.
   computerActionLog: (args?: { count?: number }) => ipcRenderer.invoke('computer:actionLog', args),
 
   // Window controls

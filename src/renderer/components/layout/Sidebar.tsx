@@ -12,17 +12,27 @@ import type { Session } from '../../../shared/types';
 // Flat, monochrome nav — icons inherit their color from the row state so the
 // whole rail reads as one system instead of a set of colored widgets.
 const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
-  { id: 'home', label: 'Home', icon: 'nav.workspace' },
+  { id: 'home', label: 'Power Center', icon: 'home.orchestrator' },
   { id: 'chats', label: 'Chats', icon: 'nav.chats' },
+  { id: 'voice', label: 'Voice', icon: 'topbar.mic' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects' },
+  // The Kanban board over the real project/task store, next to the
+  // scaffolding Projects view. See BoardView.
+  { id: 'board', label: 'Board', icon: 'nav.projects' },
+  // Filed-away conversations. Searchable, and every entry can be
+  // restored and carried on from.
+  { id: 'archive', label: 'Archive', icon: 'tab.document' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files' },
   { id: 'terminal', label: 'Terminal', icon: 'nav.terminal' },
 ];
 
 const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'bots', label: 'Bots', icon: 'nav.agents' },
+  { id: 'voice', label: 'Voice Assistant', icon: 'nav.voice' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory' },
   { id: 'automations', label: 'Scheduled Jobs', icon: 'nav.automations' },
+  // One worker per recurring task: Teaching mode, per-worker vault, app installs.
+  { id: 'workers', label: 'Workers', icon: 'automation.pulse' },
   { id: 'messaging', label: 'Messaging', icon: 'home.chat' },
   { id: 'artifacts', label: 'Artifacts', icon: 'tab.document' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
@@ -30,6 +40,9 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
+  { id: 'guide', label: 'Guide', icon: 'home.learn' },
+  { id: 'spell', label: 'Spell Forge', icon: 'nav.spell' },
+  { id: 'journal', label: 'Journal & Notes', icon: 'memory.note' },
 ];
 
 const NAV_BUSINESS: { id: string; label: string; icon: AppIconName }[] = [
@@ -94,6 +107,14 @@ export function Sidebar({
   const exportSession = useChatStore((state) => state.exportSession);
   const shareSession = useChatStore((state) => state.shareSession);
   const addToast = useNotificationStore((state) => state.addToast);
+  // The per-session "running" dots read module-level run maps
+  // (isSessionStreaming), which live outside zustand state — tick a re-render
+  // so appearing/disappearing dots stay truthful without re-rendering the app.
+  const [, forceLiveTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceLiveTick((n) => n + 1), 1500);
+    return () => clearInterval(id);
+  }, []);
   const runs = useAgentsStore((state) => state.runs);
   const { user } = useAuthStore();
   const aiTabs = useAiTabsStore((state) => state.tabs);
@@ -352,8 +373,33 @@ export function Sidebar({
         />
       </div>
 
-      {/* Nav */}
+            {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pt-1 pb-2 custom-scrollbar">
+        <button
+          onClick={() => onNavChange('infinite')}
+          title={collapsed ? 'Infinite' : undefined}
+          data-nav="infinite"
+          className={`group relative mb-1.5 w-full overflow-hidden rounded-xl border transition-all duration-200 ${
+            collapsed ? 'flex items-center justify-center p-2.5' : 'flex items-center gap-2.5 px-2.5 py-2.5'
+          } ${
+            activeView === 'infinite'
+              ? 'border-violet-400/40 bg-violet-500/15'
+              : 'border-white/[0.08] bg-gradient-to-r from-violet-500/[0.14] via-cyan-500/[0.06] to-transparent hover:border-violet-400/30 hover:from-violet-500/22'
+          }`}
+        >
+          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+            <span className="absolute inset-0 rounded-md bg-gradient-to-br from-violet-500 to-cyan-400 opacity-70 blur-[6px] transition-opacity group-hover:opacity-100" />
+            <AppIcon name="action.ai" className="relative h-4 w-4 text-white" strokeWidth={1.9} />
+          </span>
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left text-[11.5px] font-semibold tracking-[0.14em] text-white">INFINITE</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-wider text-violet-200">
+                New
+              </span>
+            </>
+          )}
+        </button>
         <div className="space-y-0.5">
           {NAV_PRIMARY.map(renderNavItem)}
         </div>

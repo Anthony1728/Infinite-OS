@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,25 @@ describe('business knowledge base', () => {
     expect(hits[0].title).toBe('Plumbing price list');
     expect(kb.deleteKb('missing')).toBe(false);
     expect(kb.deleteKb(hits[1].id)).toBe(true);
+    expect(kb.listKb()).toHaveLength(1);
+  });
+
+  it('caches the parsed store while still reflecting every write', async () => {
+    const kb = await import('./business-kb.js');
+    kb.saveKb({ title: 'Supplier list', content: 'Geyser parts ship from Durban within two days.' });
+    // Repeated reads agree with the file even though they come from cache.
+    expect(kb.searchKb('geyser')[0].title).toBe('Supplier list');
+    expect(kb.listKb()).toHaveLength(1);
+
+    // A write through the API invalidates the cache.
+    kb.saveKb({ title: 'Roofing rates', content: 'R950 per square for tile roof replacement work.' });
+    expect(kb.searchKb('roofing')).toHaveLength(1);
+    expect(kb.listKb()).toHaveLength(2);
+
+    // An edit made outside the app is picked up as well (different size).
+    const kbFile = join(home, 'knowledge', 'kb.json');
+    const stored = JSON.parse(readFileSync(kbFile, 'utf8')) as unknown[];
+    writeFileSync(kbFile, JSON.stringify(stored.slice(0, 1)), 'utf8');
     expect(kb.listKb()).toHaveLength(1);
   });
 

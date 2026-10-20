@@ -1,159 +1,1 @@
-import { describe, expect, it } from 'vitest';
-import { buildLocalModelOperatingPrompt, renderSkillsCatalog, renderStaticSystemPrompt } from './context.js';
-
-describe('local model operating prompt', () => {
-  it('grounds the model in Infinite OS and its real environment', async () => {
-    const prompt = await buildLocalModelOperatingPrompt({
-      cwd: 'C:\\work\\infinite-os',
-      model: 'minicpm-v4.6:latest',
-      permissionProfile: ':full-system-access',
-      toolsEnabled: true,
-      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
-      attachedToolNames: ['Computer', 'WebSearch'],
-    });
-
-    expect(prompt).toContain('active local agent inside the Infinite OS Windows desktop application');
-    expect(prompt).toContain('C:\\work\\infinite-os');
-    expect(prompt).toContain('Ollama/minicpm-v4.6:latest');
-    expect(prompt).toContain(':full-system-access');
-    expect(prompt).toContain('6 real Infinite OS capabilities are available');
-    expect(prompt).toContain('Executable tool schemas attached for this turn: Computer, WebSearch');
-  });
-
-  it('requires research instead of guessing and verified execution instead of narration', async () => {
-    const prompt = await buildLocalModelOperatingPrompt({
-      cwd: 'C:\\work\\infinite-os',
-      model: 'minicpm-v4.6:latest',
-      permissionProfile: ':full-system-access',
-      toolsEnabled: true,
-      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
-      attachedToolNames: ['Computer', 'WebSearch'],
-    });
-
-    expect(prompt).toContain('call WebSearch');
-    expect(prompt).toContain('never guess');
-    expect(prompt).toContain('call the narrowest real tool immediately');
-    expect(prompt).toContain('VERIFY the requested outcome');
-    expect(prompt).toContain('Completion requires evidence');
-  });
-
-  it('teaches reliable PC and coding tool routes', async () => {
-    const prompt = await buildLocalModelOperatingPrompt({
-      cwd: 'C:\\work\\infinite-os',
-      model: 'minicpm-v4.6:latest',
-      permissionProfile: ':full-system-access',
-      toolsEnabled: true,
-      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],
-      attachedToolNames: ['Computer', 'WebSearch'],
-    });
-
-    expect(prompt).toContain('PCLiveMap FIRST');
-    expect(prompt).toContain('browser_extension FIRST');
-    expect(prompt).toContain('run targeted tests/typecheck/lint/build');
-    expect(prompt).toContain('Use tool names and JSON arguments exactly as defined');
-  });
-});
-
-describe('live capability manifest', () => {
-  it('includes access profile and core identity in the prompt', () => {
-    const prompt = renderStaticSystemPrompt({
-      permissionProfile: ':workspace',
-      toolsEnabled: true,
-      provider: 'openai',
-      toolCatalog: [
-        { name: 'Operator', description: 'Control Chrome through CDP.' },
-        { name: 'Computer', description: 'Control the desktop.' },
-        { name: 'Email', description: 'Use the configured mailbox.' },
-      ],
-      attachedToolNames: ['Operator', 'Computer'],
-    });
-
-    expect(prompt).toContain('You are Infinite AI');
-    expect(prompt).toContain('Access: :workspace');
-    expect(prompt).toContain('Inspect before editing');
-    expect(prompt).toContain('Take real actions via tools');
-  });
-});
-
-describe('uncensored response mode', () => {
-  it('applies a provider-independent direct style without changing safety or permissions', () => {
-    const prompt = renderStaticSystemPrompt({
-      permissionProfile: ':full-system-access',
-      toolsEnabled: true,
-      provider: 'openai',
-      toolCatalog: [],
-      attachedToolNames: [],
-      uncensoredMode: true,
-    });
-
-    expect(prompt).toContain('Uncensored: ON');
-    expect(prompt).toContain('You are Infinite AI');
-    expect(prompt).toContain('Access: :full-system-access | Uncensored: ON');
-    expect(prompt).toContain('Take real actions via tools');
-  });
-
-  it('teaches local models the same mode contract', async () => {
-    const prompt = await buildLocalModelOperatingPrompt({
-      cwd: 'C:\\work',
-      model: 'local-model',
-      permissionProfile: ':workspace',
-      toolsEnabled: true,
-      availableToolNames: [],
-      attachedToolNames: [],
-      uncensoredMode: true,
-    });
-
-    expect(prompt).toContain('UNCENSORED RESPONSE MODE IS ON');
-    expect(prompt).toContain('use maximum autonomy within the active permission profile');
-    expect(prompt).toContain('does not override tool permissions');
-  });
-
-  it('drops all friction language under uncensored + full system access', async () => {
-    const { buildLocalModelOperatingPrompt } = await import('./context.js');
-    const prompt = await buildLocalModelOperatingPrompt({
-      cwd: 'C:\\work',
-      model: 'local-model',
-      permissionProfile: ':full-system-access',
-      toolsEnabled: true,
-      availableToolNames: [],
-      attachedToolNames: [],
-      uncensoredMode: true,
-    });
-
-    expect(prompt).toContain('FULL SYSTEM ACCESS IS ACTIVE');
-    expect(prompt).not.toContain('does not override tool permissions');
-  });
-});
-
-describe('skills catalog (progressive disclosure)', () => {
-  it('renders a compact catalog and explains how to load full skills', () => {
-    const catalog = renderSkillsCatalog([
-      { name: 'code-review', description: 'Review code systematically.', category: 'development' },
-      { name: 'deep-research', description: 'Do thorough research.', category: 'research' },
-    ]);
-
-    expect(catalog).toContain('# Skills catalog (progressive disclosure)');
-    expect(catalog).toContain('2 reusable skills are available');
-    expect(catalog).toContain('- code-review — Review code systematically. [development]');
-    expect(catalog).toContain('action=invoke');
-    expect(catalog).toContain('SkillManage');
-  });
-
-  it('caps the catalog and mentions the remainder', () => {
-    const many = Array.from({ length: 90 }, (_, i) => ({ name: `skill-${i}`, description: 'd', category: 'c' }));
-    const catalog = renderSkillsCatalog(many);
-    expect(catalog).toContain('90 reusable skills are available');
-    expect(catalog).toContain('... and 50 more');
-  });
-
-  it('truncates long skill descriptions', () => {
-    const long = 'x'.repeat(200);
-    const catalog = renderSkillsCatalog([{ name: 's', description: long, category: 'c' }]);
-    expect(catalog).not.toContain(long);
-    expect(catalog).toContain('s —');
-  });
-
-  it('returns an empty string for no skills', () => {
-    expect(renderSkillsCatalog([])).toBe('');
-  });
-});
+import { describe, expect, it } from 'vitest';import { buildContext, buildLocalModelOperatingPrompt, renderSkillsCatalog, renderStaticSystemPrompt } from './context.js';import type { Message } from '../../shared/types.js';describe('local model operating prompt', () => {  it('grounds the model in Infinite OS and its real environment', async () => {    const prompt = await buildLocalModelOperatingPrompt({      cwd: 'C:\\work\\infinite-os',      model: 'minicpm-v4.6:latest',      permissionProfile: ':full-system-access',      toolsEnabled: true,      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],      attachedToolNames: ['Computer', 'WebSearch'],    });    expect(prompt).toContain('active local agent inside the Infinite OS Windows desktop application');    expect(prompt).toContain('C:\\work\\infinite-os');    expect(prompt).toContain('Ollama/minicpm-v4.6:latest');    expect(prompt).toContain(':full-system-access');    expect(prompt).toContain('6 real Infinite OS capabilities are available');    expect(prompt).toContain('Executable tool schemas attached for this turn: Computer, WebSearch');  });  it('requires research instead of guessing and verified execution instead of narration', async () => {    const prompt = await buildLocalModelOperatingPrompt({      cwd: 'C:\\work\\infinite-os',      model: 'minicpm-v4.6:latest',      permissionProfile: ':full-system-access',      toolsEnabled: true,      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],      attachedToolNames: ['Computer', 'WebSearch'],    });    expect(prompt).toContain('call WebSearch');    expect(prompt).toContain('never guess');    expect(prompt).toContain('call the narrowest real tool immediately');    expect(prompt).toContain('VERIFY the requested outcome');    expect(prompt).toContain('Completion requires evidence');  });  it('teaches reliable PC and coding tool routes', async () => {    const prompt = await buildLocalModelOperatingPrompt({      cwd: 'C:\\work\\infinite-os',      model: 'minicpm-v4.6:latest',      permissionProfile: ':full-system-access',      toolsEnabled: true,      availableToolNames: ['Computer', 'Operator', 'WebSearch', 'Read', 'Edit', 'Bash'],      attachedToolNames: ['Computer', 'WebSearch'],    });    expect(prompt).toContain('PCLiveMap FIRST');    expect(prompt).toContain('browser_extension FIRST');    expect(prompt).toContain('run targeted tests/typecheck/lint/build');    expect(prompt).toContain('Use tool names and JSON arguments exactly as defined');  });});describe('live capability manifest', () => {  it('includes access profile and core identity in the prompt', () => {    const prompt = renderStaticSystemPrompt({      permissionProfile: ':workspace',      toolsEnabled: true,      provider: 'openai',      toolCatalog: [        { name: 'Operator', description: 'Control Chrome through CDP.' },        { name: 'Computer', description: 'Control the desktop.' },        { name: 'Email', description: 'Use the configured mailbox.' },      ],      attachedToolNames: ['Operator', 'Computer'],    });    expect(prompt).toContain('You are Infinite AI');    expect(prompt).toContain('Access: :workspace');    expect(prompt).toContain('Inspect before editing');    expect(prompt).toContain('Take real actions via tools');  });});describe('uncensored response mode', () => {  it('applies a provider-independent direct style without changing safety or permissions', () => {    const prompt = renderStaticSystemPrompt({      permissionProfile: ':full-system-access',      toolsEnabled: true,      provider: 'openai',      toolCatalog: [],      attachedToolNames: [],      uncensoredMode: true,    });    expect(prompt).toContain('Uncensored: ON');    expect(prompt).toContain('You are Infinite AI');    expect(prompt).toContain('Access: :full-system-access | Uncensored: ON');    expect(prompt).toContain('Take real actions via tools');  });  it('teaches local models the same mode contract', async () => {    const prompt = await buildLocalModelOperatingPrompt({      cwd: 'C:\\work',      model: 'local-model',      permissionProfile: ':workspace',      toolsEnabled: true,      availableToolNames: [],      attachedToolNames: [],      uncensoredMode: true,    });    expect(prompt).toContain('UNCENSORED RESPONSE MODE IS ON');    expect(prompt).toContain('use maximum autonomy within the active permission profile');    expect(prompt).toContain('does not override tool permissions');  });  it('drops all friction language under uncensored + full system access', async () => {    const { buildLocalModelOperatingPrompt } = await import('./context.js');    const prompt = await buildLocalModelOperatingPrompt({      cwd: 'C:\\work',      model: 'local-model',      permissionProfile: ':full-system-access',      toolsEnabled: true,      availableToolNames: [],      attachedToolNames: [],      uncensoredMode: true,    });    expect(prompt).toContain('FULL SYSTEM ACCESS IS ACTIVE');    expect(prompt).not.toContain('does not override tool permissions');  });});describe('skills catalog (progressive disclosure)', () => {  it('renders a compact catalog and explains how to load full skills', () => {    const catalog = renderSkillsCatalog([      { name: 'code-review', description: 'Review code systematically.', category: 'development' },      { name: 'deep-research', description: 'Do thorough research.', category: 'research' },    ]);    expect(catalog).toContain('# Skills catalog (progressive disclosure)');    expect(catalog).toContain('2 reusable skills are available');    expect(catalog).toContain('- code-review — Review code systematically. [development]');    expect(catalog).toContain('action=invoke');    expect(catalog).toContain('SkillManage');  });  it('caps the catalog and mentions the remainder', () => {    const many = Array.from({ length: 90 }, (_, i) => ({ name: `skill-${i}`, description: 'd', category: 'c' }));    const catalog = renderSkillsCatalog(many);    expect(catalog).toContain('90 reusable skills are available');    expect(catalog).toContain('... and 50 more');  });  it('truncates long skill descriptions', () => {    const long = 'x'.repeat(200);    const catalog = renderSkillsCatalog([{ name: 's', description: long, category: 'c' }]);    expect(catalog).not.toContain(long);    expect(catalog).toContain('s —');  });  it('returns an empty string for no skills', () => {    expect(renderSkillsCatalog([])).toBe('');  });});describe('buildContext context editing', () => {  it('clears stale tool outputs so early instructions survive the budget walk', async () => {    const messages: Message[] = [      { id: 'u0', role: 'user', timestamp: 1, content: [{ type: 'text', text: 'IMPORTANT: the launch code is 7391. Never forget it.' }] },    ];    for (let i = 0; i < 20; i++) {      messages.push({        id: `a${i}`,        role: 'assistant',        timestamp: 2 + i * 2,        content: [{ type: 'tool_use', id: `t${i}`, name: 'Read', input: { path: '/big.txt' } }],      });      messages.push({        id: `r${i}`,        role: 'user',        timestamp: 3 + i * 2,        content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: 'y'.repeat(5_000) }],      });    }    messages.push({ id: 'u1', role: 'user', timestamp: 999, content: [{ type: 'text', text: 'What was the launch code again?' }] });    const out = await buildContext(messages, { cwd: 'C:\\test', maxTokens: 20_000 });    // ~100k chars of tool output vs an 80k char budget: without context    // editing the walk starts at the newest end and the FIRST message (the    // instruction) is the one that gets dropped.    expect(out.some((m) => m.content.some((b) => b.type === 'text' && b.text.includes('launch code is 7391')))).toBe(true);    // Stale payloads were hollowed out…    expect(JSON.stringify(out)).toContain('stale tool output cleared');    // …the newest tool result stays verbatim…    const lastResult = [...out].reverse().flatMap((m) => m.content).find((b) => b.type === 'tool_result');    expect(lastResult?.type === 'tool_result' && typeof lastResult.content === 'string' && lastResult.content).toHaveLength(5_000);    // …and the caller's history is never mutated.    expect((messages[2].content[0] as { content: string }).content).toHaveLength(5_000);  });});

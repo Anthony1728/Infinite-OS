@@ -3,6 +3,9 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 import { getCheckpointManager } from '../checkpoint/manager.js';
+import { applySelfEdit } from '../self-apply.js';
+import { guardSelfModification } from '../agent/self-modification.js';
+import { findInfiniteRepoRoot } from './backup.js';
 import type { Tool, ToolResult } from './base.js';
 
 interface FeatureChange {
@@ -24,14 +27,62 @@ interface PreparedChange {
 const MAX_FILES = 40;
 const MAX_FILE_BYTES = 1_500_000;
 
+/**
+ * Make the edit actually take effect.
+ *
+ * Without this, a feature the agent just built sits inert. The packaged app runs
+ * a prebuilt renderer, so a new component or theme gets written to disk and is
+ * never shown until someone restarts Infinite OS by hand. This tool used to end
+ * with "Restart or reload the application if the changed feature is not
+ * hot-reloaded" — which is exactly the complaint that self-extension does not
+ * feel connected to anything.
+ *
+ * Dev needs nothing: HMR is already live. A packaged build rebuilds and
+ * relaunches. An installed build with no checkout has nothing to rebuild, and
+ * says so rather than pretending.
+ *
+ * Relaunching is completing an action the user already consented to —
+ * `BuildFeature` requires explicit permission before it writes anything — so it
+ * is not a new decision, only the last step of the one already made.
+ */
+async function applyStep(repoRoot: string | null): Promise<string> {
+  try {
+    // Read the real packaged flag from electron rather than guessing from an
+    // environment variable that nothing sets. Getting this wrong means either
+    // rebuilding needlessly in dev or silently not applying in a packaged
+    // build — which is the failure this whole step exists to prevent.
+    let isPackaged = false;
+    try {
+      const { app } = await import('electron');
+      isPackaged = Boolean(app?.isPackaged);
+    } catch {
+      // Headless (tests, exec): treat as not packaged, which takes the
+      // hot-reload branch and changes nothing.
+    }
+    const result = await applySelfEdit({ isPackaged, repoRoot });
+    return result.applied
+      ? 'Rebuilt and relaunched — the change is live now.'
+      : result.message;
+  } catch (error) {
+    // The code is written and already passed validation. Failing to *apply* it
+    // is not a failed build, so this must not roll anything back or report
+    // is_error — that would discard good work over a restart problem.
+    return (
+      'The change is saved and validated but could not be applied automatically: ' +
+      `${(error as Error).message}. Restart Infinite OS to load it.`
+    );
+  }
+}
+
 export const buildFeatureTool: Tool = {
   name: 'BuildFeature',
   description: [
     'Atomically add, fix, or improve any feature in Infinite OS itself or the current workspace.',
-    'This is your primary tool for self-improvement: use it whenever the user says "improve Infinite OS", "add a feature", "fix this", "make it better", "sharpen the UI", or requests any capability that does not yet exist.',
-    'You can create new files, modify existing UI components, add new tools, fix bugs, improve animations, and enhance any part of the application — all with automatic rollback checkpoints, workspace sandboxing, and validation (typecheck/test/build).',
-    'Inspect the code first, then use BuildFeature for atomic, validated changes with automatic rollback on failure. Prefer it over separate Write/Edit for any multi-file or UI change.',
-    'If the user needs something you cannot do yet, create a Tab explaining the next step and then use BuildFeature to add the missing capability.',
+    'This is your primary self-improvement tool: use it whenever the user says "improve Infinite OS", "add a feature", "fix this", "make it better", or asks for a capability that does not exist yet.',
+    'It creates and modifies files, UI components and tools, with automatic rollback checkpoints, workspace sandboxing and typecheck/test/build validation.',
+    'A successful build applies itself (dev: hot reload; packaged: rebuild and relaunch) — report what the apply step said instead of telling the user to restart the app.',
+    'Inspect the code first, then use BuildFeature instead of separate Write/Edit for any multi-file or UI change.',
+    'If you still cannot do it, create a Tab explaining the next step and add the missing capability with BuildFeature.',
   ].join(' '),
   inputSchema: {
     type: 'object',
@@ -112,6 +163,31 @@ export const buildFeatureTool: Tool = {
       });
 
       try {
+        // Checked BEFORE anything is written, not per file inside the loop.
+        // Validating as it goes would leave a half-applied feature when the
+        // guard trips on the third file, which is worse than refusing the whole
+        // build up front.
+        // `?? ctx.cwd` matters: without it, a build started from the repo root
+        // found no repo root and skipped the guard entirely — which is the
+        // case the guard exists for.
+        const repoRootForGuard = findInfiniteRepoRoot(ctx.cwd) ?? ctx.cwd;
+        {
+          for (const change of prepared) {
+            const operation = existsSync(change.absolutePath) ? 'modify' : 'create';
+            const guard = guardSelfModification(repoRootForGuard, change.absolutePath, operation);
+            if (!guard.allowed) {
+              return {
+                content:
+                  `Feature "${input.name}" was not applied: it would change a protected file.\n\n` +
+                  `${guard.reason ?? ''}\n\n` +
+                  `Files in this change: ${prepared.map((c) => c.path).join(', ')}\n` +
+                  'Nothing was written. Split the change, or turn self-protection off in Settings if you mean to do this.',
+                is_error: true,
+              };
+            }
+          }
+        }
+
         for (const change of prepared) {
           if (ctx.abortSignal.aborted) throw new Error('Feature build cancelled before completion.');
           await mkdir(dirname(change.absolutePath), { recursive: true });
@@ -145,13 +221,18 @@ export const buildFeatureTool: Tool = {
         };
       }
 
+      // Applied before the summary is returned, so the user is told the
+      // truth about whether their feature is live yet rather than being told
+      // to go and restart the app themselves.
+      const applyNote = await applyStep(findInfiniteRepoRoot(ctx.cwd));
+
       return {
         content: [
           `Feature "${input.name}" was baked into the workspace successfully.`,
           `Changed ${prepared.length} file${prepared.length === 1 ? '' : 's'}: ${prepared.map((change) => change.path).join(', ')}`,
           validation === 'none' ? 'Validation was skipped.' : `${validation} validation passed.`,
           `Rollback checkpoint: ${checkpoint.id}`,
-          'Restart or reload the application if the changed feature is not hot-reloaded.',
+          applyNote,
         ].join('\n\n'),
       };
     } catch (error) {

@@ -12,6 +12,26 @@ describe('infiniteHome', () => {
     expect(infiniteHome()).toBe(join('test-override', 'infinite-home'));
   });
 
+  it('a later override wins even when the cache is already warm', async () => {
+    // Regression: session/store.ts resolves infiniteHome() at import time,
+    // which pinned the real profile and silently defeated any env override a
+    // test set afterwards (test artifacts leaked into the user's real home).
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const first = mkdtempSync(join(tmpdir(), 'home-a-'));
+    const second = mkdtempSync(join(tmpdir(), 'home-b-'));
+    try {
+      process.env.INFINITE_TEST_HOME = first;
+      expect(infiniteHome()).toBe(first); // warms the cache
+      process.env.INFINITE_TEST_HOME = second;
+      expect(infiniteHome()).toBe(second); // env is checked before the cache
+    } finally {
+      process.env.INFINITE_TEST_HOME = join('test-override', 'infinite-home');
+      rmSync(first, { recursive: true, force: true });
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
   it('builds profile dirs under profiles/', () => {
     expect(profileDirFor('/base', 'user-1')).toBe(join('/base', 'profiles', 'user-1'));
   });

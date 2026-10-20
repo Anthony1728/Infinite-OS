@@ -1,10 +1,10 @@
 import { getAllApiKeys } from '../settings/secrets.js';
 import { getProvider } from './registry.js';
 import { isProviderAuthKnownBad } from './health.js';
-
+import { getModelReliability, recordModelOutcome } from './model-performance.js';
 export interface ProviderCandidate { provider: string; model: string; apiKey: string; label: string; }
 
-const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom', 'ollama', 'opencode', 'freebuff', 'gemini', 'anthropic', 'openai'];
+export const PROVIDER_ORDER = ['nvidia', 'openrouter', 'groq', 'apinex', 'bluesminds', 'cloudflare', 'custom', 'ollama', 'opencode', 'freebuff', 'gemini', 'anthropic', 'openai'];
 const unhealthyUntil = new Map<string, number>();
 const lastSuccessfulAt = new Map<string, number>();
 
@@ -31,8 +31,8 @@ export function classifyError(error: string): FailoverReason {
   if (isFreeTierExhausted(error)) return 'billing';
   if (/\b(?:401|403|api.?key|auth|unauthori[sz]ed|forbidden|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i.test(error)) return 'auth';
   if (/\b(?:402|billing|insufficient\s+balance|quota\s*exceeded|credit)\b/i.test(error)) return 'billing';
-  if (/\b(?:429|rate.?limit|quota|capacity)\b/i.test(error)) return 'rate_limit';
-  if (/\b(?:overloaded|capacity|try again)\b/i.test(error)) return 'overloaded';
+  if (/\b(?:429|rate.?limit|quota|capacity|free.?usage.?limit|retrying.?upstream)\b/i.test(error)) return 'rate_limit';
+  if (/\b(?:overloaded|capacity|try again|returned no output|no.?output|empty response)\b/i.test(error)) return 'overloaded';
   if (/\b(?:5\d\d|server.?error|internal.?error|bad.?gateway|service.?unavailable)\b/i.test(error)) return 'server_error';
   if (/\b(?:timeout|timed.?out|stalled|stall|no provider progress|supervisor.*restart|aborted.*stream)\b/i.test(error)) return 'timeout';
   if (/\b(?:context.?overflow|context.?length|too.?many.?tokens|payload.?too.?large|max.?tokens)\b/i.test(error)) return 'context_overflow';
@@ -175,6 +175,9 @@ export function recordProviderFailure(candidate: Pick<ProviderCandidate, 'provid
     : reason === 'timeout' || reason === 'network' ? 15_000
     : 20_000;
   unhealthyUntil.set(candidateId(candidate), Date.now() + cooldown);
+  // Feed the persistent routing memory: every failure teaches the Brain which
+  // models not to reach for next time (survives restarts, unlike the map above).
+  recordModelOutcome(candidate.provider, candidate.model, false, error.slice(0, 300));
   // Auth/billing failures are provider-wide: mark ALL models on this provider
   // as unhealthy so the failover chain skips them entirely.
   if (reason === 'auth' || reason === 'billing') {
@@ -191,12 +194,14 @@ export function recordProviderSuccess(candidate: Pick<ProviderCandidate, 'provid
   const id = candidateId(candidate);
   unhealthyUntil.delete(id);
   lastSuccessfulAt.set(id, Date.now());
+  // Same persistent memory, positive side: successes raise the model's learned
+  // reliability so failover ordering improves with every conversation.
+  recordModelOutcome(candidate.provider, candidate.model, true);
 }
 
 export function isProviderWideFailure(error: string): boolean {
   if (isFreeTierExhausted(error)) return true;
-  return /\b(?:401|402|403|408|409|426|429|5\d\d|api.?key|auth|login|sign.?in|credential|rate.?limit|quota|credit|capacity|overloaded|upgrade.?required|newer is required|timeout|timed out|stalled|stall|no provider progress|supervisor.*restart|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted.*stream)\b/i.test(error);
-}
+  return /\b(?:401|402|403|408|409|426|429|5\d\d|api.?key|auth|login|sign.?in|credential|rate.?limit|quota|credit|capacity|overloaded|upgrade.?required|newer is required|timeout|timed out|stalled|stall|no provider progress|supervisor.*restart|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted.*stream)\b/i.test(error);}
 
 export function prioritizeProviderCandidates(candidates: ProviderCandidate[], now = Date.now()): ProviderCandidate[] {
   return candidates
@@ -204,6 +209,9 @@ export function prioritizeProviderCandidates(candidates: ProviderCandidate[], no
       candidate,
       index,
       unhealthy: (unhealthyUntil.get(candidateId(candidate)) ?? 0) > now,
+      // Learned reliability (Wilson over persisted outcomes, 0 until proven):
+      // the Brain's long-term memory of which models have actually answered.
+      learned: getModelReliability(candidate.provider, candidate.model),
       lastSuccess: lastSuccessfulAt.get(candidateId(candidate)) ?? 0,
     }))
     .sort((a, b) =>
@@ -212,6 +220,9 @@ export function prioritizeProviderCandidates(candidates: ProviderCandidate[], no
       // in a different model before the chosen one has been tried.
       Number(b.index === 0) - Number(a.index === 0) ||
       Number(a.unhealthy) - Number(b.unhealthy) ||
+      // Among healthy candidates, proven-reliable models come first — this is
+      // the ordering that gets smarter with every conversation.
+      b.learned - a.learned ||
       b.lastSuccess - a.lastSuccess ||
       a.index - b.index,
     )
@@ -219,8 +230,7 @@ export function prioritizeProviderCandidates(candidates: ProviderCandidate[], no
 }
 
 /** Errors that mean the selected provider itself is unusable and the run may leave it. */
-const CREDENTIAL_FAILURE = /\b(401|402|403|api.?key|auth|login|sign.?in|credential|unauthori[sz]ed|forbidden|quota|credit|free.?tier|free usage exceeded|resets in|insufficient\s+balance|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i;
-// A 404 from an OpenAI-compatible endpoint almost always means "that model
+const CREDENTIAL_FAILURE = /\b(401|402|403|api.?key|auth|login|sign.?in|credential|unauthori[sz]ed|forbidden|quota|credit|free.?tier|free usage exceeded|resets in|insufficient\s+balance|token\s*(?:expired|incorrect|invalid)|expired\s*(?:api\s*)?key)\b/i;// A 404 from an OpenAI-compatible endpoint almost always means "that model
 // string does not exist on this provider" — the configured (provider, model)
 // pair is wrong. That is a hard misconfiguration, not a transient issue, so
 // the agent must be allowed to try the next candidate anywhere.
@@ -321,5 +331,4 @@ export async function buildProviderFailoverPlan(selected: { provider: string; mo
 }
 
 export function isRecoverableProviderError(error: string): boolean {
-  return /\b(401|402|403|404|408|409|426|429|5\d\d|api\s*key|auth|unauthori[sz]ed|forbidden|invalid credential|freebuff|consent_required|spend_limited|ip_capped|model_locked|model_unavailable|token\s+(?:expired|incorrect|invalid)|expired\s+(?:api\s*)?key|upgrade.?required|newer is required|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted|cancelled|canceled|model.*(?:unavailable|not found))\b/i.test(error);
-}
+  return /\b(401|402|403|404|408|409|426|429|5\d\d|api\s*key|auth|unauthori[sz]ed|forbidden|invalid credential|freebuff|consent_required|spend_limited|ip_capped|model_locked|model_unavailable|token\s+(?:expired|incorrect|invalid)|expired\s+(?:api\s*)?key|upgrade.?required|newer is required|rate.?limit|quota|credit|capacity|overloaded|timeout|timed out|network|connection|fetch failed|stopped responding|econn\w*|etimedout|enotfound|ehostunreach|enotconn|eaddrinuse|aborted|cancelled|canceled|model.*(?:unavailable|not found))\b/i.test(error);}

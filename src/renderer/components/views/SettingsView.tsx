@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ProviderInfo } from '../../../shared/types';
 import { useNotificationStore } from '../../stores/notifications';
 import { syncActiveModelToMain } from '../../utils/active-model-sync';
@@ -30,6 +30,18 @@ interface CurrentSettings {
   brainMode?: boolean;
   ollamaModel?: string;
   hasApiKey?: boolean;
+}
+
+/** Shape returned by the continuous evolution loop (main/brain/evolution-loop.ts). */
+interface EvolutionLoopStatus {
+  enabled: boolean;
+  intervalMs: number;
+  cycleInFlight: boolean;
+  cyclesCompleted: number;
+  lastRunAt: number | null;
+  nextRunAt: number | null;
+  lastSummary: string | null;
+  lastError: string | null;
 }
 
 function loadCurrent(): CurrentSettings {
@@ -89,8 +101,8 @@ function PhoneConnectCard() {
               <button onClick={async () => { try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ } }} className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-textMain hover:bg-white/[0.07]">{copied ? 'Copied!' : 'Copy link'}</button>
               <button onClick={() => window.open(url, '_blank')} className="rounded-lg bg-white text-black px-3 py-1.5 text-xs font-medium hover:bg-zinc-100">Open preview</button>
             </div>
-            <p className="text-[10px] text-textMuted mt-2">Phone & PC must be on the same Wi-Fi/network (or VPN). If the page doesn't load, allow Infinite OS through Windows Firewall for port 8766.</p>
-          </div>
+
+            <p className="text-[10px] text-textMuted mt-2">Phone &amp; PC must be on the same Wi-Fi/network (or VPN). If the page doesn&apos;t load, allow Infinite OS through Windows Firewall for port 8766.</p>          </div>
         </div>
       ) : (
         <p className="text-xs text-textMuted mt-3">Starting phone server… If this persists, check that Infinite OS is running and port 8766 is free.</p>
@@ -115,8 +127,152 @@ export function SettingsView() {
   const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [cwd, setCwd] = useState(() => loadCurrent().cwd);
   const [brainMode, setBrainMode] = useState(() => loadCurrent().brainMode ?? true);
+  const [cliVersion, setCliVersion] = useState<{ version: string | null; serverVersion: string | null; minFreeVersion: string; freeTierSupported: boolean; serverStale: boolean } | null>(null);
+  const [upgradingCli, setUpgradingCli] = useState(false);
+  const [restartingServer, setRestartingServer] = useState(false);
   const currentSettings = loadCurrent();
   const addToast = useNotificationStore((s) => s.addToast);
+
+  // Continuous self-evolution loop status (Settings → Self-Evolve card).
+  const [evolve, setEvolve] = useState<EvolutionLoopStatus | null>(null);
+  const [evolveBusy, setEvolveBusy] = useState(false);
+
+  /**
+   * Token/cost totals and background-build state.
+   *
+   * Both were finished in main and unreachable from the renderer. These cards
+   * live here because SettingsView is what the sidebar actually opens; the
+   * SettingsModal variants are only reachable through a control that is not
+   * currently rendered, so anything added there is invisible in the packaged app.
+   */
+  const [usageTotals, setUsageTotals] = useState<{
+    requests: number;
+    costUsd: number;
+    unpricedRequests?: number;
+    formatted: { cost: string; input: string; output: string; note?: string };
+    byModel: { provider: string; model: string; requests: number; costUsd: number; pricing?: string }[];
+  } | null>(null);
+  const [usageBusy, setUsageBusy] = useState(false);
+
+  const [buildStatus, setBuildStatus] = useState<{
+    phase: 'idle' | 'building' | 'ready' | 'failed' | 'applying';
+    error?: string;
+  } | null>(null);
+  const [buildBusy, setBuildBusy] = useState(false);
+
+  const refreshUsage = useCallback(async () => {
+    const t = await window.api.usageGet().catch(() => null);
+    setUsageTotals(t && typeof t === 'object' ? (t as typeof usageTotals) : null);
+  }, []);
+
+  const clearUsage = async () => {
+    setUsageBusy(true);
+    try {
+      await window.api.usageReset();
+      await refreshUsage();
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const refreshBuildStatus = useCallback(async () => {
+    const s = await window.api.buildStatus().catch(() => null);
+    setBuildStatus(s && typeof s === 'object' ? (s as typeof buildStatus) : null);
+  }, []);
+
+  const runBackgroundBuild = async (action: 'buildStart' | 'buildCancel') => {
+    setBuildBusy(true);
+    try {
+      const next = await window.api[action]().catch(() => null);
+      if (next && typeof next === 'object') setBuildStatus(next as typeof buildStatus);
+      else await refreshBuildStatus();
+    } finally {
+      setBuildBusy(false);
+    }
+  };
+  // Self-apply (rebuild + relaunch) progress for packaged builds.
+  const [applyPhase, setApplyPhase] = useState<string | null>(null);
+
+  // Token/cost totals and background-build state.
+  //
+  // Both backends already existed and returned real data; they simply had no
+  // caller. The build listener is torn down on unmount so a stale push cannot
+  // write into a view that is no longer mounted.
+  useEffect(() => {
+    void refreshUsage();
+    void refreshBuildStatus();
+    const off = window.api.onBuildStatus((s: unknown) => {
+      setBuildStatus(s && typeof s === 'object' ? (s as typeof buildStatus) : null);
+    });
+    return () => off?.();
+  }, [refreshUsage, refreshBuildStatus]);
+
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void window.api
+        .evolveLoopStatus()
+        .then((s: unknown) => {
+          if (alive && s) setEvolve(s as EvolutionLoopStatus);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const id = setInterval(refresh, 8000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => window.api.onSelfApplyEvent((e: unknown) => {
+    const phase = (e as { phase?: string })?.phase;
+    if (phase) setApplyPhase(phase === 'done' ? null : phase);
+  }), []);
+
+  const toggleEvolveContinuous = async () => {
+    setEvolveBusy(true);
+    try {
+      const next = (evolve?.enabled
+        ? await window.api.evolveLoopStop()
+        : await window.api.evolveLoopStart()) as EvolutionLoopStatus;
+      setEvolve(next);
+      addToast({
+        title: next.enabled ? 'Evolve continuously on' : 'Evolve continuously off',
+        message: next.enabled
+          ? `A fresh self-evolution cycle runs every ${Math.round(next.intervalMs / 60_000)} minutes — research → build → verify, even across restarts.`
+          : 'The evolution loop is paused. One-off Research & Evolve still works.',
+        type: 'success',
+      });
+    } catch (e) {
+      addToast({ title: 'Evolution loop', message: (e as Error).message, type: 'error' });
+    } finally {
+      setEvolveBusy(false);
+    }
+  };
+
+  const runSelfApply = async () => {
+    setApplyPhase('building');
+    try {
+      const res = (await window.api.selfApplyRun()) as {
+        ok: boolean;
+        plan: { action: string; reason: string };
+      };
+      if (res.ok && res.plan.action === 'hot-reload') {
+        setApplyPhase(null);
+        addToast({ title: 'Already live', message: res.plan.reason, type: 'success' });
+      } else if (res.ok) {
+        setApplyPhase(null);
+        addToast({ title: 'Applied', message: 'Build passed — Infinite OS relaunched with your self-edits.', type: 'success' });
+      } else {
+        setApplyPhase('failed');
+        addToast({ title: 'Rebuild failed', message: res.plan.reason, type: 'error' });
+      }
+    } catch (e) {
+      setApplyPhase(null);
+      addToast({ title: 'Rebuild failed', message: (e as Error).message, type: 'error' });
+    }
+  };
 
   useEffect(() => {
     const syncFromStorage = () => {
@@ -188,8 +344,8 @@ export function SettingsView() {
       setStatus(result.ok ? 'ok' : 'fail');
       setStatusMessage(result.ok ? `${modelList.length} models available` : result.error || 'Connection failed');
       // Display only: browsing provider tabs must never rewrite the chat's
-      // saved provider/model. Selection happens explicitly via Test & Save
-      // or clicking a model.
+      // saved provider/model. Selection happens explicitly via Test & Save,
+      // "Use installed CLI", or clicking a model.
     })().catch((error) => {
       if (!cancelled) {
         setStatus('fail');
@@ -201,6 +357,18 @@ export function SettingsView() {
       cancelled = true;
     };
   }, [activeProvider, providers]);
+
+  useEffect(() => {
+    if (activeProvider !== 'opencode') return;
+    let cancelled = false;
+    setCliVersion(null);
+    const api = window.api as unknown as { opencodeCliVersion?: () => Promise<{ version: string | null; serverVersion: string | null; minFreeVersion: string; freeTierSupported: boolean; serverStale: boolean }> };
+    if (typeof api.opencodeCliVersion !== 'function') return;
+    void api.opencodeCliVersion()
+      .then((info) => { if (!cancelled) setCliVersion(info); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activeProvider]);
 
   const test = async () => {
     setStatus('testing');
@@ -254,8 +422,8 @@ export function SettingsView() {
 
   const handleUseInstalledOpenCode = async () => {
     setStatus('testing');
-    setStatusMessage('Checking OpenCode and loading free models…');
-    try {
+
+    setStatusMessage('Checking OpenCode and loading models…');    try {
       await window.api.setProviderKey({ provider: 'opencode', key: '' });
       setApiKey('');
       setApiKeyLoaded(false);
@@ -264,21 +432,24 @@ export function SettingsView() {
       const modelList = (list as { id: string; label: string; free: boolean; provider?: string }[])
         .filter((model) => !model.provider || model.provider === 'opencode');
       setModels(modelList);
+
+      // Only switch the saved provider when the CLI actually answered with
+      // models — a failed probe must never overwrite a working selection
+      // with an empty opencode model.
       if (result.ok && modelList.length > 0) {
         setStatus('ok');
-        setStatusMessage(`${modelList.length} free models available`);
-        const current = loadCurrent();
+        setStatusMessage(`${modelList.length} CLI models available`);        const current = loadCurrent();
         const nextModel = current.provider === 'opencode' && modelList.some((model) => model.id === current.model)
           ? current.model
           : modelList.find((model) => model.free)?.id ?? modelList[0]?.id ?? '';
         saveCurrent({ provider: 'opencode', model: nextModel, hasApiKey: false });
         setCurrentModel(nextModel);
         window.dispatchEvent(new Event('storage'));
-        addToast({ type: 'success', title: 'Using OpenCode free tier (no API key)' });
+
+        addToast({ type: 'success', title: 'Using installed OpenCode credentials' });
       } else {
         setStatus('fail');
-        const message = result.error || (modelList.length === 0 ? 'No free models available. Sign in to OpenCode (`opencode auth login`) and try again.' : 'OpenCode CLI connection failed');
-        setStatusMessage(message);
+        const message = result.error || (modelList.length === 0 ? 'OpenCode reported no usable free models. Sign in (`opencode auth login`) and try again.' : 'OpenCode CLI connection failed');        setStatusMessage(message);
         addToast({ type: 'error', title: message });
       }
     } catch (error) {
@@ -286,6 +457,71 @@ export function SettingsView() {
       const message = error instanceof Error ? error.message : 'Could not connect to OpenCode';
       setStatusMessage(message);
       addToast({ type: 'error', title: message });
+    }
+  };
+
+  const handleUpgradeOpenCodeCli = async () => {
+    const api = window.api as unknown as {
+      opencodeCliUpgrade?: () => Promise<{ ok: boolean; output?: string; error?: string }>;
+      opencodeCliVersion?: () => Promise<{ version: string | null; serverVersion: string | null; minFreeVersion: string; freeTierSupported: boolean; serverStale: boolean }>;
+    };
+    if (typeof api.opencodeCliUpgrade !== 'function') {
+      addToast({ type: 'error', title: 'Upgrade requires a rebuilt app — run `npm run build` first.' });
+      return;
+    }
+    setUpgradingCli(true);
+    setStatusMessage('Upgrading OpenCode CLI (npm install --global opencode-ai@latest)…');
+    try {
+      const res = await api.opencodeCliUpgrade();
+      if (res.ok) {
+        addToast({ type: 'success', title: 'OpenCode CLI upgraded — re-checking free models' });
+        if (typeof api.opencodeCliVersion === 'function') {
+          await api.opencodeCliVersion().then(setCliVersion).catch(() => undefined);
+        }
+        await handleUseInstalledOpenCode();
+      } else {
+        addToast({ type: 'error', title: res.error || 'CLI upgrade failed' });
+        setStatusMessage(res.error || 'CLI upgrade failed. Try `npm i -g opencode-ai@latest` in a terminal.');
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'CLI upgrade failed';
+      addToast({ type: 'error', title: message });
+      setStatusMessage(message);
+    } finally {
+      setUpgradingCli(false);
+    }
+  };
+
+  const handleRestartOpenCodeServer = async () => {
+    const api = window.api as unknown as {
+      opencodeServerRestart?: () => Promise<{ version: string | null }>;
+      opencodeCliVersion?: () => Promise<{ version: string | null; serverVersion: string | null; minFreeVersion: string; freeTierSupported: boolean; serverStale: boolean }>;
+    };
+    if (typeof api.opencodeServerRestart !== 'function') {
+      addToast({ type: 'error', title: 'Restart requires a rebuilt app — run `npm run build` first.' });
+      return;
+    }
+    setRestartingServer(true);
+    setStatusMessage('Restarting OpenCode runtime with the installed CLI…');
+    try {
+      const res = await api.opencodeServerRestart();
+      if (typeof api.opencodeCliVersion === 'function') {
+        await api.opencodeCliVersion().then(setCliVersion).catch(() => undefined);
+      }
+      if (res.version) {
+        addToast({ type: 'success', title: `Runtime restarted (v${res.version}) — re-checking free models` });
+        await handleUseInstalledOpenCode();
+      } else {
+        setStatus('fail');
+        setStatusMessage('Runtime did not come back. Run `opencode serve --pure --port 4096` in a terminal.');
+        addToast({ type: 'error', title: 'Runtime restart failed' });
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Runtime restart failed';
+      addToast({ type: 'error', title: message });
+      setStatusMessage(message);
+    } finally {
+      setRestartingServer(false);
     }
   };
 
@@ -467,8 +703,8 @@ export function SettingsView() {
                   Self-Evolve — Infinite OS Lives
                 </h3>
                 <p className="text-xs text-textMuted mt-1 max-w-[560px]">
-                  One click: Infinite AI goes online, researches the best features from Claude, OpenCode, OpenClaw, Antigravity and every top app, finds what we're missing, and builds it into Infinite OS automatically — new tools, skills, automations, UI. Validated & checkpointed. Infinite OS improves itself.
-                </p>
+
+                  One click: Infinite AI goes online, researches the best features from Claude, OpenCode, OpenClaw, Antigravity and every top app, finds what we&apos;re missing, and builds it into Infinite OS automatically — new tools, skills, automations, UI. Validated &amp; checkpointed. Infinite OS improves itself.                </p>
               </div>
               <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 px-2.5 py-1 text-[10px] font-medium text-emerald-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Lives
@@ -507,10 +743,144 @@ export function SettingsView() {
               </button>
               <span className="text-[10px] text-textMuted">Uses WebSearch → WebFetch → BuildFeature. You can stop or talk to the AI mid-build in Chat.</span>
             </div>
+            {/* Continuous evolution + self-apply row */}
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/[0.06] pt-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(evolve?.enabled)}
+                onClick={() => void toggleEvolveContinuous()}
+                disabled={evolveBusy}
+                title="Run a fresh self-evolution cycle on an interval, even after restarts. Cycles never overlap; repeated failures auto-pause the loop."
+                className="flex items-center gap-2 text-xs text-textMuted hover:text-textMain transition-colors disabled:opacity-50"
+              >
+                <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${evolve?.enabled ? 'bg-emerald-500/70' : 'bg-white/10'}`}>
+                  <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${evolve?.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                </span>
+                Evolve continuously {evolve?.enabled ? 'on' : 'off'}
+              </button>
+              {evolve && (
+                <span className="text-[10px] text-textMuted">
+                  {evolve.cycleInFlight ? (
+                    <span className="text-emerald-300">Cycle running…</span>
+                  ) : (
+                    `${evolve.cyclesCompleted} cycle${evolve.cyclesCompleted === 1 ? '' : 's'} completed`
+                  )}
+                  {evolve.lastError
+                    ? ` · ${evolve.lastError.slice(0, 160)}`
+                    : evolve.lastSummary
+                      ? ` · ${evolve.lastSummary.slice(0, 140)}`
+                      : ''}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => void runSelfApply()}
+                disabled={applyPhase === 'building' || applyPhase === 'restarting'}
+                title="Typecheck + rebuild + relaunch so self-edits load in packaged builds (dev mode hot-reloads automatically)."
+                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-textMain hover:bg-white/[0.07] disabled:opacity-60"
+              >
+                {applyPhase === 'building' ? 'Rebuilding…' : applyPhase === 'restarting' ? 'Relaunching…' : 'Rebuild & Apply'}
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Connect Your Phone — Chat from anywhere on your network */}
+
+        {/*
+          Usage and cost.
+
+          Every provider reported usage per response and the pricing table
+          could turn it into money, but nothing joined the two, so a
+          conversation's cost was computed nowhere and shown nowhere. An
+          estimate: genuinely free models are $0, and models with no published
+          rate are disclosed in a note rather than silently presented as free.
+
+          This lives in SettingsView because that is the surface the sidebar
+          actually opens. The two SettingsModal variants are reachable only
+          through a control that is not rendered, so cards added there were
+          invisible in the packaged app.
+        */}
+        <div className="card-premium">
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <div>
+              <h3 className="font-medium text-textMain">Usage and cost</h3>
+              <p className="mt-1 text-xs text-textMuted">
+                What your conversations have used since these totals were last cleared.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void clearUsage()}
+              disabled={usageBusy || !usageTotals?.requests}
+              className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-textMuted hover:text-textMain disabled:opacity-40"
+            >
+              Clear
+            </button>
+          </div>
+          {usageTotals && usageTotals.requests > 0 ? (
+            <>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <div className="rounded-lg bg-white/[0.02] p-2">
+                  <div className="text-[10px] text-textMuted">Estimated cost</div>
+                  <div className="mt-0.5 text-sm font-medium text-textMain">{usageTotals.formatted.cost}</div>
+                </div>
+                <div className="rounded-lg bg-white/[0.02] p-2">
+                  <div className="text-[10px] text-textMuted">Input tokens</div>
+                  <div className="mt-0.5 text-sm font-medium text-textMain">{usageTotals.formatted.input}</div>
+                </div>
+                <div className="rounded-lg bg-white/[0.02] p-2">
+                  <div className="text-[10px] text-textMuted">Output tokens</div>
+                  <div className="mt-0.5 text-sm font-medium text-textMain">{usageTotals.formatted.output}</div>
+                </div>
+              </div>
+              {usageTotals.formatted.note && (
+                <p className="mt-2 text-[11px] text-amber-300/90">{usageTotals.formatted.note}</p>
+              )}
+            </>
+          ) : (
+            <p className="mt-2 text-[11px] text-textMuted">
+              Nothing recorded yet. Totals appear after your first reply.
+            </p>
+          )}
+        </div>
+
+        {/*
+          Background builds.
+
+          The five handlers and auto-update/index.ts were finished but never
+          exposed on the preload bridge, and nothing subscribed to
+          onBuildStatusChange — so a rebuild could start, finish or fail with
+          the app simply looking idle.
+        */}
+        <div className="card-premium">
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <div>
+              <h3 className="font-medium text-textMain">Background builds</h3>
+              <p className="mt-1 text-xs text-textMuted">
+                Rebuild without closing the app. Useful after Infinite AI changes Infinite OS itself.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void runBackgroundBuild(buildStatus?.phase === 'building' ? 'buildCancel' : 'buildStart')}
+              disabled={buildBusy}
+              className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-textMuted hover:text-textMain disabled:opacity-40"
+            >
+              {buildStatus?.phase === 'building' ? 'Cancel' : 'Build now'}
+            </button>
+          </div>
+          {buildStatus && (
+            <p className="mt-2 text-[11px] text-textMuted">
+              {buildStatus.phase === 'idle' && 'Idle'}
+              {buildStatus.phase === 'building' && 'Building…'}
+              {buildStatus.phase === 'ready' && 'A new build is ready to apply.'}
+              {buildStatus.phase === 'applying' && 'Applying…'}
+              {buildStatus.phase === 'failed' && `Last build failed: ${buildStatus.error}`}
+            </p>
+          )}
+        </div>
         <PhoneConnectCard />
 
         {/* AI Provider */}
@@ -619,7 +989,70 @@ export function SettingsView() {
                 </button>
               </div>
               {activeProvider === 'opencode' && (
-                <p className="mt-2 text-xs text-textMuted">Paste a Zen or Go API key from opencode.ai/auth. Paid subscription models only.</p>
+
+                <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-textMain">OpenCode free server — no API key needed</div>
+                      <p className="mt-0.5 text-xs text-textMuted">
+                        Infinite OS connects to the OpenCode runtime on this PC (127.0.0.1:4096) and uses its free-tier
+                        models. Keep the OpenCode app running, or let Infinite OS start the runtime for you.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => void handleUseInstalledOpenCode()}
+                      disabled={status === 'testing'}
+                      className="shrink-0 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-medium text-black hover:bg-emerald-400 disabled:opacity-50"
+                    >
+                      {status === 'testing' ? 'Connecting…' : models.length > 0 ? `Connected · ${models.length} free models` : 'Connect free server'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {provider.acceptsApiKey && activeProvider !== 'opencode' && (
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <p className="text-xs text-textMuted">Free path — no key needed: use your installed OpenCode CLI. Or paste an OpenCode Zen key to scan Zen models.</p>
+                  <button onClick={() => void handleUseInstalledOpenCode()} className="shrink-0 text-xs text-indigo-300 hover:text-indigo-200">Use installed CLI (free)</button>
+                </div>              )}
+              {activeProvider === 'opencode' && (
+                <p className="mt-2 text-xs text-textMuted">Optional: paste an OpenCode Zen subscription key above for Zen models, or leave it empty for the free server.</p>
+              )}
+              {activeProvider === 'opencode' && cliVersion && (
+                <div className={`mt-2 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+                  cliVersion.version == null
+                    ? 'border-white/10 bg-white/[0.03] text-textMuted'
+                    : cliVersion.freeTierSupported && !cliVersion.serverStale
+                      ? 'border-green-500/20 bg-green-500/5 text-green-300'
+                      : 'border-amber-500/25 bg-amber-500/5 text-amber-300'
+                }`}>
+                  <span>
+                    {cliVersion.version == null
+                      ? 'OpenCode CLI not found — install it (`npm i -g opencode-ai`), then sign in (`opencode auth login`).'
+                      : cliVersion.serverStale
+                        ? `CLI v${cliVersion.version} installed, but the running server is v${cliVersion.serverVersion} — restart it for the free tier.`
+                        : cliVersion.freeTierSupported
+                          ? `Installed CLI v${cliVersion.version}${cliVersion.serverVersion ? ` · runtime v${cliVersion.serverVersion}` : ''} — free tier ready.`
+                          : `Installed CLI v${cliVersion.version} — free tier needs v${cliVersion.minFreeVersion}+.`}
+                  </span>
+                  {cliVersion.version != null && !cliVersion.freeTierSupported && !cliVersion.serverStale && (
+                    <button
+                      onClick={() => void handleUpgradeOpenCodeCli()}
+                      disabled={upgradingCli}
+                      className="shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      {upgradingCli ? 'Upgrading…' : 'Upgrade CLI'}
+                    </button>
+                  )}
+                  {cliVersion.serverStale && (
+                    <button
+                      onClick={() => void handleRestartOpenCodeServer()}
+                      disabled={restartingServer}
+                      className="shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      {restartingServer ? 'Restarting…' : 'Restart runtime'}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}

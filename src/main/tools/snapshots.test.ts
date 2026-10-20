@@ -35,6 +35,21 @@ describe('findInfiniteRepoRoot', () => {
       rmSync(other, { recursive: true, force: true });
     }
   });
+
+  it('finds the repo when given the repo root itself', async () => {
+    // Every guard passes the conversation cwd, which is normally the repo root.
+    // This used to begin the walk at the *parent*, so it never found the repo
+    // and returned null — which silently disabled BuildFeature's guard, the
+    // one caller with no `?? ctx.cwd` fallback. The case the guard exists for
+    // was the one case where it did not run.
+    const { findInfiniteRepoRoot } = await load();
+    expect(findInfiniteRepoRoot(root)).toBe(root);
+  });
+
+  it('finds the repo from a directory inside it', async () => {
+    const { findInfiniteRepoRoot } = await load();
+    expect(findInfiniteRepoRoot(join(root, 'src', 'main'))).toBe(root);
+  });
 });
 
 describe('session snapshots', () => {

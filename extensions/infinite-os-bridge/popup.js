@@ -108,7 +108,7 @@ async function loadTabs() {
       const item = document.createElement('div');
       item.className = 'tab-item' + (tab.active ? ' active' : '');
       item.innerHTML = `
-        <img class="tab-favicon" alt="" onerror="this.style.display='none'">
+        <img class="tab-favicon" alt="">
         <div class="tab-info">
           <div class="tab-title">${escapeHtml(tab.title || 'Untitled')}</div>
           <div class="tab-url">${escapeHtml(truncateUrl(tab.url || ''))}</div>
@@ -123,8 +123,12 @@ async function loadTabs() {
       const safeUrl = tab.favIconUrl || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><rect width=%2216%22 height=%2216%22 fill=%22%23333%22/></svg>';
       if (safeUrl.startsWith('http://') || safeUrl.startsWith('https://') || safeUrl.startsWith('data:')) {
         favicon.setAttribute('src', safeUrl);
+        // An inline onerror attribute is blocked by the MV3 extension CSP, so
+        // the fallback is attached as a listener (a dead favicon used to leave
+        // a broken-image glyph in every row).
+        favicon.addEventListener('error', () => { favicon.style.display = 'none'; });
       } else {
-        favicon.setAttribute('src', '');
+        favicon.style.display = 'none';
       }
 
       // Click to activate tab
@@ -447,14 +451,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (typeof chrome?.runtime?.id === 'string') {
         try {
-          await sendToBackground({ type: 'detach-debugger' });
-          // also tell host to release control
-          chrome.runtime.sendMessage({ type: 'agent:abort', reason: 'emergency-stop' }).catch?.(() => {});
+          // The worker does both: it detaches the debugger and tells the host.
+          // (Sending agent:abort from here raced the detach and was dropped.)
+          await sendToBackground({ type: 'detach-debugger', reason: 'emergency-stop' });
           if (feed) {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
             entry.style.color = 'var(--status-red)';
-            entry.innerHTML = `<span class="log-time">[${stamp()}]</span> Emergency detach triggered — control released.`;
+            entry.innerHTML = '<span class="log-time"></span> Emergency detach triggered — control released.';
+            entry.querySelector('.log-time').textContent = `[${stamp()}]`;
             feed.appendChild(entry);
             feed.scrollTop = feed.scrollHeight;
           }
@@ -463,7 +468,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const entry = document.createElement('div');
             entry.className = 'log-entry';
             entry.style.color = 'var(--status-red)';
-            entry.innerHTML = `<span class="log-time">[${stamp()}]</span> Detach failed: ${err?.message || err}`;
+            // textContent, not interpolation: the message can carry a channel
+            // error string and this runs in the extension's own context.
+            entry.innerHTML = '<span class="log-time"></span> Detach failed.';
+            entry.querySelector('.log-time').textContent = `[${stamp()}]`;
+            entry.appendChild(document.createTextNode(' ' + String(err?.message || err)));
             feed.appendChild(entry);
             feed.scrollTop = feed.scrollHeight;
           }

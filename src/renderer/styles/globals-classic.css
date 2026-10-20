@@ -1356,3 +1356,33 @@ button:disabled {
     animation-duration: 1ms;
   }
 }
+
+/* Keep the full hover glow visible - grid breathing room prevents the card
+   shadow and 4px lift from being cut off by the scroll container. */
+.agent-card--static {
+  background: rgba(15, 12, 26, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.agent-card--static:hover {
+  transform: translateY(-4px);
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.6), 0 0 24px rgba(139, 92, 246, 0.25);
+}
+.agent-card--static:hover .af-action {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(168, 85, 247, 0.5);
+  color: #ffffff;
+}
+.card-grid-animated {
+  padding: 28px;
+}
+

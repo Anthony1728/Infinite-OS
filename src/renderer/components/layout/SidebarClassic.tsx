@@ -8,14 +8,25 @@ import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { PhoneConnectModal } from '../phone/PhoneConnectModal';
 
 const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
+  { id: 'infinite', label: 'Infinite', icon: 'action.ai', color: 'text-violet-400' },
+  { id: 'home', label: 'Power Center', icon: 'home.orchestrator', color: 'text-violet-400' },
   { id: 'chats', label: 'Chats', icon: 'nav.chats', color: 'text-cyan-400' },
   { id: 'projects', label: 'Projects', icon: 'nav.projects', color: 'text-emerald-400' },
+  // The Kanban board over the real project/task store. ProjectsView is a
+  // scaffolding generator, so nothing ever showed the board itself.
+  { id: 'board', label: 'Board', icon: 'nav.projects', color: 'text-emerald-400' },
+  // Filed-away conversations. Searchable, and every entry can be restored and
+  // carried on from.
+  { id: 'archive', label: 'Archive', icon: 'tab.document', color: 'text-slate-400' },
   { id: 'documents', label: 'File Explorer', icon: 'nav.files', color: 'text-sky-400' },
   { id: 'bots', label: 'Bots', icon: 'nav.agents', color: 'text-violet-400' },
+  { id: 'voice', label: 'Voice Assistant', icon: 'nav.voice', color: 'text-rose-400' },
   { id: 'artifacts', label: 'Artifacts', icon: 'tab.document', color: 'text-cyan-400' },
   { id: 'messaging', label: 'Messaging', icon: 'home.chat', color: 'text-emerald-400' },
   { id: 'terminal', label: 'Terminal', icon: 'nav.terminal', color: 'text-lime-400' },
   { id: 'automations', label: 'Automations', icon: 'nav.automations', color: 'text-amber-400' },
+  // One worker per recurring task: schedules, Teaching mode, vault, apps.
+  { id: 'workers', label: 'Workers', icon: 'automation.pulse', color: 'text-sky-400' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
   { id: 'active-memory', label: 'Active Memory', icon: 'nav.memory', color: 'text-cyan-400' },
@@ -55,6 +66,7 @@ export function SidebarClassic({
   const clearAllSessions = useChatStore((state) => state.clearAllSessions);
   const renameSession = useChatStore((state) => state.renameSession);
   const pinSession = useChatStore((state) => state.pinSession);
+  const archiveSession = useChatStore((state) => state.archiveSession);
   const searchSessions = useChatStore((state) => state.searchSessions);
   const branchSession = useChatStore((state) => state.branchSession);
   const exportSession = useChatStore((state) => state.exportSession);
@@ -484,6 +496,12 @@ export function SidebarClassic({
                     <div className="absolute z-50 right-1 top-7 w-36 rounded-lg border border-white/[0.08] bg-[#11131b] p-1 shadow-2xl animate-scale-in">
                       {[
                         { label: s.pinned ? 'Unpin' : 'Pin', action: () => pinSession(s.id, !s.pinned) },
+                        {
+                          // Files the conversation in the Archive section instead
+                          // of deleting it, so it can be found and resumed later.
+                          label: 'Archive',
+                          action: () => void archiveSession(s.id, true),
+                        },
                         {
                           label: 'Rename',
                           action: () => {

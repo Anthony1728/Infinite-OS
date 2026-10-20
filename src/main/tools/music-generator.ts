@@ -11,7 +11,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Tool, ToolResult, ToolContext } from './base.js';
+import { outputDirectoryDenial } from './write-guard.js';
 import { resolveProviderKey, redact } from './media-keys.js';
+import { mediaEnvelope } from './image-generator.js';
 
 const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || '.', 'infinite-music');
 
@@ -42,6 +44,8 @@ export const musicGeneratorTool: Tool = {
     if (!prompt) return { content: 'MusicGen requires a non-empty prompt.', is_error: true };
     const seconds = Math.max(5, Math.min(120, Math.round(a.duration_seconds ?? 20)));
     const outDir = a.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
     await mkdir(outDir, { recursive: true });
 
     // 1) ElevenLabs Music
@@ -122,7 +126,7 @@ function ok(provider: string, path: string, prompt: string, seconds: number): To
   return {
     content: `Music generated via ${provider} (${seconds}s) — saved to:\n${path}\nPrompt: ${prompt}${
       provider.startsWith('Local') ? '\nHint: save an ElevenLabs or Replicate key in Settings → AI Provider for studio-quality output.' : ''
-    }`,
+    }${mediaEnvelope('audio', path, path.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg')}`,
   };
 }
 

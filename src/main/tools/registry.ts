@@ -1,269 +1,1 @@
-// Built-in tool registrations.
-
-import { toolRegistry } from './base.js';
-import { bash } from './bash.js';
-import { read } from './read.js';
-import { write } from './write.js';
-import { edit } from './edit.js';
-import { glob } from './glob.js';
-import { grep } from './grep.js';
-import { webfetch } from './webfetch.js';
-import { websearch } from './websearch.js';
-import { todowrite, todoread } from './todowrite.js';
-import { agent as agentTool } from './agent.js';
-import { crewTool } from './crew.js';
-import { createCustomAgentTool } from './custom-agent.js';
-import { computerTool } from './computer.js';
-import { browserTool } from './browser.js';
-import { selfImprove } from './self-improve.js';
-import { buildFeatureTool, rollbackFeatureTool } from './build-feature.js';
-import { emailTool } from './email.js';
-import { operatorTool } from './operator.js';
-import { browserExtensionTool } from './browser-extension.js';
-import { deleteTool } from './delete.js';
-import { fileOpsTool } from './file-ops.js';
-import { knowledgeTool } from './knowledge.js';
-import { systemTool } from './system.js';
-import { securityTool } from './security.js';
-import { projectTool } from './project.js';
-import { automationTool } from './automation.js';
-import { taskGroupTool } from './task-group.js';
-import { deployTool } from './deploy.js';
-import { businessTool } from './business.js';
-import { gameAssistantTool } from './game-assistant.js';
-import { teachTool } from './teach.js';
-import { skillsTool, skillManageTool } from './skills.js';
-import { businessAdvisorTool } from './business-advisor.js';
-import { taskExecutorTool } from './task-executor.js';
-import { automationDisplayTool } from './automation-display.js';
-import { appBuilderTool } from './app-builder.js';
-import { websiteBuilderTool } from './website-builder.js';
-// Phase 1 new tools
-import { clipboardTool, clipboardReadTool, clipboardWriteTool, clipboardImageTool } from './clipboard.js';import {
-  notificationTool,
-  notificationProgressTool,
-  notificationActionTool,
-  notificationStatusTool,
-  notificationClearTool,
-} from './notification.js';
-import {
-  gitTool,
-  gitStatusTool,
-  gitLogTool,
-  gitCommitTool,
-  gitBranchTool,
-  gitPushTool,
-  gitPullTool,
-  gitDiffTool,
-} from './git.js';
-// Deterministic utility tools (Json, Text, Crypto, Time, Math, Timer)
-import { jsonTool } from './json.js';
-import { textTool } from './text.js';
-import { cryptoTool } from './crypto.js';
-import { timeTool } from './time.js';
-import { mathTool } from './math.js';
-import { timerTool } from './timer.js';
-// Phase 1: Document/Chart/Image/API tools
-import { documentGeneratorTool } from './document-generator.js';
-import { chartGeneratorTool } from './chart-generator.js';
-import { imageEditorTool } from './image-editor.js';
-import { apiTesterTool } from './api-tester.js';
-// Phase 2: Docker, CI/CD, Calendar
-import { dockerTool } from './docker.js';
-import { cicdTool } from './cicd.js';
-import { calendarTool } from './calendar.js';
-// Dynamic tab tool
-import { createTabTool } from './create-tab.js';
-// Phase 3: Database and Voice tools
-import { databaseTool } from './database.js';
-import { voiceTool } from './voice.js';
-// Phase 4: Superpowers - Universal API, Enhanced Computer, Workflows, Games, Business
-import { apiConnectorTool } from './api-connector.js';
-import { enhancedComputerTool } from './enhanced-computer.js';
-import { workflowTemplatesTool } from './workflow-templates.js';
-import { gameEngineTool } from './game-engine.js';
-import { businessSuiteTool } from './business-suite.js';
-// Phase 5: Intelligence - Smart Scheduler, Knowledge Graph, Proactive Assistant
-import { smartSchedulerTool } from './smart-scheduler.js';
-import { knowledgeGraphTool } from './knowledge-graph.js';
-import { proactiveAssistantTool } from './proactive-assistant.js';
-// Phase 6: Meta - Dynamic Tool Registration
-import { dynamicToolTool } from './dynamic-tool.js';
-
-// Phase 6: Self-help - Network diagnostics and router management (user's own devices)
-import { networkTool } from './network.js';
-import { routerAdminTool } from './router-admin.js';
-import { tabBrowserTool } from './tab-browser.js';
-import { askQuestionTool } from './ask-question.js';
-
-// Hermes-beating: Messaging, Image generation, Device/Home integrations (40/40 parity + beyond)
-import { messagingTool } from './messaging.js';
-import { imageGeneratorTool } from './image-generator.js';
-import { deviceTool } from './device.js';
-import { visionTool } from './vision.js';
-import { sandboxTool } from './sandbox.js';
-import { batchTool } from './batch.js';
-import { ultimatePlannerTool } from './ultimate-planner.js';
-import { computeTool } from './compute.js';
-// New high-value tools
-import { codeReviewTool } from './code-review.js';
-import { regexTool } from './regex.js';
-import { csvTool } from './csv.js';
-import { translateTool } from './translate.js';
-import { colorTool } from './color.js';
-import { verifyTool } from './verify.js';
-import { snapshotTool } from './snapshot.js';
-import { appointmentsTool } from './appointments.js';
-import { enterpriseCompanyTool } from './enterprise-company.js';
-import { businessKnowledgeTool } from './business-knowledge.js';
-import { pcLiveMapTool } from './pc-live-map.js';
-import { exitPlanTool } from './exit-plan.js';
-import { lspTool } from './lsp.js';
-// Creative + commerce: the "do anything a human can on a PC" tools
-import { musicGeneratorTool } from './music-generator.js';
-import { videoGeneratorTool } from './video-generator.js';
-import { sellAppTool } from './sell-app.js';
-import { launchProductTool } from './launch-product.js';
-
-export function registerBuiltinTools(): void {
-  for (const t of [
-    // Existing tools
-    bash,
-    read,
-    write,
-    edit,
-    glob,
-    grep,
-    webfetch,
-    websearch,
-    todowrite,
-    todoread,
-    agentTool,
-    crewTool,
-    createCustomAgentTool,
-    computerTool,
-    browserTool,
-    selfImprove,
-    buildFeatureTool,
-    rollbackFeatureTool,
-    emailTool,
-    operatorTool,
-    browserExtensionTool,
-    deleteTool,
-    fileOpsTool,
-    knowledgeTool,
-    systemTool,
-    securityTool,
-    projectTool,
-    automationTool,
-    taskGroupTool,
-    deployTool,
-    businessTool,
-    // Phase 2 capability tools
-    gameAssistantTool,
-    teachTool,
-    skillsTool,
-    skillManageTool,
-    businessAdvisorTool,
-    taskExecutorTool,
-    automationDisplayTool,
-    // Builder tools
-    appBuilderTool,
-    websiteBuilderTool,
-    // Clipboard tools (all four must be registered)
-    clipboardTool,
-    clipboardReadTool,
-    clipboardWriteTool,
-    clipboardImageTool,
-    // Notification tools (all five must be registered)
-    notificationTool,
-    notificationProgressTool,
-    notificationActionTool,
-    notificationStatusTool,
-    notificationClearTool,
-    // Git tools (all eight must be registered)
-    gitTool,
-    gitStatusTool,
-    gitLogTool,
-    gitCommitTool,
-    gitBranchTool,
-    gitPushTool,
-    gitPullTool,
-    gitDiffTool,
-    // Deterministic utility tools
-    jsonTool,
-    textTool,
-    cryptoTool,
-    timeTool,
-    mathTool,
-    timerTool,
-    // Phase 1: Document/Chart/Image/API tools
-    documentGeneratorTool,
-    chartGeneratorTool,
-    imageEditorTool,
-    apiTesterTool,
-    // Phase 2: Docker, CI/CD, Calendar
-    dockerTool,
-    cicdTool,
-    calendarTool,
-    // Dynamic tabs
-    createTabTool,
-    // Phase 3: Database and Voice
-    databaseTool,
-    voiceTool,
-    // Phase 4: Superpowers
-    apiConnectorTool,
-    enhancedComputerTool,
-    workflowTemplatesTool,
-    gameEngineTool,
-    businessSuiteTool,
-    // Phase 5: Intelligence
-    smartSchedulerTool,
-    knowledgeGraphTool,
-    proactiveAssistantTool,
-    // Phase 6: Meta - Dynamic Tool Registration
-    dynamicToolTool,
-
-    // Phase 7: Self-help (user's own PC and network)
-    networkTool,
-    routerAdminTool,
-    tabBrowserTool,
-    askQuestionTool,
-
-    // Hermes 40/40 — last 6 pillars: messaging integrations, image generation, home/device, vision, sandboxed execution, batch execution
-    messagingTool,
-    imageGeneratorTool,
-    deviceTool,
-    visionTool,
-    sandboxTool,
-    batchTool,
-    // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)
-    ultimatePlannerTool,
-    computeTool,
-    // High-value utilities — deterministic, no model call
-    codeReviewTool,
-    regexTool,
-    csvTool,
-    translateTool,
-    colorTool,
-    verifyTool,
-    snapshotTool,
-    appointmentsTool,
-    enterpriseCompanyTool,
-    businessKnowledgeTool,
-    pcLiveMapTool,
-    // Enforced plan mode — ExitPlan is the approval gate
-    exitPlanTool,
-    // LSP-grade diagnostics (tsc/pyright/ruff/cargo)
-    lspTool,
-    // Creative media — real audio/video files, keyless fallbacks
-    musicGeneratorTool,
-    videoGeneratorTool,
-    // Builder → revenue handoff: package + Stripe payment link
-    sellAppTool,
-    // One-run product launch: build → jingle → promo → package → payment link
-    launchProductTool,
-  ]) {
-    toolRegistry.register(t);
-  }
-}
+// Built-in tool registrations.import { toolRegistry } from './base.js';import { bash } from './bash.js';import { cliHubTool } from './cli-hub.js';import { reaTool } from '../rea/tool.js';import { pentestTool } from './pentest.js';import { read } from './read.js';import { write } from './write.js';import { edit } from './edit.js';import { glob } from './glob.js';import { grep } from './grep.js';import { webfetch } from './webfetch.js';import { websearch } from './websearch.js';import { todowrite, todoread } from './todowrite.js';import { agent as agentTool } from './agent.js';import { crewTool } from './crew.js';import { createCustomAgentTool } from './custom-agent.js';import { computerTool } from './computer.js';import { browserTool } from './browser.js';import { selfImprove } from './self-improve.js';import { buildFeatureTool, rollbackFeatureTool } from './build-feature.js';import { emailTool } from './email.js';import { operatorTool } from './operator.js';import { browserExtensionTool } from './browser-extension.js';import { deleteTool } from './delete.js';import { fileOpsTool } from './file-ops.js';import { knowledgeTool } from './knowledge.js';import { systemTool } from './system.js';import { inAppBrowserTool } from './in-app-browser.js';import { systemControlTool } from './system-control.js';import { securityTool } from './security.js';import { projectTool } from './project.js';import { automationTool } from './automation.js';import { taskGroupTool } from './task-group.js';import { deployTool } from './deploy.js';import { businessTool } from './business.js';import { gameAssistantTool } from './game-assistant.js';import { teachTool } from './teach.js';import { skillsTool, skillManageTool } from './skills.js';import { businessAdvisorTool } from './business-advisor.js';import { taskExecutorTool } from './task-executor.js';import { automationDisplayTool } from './automation-display.js';import { appBuilderTool } from './app-builder.js';import { websiteBuilderTool } from './website-builder.js';// Phase 1 new toolsimport { clipboardTool, clipboardReadTool, clipboardWriteTool, clipboardImageTool } from './clipboard.js';import {  notificationTool,  notificationProgressTool,  notificationActionTool,  notificationStatusTool,  notificationClearTool,} from './notification.js';import {  gitTool,  gitStatusTool,  gitLogTool,  gitCommitTool,  gitBranchTool,  gitPushTool,  gitPullTool,  gitDiffTool,} from './git.js';// Deterministic utility tools (Json, Text, Crypto, Time, Math, Timer)import { jsonTool } from './json.js';import { textTool } from './text.js';import { cryptoTool } from './crypto.js';import { timeTool } from './time.js';import { mathTool } from './math.js';import { timerTool } from './timer.js';// Phase 1: Document/Chart/Image/API toolsimport { documentGeneratorTool } from './document-generator.js';import { chartGeneratorTool } from './chart-generator.js';import { imageEditorTool } from './image-editor.js';import { apiTesterTool } from './api-tester.js';// Phase 2: Docker, CI/CD, Calendarimport { dockerTool } from './docker.js';import { cicdTool } from './cicd.js';import { calendarTool } from './calendar.js';// Dynamic tab toolimport { createTabTool } from './create-tab.js';// Phase 3: Database and Voice toolsimport { databaseTool } from './database.js';import { voiceTool } from './voice.js';// Phase 4: Superpowers - Universal API, Enhanced Computer, Workflows, Games, Businessimport { apiConnectorTool } from './api-connector.js';import { enhancedComputerTool } from './enhanced-computer.js';import { workflowTemplatesTool } from './workflow-templates.js';import { gameEngineTool } from './game-engine.js';import { businessSuiteTool } from './business-suite.js';// Phase 5: Intelligence - Smart Scheduler, Knowledge Graph, Proactive Assistantimport { smartSchedulerTool } from './smart-scheduler.js';import { knowledgeGraphTool } from './knowledge-graph.js';import { proactiveAssistantTool } from './proactive-assistant.js';// Phase 6: Meta - Dynamic Tool Registrationimport { dynamicToolTool } from './dynamic-tool.js';// Phase 6: Self-help - Network diagnostics and router management (user's own devices)import { networkTool } from './network.js';import { routerAdminTool } from './router-admin.js';import { tabBrowserTool } from './tab-browser.js';import { askQuestionTool } from './ask-question.js';// Hermes-beating: Messaging, Image generation, Device/Home integrations (40/40 parity + beyond)import { messagingTool } from './messaging.js';import { imageGeneratorTool } from './image-generator.js';import { deviceTool } from './device.js';import { visionTool } from './vision.js';import { sandboxTool } from './sandbox.js';import { batchTool } from './batch.js';import { ultimatePlannerTool } from './ultimate-planner.js';import { computeTool } from './compute.js';// New high-value toolsimport { codeReviewTool } from './code-review.js';import { regexTool } from './regex.js';import { csvTool } from './csv.js';import { translateTool } from './translate.js';import { colorTool } from './color.js';import { verifyTool } from './verify.js';import { snapshotTool } from './snapshot.js';import { appointmentsTool } from './appointments.js';import { conversationSearchTool } from './conversation-search.js';import { enterpriseCompanyTool } from './enterprise-company.js';import { businessKnowledgeTool } from './business-knowledge.js';import { pcLiveMapTool } from './pc-live-map.js';import { exitPlanTool } from './exit-plan.js';import { lspTool } from './lsp.js';// Creative + commerce: the "do anything a human can on a PC" toolsimport { musicGeneratorTool } from './music-generator.js';import { videoGeneratorTool } from './video-generator.js';import { sellAppTool } from './sell-app.js';import { launchProductTool } from './launch-product.js';// Workers / Teaching mode (Warmwind-style autonomous tasks) — non-core by designimport { workerTool } from './worker.js';import { workerVaultTool } from './worker-vault.js';import { teachingTool } from './teaching.js';export function registerBuiltinTools(): void {  for (const t of [    // Existing tools    bash,    cliHubTool,    reaTool,    pentestTool,    read,    write,    edit,    glob,    grep,    webfetch,    websearch,    todowrite,    todoread,    agentTool,    crewTool,    createCustomAgentTool,    computerTool,    browserTool,    selfImprove,    buildFeatureTool,    rollbackFeatureTool,    emailTool,    operatorTool,    browserExtensionTool,    deleteTool,    fileOpsTool,    knowledgeTool,    systemTool,    // Machine control, not just inspection: services, env, registry, Wi-Fi,    // scheduled tasks, power, windows, sound. Registered beside System so the    // read/write split stays discoverable.    systemControlTool,    // Real browser INSIDE the app: the agent's default route for web work, so    // nothing has to launch a Chrome window over Infinite OS.    inAppBrowserTool,    securityTool,    projectTool,    automationTool,    taskGroupTool,    deployTool,    businessTool,    // Phase 2 capability tools    gameAssistantTool,    teachTool,    skillsTool,    skillManageTool,    businessAdvisorTool,    taskExecutorTool,    automationDisplayTool,    // Builder tools    appBuilderTool,    websiteBuilderTool,    // Clipboard tools (all four must be registered)    clipboardTool,    clipboardReadTool,    clipboardWriteTool,    clipboardImageTool,    // Notification tools (all five must be registered)    notificationTool,    notificationProgressTool,    notificationActionTool,    notificationStatusTool,    notificationClearTool,    // Git tools (all eight must be registered)    gitTool,    gitStatusTool,    gitLogTool,    gitCommitTool,    gitBranchTool,    gitPushTool,    gitPullTool,    gitDiffTool,    // Deterministic utility tools    jsonTool,    textTool,    cryptoTool,    timeTool,    mathTool,    timerTool,    // Phase 1: Document/Chart/Image/API tools    documentGeneratorTool,    chartGeneratorTool,    imageEditorTool,    apiTesterTool,    // Phase 2: Docker, CI/CD, Calendar    dockerTool,    cicdTool,    calendarTool,    // Dynamic tabs    createTabTool,    // Phase 3: Database and Voice    databaseTool,    voiceTool,    // Phase 4: Superpowers    apiConnectorTool,    enhancedComputerTool,    workflowTemplatesTool,    gameEngineTool,    businessSuiteTool,    // Phase 5: Intelligence    smartSchedulerTool,    knowledgeGraphTool,    proactiveAssistantTool,    // Phase 6: Meta - Dynamic Tool Registration    dynamicToolTool,    // Phase 7: Self-help (user's own PC and network)    networkTool,    routerAdminTool,    tabBrowserTool,    askQuestionTool,    // Hermes 40/40 — last 6 pillars: messaging integrations, image generation, home/device, vision, sandboxed execution, batch execution    messagingTool,    imageGeneratorTool,    deviceTool,    visionTool,    sandboxTool,    batchTool,    // Ultimate OS — Universal Task Planner + Intelligent Compute (beyond Hermes)    ultimatePlannerTool,    computeTool,    // High-value utilities — deterministic, no model call    codeReviewTool,    regexTool,    csvTool,    translateTool,    colorTool,    verifyTool,    snapshotTool,    appointmentsTool,    conversationSearchTool,    enterpriseCompanyTool,    businessKnowledgeTool,    pcLiveMapTool,    // Enforced plan mode — ExitPlan is the approval gate    exitPlanTool,    // LSP-grade diagnostics (tsc/pyright/ruff/cargo)    lspTool,    // Creative media — real audio/video files, keyless fallbacks    musicGeneratorTool,    videoGeneratorTool,    // Builder → revenue handoff: package + Stripe payment link    sellAppTool,    // One-run product launch: build → jingle → promo → package → payment link    launchProductTool,    // Workers: autonomous task surface, per-worker credential vault, demo recording    workerTool,    workerVaultTool,    teachingTool,  ]) {    toolRegistry.register(t);  }}

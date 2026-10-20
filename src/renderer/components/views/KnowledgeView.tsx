@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen,
   Plus,
@@ -147,7 +147,7 @@ export function KnowledgeView() {
     };
   };
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
       const rows = (await window.api.kbList()) as Array<{
         id: unknown; title: unknown; tags: unknown; content: unknown; fileName: unknown; createdAt: unknown; updatedAt: unknown;
@@ -155,10 +155,13 @@ export function KnowledgeView() {
       setEntries((Array.isArray(rows) ? rows : []).map(toEntry));
     } catch { /* store unavailable — view stays empty */ }
     finally { setLoading(false); }
-  };
+  }, []);
 
+  // Mount-only fetch: `reload` is redefined each render, so listing it as a
+  // dependency would refetch in a loop. Refreshes happen via the explicit
+  // reload() calls after create/edit/delete.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void reload(); }, []);
-
   const filteredEntries = useMemo(() => {
     let list = entries;
     if (filterCategory !== 'All') {

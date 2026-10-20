@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeJid, isSelfChat, extractInboundText, shouldAnswerInbound, appendDebugLog, debugLogPath } from './whatsapp-link.js';
+import { normalizeJid, isSelfChat, extractInboundText, shouldAnswerInbound, appendDebugLog, debugLogPath, whatsAppLink } from './whatsapp-link.js';
 
 const base = {
   ownJid: '15551234567@s.whatsapp.net',
@@ -115,6 +115,38 @@ describe('whatsapp link gating', () => {
       const p = debugLogPath();
       expect(existsSync(p)).toBe(true);
       expect(readFileSync(p, 'utf8')).toContain('hello-log');
+    } finally {
+      if (saved === undefined) delete process.env.INFINITE_TEST_HOME;
+      else process.env.INFINITE_TEST_HOME = saved;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('auto-resumes only when a genuinely linked pairing is on disk', async () => {
+    const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'wa-creds-'));
+    const saved = process.env.INFINITE_TEST_HOME;
+    process.env.INFINITE_TEST_HOME = home;
+    try {
+      const dir = join(home, 'whatsapp-link');
+      expect(whatsAppLink.hasLinkedCreds()).toBe(false); // fresh install
+      mkdirSync(dir, { recursive: true });
+      expect(whatsAppLink.hasLinkedCreds()).toBe(false); // empty dir
+      // The debug log must NOT count as a pairing. "Directory not empty" made
+      // every boot silently restart a QR flow nobody was watching, which then
+      // died with "QR refs attempts ended" and retried every ~3 min.
+      writeFileSync(join(dir, 'debug.log'), '2026-09-24 hello-log\n');
+      expect(whatsAppLink.hasLinkedCreds()).toBe(false);
+      // Half-finished pairing: creds written but never scanned — no identity,
+      // so a boot must not auto-resume into another silent QR loop either.
+      writeFileSync(join(dir, 'creds.json'), JSON.stringify({ registered: false }));
+      expect(whatsAppLink.hasLinkedCreds()).toBe(false);
+      // Genuinely linked: baileys has a resolved `me` and logs in instead of
+      // re-registering — this is the only auto-resume case.
+      writeFileSync(join(dir, 'creds.json'), JSON.stringify({ registered: true, me: { id: '15551234567@s.whatsapp.net' } }));
+      expect(whatsAppLink.hasLinkedCreds()).toBe(true);
     } finally {
       if (saved === undefined) delete process.env.INFINITE_TEST_HOME;
       else process.env.INFINITE_TEST_HOME = saved;

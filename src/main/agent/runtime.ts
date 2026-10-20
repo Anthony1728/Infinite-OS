@@ -437,19 +437,28 @@ export async function runSubagent(
       return '';
     }
     const toolsEnabled = providerSupportsTools(activeCandidate.provider, activeCandidate.model);
+    const allowAll = agent.allowedTools.includes('*');
     const allowedTools = toolsEnabled
       ? toolRegistry
           .asProviderTools()
           .filter((tool) => {
             if (config?.toolOverride?.exclude?.includes(tool.name)) return false;
-            return agent.allowedTools.includes('*') || agent.allowedTools.includes(tool.name) || Boolean(config?.toolOverride?.include?.includes(tool.name));
+            return allowAll || agent.allowedTools.includes(tool.name) || Boolean(config?.toolOverride?.include?.includes(tool.name));
           })
       : [];
-    // CORE TOOL SET — canonical list in tools/base.ts (CORE_TOOL_NAMES).
-    const CORE_TOOL_SET = CORE_TOOL_NAMES;
+    // An agent that declares `'*'` means "no capability restrictions", so it gets
+    // the whole registry. This used to be intersected with CORE_TOOL_NAMES, which
+    // silently capped every agent at ~37 tools no matter what it declared — so
+    // tools an agent genuinely needed (SystemControl, Security, Deploy,
+    // BusinessAdvisor, Notifications, Clipboard, …) were simply unreachable and
+    // the agent had to give up or fake it. An explicit per-agent allowlist is
+    // still honoured exactly as written; only the wildcard is unrestricted.
+    const scopedTools = allowAll
+      ? allowedTools
+      : allowedTools.filter((t) => CORE_TOOL_NAMES.has(t.name));
     const tools = activeCandidate.provider === 'ollama'
-      ? selectLocalModelTools(opts.task, allowedTools)
-      : allowedTools.filter((t) => CORE_TOOL_SET.has(t.name));
+      ? selectLocalModelTools(opts.task, scopedTools)
+      : scopedTools;
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${tools.map((tool) => tool.name).join(',')}`;
     let baseSystem = runSystemPrompts.get(systemKey);
     if (!baseSystem) baseSystem = [
@@ -976,6 +985,27 @@ export function abortSessionRuns(sessionId: string): number {
     if (!st || st.sessionId === sessionId) {
       try { ctrl.abort(new Error('Session aborted by user.')); } catch { /* already aborted */ }
     }
+  }
+  return n;
+}
+
+/**
+ * Stop every in-flight agent turn. Used by the browser bridge's Emergency Stop:
+ * the extension tells the app the user hit stop, and any run that is currently
+ * driving the browser has to be cancelled — otherwise the AI keeps clicking
+ * after the user believes everything has halted.
+ */
+export function abortAllRuns(reason = 'Stopped by user.'): number {
+  let n = 0;
+  for (const [runId, state] of runStates) {
+    if (state.status === 'queued' || state.status === 'running') {
+      abortSubagent(runId);
+      activeStreamControllers.get(runId)?.abort(new Error(reason));
+      n++;
+    }
+  }
+  for (const [, ctrl] of activeStreamControllers) {
+    try { ctrl.abort(new Error(reason)); } catch { /* already aborted */ }
   }
   return n;
 }

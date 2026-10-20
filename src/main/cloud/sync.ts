@@ -214,7 +214,9 @@ export class CloudSync {
         const sessionsDir = join(infiniteHome(), 'sessions');
         if (existsSync(sessionsDir)) {
           const { readdirSync } = await import('node:fs');
-          const files = readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));
+          // Transcripts plus their meta sidecars, so a restored backup keeps
+          // titles, previews, archive flags and message counts.
+          const files = readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl') || f.endsWith('.meta.json'));
           const chatBackupPath = join(backupDir, 'chats');
           if (!existsSync(chatBackupPath)) mkdirSync(chatBackupPath, { recursive: true });
           for (const file of files) {

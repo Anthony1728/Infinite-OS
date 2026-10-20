@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { audioDataMime, speakWithBrowserVoice } from '../lib/voiceConversation';
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -94,19 +95,26 @@ export function useVoiceAssistant() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
+  const [finalTranscript, setFinalTranscript] = useState('');
+  const [engine, setEngine] = useState<'local-whisper' | 'windows-local' | 'browser' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguageState] = useState(preferredLanguage);
   const [isSupported, setIsSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const shouldListenRef = useRef(false);
   const nativeActiveRef = useRef(false);
+  // Set when native (Windows) dictation fails and the browser engine takes
+  // over: late events from the failed native attempt must be ignored so they
+  // cannot clobber the browser session's state.
+  const demotedRef = useRef(false);
   const nativeFinalPartsRef = useRef<string[]>([]);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!window.api?.onVoiceTranscript) return undefined;
     setIsSupported(true);
-    return window.api.onVoiceTranscript((event: NativeDictationEventLike) => {
+    const dispose = window.api.onVoiceTranscript((event: NativeDictationEventLike) => {
+      if (demotedRef.current) return;
       if (event.type === 'ready') {
         nativeActiveRef.current = true;
         setIsListening(true);
@@ -119,6 +127,7 @@ export function useVoiceAssistant() {
         if (event.final) {
           nativeFinalPartsRef.current.push(phrase);
           setInterimTranscript('');
+          setFinalTranscript(nativeFinalPartsRef.current.join(' ').trim());
         } else {
           setInterimTranscript(phrase);
         }
@@ -136,6 +145,15 @@ export function useVoiceAssistant() {
         if (event.message) setError(event.message);
       }
     });
+    return () => {
+      dispose();
+      // Never leave the main-process recognizer running after unmount.
+      if (nativeActiveRef.current) {
+        nativeActiveRef.current = false;
+        shouldListenRef.current = false;
+        void window.api.voiceStopListening();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -155,6 +173,7 @@ export function useVoiceAssistant() {
       const next = transcriptFromResults(event.results);
       setTranscript(next.transcript);
       setInterimTranscript(next.interimTranscript);
+      setFinalTranscript(next.finalTranscript);
       setError(null);
     };
     recognition.onerror = (event) => {
@@ -202,14 +221,24 @@ export function useVoiceAssistant() {
   const startListening = useCallback(() => {
     setTranscript('');
     setInterimTranscript('');
+    setFinalTranscript('');
     setError(null);
+    setEngine(null);
     nativeFinalPartsRef.current = [];
     shouldListenRef.current = true;
     nativeActiveRef.current = true;
     setIsListening(true);
 
-    void window.api.voiceStartListening().then((result: { ok?: boolean; error?: string }) => {
+    void window.api.voiceStartListening().then((result: { ok?: boolean; error?: string; engine?: string }) => {
+      // The user may have pressed Stop while the engine was still starting;
+      // a late "ok" must not re-arm a session nobody wants any more.
+      if (!shouldListenRef.current) {
+        nativeActiveRef.current = false;
+        void window.api.voiceStopListening();
+        return;
+      }
       if (result?.ok) {
+        setEngine(result.engine === 'local-whisper' ? 'local-whisper' : 'windows-local');
         return;
       }
       nativeActiveRef.current = false;
@@ -222,13 +251,17 @@ export function useVoiceAssistant() {
       }
       try {
         recognition.start();
+        setEngine('browser');
       } catch {
         shouldListenRef.current = false;
         setIsListening(false);
         setError('The microphone is already busy. Wait a moment and try again.');
       }
     }).catch((cause: unknown) => {
+      if (!shouldListenRef.current) return;
       shouldListenRef.current = false;
+      nativeActiveRef.current = false;
+      demotedRef.current = true;
       setIsListening(false);
       setError(cause instanceof Error ? cause.message : 'Windows dictation could not start.');
     });
@@ -254,26 +287,32 @@ export function useVoiceAssistant() {
 
   const speak = useCallback(async (text: string) => {
     try {
-      // Try main-process TTS first (Edge TTS / OpenAI) — returns base64 mp3.
-      const result = await window.api.voiceTTS({ text });
-      if (result && typeof result === 'string') {
-        const audio = new Audio(`data:audio/mpeg;base64,${result}`);
+      // Try main-process TTS first (local Piper / OpenAI / Edge) — base64 WAV or MP3.
+      const result = (await window.api.voiceTTS({ text })) as
+        | string
+        | { audio?: string; provider?: string }
+        | null
+        | undefined;
+      const encoded = typeof result === 'string' ? result : result?.audio;
+      if (encoded) {
+        const audio = new Audio(`data:${audioDataMime(encoded)};base64,${encoded}`);
         await audio.play();
         return;
       }
     } catch {
       // Fall through to browser SpeechSynthesis.
     }
-    // Fallback: browser built-in speech synthesis.
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = language;
-      window.speechSynthesis.speak(utterance);
-    }
+    // Fallback: browser built-in speech synthesis. The helper waits for
+    // Chromium's voice list to finish loading and only reports success when
+    // audio actually came out — the old inline version spoke into an empty
+    // list (cold start) and returned as if it had spoken.
+    await speakWithBrowserVoice(text, { lang: language }).done;
   }, [language]);
 
   return {
+    engine,
     error,
+    finalTranscript,
     interimTranscript,
     isListening,
     isSupported,

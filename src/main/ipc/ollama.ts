@@ -4,6 +4,17 @@ import { ipcMain } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 import { getOllamaBrain } from '../ollama/brain.js';
 import { getEngine } from '../engine/intelligence.js';
+import {
+  budgetForModel,
+  describeHardware,
+  getHardwareProfile,
+  getInstalledModels,
+  isModelComfortable,
+  loadedModels,
+  preloadModel,
+  testOllamaConnection,
+  unloadModel,
+} from '../ollama/utils.js';
 
 function detectTaskType(input: string): string {
   const lower = input.toLowerCase();
@@ -67,4 +78,46 @@ export function registerOllamaIpc(): void {
   ipcMain.handle(IPC.OLLAMA_SYSTEM_PROMPT, async () => {
     return brain.getSystemPrompt();
   });
+
+  // ── Local model performance controls ─────────────────────────────────────
+  // The settings page needs to be able to answer "why is it slow?" and "give my
+  // memory back" without the user leaving the app or guessing. Every number here
+  // comes from the measured hardware profile.
+
+  ipcMain.handle(IPC.OLLAMA_CAPABILITY, async () => {
+    const profile = getHardwareProfile();
+    const budget = budgetForModel();
+    return {
+      profile: {
+        tier: profile.tier,
+        totalRamGb: profile.totalRamGb,
+        cpuThreads: profile.cpuThreads,
+        cpuModel: profile.cpuModel,
+        vramGb: profile.vramGb,
+        hasNvidiaGpu: profile.hasNvidiaGpu,
+      },
+      budget,
+      // One plain sentence, so the UI does not have to explain tiers itself.
+      summary: describeHardware(),
+    };
+  });
+
+  ipcMain.handle(IPC.OLLAMA_MODELS_LOCAL, async () => {
+    const models = await getInstalledModels();
+    return models.map((m) => ({
+      ...m,
+      comfortable: isModelComfortable(m.name),
+      sizeGb: Math.round((m.sizeBytes / 1024 ** 3) * 10) / 10,
+    }));
+  });
+
+  ipcMain.handle(IPC.OLLAMA_LOADED, async () => loadedModels());
+
+  ipcMain.handle(IPC.OLLAMA_PRELOAD, async (_e, { model }: { model: string }) => preloadModel(model));
+
+  ipcMain.handle(IPC.OLLAMA_UNLOAD, async (_e, { model }: { model: string }) => unloadModel(model));
+
+  // Deliberately non-blocking and non-starting: pressing "Check" must not
+  // launch a server, and must never hang the settings dialog.
+  ipcMain.handle(IPC.OLLAMA_HEALTH, async () => testOllamaConnection({ startIfNeeded: false }));
 }

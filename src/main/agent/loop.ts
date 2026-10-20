@@ -5,6 +5,7 @@ import type { Message, ContentBlock } from '../../shared/types.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getProvider } from '../providers/registry.js';
+import { recordUsage } from '../providers/usage-store.js';
 import { toolRegistry, unknownToolMessage, CORE_TOOL_NAMES } from '../tools/base.js';
 import { buildSystemPrompt, buildContext } from './context.js';
 import { DecisionRouter } from '../brain/router.js';
@@ -27,10 +28,12 @@ import {
   type CapabilityFailureType,
 } from '../providers/failover.js';
 import { routeForcedBrowserTool } from './browser-routing.js';
+import { persistActiveModel } from '../brain/model-switch.js';
 import { StreamCoalescer } from './stream-coalescer.js';
 import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
-import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
+import { executeToolCall, isParallelSafeTool, mapWithConcurrency, PARALLEL_TOOL_CONCURRENCY } from './tool-execution.js';
 import { shouldCompact, compactMessages } from './compaction.js';
+import { resolveRunBudget } from './run-budget.js';
 export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
@@ -156,6 +159,7 @@ export interface AgentEvent {
     | 'message_start'
     | 'message_discard'
     | 'text_delta'
+    | 'thinking_delta'
     | 'tool_use_start'
     | 'tool_use_delta'
     | 'tool_use_end'
@@ -171,6 +175,8 @@ export interface AgentEvent {
   [k: string]: unknown;
 }
 
+import { resolveThinkingPreference } from './thinking-preference.js';
+
 export interface AgentRunOptions {
   sessionId: string;
   cwd: string;
@@ -178,6 +184,23 @@ export interface AgentRunOptions {
   model: string;
   signal: AbortSignal;
   onEvent: (e: AgentEvent) => void;
+  /** Per-run turn ceiling (work-until-done, WhatsApp caps). Wins over the agentMaxTurns setting. */
+  maxTurns?: number;
+  /** Per-run wall-clock ceiling in ms. Wins over the 15-minute default. */
+  wallClockMs?: number;
+  /**
+   * Called the moment a message is finished with and added to the transcript.
+   *
+   * This exists because the transcript used to be written only after the whole
+   * run returned. If the app restarted — which is exactly what happens when
+   * Infinite AI edits its own main-process source — `runAgent` never resolved and
+   * every tool call, result and reply it had already produced was lost, leaving a
+   * transcript with the user's question and nothing else. Persisting as it goes
+   * means a restart costs the user the in-flight turn, not the whole session.
+   *
+   * Callers persist; the loop just reports. It must not throw.
+   */
+  onMessage?: (message: Message) => void | Promise<void>;
 }
 
 /**
@@ -199,12 +222,40 @@ export function keepPartialAssistant(assistant: Message): boolean {
   });
 }
 
+/**
+ * Report every message added since the last check, in order.
+ *
+ * Called at turn boundaries rather than at each `messages.push`, so there is a
+ * single place to keep correct and no push site can be forgotten. Persistence
+ * failures must not take the run down — the work is already done and the caller
+ * still gets it from the returned array.
+ */
+async function reportNewMessages(
+  messages: Message[],
+  reportedCount: { value: number },
+  opts: AgentRunOptions,
+): Promise<void> {
+  if (!opts.onMessage) return;
+  while (reportedCount.value < messages.length) {
+    const message = messages[reportedCount.value++];
+    try {
+      await opts.onMessage(message);
+    } catch (err) {
+      console.warn('[loop] streaming a message to the transcript failed:', err);
+    }
+  }
+}
+
 export async function runAgent(
   history: Message[],
   userMessage: Message,
   opts: AgentRunOptions,
 ): Promise<Message[]> {
   const messages = [...history, userMessage];
+  // How much of `messages` the caller has already been told about. The history
+  // and the user message are the caller's to record, so the run only reports
+  // what it produces itself.
+  const reportedCount = { value: history.length + 1 };
   // Failover kill-switch (Settings → Providers): when OFF, only the selected
   // model is ever tried — its real error surfaces instead of a substitution.
   const failoverEnabled = settings.get('failoverEnabled') !== false;
@@ -247,13 +298,22 @@ export async function runAgent(
   }
   let activeCandidate: ProviderCandidate = failoverPlan[0];
   let failoverIndex = 0;
+  // Sticky auto-switch bookkeeping: what killed the user's explicit selection
+  // (first failure only), and whether the recovered model has already been
+  // saved as the new active model for this run.
+  let selectedModelHardFailure: string | null = null;
+  let autoSwitchPersisted = false;
   // Bounded by default so a stuck model cannot loop for hours. The setting
-  // remains an explicit opt-in to raise the ceiling.
+  // remains an explicit opt-in to raise the ceiling; a per-run override
+  // (work-until-done, WhatsApp turn caps) wins over both.
   const configuredTurns = settings.get('agentMaxTurns') as number | undefined;
-  const MAX_TURNS = typeof configuredTurns === 'number' && Number.isFinite(configuredTurns) && configuredTurns > 0
-    ? Math.trunc(configuredTurns)
-    : 60;
-  const WALL_CLOCK_LIMIT_MS = 15 * 60_000;
+  const budget = resolveRunBudget({
+    configuredTurns,
+    overrideTurns: opts.maxTurns,
+    overrideWallClockMs: opts.wallClockMs,
+  });
+  const MAX_TURNS = budget.maxTurns;
+  const WALL_CLOCK_LIMIT_MS = budget.wallClockMs;
   const MAX_INTENT_ONLY_RETRIES = 2;
   let intentOnlyRetries = 0;
   // Same-model stream retry budget: transient hiccups retry on the active
@@ -328,6 +388,17 @@ export async function runAgent(
   const switchCandidate = (failure: string, assistant: Message, stage: string): boolean => {
     recordProviderFailure(activeCandidate, failure);
     candidateErrors.push({ label: activeCandidate.label, error: failure.slice(0, 220) });
+    // Remember why the USER'S selection died — only a hard failure (dead key,
+    // quota, retired model) earns a persistent auto-switch. A transient blip
+    // (timeout, 5xx) recovers in-run and must never silently replace the model
+    // the user picked.
+    if (
+      !selectedModelHardFailure
+      && activeCandidate.provider === opts.provider
+      && activeCandidate.model === opts.model
+    ) {
+      selectedModelHardFailure = failure;
+    }
     // Kill-switch: never leave the selected model. The caller surfaces the
     // real error instead of substituting another model.
     if (!failoverEnabled) return false;
@@ -365,6 +436,11 @@ export async function runAgent(
   };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // Flush anything the previous turn produced before starting the next one.
+    // Reported from here rather than at each `messages.push` so no push site can
+    // be missed — the transcript is written as work completes, not only when the
+    // whole run returns, so a restart mid-run keeps what was already done.
+    await reportNewMessages(messages, reportedCount, opts);
     if (Date.now() - runStartedAt > WALL_CLOCK_LIMIT_MS) {
       opts.onEvent({ type: 'error', error: `Run exceeded ${Math.round(WALL_CLOCK_LIMIT_MS / 60000)} min wall-clock limit. Stopping and reporting.` });
       opts.onEvent({ type: 'fallback_required', error: `Wall-clock limit (${Math.round(WALL_CLOCK_LIMIT_MS / 60000)} min)` });
@@ -553,6 +629,7 @@ export async function runAgent(
         tools: activeTools,
         stream: true,
         signal: streamController.signal,
+        ...resolveThinkingPreference(activeCandidate.provider),
       },
       activeCandidate.apiKey,
     );
@@ -593,6 +670,16 @@ export async function runAgent(
           case 'text_delta':
             appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
             deltaCoalescer.push(chunk.text);
+            break;
+          case 'thinking_delta':
+            // The model's reasoning, kept in its own block so the UI can show it
+            // separately from the answer and so it is never replayed to the model
+            // on the next turn. Stored on the same assistant message that will
+            // carry the answer, which is what makes it survive a reload.
+            appendOrCreate(assistant.content, { type: 'thinking', text: chunk.text });
+            // Forwarded live so the user watches the reasoning arrive, which is
+            // what turns a minute of silence into visible progress.
+            opts.onEvent({ type: 'thinking_delta', message_id: assistant.id, text: chunk.text });
             break;
           case 'tool_use_start':
             pendingToolCalls.set(chunk.id, { name: chunk.name, json: '' });
@@ -670,6 +757,11 @@ export async function runAgent(
           case 'message_end':
             assistant.stop_reason = chunk.stop_reason as Message['stop_reason'];
             assistant.usage = chunk.usage;
+            // Record what this response actually cost. Providers already report
+            // usage per response and the pricing table knows how to turn it
+            // into money; nothing was doing that, so the numbers were captured
+            // and discarded.
+            recordUsage(chunk.usage, activeCandidate.provider, activeCandidate.model);
             opts.onEvent({ type: 'message_end', message_id: assistant.id, stop_reason: chunk.stop_reason, usage: chunk.usage });
             break;
           case 'error':
@@ -899,6 +991,34 @@ export async function runAgent(
       }
       decisionRouter.recordTask(activeCandidate.model, true);
       recordProviderSuccess(activeCandidate);
+
+      // Sticky auto-switch: the run had to leave the selected model because of
+      // a hard failure, and this candidate just answered for real. Save it as
+      // THE active model so the next turn — especially a phone turn that reads
+      // settings directly — starts on the working model instead of
+      // re-discovering the dead one. Opt out with Settings → autoSwitchModel.
+      const switchedAway = activeCandidate.provider !== opts.provider || activeCandidate.model !== opts.model;
+      const earnedSwitch = Boolean(selectedModelHardFailure) && !isTransientStreamFailure(selectedModelHardFailure ?? '');
+      if (switchedAway && earnedSwitch && !autoSwitchPersisted && settings.get('autoSwitchModel') !== false) {
+        autoSwitchPersisted = true;
+        const from = `${opts.provider}/${opts.model}`;
+        const reason = `Auto-switched: ${from} failed (${(selectedModelHardFailure ?? '').slice(0, 180)}) and ${activeCandidate.label} answered. Saved as the active model so the next turn starts here.`;
+        void persistActiveModel(activeCandidate.provider, activeCandidate.model, opts.cwd)
+          .catch((e) => console.warn('[agent] Auto-switch persistence failed:', (e as Error).message));
+        opts.onEvent({
+          type: 'provider_status',
+          status: 'failover',
+          from,
+          to: activeCandidate.label,
+          reason,
+          // Renderer adoption: mark it sticky + carry ids so the UI can update
+          // its own saved selection instead of reverting at next launch.
+          sticky: true,
+          provider: activeCandidate.provider,
+          model: activeCandidate.model,
+        });
+        console.warn(`[agent] Sticky auto-switch saved: ${from} -> ${activeCandidate.provider}/${activeCandidate.model}`);
+      }
       
       // Log performance metrics
       const totalRunMs = Date.now() - runStartedAt;
@@ -980,11 +1100,26 @@ export async function runAgent(
         sequentialBatch.push(tu);
       }
     }
-    const parallelResults = parallelBatch.length > 0 ? await Promise.all(parallelBatch.map(executeOne)) : [];
-    const sequentialResults: Awaited<ReturnType<typeof executeOne>>[] = [];
-    for (const tu of sequentialBatch) {
-      sequentialResults.push(await executeOne(tu));
-    }
+    // Both chains start now and are awaited together. Waiting for the parallel
+    // fan-out to drain before starting the sequential chain meant a mixed turn
+    // paid the full duration of its slowest read-only tool before the first
+    // Write or Bash even began. The model emits a whole batch without seeing
+    // any of its results, so nothing in the sequential chain can depend on a
+    // parallel result from the same turn — the same independence that justifies
+    // fanning out in the first place. Order inside the sequential chain is
+    // preserved, results are merged back into the model's order below, and the
+    // fan-out is capped so a burst of searches cannot stampede a provider.
+    const parallelRun = parallelBatch.length > 0
+      ? mapWithConcurrency(parallelBatch, PARALLEL_TOOL_CONCURRENCY, executeOne)
+      : Promise.resolve([]);
+    const sequentialRun = (async () => {
+      const results: Awaited<ReturnType<typeof executeOne>>[] = [];
+      for (const tu of sequentialBatch) {
+        results.push(await executeOne(tu));
+      }
+      return results;
+    })();
+    const [parallelResults, sequentialResults] = await Promise.all([parallelRun, sequentialRun]);
     
     // Track performance metrics
     performanceMetrics.toolCalls += toolUses.length;
@@ -1106,9 +1241,17 @@ function providerSupportsTools(providerId: string, model: string): boolean {
 
 function appendOrCreate(blocks: ContentBlock[], block: ContentBlock) {
   const last = blocks[blocks.length - 1];
+  // Consecutive blocks of the same kind merge, so a streamed answer (or a
+  // streamed reasoning trace) is one block rather than thousands of fragments.
+  // Without this a long trace would blow the transcript up with one block per
+  // chunk, and every later turn would pay to re-read them.
   if (last && last.type === 'text' && block.type === 'text') {
     last.text += block.text;
-  } else {
-    blocks.push(block);
+    return;
   }
+  if (last && last.type === 'thinking' && block.type === 'thinking') {
+    last.text += block.text;
+    return;
+  }
+  blocks.push(block);
 }

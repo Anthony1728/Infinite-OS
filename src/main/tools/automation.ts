@@ -1,34 +1,1 @@
-import type { Tool, ToolResult } from './base.js';
-import { automationBuilder, type Action } from '../automation/builder.js';
-
-export const automationTool: Tool = {
-  name: 'Automation',
-  description: 'Create and run scheduled, event, webhook, file-change, and manual workflows with tool calls, agent runs, conditions, delays, notifications, scripts, computer actions, retries, and human approval patterns. Notify actions REALLY deliver: desktop toast by default, or channel whatsapp (your linked WhatsApp self-chat), telegram (default chat), email (needs "to"). Chain agent_run -> notify with {{previous}} in the message to deliver generated content (e.g. a morning brief: "Morning brief: {{previous}}" with channel whatsapp). Undeliverable notifications fail the run loudly instead of succeeding silently.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      action: { type: 'string', enum: ['create', 'list', 'get', 'add_action', 'run', 'enable', 'disable', 'templates', 'runs', 'stats'] },
-      workflow_id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' }, trigger_type: { type: 'string', enum: ['manual', 'schedule', 'event', 'webhook', 'file_change'] }, trigger_config: { type: 'object' }, automation_action: { type: 'object' },
-    },
-    required: ['action'],
-  },
-  permission: 'ask',
-  async execute(args): Promise<ToolResult> {
-    const input = args as { action: string; workflow_id?: string; name?: string; description?: string; trigger_type?: 'manual' | 'schedule' | 'event' | 'webhook' | 'file_change'; trigger_config?: Record<string, unknown>; automation_action?: Omit<Action, 'id'> };
-    try {
-      if (input.action === 'create') return input.name ? json(automationBuilder.createWorkflow({ name: input.name, description: input.description, trigger: { type: input.trigger_type ?? 'manual', config: input.trigger_config ?? {} } })) : bad('create requires name.');
-      if (input.action === 'list') return json(automationBuilder.listWorkflows());
-      if (input.action === 'get') return json(input.workflow_id ? automationBuilder.getWorkflow(input.workflow_id) : null);
-      if (input.action === 'add_action') return input.workflow_id && input.automation_action ? json(automationBuilder.addAction(input.workflow_id, input.automation_action)) : bad('add_action requires workflow_id and automation_action.');
-      if (input.action === 'run') return input.workflow_id ? json(await automationBuilder.runWorkflow(input.workflow_id)) : bad('run requires workflow_id.');
-      if (input.action === 'enable') return json({ enabled: Boolean(input.workflow_id && automationBuilder.enableWorkflow(input.workflow_id)) });
-      if (input.action === 'disable') return json({ disabled: Boolean(input.workflow_id && automationBuilder.disableWorkflow(input.workflow_id)) });
-      if (input.action === 'templates') return json(automationBuilder.getTemplates());
-      if (input.action === 'runs') return json(automationBuilder.getRuns(input.workflow_id));
-      if (input.action === 'stats') return json(automationBuilder.getStats());
-      return bad(`Unknown Automation action: ${input.action}`);
-    } catch (error) { return bad((error as Error).message); }
-  },
-};
-function json(value: unknown): ToolResult { return { content: JSON.stringify(value, null, 2) }; }
-function bad(content: string): ToolResult { return { content, is_error: true }; }
+import type { Tool, ToolResult } from './base.js';import { automationBuilder, type Action } from '../automation/builder.js';export const automationTool: Tool = {  name: 'Automation',  description: 'Create and run scheduled, event, webhook, file-change, and manual workflows with tool calls, agent runs, conditions, delays, notifications, scripts, computer actions, retries, and human approval patterns. Notify actions REALLY deliver: desktop toast by default, or channel whatsapp (your linked WhatsApp self-chat), telegram (default chat), email (needs "to"). Chain agent_run -> notify with {{previous}} in the message to deliver generated content (e.g. a morning brief: "Morning brief: {{previous}}" with channel whatsapp). Undeliverable notifications fail the run loudly instead of succeeding silently.',  inputSchema: {    type: 'object',    properties: {      action: { type: 'string', enum: ['create', 'list', 'get', 'add_action', 'run', 'enable', 'disable', 'templates', 'runs', 'stats'] },      workflow_id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' }, trigger_type: { type: 'string', enum: ['manual', 'schedule', 'event', 'webhook', 'file_change'] }, trigger_config: { type: 'object' }, automation_action: { type: 'object' },    },    required: ['action'],  },  permission: 'ask',  async execute(args): Promise<ToolResult> {    const input = args as { action: string; workflow_id?: string; name?: string; description?: string; trigger_type?: 'manual' | 'schedule' | 'event' | 'webhook' | 'file_change'; trigger_config?: Record<string, unknown>; automation_action?: Omit<Action, 'id'> };    try {      if (input.action === 'create') return input.name ? json(automationBuilder.createWorkflow({ name: input.name, description: input.description, trigger: { type: input.trigger_type ?? 'manual', config: input.trigger_config ?? {} } })) : bad('create requires name.');      if (input.action === 'list') return json(automationBuilder.listWorkflows());      if (input.action === 'get') return json(input.workflow_id ? automationBuilder.getWorkflow(input.workflow_id) : null);      if (input.action === 'add_action') return input.workflow_id && input.automation_action ? json(automationBuilder.addAction(input.workflow_id, input.automation_action)) : bad('add_action requires workflow_id and automation_action.');      if (input.action === 'run') return input.workflow_id ? json(await automationBuilder.runWorkflow(input.workflow_id)) : bad('run requires workflow_id.');      if (input.action === 'enable') return json({ enabled: Boolean(input.workflow_id && automationBuilder.enableWorkflow(input.workflow_id)) });      if (input.action === 'disable') return json({ disabled: Boolean(input.workflow_id && automationBuilder.disableWorkflow(input.workflow_id)) });      if (input.action === 'templates') return json(automationBuilder.getTemplates());      if (input.action === 'runs') return json(automationBuilder.getRuns(input.workflow_id));      if (input.action === 'stats') return json(automationBuilder.getStats());      return bad(`Unknown Automation action: ${input.action}`);    } catch (error) { return bad((error as Error).message); }  },};function json(value: unknown): ToolResult { return { content: JSON.stringify(value, null, 2) }; }function bad(content: string): ToolResult { return { content, is_error: true }; }

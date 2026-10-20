@@ -16,7 +16,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export interface AuditEntry {
   /** Monotonic sequence number within the log (chained per file). */
@@ -118,7 +118,15 @@ class ActionAuditLog {
     this.tail.push(withHash);
     if (this.tail.length > MAX_MEMORY_TAIL) this.tail.splice(0, this.tail.length - MAX_MEMORY_TAIL);
     if (this.memoryOnly) return;
-    this.lastWrite = this.appendToFile(withHash);
+    // Resolve the target file NOW, not when the write eventually runs: with
+    // chained writes, a deferred append must never consult dirOverride
+    // (which may already point at the next test's/store's directory by the
+    // time it executes — stale entries would land in the wrong log).
+    const file = this.logFile(new Date(full.ts));
+    // Chain onto the previous append instead of replacing the promise:
+    // concurrent records must resolve in order, so flush() (tests, graceful
+    // shutdown) never returns while an earlier write is still in flight.
+    this.lastWrite = this.lastWrite.then(() => this.appendToFile(file, withHash));
   }
 
   /** Await pending disk writes (useful for tests and graceful shutdown). */
@@ -126,11 +134,11 @@ class ActionAuditLog {
     await this.lastWrite;
   }
 
-  private async appendToFile(e: AuditEntry): Promise<void> {
+  private async appendToFile(file: string, e: AuditEntry): Promise<void> {
     try {
-      const dir = this.logDir();
+      const dir = dirname(file);
       if (!existsSync(dir)) await mkdir(dir, { recursive: true });
-      await appendFile(this.logFile(new Date(e.ts)), `${JSON.stringify(e)}\n`, 'utf8');
+      await appendFile(file, `${JSON.stringify(e)}\n`, 'utf8');
     } catch { /* audit must never break the action */ }
   }
 

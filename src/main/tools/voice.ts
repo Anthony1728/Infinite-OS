@@ -2,7 +2,8 @@
 // Gives the agent direct speech output using Edge TTS or OpenAI TTS.
 
 import type { Tool, ToolResult } from './base.js';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { outputDirectoryDenial } from './write-guard.js';
 import { infiniteHome } from '../profiles/home.js';
 
 interface VoiceInput {
@@ -39,8 +40,16 @@ export const voiceTool: Tool = {
           const buffer = await voice.textToSpeech(input.text, input.voice);
           const outputPath = input.output_path ?? join(infiniteHome(), 'voice', `speech-${Date.now()}.mp3`);
           const { writeFileSync, mkdirSync, existsSync } = await import('node:fs');
-          const dir = join(infiniteHome(), 'voice');
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+          // The chosen path is agent-controlled, so it goes through the same
+          // protection as every other write: a generated file must not be able
+          // to land over Infinite OS's own source or an installed app.
+          const denied = outputDirectoryDenial(outputPath, _ctx?.cwd);
+          if (denied) return { content: denied, is_error: true };
+          // Create the directory the file is actually going to. Previously this
+          // made `<home>/voice` and then wrote to `outputPath`, so any custom
+          // path outside that folder failed with ENOENT.
+          const parent = dirname(outputPath);
+          if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
           writeFileSync(outputPath, buffer);
           return {
             content: JSON.stringify({

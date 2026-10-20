@@ -1,42 +1,1 @@
-import { writeFile, mkdir, readFile } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
-import type { Tool, ToolResult } from './base.js';
-import { backupFile } from './backup.js';
-import { recordFileMutation } from '../agent/edit-checkpoint.js';
-
-export const write: Tool = {
-  name: 'Write',
-  description: 'Create a new file or overwrite an existing file with the given content. Automatically creates parent directories and backs up existing files.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      file_path: { type: 'string', description: 'Path to the file (absolute or relative to cwd)' },
-      content: { type: 'string', description: 'The full file content' },
-    },
-    required: ['file_path', 'content'],
-  },
-  permission: 'ask',
-
-  async execute(args, ctx): Promise<ToolResult> {
-    const { file_path, content } = args as { file_path: string; content: string };
-    try {
-      const abs = resolve(ctx.cwd, file_path);
-      const signal = ctx.abortSignal;
-      // Mark as agent-authorized so source guard allows it
-      try { const { allowWrite } = await import('../guard/source-guard.js'); allowWrite(abs); } catch { /* guard optional */ }
-      // Auto-backup before overwriting existing files (session-grouped
-      // snapshot inside the Infinite OS repo, legacy .backups elsewhere)
-      const backupPath = await backupFile(abs, ctx.sessionId);
-      const original = await readFile(abs, 'utf8').catch(() => undefined);
-      await mkdir(dirname(abs), { recursive: true });
-      await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });
-      // Checkpoint-on-edit: enable rewind-to-here for this session.
-      recordFileMutation({ sessionId: ctx.sessionId, path: abs, operation: original === undefined ? 'create' : 'modify', originalContent: original, newContent: content });
-      const backupNote = backupPath ? ` (backup: ${backupPath})` : '';
-      return { content: `Wrote ${content.length} bytes to ${file_path}${backupNote}` };
-    } catch (e) {
-      return { content: `Error writing ${file_path}: ${(e as Error).message}`, is_error: true };
-    }
-  },
-};
-
+import { writeFile, mkdir, readFile } from 'node:fs/promises';import { resolve, dirname } from 'node:path';import { guardSelfModification } from '../agent/self-modification.js';import { findInfiniteRepoRoot } from './backup.js';import type { Tool, ToolResult } from './base.js';import { backupFile } from './backup.js';import { recordFileMutation } from '../agent/edit-checkpoint.js';export const write: Tool = {  name: 'Write',  description: 'Create a new file or overwrite an existing file with the given content. Automatically creates parent directories and backs up existing files.',  inputSchema: {    type: 'object',    properties: {      file_path: { type: 'string', description: 'Path to the file (absolute or relative to cwd)' },      content: { type: 'string', description: 'The full file content' },    },    required: ['file_path', 'content'],  },  permission: 'ask',  async execute(args, ctx): Promise<ToolResult> {    const { file_path, content } = args as { file_path: string; content: string };    try {      const abs = resolve(ctx.cwd, file_path);      const signal = ctx.abortSignal;      // Mark as agent-authorized so source guard allows it      // Refuse to rewrite the machinery that records and undoes agent changes.      // Unlike the watcher below this fails closed: if the check throws, the      // write does not happen.      const guard = guardSelfModification(findInfiniteRepoRoot(ctx.cwd) ?? ctx.cwd, abs, 'modify');      if (!guard.allowed) return { content: guard.reason ?? 'Refused.', is_error: true };      try { const { allowWrite } = await import('../guard/source-guard.js'); allowWrite(abs); } catch { /* guard optional */ }      // Auto-backup before overwriting existing files (session-grouped      // snapshot inside the Infinite OS repo, legacy .backups elsewhere)      const backupPath = await backupFile(abs, ctx.sessionId);      const original = await readFile(abs, 'utf8').catch(() => undefined);      await mkdir(dirname(abs), { recursive: true });      await writeFile(abs, content, { encoding: 'utf8', ...(signal ? { signal } : {}) });      // Checkpoint-on-edit: enable rewind-to-here for this session.      recordFileMutation({ sessionId: ctx.sessionId, path: abs, operation: original === undefined ? 'create' : 'modify', originalContent: original, newContent: content });      const backupNote = backupPath ? ` (backup: ${backupPath})` : '';      return { content: `Wrote ${content.length} bytes to ${file_path}${backupNote}` };    } catch (e) {      return { content: `Error writing ${file_path}: ${(e as Error).message}`, is_error: true };    }  },};

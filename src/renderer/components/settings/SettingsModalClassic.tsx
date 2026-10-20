@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ProviderInfo } from '../../../shared/types';
 import { useUiTheme, UI_THEMES } from '../../theme/uiTheme';
+import { LocalModelPanel } from './LocalModelPanel';
+import { PerformancePanel } from './PerformancePanel';
 import { syncActiveModelToMain } from '../../utils/active-model-sync';
+import { useVoiceSessionStore } from '../../stores/voice-session';
 
 interface CurrentSettings {
   provider: string;
@@ -99,10 +102,176 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
   const [customModel, setCustomModel] = useState('');
   const [failoverEnabled, setFailoverEnabled] = useState(true);
   const [permissionProfile, setPermissionProfile] = useState<PermissionProfile>(':workspace');
+  const [alwaysOnVoice, setAlwaysOnVoice] = useState(false);
+  const [alwaysOnVoicePending, setAlwaysOnVoicePending] = useState(false);
+
+  /**
+   * Background builds, token usage and the self-evolution loop.
+   *
+   * These mirror the cards added to SettingsModal.tsx. Both modals are shipped
+   * and App.tsx picks between them on the UI theme, with 'classic' (this file)
+   * as the default — so a feature added to only one of them is invisible to
+   * most users while looking complete in source review.
+   */
+  const [buildStatus, setBuildStatus] = useState<{
+    phase: 'idle' | 'building' | 'ready' | 'failed' | 'applying';
+    error?: string;
+  } | null>(null);
+  const [buildPending, setBuildPending] = useState(false);
+
+  const [usage, setUsage] = useState<{
+    requests: number;
+    costUsd: number;
+    unpricedRequests?: number;
+    formatted: { cost: string; input: string; output: string; note?: string };
+    byModel: { provider: string; model: string; requests: number; costUsd: number; pricing?: string }[];
+  } | null>(null);
+  const [usagePending, setUsagePending] = useState(false);
+
+  const [evolveRunning, setEvolveRunning] = useState(false);
+  const [evolvePending, setEvolvePending] = useState(false);
+  const [evolveStatus, setEvolveStatus] = useState<{
+    enabled?: boolean; cyclesCompleted?: number; lastRunAt?: number | null;
+  } | null>(null);
+  const [evolveSuggestions, setEvolveSuggestions] = useState<{
+    id: string; pattern: string; description: string; frequency: number;
+    confidence: number; automationProposal: string;
+  }[]>([]);
+
+  const loadEvolveSuggestions = useCallback(async () => {
+    const list = await window.api.selfEvolveSuggestions({ status: 'suggested' }).catch(() => []);
+    setEvolveSuggestions(Array.isArray(list) ? list : []);
+  }, []);
+
+  const refreshEvolveStatus = useCallback(async () => {
+    const s = await window.api.evolveLoopStatus().catch(() => null);
+    if (s && typeof s === 'object') {
+      setEvolveStatus(s as typeof evolveStatus);
+      setEvolveRunning(Boolean((s as { enabled?: boolean }).enabled));
+    }
+  }, []);
+
+  const refreshBuildStatus = useCallback(async () => {
+    const s = await window.api.buildStatus().catch(() => null);
+    setBuildStatus(s && typeof s === 'object' ? s : null);
+  }, []);
+
+  const refreshUsage = useCallback(async () => {
+    const t = await window.api.usageGet().catch(() => null);
+    setUsage(t && typeof t === 'object' ? t : null);
+  }, []);
+
+  const runBuildAction = async (action: 'buildStart' | 'buildCancel') => {
+    setBuildPending(true);
+    try {
+      const next = await window.api[action]().catch(() => null);
+      if (next && typeof next === 'object') setBuildStatus(next as typeof buildStatus);
+      else await refreshBuildStatus();
+    } finally {
+      setBuildPending(false);
+    }
+  };
+
+  const clearUsage = async () => {
+    setUsagePending(true);
+    try {
+      await window.api.usageReset();
+      await refreshUsage();
+    } finally {
+      setUsagePending(false);
+    }
+  };
+
+  const toggleEvolveLoop = async () => {
+    setEvolvePending(true);
+    try {
+      const next = await (evolveRunning
+        ? window.api.evolveLoopStop()
+        : window.api.evolveLoopStart());
+      if (next && typeof next === 'object') setEvolveStatus(next as typeof evolveStatus);
+      setEvolveRunning(!evolveRunning);
+      if (!evolveRunning) await loadEvolveSuggestions();
+    } catch {
+      await refreshEvolveStatus();
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const runEvolveNow = async () => {
+    setEvolvePending(true);
+    try {
+      await window.api.evolveLoopRunNow();
+      await refreshEvolveStatus();
+      await loadEvolveSuggestions();
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const acceptEvolveSuggestion = async (id: string) => {
+    setEvolvePending(true);
+    try {
+      await window.api.selfEvolveAccept({ id });
+      await loadEvolveSuggestions();
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  const dismissEvolveSuggestion = async (id: string) => {
+    setEvolvePending(true);
+    try {
+      await window.api.selfEvolveDismiss({ id });
+      setEvolveSuggestions((prev) => prev.filter((s) => s.id !== id));
+    } finally {
+      setEvolvePending(false);
+    }
+  };
+
+  // Load on mount, and subscribe to build progress pushes.
+  useEffect(() => {
+    void refreshEvolveStatus();
+    void loadEvolveSuggestions();
+    void refreshUsage();
+    void refreshBuildStatus();
+    const off = window.api.onBuildStatus((s: unknown) => setBuildStatus(s as typeof buildStatus));
+    return () => off?.();
+  }, [refreshEvolveStatus, loadEvolveSuggestions, refreshUsage, refreshBuildStatus]);
+  const voiceState = useVoiceSessionStore((s) => s.state);
   const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
   const [emailSaved, setEmailSaved] = useState(false);
   const [emailStatus, setEmailStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [emailMessage, setEmailMessage] = useState('');
+
+  // Always-on voice: the preference is owned by the main process (it holds the
+  // microphone), so this only reflects and flips it. It rolls back on failure —
+  // a switch that controls the mic must never lie about its own state.
+  useEffect(() => {
+    let cancelled = false;
+    void window.api
+      .voiceSessionState()
+      .then((state: { enabled?: boolean } | undefined) => {
+        if (!cancelled && state) setAlwaysOnVoice(state.enabled === true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleAlwaysOnVoice = async () => {
+    const next = !alwaysOnVoice;
+    setAlwaysOnVoice(next);
+    setAlwaysOnVoicePending(true);
+    try {
+      await window.api.voiceSessionSetEnabled({ enabled: next, cwd: loadCurrent().cwd || '.' });
+    } catch {
+      setAlwaysOnVoice(!next);
+    } finally {
+      setAlwaysOnVoicePending(false);
+    }
+  };
 
   useEffect(() => {
     window.api.listProviders().then((p: ProviderInfo[]) => {
@@ -674,6 +843,35 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
             )}
           </section>
 
+          {/* Performance sits above local models because "why is my PC slow" is the
+            first question, and it is answered with this machine's real
+            measurements. */}
+          <section>
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-white">Speed &amp; Cleanup</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                What is slowing this computer down, measured live. Everything Infinite OS changes can be put
+                back with one click.
+              </p>
+            </div>
+            <PerformancePanel />
+          </section>
+
+          {/* Local models sit right after the model pickers, because that is where
+            somebody who has just chosen "Ollama (local)" looks for "why is it
+            slow?". The panel answers with this machine's real measured limits
+            rather than generic advice. */}
+          <section>
+            <div className="mb-3">
+              <h3 className="text-sm font-semibold text-white">Local Models &amp; Speed</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Runs on this computer with no internet. Infinite OS tunes context, reply length and memory
+                use to your hardware automatically, and never loads a model at startup.
+              </p>
+            </div>
+            <LocalModelPanel />
+          </section>
+
           <section>
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
@@ -752,6 +950,295 @@ export function SettingsModalClassic({ onClose }: { onClose: () => void }) {
 
           <section>
             <h3 className="text-sm font-semibold text-white mb-3">Agent Feature Stack</h3>
+
+              {/*
+                These three cards are duplicated from SettingsModal.tsx on
+                purpose. The app ships two parallel settings modals and picks
+                between them on the UI theme: 'classic' renders this file, and
+                classic is the default theme. Adding them only to
+                SettingsModal.tsx left all three invisible to default users.
+              */}
+
+              {/* Background builds: the five handlers and auto-update/index.ts
+                  were finished but never exposed on the preload bridge, and
+                  nothing subscribed to onBuildStatusChange. */}
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 mb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-white text-sm font-medium">Background builds</div>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                      Rebuild the app without closing it. Useful after Infinite AI changes Infinite
+                      OS itself — you can keep working while it compiles.
+                    </p>
+                    {buildStatus && (
+                      <p className="mt-2 text-[11px] text-gray-400">
+                        {buildStatus.phase === 'idle' && 'Idle'}
+                        {buildStatus.phase === 'building' && 'Building…'}
+                        {buildStatus.phase === 'ready' && 'A new build is ready to apply.'}
+                        {buildStatus.phase === 'applying' && 'Applying…'}
+                        {buildStatus.phase === 'failed' && `Last build failed: ${buildStatus.error}`}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {buildStatus?.phase === 'building' ? (
+                      <button
+                        type="button"
+                        onClick={() => void runBuildAction('buildCancel')}
+                        className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-gray-300 hover:text-white"
+                      >
+                        Cancel
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void runBuildAction('buildStart')}
+                        disabled={buildPending}
+                        className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+                      >
+                        Build now
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Usage and cost: every provider reported usage per response and
+                  the pricing table priced it, but nothing joined the two. An
+                  estimate — free models are $0, and unpriced models are
+                  disclosed below. */}
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 mb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-white text-sm font-medium">Usage and cost</div>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                      What your conversations have used since these totals were last cleared. An
+                      estimate, based on the published rate for each model.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void clearUsage()}
+                    disabled={usagePending || !usage?.requests}
+                    className="mt-0.5 shrink-0 rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-gray-300 hover:text-white disabled:opacity-40"
+                  >
+                    Clear
+                  </button>
+                </div>
+                {usage && usage.requests > 0 ? (
+                  <>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg bg-white/[0.02] p-2">
+                        <div className="text-[10px] text-gray-500">Estimated cost</div>
+                        <div className="mt-0.5 text-sm font-medium text-white">{usage.formatted.cost}</div>
+                      </div>
+                      <div className="rounded-lg bg-white/[0.02] p-2">
+                        <div className="text-[10px] text-gray-500">Input tokens</div>
+                        <div className="mt-0.5 text-sm font-medium text-white">{usage.formatted.input}</div>
+                      </div>
+                      <div className="rounded-lg bg-white/[0.02] p-2">
+                        <div className="text-[10px] text-gray-500">Output tokens</div>
+                        <div className="mt-0.5 text-sm font-medium text-white">{usage.formatted.output}</div>
+                      </div>
+                    </div>
+                    {usage.formatted.note && (
+                      <p className="mt-2 text-[11px] text-amber-300/90">{usage.formatted.note}</p>
+                    )}
+                    {usage.byModel.length > 0 && (
+                      <div className="mt-3 space-y-1 border-t border-white/[0.06] pt-3">
+                        {usage.byModel.slice(0, 6).map((m) => (
+                          <div key={m.provider + '/' + m.model} className="flex items-center justify-between gap-3 text-[11px]">
+                            <span className="truncate text-gray-400" title={m.provider + '/' + m.model}>
+                              {m.model}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-gray-500">
+                              {m.requests} req{m.requests === 1 ? '' : 's'}
+                              {m.costUsd > 0 && ` · $${m.costUsd.toFixed(4)}`}
+                              {m.pricing === 'unknown' && ' · no price'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-3 text-[11px] text-gray-500">
+                    Nothing recorded yet. Totals appear after your first reply.
+                  </p>
+                )}
+              </div>
+
+              {/* Evolve continuously: the backend was finished and tested long
+                  before any UI called it. */}
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 mb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-white text-sm font-medium">Evolve continuously</div>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                      Infinite OS watches how you actually work and suggests turning repeated things
+                      into skills. Runs on a timer in the background and only ever suggests; nothing
+                      is created without you saying yes.
+                    </p>
+                    {evolveStatus && (
+                      <p className="mt-2 text-[11px] text-gray-400">
+                        {evolveStatus.enabled ? 'Running' : 'Stopped'}
+                        {evolveStatus.lastRunAt ? ` · last check ${new Date(evolveStatus.lastRunAt).toLocaleString()}` : ' · not run yet'}
+                        {evolveStatus.cyclesCompleted ? ` · ${evolveStatus.cyclesCompleted} check${evolveStatus.cyclesCompleted === 1 ? '' : 's'}` : ''}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={evolveRunning}
+                    aria-label="Evolve continuously"
+                    disabled={evolvePending}
+                    onClick={() => void toggleEvolveLoop()}
+                    title={evolveRunning ? 'Turn OFF to stop the background checks' : 'Turn ON to look for repeated work to automate'}
+                    className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
+                      evolveRunning ? 'border-emerald-400/40 bg-emerald-500/80' : 'border-white/[0.12] bg-white/[0.06]'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full transition-all ${
+                        evolveRunning ? 'left-[18px] bg-white' : 'left-[3px] bg-zinc-500'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void runEvolveNow()}
+                    disabled={evolvePending}
+                    className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+                  >
+                    Check now
+                  </button>
+                  {evolveRunning && (
+                    <button
+                      type="button"
+                      onClick={() => void loadEvolveSuggestions()}
+                      disabled={evolvePending}
+                      className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-gray-300 hover:text-white disabled:opacity-50"
+                    >
+                      Refresh suggestions
+                    </button>
+                  )}
+                </div>
+                {evolveSuggestions.length > 0 && (
+                  <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3">
+                    {evolveSuggestions.map((s) => (
+                      <div key={s.id} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="text-xs font-medium text-gray-200">{s.pattern}</div>
+                        {s.description && <p className="mt-1 text-[11px] text-gray-500">{s.description}</p>}
+                        <p className="mt-1 text-[10px] text-gray-500">
+                          seen {s.frequency}× · {Math.round(s.confidence * 100)}% confident
+                          {s.automationProposal ? ` · ${s.automationProposal}` : ''}
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void acceptEvolveSuggestion(s.id)}
+                            disabled={evolvePending}
+                            className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+                          >
+                            Create skill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void dismissEvolveSuggestion(s.id)}
+                            disabled={evolvePending}
+                            className="rounded-lg px-2 py-1 text-[11px] text-gray-500 hover:text-gray-300 disabled:opacity-50"
+                          >
+                            Not interested
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            {/* ── Always-on voice ──────────────────────────────────────────── */}
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 mb-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-white text-sm font-medium">Always-on voice</div>
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                    Infinite AI keeps listening with the app in the background — no need to sit on the Voice page. It hears you in any
+                    section, runs the same agent with your full tool access, and answers out loud.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={alwaysOnVoice}
+                  aria-label="Always-on voice"
+                  disabled={alwaysOnVoicePending}
+                  onClick={() => void toggleAlwaysOnVoice()}
+                  title={alwaysOnVoice ? 'Turn OFF to release the microphone' : 'Turn ON to let Infinite AI listen in the background'}
+                  className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors disabled:opacity-50 ${
+                    alwaysOnVoice ? 'border-emerald-400/40 bg-emerald-500/80' : 'border-white/[0.12] bg-white/[0.06]'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full transition-all ${
+                      alwaysOnVoice ? 'left-[18px] bg-white' : 'left-[3px] bg-zinc-500'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${
+                    alwaysOnVoice && voiceState.listening
+                      ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-300'
+                      : 'border-white/[0.08] bg-white/[0.03] text-zinc-400'
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${alwaysOnVoice && voiceState.listening ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+                  {alwaysOnVoice
+                    ? voiceState.listening
+                      ? 'Listening now'
+                      : voiceState.phase === 'error'
+                        ? 'Mic unavailable'
+                        : 'Starting…'
+                    : 'Off'}
+                </span>
+                {alwaysOnVoice && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void window.api.voiceSessionPause()}
+                      className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                    >
+                      Pause
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void window.api.voiceSessionResume()}
+                      className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                    >
+                      Resume
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void window.api.voiceSessionSay({ text: 'Infinite AI is listening.' })}
+                      className="rounded-lg border border-white/[0.08] px-2.5 py-1 text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-white"
+                    >
+                      Test voice
+                    </button>
+                  </>
+                )}
+              </div>
+              {alwaysOnVoice && voiceState.error && <p className="mt-2 text-[11px] leading-relaxed text-rose-300">{voiceState.error}</p>}
+              {alwaysOnVoice && (
+                <p className="mt-2 text-[10px] leading-relaxed text-gray-600">
+                  Wake word “{voiceState.wakeWord}” · stop anytime by saying “stop listening”. Runs while Infinite OS is open; the
+                  microphone is released the moment you turn this off.
+                </p>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-400">
               <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
                 <div className="text-white text-sm font-medium mb-1">Codex-style</div>

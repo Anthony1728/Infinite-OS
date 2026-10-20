@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import type { ContentBlock, Message, Session } from '../../shared/types';
 import { useBrainStore } from './brain';
 import { useEditorStore } from './editor';
@@ -10,6 +10,7 @@ import {
   parseBrainTeachingCommand,
   type BrainTeachingStatus,
 } from '../lib/brainTeaching';
+import { UNTIL_DONE_STORAGE_KEY, wrapUntilDone } from '../lib/untilDone';
 
 // Each conversation can keep working in the background, so watchdogs must be
 // keyed by session rather than sharing one global timer.
@@ -35,6 +36,30 @@ function persistSessionMessage(sessionId: string, message: Message): void {
 async function flushPersists(): Promise<void> {
   if (pendingPersists.size === 0) return;
   await Promise.allSettled([...pendingPersists]);
+}
+
+// Which chat was open, remembered across a reload.
+//
+// This is deliberately NOT part of the persisted chat store: the store is
+// rebuilt from the transcript on disk, so a remembered id that no longer exists
+// (deleted, or a different profile) simply falls back to the newest chat.
+const LAST_SESSION_KEY = 'infinite:chat:last-session';
+function readRememberedSessionId(): string | null {
+  try {
+    const raw = localStorage.getItem(LAST_SESSION_KEY);
+    return typeof raw === 'string' && raw.trim() ? raw : null;
+  } catch {
+    // Private mode or storage disabled — fall back to the newest session.
+    return null;
+  }
+}
+function rememberSessionId(sessionId: string | null): void {
+  try {
+    if (sessionId) localStorage.setItem(LAST_SESSION_KEY, sessionId);
+    else localStorage.removeItem(LAST_SESSION_KEY);
+  } catch {
+    /* nothing to do; the session list fallback covers it */
+  }
 }
 const activeChatTaskBySession = new Map<string, string>();
 const chatTaskByOrchestrator = new Map<string, string>();
@@ -152,9 +177,22 @@ function clearAllSafetyTimers(): void {
 
 export type StreamEvent =
   | { type: 'welcome'; agentName: string; role: string; model?: string; message: string }
+  | {
+      /**
+       * A turn the user started somewhere other than this window — a spoken
+       * utterance from the always-on voice loop, or a message that arrived over
+       * Telegram/WhatsApp. The words are already on disk; this event exists so
+       * an open transcript shows them the instant they are accepted instead of
+       * only after the reply finishes.
+       */
+      type: 'user_message';
+      message: { id: string; role: 'user'; content: unknown[]; timestamp?: number };
+    }
   | { type: 'message_start'; message_id: string }
   | { type: 'message_discard'; message_id: string }
   | { type: 'text_delta'; message_id: string; text: string }
+  /** The model's reasoning, streamed live and shown separately from the answer. */
+  | { type: 'thinking_delta'; message_id: string; text: string }
   | { type: 'tool_use_start'; message_id: string; tool_use_id: string; name: string }
   | { type: 'tool_use_delta'; tool_use_id: string; partial_json: string }
   | { type: 'tool_use_end'; message_id: string; tool_use_id: string; name: string; input: unknown }
@@ -190,6 +228,8 @@ export type StreamEvent =
       from?: string;
       to?: string;
       reason?: string;
+      /** Main persisted this failover as the new active model (sticky auto-switch). */
+      sticky?: boolean;
     }
   | { type: 'message_end'; message_id: string; stop_reason: string; usage?: { input: number; output: number } }
   | { type: 'error'; error: string }
@@ -385,6 +425,42 @@ function formatToolArgPreview(partialJson: string): string {
   return tail.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Streaming transcript guarantees (one bubble per streamed response, tools
+ * visible the moment they start).
+ *
+ * - Every `message_start` with a fresh id appends its own assistant bubble;
+ *   a re-emitted id (retry after discard) reuses its bubble instead of
+ *   duplicating it — streamed text never lands in an older, finished bubble.
+ * - Every `tool_use_start` plants a `tool_use` block in the live bubble so
+ *   the ToolCallCard renders with its running pulse immediately; `tool_use_end`
+ *   fills the same block in place with the full input. Pure (no store) so the
+ *   contract is unit-testable.
+ */
+export function appendLiveMessage(messages: Message[], message: Message): Message[] {
+  if (messages.some((m) => m.id === message.id)) return messages;
+  return [...messages, message];
+}
+
+export function upsertLiveToolUse(
+  messages: Message[],
+  messageId: string,
+  tool: { id: string; name: string; input?: unknown },
+): Message[] {
+  if (!messages.some((m) => m.id === messageId)) return messages;
+  return messages.map((m) => {
+    if (m.id !== messageId) return m;
+    const block: ContentBlock = { type: 'tool_use', id: tool.id, name: tool.name, input: tool.input ?? {} };
+    const idx = m.content.findIndex((b) => b.type === 'tool_use' && b.id === tool.id);
+    if (idx >= 0) {
+      const content = [...m.content];
+      content[idx] = block;
+      return { ...m, content };
+    }
+    return { ...m, content: [...m.content, block] };
+  });
+}
+
 function summarizeTool(name: string, input: unknown): { label: string; detail: string; category: string } {
   const i = (input ?? {}) as Record<string, unknown>;
   const n = name.toLowerCase();
@@ -478,6 +554,8 @@ interface ChatState {
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   pinSession: (id: string, pinned: boolean) => Promise<void>;
+  /** File a conversation away, or bring it back. */
+  archiveSession: (id: string, archived: boolean) => Promise<void>;
   searchSessions: (query: string) => Promise<void>;
   branchSession: (id: string, messageId?: string) => Promise<void>;
   exportSession: (id: string, format?: 'markdown' | 'json') => Promise<void>;
@@ -491,6 +569,9 @@ interface ChatState {
   /** Undo all file edits from the aborted run (rewind to its pre-run checkpoint). */
   undoAbortedRun: () => Promise<void>;
   announceUncensoredMode: () => Promise<void>;
+  /** Keep-working-until-done quality toggle for huge prompts (persisted). */
+  untilDone: boolean;
+  setUntilDone: (untilDone: boolean) => void;
   sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string, background?: boolean) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
@@ -503,6 +584,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentSessionId: null,
   messages: [],
   streaming: false,
+  untilDone: typeof localStorage !== 'undefined' && localStorage.getItem(UNTIL_DONE_STORAGE_KEY) === '1',
   loadingSession: false,
   activity: [],
   pendingPermission: null,
@@ -525,6 +607,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Ignore late events from a run deliberately aborted by our watchdog.
       // A future send clears this marker before it starts a new run.
       if (safetyFallbackSessions.has(ev.sessionId)) return;
+
+      // A blocked agent is waiting on the USER, not on the open transcript.
+      //
+      // These two events used to fall through to the currentSessionId filter
+      // below, which silently discarded them whenever the run belonged to a
+      // different session than the one on screen — always-on voice, a
+      // background automation, a Telegram or WhatsApp message, or simply a
+      // second conversation running in the background. The agent would sit
+      // blocked on an invisible question and the user would have no idea why
+      // nothing was happening. Both are global prompts, so both bypass the
+      // filter and render wherever the user happens to be.
+      if (ev.type === 'question_request' || ev.type === 'plan_state') {
+        handleStreamEvent(ev).catch((e) => console.error('[chat] handleStreamEvent error:', e));
+        return;
+      }
+
       // Provider status, tokens, and tool events all prove the run is alive.
       touchSafetyTimer(ev.sessionId);
       if (ev.sessionId !== get().currentSessionId) {
@@ -1117,8 +1215,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadSessions: async () => {
-    const sessions = await window.api.listSessions();
+    const all = await window.api.listSessions();
+    // Archived conversations are filed in the Archive section, so they must not
+    // also sit in the everyday list — that is what "filed away" means. They stay
+    // fully readable and resumable; they are just out of the way.
+    const sessions = all.filter((s: { archived?: boolean }) => !s.archived);
     set({ sessions });
+    // Come back to the conversation the user was actually in.
+    //
+    // After a reload the chat surface used to come up empty with nothing
+    // selected, even though the transcript was sitting on disk — most visibly
+    // after Infinite AI edits the app and it restarts, where the user is left
+    // staring at a blank screen instead of the thread they were in.
+    const remembered = readRememberedSessionId();
+    const target = remembered && sessions.some((s: { id: string }) => s.id === remembered) ? remembered : sessions[0]?.id;
+    if (target && get().currentSessionId !== target) {
+      await get().selectSession(target);
+    }
   },
 
   clearAllSessions: async () => {
@@ -1151,7 +1264,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   createSession: async (cwd, model, provider) => {
     const session = await window.api.createSession({ cwd, model, provider });
-    set((s) => ({ sessions: [session, ...s.sessions], currentSessionId: session.id, messages: [] }));
+    // A fresh session starts idle even while the previous conversation keeps
+    // running — streaming is per-session, not a global lock.
+    set((s) => ({
+      sessions: [session, ...s.sessions],
+      currentSessionId: session.id,
+      messages: [],
+      streaming: false,
+      activity: [],
+      orchestratedTaskId: null,
+    }));
     return session;
   },
 
@@ -1201,6 +1323,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().loadSessions();
   },
 
+  archiveSession: async (id, archived) => {
+    await window.api.archiveSession({ sessionId: id, archived });
+    // Archiving the conversation you are currently reading would otherwise leave
+    // you looking at a chat that is no longer in the sidebar. Move to the newest
+    // remaining conversation instead of stranding the view.
+    if (archived && get().currentSessionId === id) {
+      const remaining = get().sessions.filter((s) => s.id !== id);
+      const next = remaining[0]?.id;
+      if (next) await get().selectSession(next);
+      else set({ currentSessionId: null, messages: [], activity: [] });
+    }
+    await get().loadSessions();
+  },
+
   searchSessions: async (query) => {
     const sessions = await window.api.searchSessions({ query });
     set({ sessions });
@@ -1210,7 +1346,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const session = await window.api.branchSession({ sessionId: id, messageId });
     await flushPersists();
     const messages = await window.api.loadSession({ sessionId: session.id });
-    set((state) => ({ sessions: [session, ...state.sessions], currentSessionId: session.id, messages }));
+    set((state) => ({
+      sessions: [session, ...state.sessions],
+      currentSessionId: session.id,
+      messages,
+      streaming: false,
+      activity: [],
+      orchestratedTaskId: null,
+    }));
   },
 
   exportSession: async (id, format = 'markdown') => {
@@ -1310,6 +1453,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
   },
 
+  setUntilDone: (untilDone) => {
+    try {
+      localStorage.setItem(UNTIL_DONE_STORAGE_KEY, untilDone ? '1' : '0');
+    } catch { /* storage may be unavailable — toggle still works for this session */ }
+    set({ untilDone });
+  },
+
   sendMessage: async (visibleText, images, mode = 'chat', agentId, background = false) => {
     // Show thinking indicator IMMEDIATELY — before any async work.
     // This makes the UI feel instant when the user presses Enter.
@@ -1324,6 +1474,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       : (mode && mode !== 'chat' && mode !== 'agent')
         ? promptForExecutionMode(visibleText, mode)
         : visibleText.trim();
+    // Keep-working-until-done: the transcript keeps the user's own words, the
+    // model sees the completion contract, and main raises this run's budget
+    // (the untilDone flag → run-budget overrides in CHAT_SEND).
+    const untilDone = get().untilDone;
+    const outgoing = untilDone ? wrapUntilDone(text) : text;
     const { currentSessionId } = get();
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
@@ -1590,7 +1745,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               type: 'text',
               text:
                 result?.status === 'success'
-                  ? `**Deployed successfully!**\n\n${result.steps?.map((s) => `- ${s.name}: \`${s.command}\` ΓÇö ${s.status}`).join('\n')}`
+                  ? `**Deployed successfully!**\n\n${result.steps?.map((s) => `- ${s.name}: \`${s.command}\` — ${s.status}`).join('\n')}`
                   : `**Deployment failed.**\n\n${
                       result?.steps
                         ?.filter((s) => s.status === 'failed')
@@ -1829,7 +1984,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } else if (brainMode) {
 
 
-      // Step 1: Try Brain patterns FIRST ΓÇö these execute real actions (build, open, email, terminal, etc.)
+      // Step 1: Try Brain patterns FIRST — these execute real actions (build, open, email, terminal, etc.)
       let brainResponse: string | null = null;
       let isActionResponse = false;
       try {
@@ -1843,22 +1998,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           isActionResponse =
           brainResponse.startsWith('**$ ') ||
           brainResponse.includes('```') ||
-          brainResponse.startsWith('≡ƒôü') ||
-          brainResponse.startsWith('Γ£à') ||
-          brainResponse.startsWith('≡ƒô╕') ||
-          brainResponse.startsWith('≡ƒôé') ||
-          brainResponse.startsWith('≡ƒûÑ∩╕Å') ||
-          brainResponse.startsWith('≡ƒîÉ') ||
-          brainResponse.startsWith('≡ƒôº') ||
-          brainResponse.startsWith('≡ƒô¼') ||
-          brainResponse.startsWith('≡ƒô¡') ||
-          brainResponse.startsWith('≡ƒöè') ||
-          brainResponse.startsWith('≡ƒöç') ||
-          brainResponse.startsWith('ΓÅ│') ||
+          brainResponse.startsWith('📁') ||
+          brainResponse.startsWith('✅') ||
+          brainResponse.startsWith('📸') ||
+          brainResponse.startsWith('📂') ||
+          brainResponse.startsWith('🖥️') ||
+          brainResponse.startsWith('🌐') ||
+          brainResponse.startsWith('📧') ||
+          brainResponse.startsWith('📬') ||
+          brainResponse.startsWith('📭') ||
+          brainResponse.startsWith('🔊') ||
+          brainResponse.startsWith('🔇') ||
+          brainResponse.startsWith('⏳') ||
           brainResponse.includes('Exit code:') ||
           brainResponse.includes('created successfully') ||
           brainResponse.includes('Error:') ||
-          brainResponse.includes('Γ¥î');
+          brainResponse.includes('❌');
         } else {
           isActionResponse = false;
         }
@@ -1871,7 +2026,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch (brainErr: unknown) {
         const error = brainErr instanceof Error ? brainErr : new Error(String(brainErr));
         console.error('[chat] Brain error:', error);
-        brainResponse = `Γ¥î Brain error: ${error.message}. Try again or check the console for details.`;
+        brainResponse = `❌ Brain error: ${error.message}. Try again or check the console for details.`;
         isActionResponse = true; // Treat errors as action responses
       }
 
@@ -1914,7 +2069,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // If Brain gave conversational response but user has API key, fall through to API path
       if (!isActionResponse && hasApiKey) {
 
-        // Don't add user message yet ΓÇö the API path will add it
+        // Don't add user message yet — the API path will add it
         // Fall through to the API code below (past the brainMode block)
       }
 
@@ -1949,7 +2104,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           }
         } catch {
-          // Ollama unavailable ΓÇö keep the pattern-matching response
+          // Ollama unavailable — keep the pattern-matching response
         }
 
         if (!finalResponse) {
@@ -2085,7 +2240,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     safetyFallbackSessions.delete(sessionId);
     armSafetyTimer(sessionId, async () => {
       if (!activeChatTaskBySession.has(sessionId!)) return;
-      console.error('[chat] Safety timeout ΓÇö stopping the unverified run and using the offline fallback');
+      console.error('[chat] Safety timeout — stopping the unverified run and using the offline fallback');
       safetyFallbackSessions.add(sessionId!);
       await window.api.abortMessage({ sessionId: sessionId! }).catch(() => undefined);
       const brainStore = useBrainStore.getState();
@@ -2127,7 +2282,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         /(?:\band\b|\bthen\b|,|;)/i.test(text)); // multi-part: "create X and Y"
 
     try {
-      if (isComplexTask) {
+      // Until-done runs take the direct path: the marathon budget (and the
+      // completion contract) rides CHAT_SEND, not the orchestrator.
+      if (isComplexTask && !untilDone) {
         // Use orchestrator for complex tasks
         try {
           const result = await window.api.orchestratorStart({
@@ -2149,7 +2306,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.error('[chat] Orchestrator failed, falling back to direct:', e);
           await window.api.sendMessage({
             sessionId: sessionId!,
-            message: withImages(text, images),
+            message: withImages(outgoing, images),
             displayMessage: userMessage.content,
             provider,
             model,
@@ -2160,13 +2317,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Use direct agent for simple tasks
         await window.api.sendMessage({
           sessionId: sessionId!,
-          message: withImages(text, images),
+          message: withImages(outgoing, images),
           displayMessage: userMessage.content,
           provider,
           model,
           cwd: settings.cwd ?? '.',
           ...(mode === 'plan' ? { planMode: true } : {}),
           ...(background ? { background: true } : {}),
+          ...(untilDone ? { untilDone: true } : {}),
         });
       }
     } catch (e: unknown) {
@@ -2266,6 +2424,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 }));
+
+// Remember the open chat in one place rather than at each of the dozen places
+// that select a session — a new code path that picks a session would otherwise
+// silently not survive a reload.
+useChatStore.subscribe((state, previous) => {
+  if (state.currentSessionId !== previous.currentSessionId) {
+    rememberSessionId(state.currentSessionId);
+  }
+});
 
 type DistillSource = 'api' | 'brain' | 'ollama' | 'system';
 
@@ -2367,6 +2534,55 @@ async function distillInteraction(input: string, output: string, options: Distil
   }
 }
 
+/**
+ * Media tool results (ImageGenerator / VideoGen / MusicGen) embed an
+ * INFINITE_MEDIA envelope in their text content. The renderer turns it into
+ * media ContentBlocks so the result renders inline in chat; the model itself
+ * only sees the plain summary — media bytes never enter the model context.
+ */
+interface InfiniteMediaEntry {
+  kind: 'image' | 'video' | 'audio';
+  path: string;
+  mime: string;
+}
+
+const MEDIA_ENVELOPE_RE = /INFINITE_MEDIA:\s*(\[[\s\S]*?\])/;
+
+export function extractMediaEnvelope(content: unknown): Array<
+  | { type: 'image'; source: { type: 'base64'; mediaType: string; data: string } }
+  | { type: 'file'; name: string; mimeType: string; data: string; mediaPath: string; mediaKind: 'image' | 'video' | 'audio' }
+> {
+  // Tool result content can be a plain string or a structured block array.
+  const texts: string[] = [];
+  if (typeof content === 'string') texts.push(content);
+  else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (typeof part === 'string') texts.push(part);
+      else if (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string') {
+        texts.push((part as { text: string }).text);
+      }
+    }
+  }
+  const match = MEDIA_ENVELOPE_RE.exec(texts.join('\n'));
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]) as InfiniteMediaEntry[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((m) => m && typeof m.path === 'string' && typeof m.mime === 'string')
+      .map((m) => ({
+        type: 'file' as const,
+        name: m.path.split(/[\\/]/).pop() ?? 'media',
+        mimeType: m.mime,
+        data: '', // Loaded lazily via fileRead (media files can be tens of MB).
+        mediaPath: m.path,
+        mediaKind: m.kind === 'video' ? 'video' : m.kind === 'audio' ? 'audio' : 'image',
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function generateFilename(lang: string): string {
   const map: Record<string, string> = {
     html: 'index.html',
@@ -2434,9 +2650,27 @@ async function extractAndCreateFilesFromText(text: string, requestText = ''): Pr
       try {
         const result = (await window.api.fileWrite({ path: filename, content })) as { ok?: boolean; error?: string };
         if (result.error) throw new Error(result.error);
-        useEditorStore
-          .getState()
-          .openInEditor(filename, content, undefined, shouldLaunchArtifact(requestText, filename));
+        // A generated .html file opens INSIDE Infinite OS, as a tab, on a
+        // loopback URL. It used to be handed to the editor with "launch" set,
+        // which ended in shell.openPath and put the user's default browser on
+        // top of the app — the exact thing this product must never do.
+        if (shouldLaunchArtifact(requestText, filename)) {
+          const served = (await window.api.workspaceUrlFor({ path: filename })) as
+            | { ok?: boolean; url?: string; error?: string }
+            | undefined;
+          if (served?.ok && served.url) {
+            const { useAiTabsStore } = await import('./aiTabs.js');
+            const tab = useAiTabsStore.getState().createTab({
+              title: filename.replace(/\.html?$/i, '').slice(0, 40) || 'Preview',
+              kind: 'website',
+              prompt: `Preview of ${filename}`,
+              metadata: { browserUrl: served.url, sourceFile: filename },
+            });
+            window.dispatchEvent(new CustomEvent('infinite:navigate', { detail: tab.id }));
+          }
+        } else {
+          useEditorStore.getState().openInEditor(filename, content, undefined, false);
+        }
         createdFiles.push(filename);
       } catch (e) {
         console.error('[chat] Failed to create file:', filename, e);
@@ -2495,6 +2729,8 @@ interface SubagentLiveEvent {
   stop_reason?: Message['stop_reason'];
   usage?: unknown;
   attempt?: number;
+  /** Set on a failover `provider_status` event: the switch is persisted. */
+  sticky?: boolean;
 }
 
 function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void {
@@ -2508,12 +2744,17 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
       const msgId = ev.message_id;
       const prevId = target.liveIds.length ? target.liveIds[target.liveIds.length - 1] : undefined;
       const prev = prevId ? useChatStore.getState().messages.find((m) => m.id === prevId) : undefined;
-      const prevHasText = prev?.content.some((c) => c.type === 'text' && c.text.trim());
-      if (prev && !prevHasText && prevId) {
+      // Drop only a truly empty placeholder bubble. A turn with tool calls
+      // but no text yet is real transcript (its cards must survive), so
+      // tool_use content counts as content here.
+      const prevHasContent = prev?.content.some(
+        (c) => (c.type === 'text' && c.text.trim()) || c.type === 'tool_use',
+      );
+      if (prev && !prevHasContent && prevId) {
         const dropIdx = target.liveIds.indexOf(prevId);
         if (dropIdx >= 0) target.liveIds.splice(dropIdx, 1);
       }
-      const droppedId = prev && !prevHasText ? prevId : undefined;
+      const droppedId = prev && !prevHasContent ? prevId : undefined;
       set((s) => {
         const messages = droppedId ? s.messages.filter((m) => m.id !== droppedId) : s.messages;
         if (messages.some((m) => m.id === msgId)) return { streaming: true };
@@ -2557,6 +2798,24 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
       }));
       break;
     }
+    case 'thinking_delta': {
+      // Reasoning streams into its own block so the UI can show it as "thinking"
+      // while the answer has not started yet — which is exactly what the user
+      // sees as a frozen bubble when a local model deliberates for a minute.
+      if (!target.transcript || !liveId || typeof ev.text !== 'string' || !ev.text) break;
+      const thought = ev.text;
+      set((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== liveId) return m;
+          const last = m.content[m.content.length - 1];
+          if (last && last.type === 'thinking') {
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'thinking', text: last.text + thought }] };
+          }
+          return { ...m, content: [...m.content, { type: 'thinking', text: thought }] };
+        }),
+      }));
+      break;
+    }
     case 'tool_use_start': {
       if (!ev.tool_use_id || !ev.name) break;
       const toolId = ev.tool_use_id;
@@ -2564,6 +2823,12 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
       if (!target.toolIds.includes(toolId)) target.toolIds.push(toolId);
       const summary = summarizeTool(toolName, {});
       set((s) => ({
+        // Same contract as the main agent path: the card renders in the live
+        // transcript bubble the moment the tool starts.
+        messages:
+          liveId && target.transcript
+            ? upsertLiveToolUse(s.messages, liveId, { id: toolId, name: toolName })
+            : s.messages,
         activity: s.activity.some((item) => item.toolUseId === toolId)
           ? s.activity
           : [
@@ -2589,20 +2854,10 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
       if (!target.toolIds.includes(toolId)) target.toolIds.push(toolId);
       const summary = summarizeTool(toolName, ev.input);
       set((s) => ({
+        // Fill the running card in place — never a second card for one call.
         messages:
           liveId && target.transcript
-            ? s.messages.map((m) =>
-                m.id === liveId
-                  ? {
-                      ...m,
-                      // Dedupe: synthesized remote-telemetry blocks already live
-                      // in content (start arrived before end) — never double cards.
-                      content: m.content.some((b) => b.type === 'tool_use' && (b as { id?: string }).id === toolId)
-                        ? m.content
-                        : [...m.content, { type: 'tool_use', id: toolId, name: toolName, input: ev.input }],
-                    }
-                  : m,
-              )
+            ? upsertLiveToolUse(s.messages, liveId, { id: toolId, name: toolName, input: ev.input })
             : s.messages,
         activity: s.activity.some((item) => item.toolUseId === toolId)
           ? s.activity.map((item) =>
@@ -2771,6 +3026,19 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
   const { setState, getState } = useChatStore;
   const sessionId = ctx?.sessionId ?? ev.sessionId;
   switch (ev.type) {
+    case 'user_message': {
+      // Already persisted by main — append it to the live transcript so the
+      // words appear now. Guarded on the id so a remount or a replayed event
+      // can't duplicate the turn.
+      const incoming = ev.message as unknown as Message;
+      if (!incoming?.id) break;
+      setState((s) => ({
+        messages: s.messages.some((m) => m.id === incoming.id)
+          ? s.messages
+          : [...s.messages, { ...incoming, content: incoming.content ?? [] }],
+      }));
+      break;
+    }
     case 'message_start': {
       const assistant: Message = {
         id: ev.message_id,
@@ -2781,7 +3049,8 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       // A task may span several assistant/tool turns. Preserve its completed
       // activity rows so the user can follow the entire run, not only the
       // latest model turn. New sends clear the feed before starting.
-      setState((s) => ({ messages: [...s.messages, assistant] }));
+      // Fresh id → fresh bubble; re-emitted id reuses its bubble (retry).
+      setState((s) => ({ messages: appendLiveMessage(s.messages, assistant) }));
       break;
     }
     case 'message_discard': {
@@ -2805,6 +3074,10 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
     }
     case 'tool_use_start': {
       setState((s) => ({
+        // Plant the card in the live transcript bubble NOW (running pulse),
+        // not only when the full input arrives — every tool the AI uses is
+        // visible in the conversation from the moment it starts.
+        messages: upsertLiveToolUse(s.messages, ev.message_id, { id: ev.tool_use_id, name: ev.name }),
         activity: [
           ...s.activity,
           {
@@ -2839,14 +3112,9 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
     case 'tool_use_end': {
       const summary = summarizeTool(ev.name, ev.input);
       setState((s) => ({
-        messages: s.messages.map((m) => {
-          if (m.id !== ev.message_id) return m;
-          const already = m.content.some((b) => b.type === 'tool_use' && (b as { id?: string }).id === ev.tool_use_id);
-          return {
-            ...m,
-            content: already ? m.content : [...m.content, { type: 'tool_use', id: ev.tool_use_id, name: ev.name, input: ev.input }],
-          };
-        }),
+        // Fill the running card in place (same block id): the transcript
+        // keeps exactly one card per tool call, now with its full input.
+        messages: upsertLiveToolUse(s.messages, ev.message_id, { id: ev.tool_use_id, name: ev.name, input: ev.input }),
         activity: s.activity.some((item) => item.toolUseId === ev.tool_use_id)
           ? s.activity.map((item) => item.toolUseId === ev.tool_use_id
             ? { ...item, name: ev.name, label: summary.label, detail: summary.detail, category: summary.category }
@@ -2869,7 +3137,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
                 ...item,
                 name: ev.name,
                 label: summary.label,
-                detail: ev.detail || summary.detail || (status === 'running' ? 'WorkingΓÇª' : 'Completed'),
+                detail: ev.detail || summary.detail || (status === 'running' ? 'Working…' : 'Completed'),
                 category: summary.category,
                 status,
               }
@@ -2879,7 +3147,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
               toolUseId: ev.tool_use_id,
               name: ev.name,
               label: summary.label,
-              detail: ev.detail || summary.detail || (status === 'running' ? 'WorkingΓÇª' : 'Completed'),
+              detail: ev.detail || summary.detail || (status === 'running' ? 'Working…' : 'Completed'),
               category: summary.category,
               status,
               timestamp: Date.now(),
@@ -2942,6 +3210,26 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         }
       } catch {
         // Not a tab/question action — ignore
+      }
+      // Media tools (ImageGenerator / VideoGen / MusicGen) return an
+      // INFINITE_MEDIA envelope so the UI can render the result inline —
+      // image/video/audio preview right in the chat, openable in the app —
+      // while the model itself only ever sees the plain text summary
+      // (media bytes never enter the model conversation).
+      const mediaEnvelope = extractMediaEnvelope(ev.content);
+      if (mediaEnvelope.length > 0) {
+        setState((s) => {
+          const messages = [...s.messages];
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const m = messages[i];
+            if (m.role === 'assistant') {
+              messages[i] = { ...m, content: [...m.content, ...mediaEnvelope] };
+              break;
+            }
+            if (m.role === 'user') break;
+          }
+          return { messages };
+        });
       }
       const last = getState().messages[getState().messages.length - 1];
       if (!last || last.role !== 'user') {
@@ -3042,14 +3330,27 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       switch (ev.status) {
         case 'connecting':
           label = `Connecting to ${ev.provider ?? 'the provider'}`;
-          detail = ev.model ? `Model: ${ev.model}` : 'Opening the network connectionΓÇª';
+          detail = ev.model ? `Model: ${ev.model}` : 'Opening the network connection…';
           break;
         case 'streaming':
           label = `${ev.provider ?? 'Provider'} is streaming`;
-          detail = ev.model ? `Awaiting first token from ${ev.model}` : 'Awaiting first tokenΓÇª';
+          detail = ev.model ? `Awaiting first token from ${ev.model}` : 'Awaiting first token…';
           break;
         case 'failover':
-          label = `Switching providers`;
+          // Sticky auto-switch: main already saved the model that answered as
+          // the new active model. Adopt it in the renderer's saved selection
+          // too, so Settings shows the truth and the next launch can't push the
+          // dead model back over it.
+          if (ev.sticky === true && typeof ev.provider === 'string' && typeof ev.model === 'string') {
+            try {
+              const raw = localStorage.getItem('infinite:current');
+              const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+              localStorage.setItem('infinite:current', JSON.stringify({ ...current, provider: ev.provider, model: ev.model }));
+            } catch { /* adoption is best-effort */ }
+            label = 'Auto-switched to a working model';
+          } else {
+            label = `Switching providers`;
+          }
           detail = `${ev.from} → ${ev.to}${ev.reason ? ` (${ev.reason.slice(0, 220)})` : ''}`;
           break;
         case 'cold_start':
@@ -3090,7 +3391,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         ),
         activity: s.activity,
         // First text/token has landed; clear the placeholder status so the
-        // Thinking bubble knows it can stop showing "awaiting responseΓÇª".
+        // Thinking bubble knows it can stop showing "awaiting response…".
         providerStatus: null,
       }));
 

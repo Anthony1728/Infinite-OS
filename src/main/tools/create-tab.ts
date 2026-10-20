@@ -38,25 +38,25 @@ const KIND_ICONS: Record<string, string> = {
 export const createTabTool: Tool = {
   name: 'CreateTab',
   description: [
-    'YOUR CREATIVE CANVAS — build ANYTHING as a persistent sidebar tab under "Tabs" (websites, images, video, quizzes, charts, dashboards, tables, documents, schedules, trackers, portfolios, comparisons, calculators, presentations, mindmaps, checklists, timelines, kanban, invoices, reports, lessons, summaries, custom HTML).',
-    'Use when the user asks to visualize, track, plan, compare, calculate, or see anything visually — or when a dedicated visual workspace helps.',
-    'CONTENT: htmlContent (raw HTML/CSS/JS, max flexibility) | sections (text/code/lists/charts/tables/images/embeds/videos/metrics) | chartData (labels+datasets+type) | tableData (columns+rows) | metrics (KPI cards) | filePath (generated file ref) | actions (buttons that send prompts to chat).',
-    'RULES: no custom backgrounds/gradients/inline background styles — use the Infinite OS dark theme. Content must be functional and interactive. Match kind to content (charts→chartData, tables→tableData).',
+    'YOUR CREATIVE CANVAS — build anything as a persistent tab under Tabs (websites, media, charts, dashboards, tables, documents).',
+    'Use when the user asks to visualize, track, plan, compare or calculate.',
+    'CONTENT: htmlContent | sections | chartData | tableData | metrics | filePath | actions (see schema).',
+    'RULES: dark theme, no custom backgrounds; content must work and be interactive; match kind to content.',
   ].join(' '),
   permission: 'allow',
   inputSchema: {
     type: 'object',
     properties: {
-      title: { type: 'string', description: 'Tab title (max 40 chars)' },
+      title: { type: 'string', description: 'Tab title' },
       kind: {
         type: 'string',
         enum: VALID_KINDS,
-        description: 'Tab kind — determines icon and default presentation',
+        description: 'Tab kind',
       },
-      prompt: { type: 'string', description: 'The original user request or purpose of this tab' },
-      content: { type: 'string', description: 'Plain text content (fallback if no sections/htmlContent)' },
-      icon: { type: 'string', description: 'Custom emoji icon override' },
-      color: { type: 'string', description: 'Custom accent color (hex, e.g. #8b5cf6)' },
+      prompt: { type: 'string', description: 'Original user request' },
+      content: { type: 'string', description: 'Plain text fallback' },
+      icon: { type: 'string', description: 'Emoji icon' },
+      color: { type: 'string', description: 'Accent color (hex)' },
       sections: {
         type: 'array',
         description: 'Structured content blocks',

@@ -1,5 +1,6 @@
 import type { Tool, ToolResult } from './base.js';
 import { hasEmailConfig, listEmails, readEmail, sendEmail } from '../email/index.js';
+import { getBusinessOS } from '../business/crm.js';
 
 export const emailTool: Tool = {
   name: 'Email',
@@ -47,9 +48,25 @@ export const emailTool: Tool = {
       }
       if (!input.to || !input.subject || !input.body) return required('to, subject, and body');
       const result = await sendEmail(input.to, input.subject, input.body, input.in_reply_to);
-      return result.ok
-        ? { content: `Email sent to ${input.to}.` }
-        : { content: `Email could not be sent: ${result.error ?? 'Unknown error'}`, is_error: true };
+      if (!result.ok) {
+        return { content: `Email could not be sent: ${result.error ?? 'Unknown error'}`, is_error: true };
+      }
+      // Logged to the business record so mail the AI sends appears in the
+      // Business section exactly like mail the user sends.
+      //
+      // It did not before: the user sending an email wrote it to the business
+      // log, the agent sending one did not, so the Business screen showed a
+      // history of correspondence that silently omitted everything the AI had
+      // written to customers. That is worse than no log at all, because it
+      // looks complete.
+      //
+      // A failure to log is not a send failure — the mail has already left.
+      try {
+        getBusinessOS().logSentEmail({ from: 'me', to: input.to, subject: input.subject, body: input.body });
+      } catch {
+        /* the message was sent; losing the local copy does not unsend it */
+      }
+      return { content: `Email sent to ${input.to}.` };
     } catch (error) {
       return { content: `Email action failed: ${(error as Error).message}`, is_error: true };
     }

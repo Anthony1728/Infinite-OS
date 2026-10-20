@@ -37,6 +37,11 @@ export const IPC = {
   SESSION_RENAME: 'session:rename',
   SESSION_SEARCH: 'session:search',
   SESSION_PIN: 'session:pin',
+
+  // ── Archive ──────────────────────────────────────────────────────────────
+  SESSION_ARCHIVE_SET: 'session:archive:set',
+  SESSION_ARCHIVE_LIST: 'session:archive:list',
+  SESSION_ARCHIVE_SEARCH: 'session:archive:search',
   SESSION_EXPORT: 'session:export',
   SESSION_IMPORT: 'session:import',
   SESSION_SHARE: 'session:share',
@@ -177,15 +182,15 @@ export const IPC = {
   BROWSER_DELETE_SESSION: 'browser:delete-session',
   BROWSER_STATS: 'browser:stats',
 
-  // Computer Control
-  COMPUTER_MOVE_MOUSE: 'computer:move-mouse',
-  COMPUTER_CLICK_MOUSE: 'computer:click-mouse',
-  COMPUTER_TYPE_TEXT: 'computer:type-text',
-  COMPUTER_PRESS_KEY: 'computer:press-key',
-  COMPUTER_CAPTURE_SCREEN: 'computer:capture-screen',
-  COMPUTER_OPEN_APP: 'computer:open-app',
-  COMPUTER_CLOSE_APP: 'computer:close-app',
-  COMPUTER_STATS: 'computer:stats',
+  // The `COMPUTER_*` constants that used to live here are gone. They were a
+  // second implementation of computer control, registered in main with no
+  // preload exposure and no caller, so they could never run.
+  //
+  // Note that computer control is still exposed over IPC — just not here. The
+  // live surface uses raw `computer:*` channels registered directly in
+  // `ipc/computer-automation.ts` (computerMoveMouse, computerClick, and ~25
+  // more), which the renderer uses. Any scan for dead handlers must therefore
+  // match raw string channels too, not only `IPC.` constants.
 
   // Automation
   AUTOMATION_CREATE_WORKFLOW: 'automation:create-workflow',
@@ -206,8 +211,9 @@ export const IPC = {
   AUTOMATION_CANCEL_RUN: 'automation:cancel-run',
   AUTOMATION_CREATE_FROM_NL: 'automation:create-from-nl',
 
-  // Heartbeat (Hermes-inspired idle consolidation)
-  HEARTBEAT_STATUS: 'heartbeat:status',
+  // Heartbeat (Hermes-inspired idle consolidation) runs in the background and is
+  // not exposed over IPC: no renderer ever asked it for status, so the handler
+  // was registered and unreachable.
 
   // Background build (app stays running while AI edits code)
   BUILD_START: 'build:start',
@@ -263,6 +269,40 @@ export const IPC = {
   BUSINESS_UPDATE_DEAL_STAGE: 'business:update-deal-stage',
   BUSINESS_LIST_DEALS: 'business:list-deals',
   BUSINESS_ANALYTICS: 'business:analytics',
+  BUSINESS_LIST_TASKS: 'business:tasks:list',
+  BUSINESS_CREATE_TASK: 'business:tasks:create',
+  BUSINESS_UPDATE_TASK: 'business:tasks:update',
+  BUSINESS_DELETE_TASK: 'business:tasks:delete',
+  BUSINESS_OVERVIEW: 'business:overview',
+  BUSINESS_SEARCH: 'business:search',
+  BUSINESS_ACTIVITIES: 'business:activities',
+  BUSINESS_ADD_NOTE: 'business:note:add',
+  BUSINESS_CONTACT_DETAIL: 'business:contact-detail',
+  BUSINESS_ATTENTION: 'business:attention',
+  BUSINESS_DELETE_LEAD: 'business:lead:delete',
+  BUSINESS_DELETE_INVOICE: 'business:invoice:delete',
+  BUSINESS_DELETE_DEAL: 'business:deal:delete',
+  BUSINESS_LOG_SENT_EMAIL: 'business:email:log-sent',
+
+  // ── Project board (the same store the `Project` tool writes to) ──────────
+  PROJECTS_LIST: 'projects:list',
+  PROJECTS_CREATE: 'projects:create',
+  PROJECTS_UPDATE: 'projects:update',
+  PROJECTS_DELETE: 'projects:delete',
+  PROJECTS_WITH_FILES: 'projects:with-files',
+  PROJECTS_BOARD: 'projects:board',
+  PROJECTS_LIST_ALL: 'projects:tasks',
+  PROJECTS_CREATE_TASK: 'projects:task:create',
+  PROJECTS_UPDATE_TASK: 'projects:task:update',
+  PROJECTS_DELETE_TASK: 'projects:task:delete',
+  PROJECTS_ADD_CHECKLIST: 'projects:task:checklist:add',
+  PROJECTS_TOGGLE_CHECKLIST: 'projects:task:checklist:toggle',
+  PROJECTS_ADD_COMMENT: 'projects:task:comment:add',
+  PROJECTS_ANALYTICS: 'projects:analytics',
+
+  // ── Resume after a restart ───────────────────────────────────────────────
+  /** Runs that a restart cut off, with what they had actually done. */
+  RESUME_INTERRUPTED: 'resume:interrupted',
   BUSINESS_STATS: 'business:stats',
   BUSINESS_LIST_EMAILS: 'business:list-emails',
   BUSINESS_SAVE_EMAIL: 'business:save-email',
@@ -331,6 +371,15 @@ export const IPC = {
   CREW_STATUS: 'crew:status',
   CREW_EVENT: 'crew:event', // main → renderer push
 
+  // Session Board (kanban management of parallel agent sessions)
+  SESSION_BOARD_CREATE: 'session-board:create',
+  SESSION_BOARD_START: 'session-board:start',
+  SESSION_BOARD_CANCEL: 'session-board:cancel',
+  SESSION_BOARD_INTERJECT: 'session-board:interject',
+  SESSION_BOARD_LIST: 'session-board:list',
+  SESSION_BOARD_GET: 'session-board:get',
+  SESSION_BOARD_EVENT: 'session-board:event', // main → renderer push
+
   // Free Model Selector
   MODEL_SELECT: 'model:select',
   MODEL_FREE_LIST: 'model:free-list',
@@ -350,6 +399,40 @@ export const IPC = {
   VOICE_CLEAR_HISTORY: 'voice:clear-history',
   VOICE_SPEAK: 'voice:speak',
   VOICE_STATUS: 'voice:status',
+  /** Loopback static server for the workspace, so the tab browser can load a
+   *  file the agent produced without opening an external browser window. */
+  WORKSPACE_SERVE: 'workspace:serve',
+  WORKSPACE_URL_FOR: 'workspace:url-for',
+
+  /** In-app browser for the Tabs section (WebContentsView, main-owned). */
+  TAB_BROWSER_CREATE: 'tab-browser:create',
+  TAB_BROWSER_BOUNDS: 'tab-browser:bounds',
+  TAB_BROWSER_NAVIGATE: 'tab-browser:navigate',
+  TAB_BROWSER_BACK: 'tab-browser:back',
+  TAB_BROWSER_FORWARD: 'tab-browser:forward',
+  TAB_BROWSER_RELOAD: 'tab-browser:reload',
+  TAB_BROWSER_STATE: 'tab-browser:state',
+  TAB_BROWSER_CLOSE: 'tab-browser:close',
+  TAB_BROWSER_EVENT: 'tab-browser:event',
+
+  /** Real tab channel. Tabs previously had none — they were created by the
+   *  renderer sniffing a JSON string out of a tool result. */
+  TAB_CREATE: 'tab:create',
+  TAB_UPDATE: 'tab:update',
+  /** Renderer mirrors its tabs into main so the agent can list them and read
+   *  their real address, which it could not do while they lived only in
+   *  renderer localStorage. */
+  TAB_INDEX_REPLACE: 'tab:index:replace',
+  TAB_INDEX_UPSERT: 'tab:index:upsert',
+  TAB_INDEX_REMOVE: 'tab:index:remove',
+  /** Always-on voice: the loop lives in main, so it survives view changes. */
+  VOICE_SESSION_STATE: 'voice:session:state',
+  VOICE_SESSION_SET_ENABLED: 'voice:session:set-enabled',
+  VOICE_SESSION_PAUSE: 'voice:session:pause',
+  VOICE_SESSION_RESUME: 'voice:session:resume',
+  VOICE_SESSION_INTERRUPT: 'voice:session:interrupt',
+  VOICE_SESSION_SAY: 'voice:session:say',
+  VOICE_SESSION_EVENT: 'voice:session:event',
 
   // Video Clipping
   VIDEO_CREATE_PROJECT: 'video:create-project',
@@ -509,6 +592,30 @@ export const IPC = {
   OLLAMA_RECORD_API: 'ollama:record-api',
   OLLAMA_RECORD_CONVERSATION: 'ollama:record-conversation',
   OLLAMA_SYSTEM_PROMPT: 'ollama:system-prompt',
+  /** What the machine can actually run, and the budget that follows from it. */
+  OLLAMA_CAPABILITY: 'ollama:capability',
+  /** Installed local models, cached server-side so this does not refetch. */
+  OLLAMA_MODELS_LOCAL: 'ollama:models-local',
+  /** What Ollama currently holds in RAM — the honest answer to "why is it slow?". */
+  OLLAMA_LOADED: 'ollama:loaded',
+  /** Load a model now so the next chat skips the cold load. */
+  OLLAMA_PRELOAD: 'ollama:preload',
+  /** Free a model's RAM immediately. */
+  OLLAMA_UNLOAD: 'ollama:unload',
+  /** Reachability check that never blocks and never launches anything. */
+  OLLAMA_HEALTH: 'ollama:health',
+
+  // ── Boot optimization ────────────────────────────────────────────────────
+  /** What is making this PC slow, and what is safe to do about it. */
+  OPTIMIZE_ANALYSE: 'optimize:analyse',
+  /** Apply exactly one finding. Refused for report-only findings. */
+  OPTIMIZE_APPLY: 'optimize:apply',
+  OPTIMIZE_UNDO_LIST: 'optimize:undo:list',
+  OPTIMIZE_UNDO: 'optimize:undo',
+  OPTIMIZE_UNDO_ALL: 'optimize:undo:all',
+  OPTIMIZE_DISMISS: 'optimize:dismiss',
+  OPTIMIZE_SEEN: 'optimize:seen',
+  OPTIMIZE_AUTO_ENABLED: 'optimize:auto-enabled',
 
   // System
   SYSTEM_OPEN_URL: 'system:open-url',
@@ -516,8 +623,6 @@ export const IPC = {
   // Clipboard
   CLIPBOARD_READ: 'clipboard:read',
   CLIPBOARD_WRITE: 'clipboard:write',
-  CLIPBOARD_READ_IMAGE: 'clipboard:read-image',
-  CLIPBOARD_WRITE_IMAGE: 'clipboard:write-image',
 
   // Messaging (unified Slack / Discord / Telegram / WhatsApp + Telegram inbound)
   MESSAGING_STATUS: 'messaging:status',
@@ -535,10 +640,9 @@ export const IPC = {
 
   // Notification
   NOTIFICATION_SHOW: 'notification:show',
-  NOTIFICATION_PROGRESS: 'notification:progress',
-  NOTIFICATION_ACTION: 'notification:action',
   NOTIFICATION_STATUS: 'notification:status',
   NOTIFICATION_CLEAR: 'notification:clear',
+  NOTIFICATION_ACTIVE_COUNT: 'notification:active-count',
 
   // Interactive Terminal (PTY-based)
   TERMINAL_CREATE_SESSION: 'terminal:create-session',
@@ -689,6 +793,12 @@ export const IPC = {
 
   // Experimental
   EXPERIMENTAL_GET: 'experimental:get',
+  /** Token and cost totals for the user's conversations. */
+  USAGE_GET: 'usage:get',
+  USAGE_RESET: 'usage:reset',
+  /** Push: background-build progress. Separate from the request channels so
+   *  its payload shape cannot collide with the invoke responses. */
+  BUILD_STATUS_CHANGED: 'build:status-changed',
   EXPERIMENTAL_SET: 'experimental:set',
 
   // ============ OpenClaw Gateway/Node (continued) ============
@@ -724,4 +834,55 @@ export const IPC = {
   SELF_EVOLVE_STATUS: 'self-evolve:status',
   SELF_EVOLVE_PROMPT: 'self-evolve:prompt',
   SELF_EVOLVE_EVOLVE: 'self-evolve:evolve',
+
+  // Continuous self-evolution loop (Settings → Self-Evolve toggle)
+  EVOLVE_LOOP_START: 'evolve-loop:start',
+  EVOLVE_LOOP_STOP: 'evolve-loop:stop',
+  EVOLVE_LOOP_STATUS: 'evolve-loop:status',
+  EVOLVE_LOOP_RUN_NOW: 'evolve-loop:run-now',
+
+  // Self-apply: typecheck + rebuild + relaunch to load self-edits (packaged builds)
+  SELF_APPLY_RUN: 'self-apply:run',
+  SELF_APPLY_STATUS: 'self-apply:status',
+  SELF_APPLY_EVENT: 'self-apply:event', // main → renderer push
+
+  // Workers (Warmwind-style autonomous tasks with step lists)
+  WORKERS_LIST: 'workers:list',
+  WORKERS_GET: 'workers:get',
+  WORKERS_CREATE: 'workers:create',
+  WORKERS_UPDATE: 'workers:update',
+  WORKERS_DELETE: 'workers:delete',
+  WORKERS_RUN: 'workers:run',
+  WORKERS_PAUSE: 'workers:pause',
+  WORKERS_RESUME: 'workers:resume',
+  WORKERS_CANCEL: 'workers:cancel',
+  WORKERS_INTERJECT: 'workers:interject',
+  WORKERS_HISTORY: 'workers:history',
+  WORKERS_OPEN_FOLDER: 'workers:open-folder',
+  WORKERS_EVENT: 'workers:event', // main → renderer push
+  WORKERS_BACKGROUND_GET: 'workers:background:get',
+  WORKERS_BACKGROUND_SET: 'workers:background:set',
+
+  // Teaching mode (record a demo → compile → editable steps → Worker)
+  TEACH_START: 'teach:start',
+  TEACH_STOP: 'teach:stop',
+  TEACH_NARRATE: 'teach:narrate',
+  TEACH_RENAME: 'teach:rename',
+  TEACH_LIST: 'teach:list',
+  TEACH_GET: 'teach:get',
+  TEACH_DELETE: 'teach:delete',
+  TEACH_COMPILE: 'teach:compile',
+  TEACH_FRAME: 'teach:frame',
+  TEACH_UPDATE_STEPS: 'teach:update-steps',
+  TEACH_CREATE_WORKER: 'teach:create-worker',
+  TEACH_EVENT: 'teach:event', // main → renderer push
+
+  // App catalog (winget) + Worker credential vault
+  APPS_LIST: 'apps:list',
+  APPS_INSTALL: 'apps:install',
+  APPS_LAUNCH: 'apps:launch',
+  VAULT_LIST: 'vault:list',
+  VAULT_ADD: 'vault:add',
+  VAULT_AUTHORIZE: 'vault:authorize',
+  VAULT_DELETE: 'vault:delete',
 } as const;

@@ -4,10 +4,10 @@ import { askUserQuestions } from '../agent/question-prompt.js';
 export const askQuestionTool: Tool = {
   name: 'AskUserQuestion',
   description: [
-    'Ask the user 1-4 clarifying questions as interactive multi-choice cards (2-5 options each plus a free-text custom answer).',
-    'This tool BLOCKS: it returns only when the user has answered every question (or skipped).',
-    'Use it BEFORE making an irreversible or high-effort choice the user must own: which stack/framework, which model/provider, approve scope, pick between designs.',
-    'Do NOT use it for trivia you can decide yourself or that is already answered in the request — ask once, with concrete options, then continue the original task with the answers.',
+    'Ask the user 1-4 clarifying questions as multi-choice cards (2-5 options plus a free-text answer).',
+    'BLOCKS until every question is answered or skipped.',
+    'Use only before an irreversible or high-effort choice the user must own: stack, framework, provider, scope or design.',
+    'Do not use it for trivia you can decide or facts already in the request — ask once with concrete options, then continue.',
   ].join(' '),
   permission: 'allow',
   inputSchema: {

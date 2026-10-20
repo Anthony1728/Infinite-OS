@@ -4,7 +4,7 @@
  * Handles clipboard IPC requests from the renderer.
  */
 
-import { ipcMain, clipboard, nativeImage } from 'electron';
+import { ipcMain, clipboard } from 'electron';
 import { IPC } from '../../shared/ipc.js';
 
 export function registerClipboardIpc(): void {
@@ -57,46 +57,8 @@ export function registerClipboardIpc(): void {
     }
   });
 
-  // Read image from clipboard
-  ipcMain.handle(IPC.CLIPBOARD_READ_IMAGE, async () => {
-    try {
-      const image = clipboard.readImage();
-      if (image.isEmpty()) {
-        return { ok: true, isEmpty: true };
-      }
-
-      return {
-        ok: true,
-        isEmpty: false,
-        dataUrl: image.toDataURL(),
-        size: image.getSize(),
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
-  });
-
-  // Write image to clipboard
-  ipcMain.handle(IPC.CLIPBOARD_WRITE_IMAGE, async (_event, args: { imageBase64: string }) => {
-    try {
-      let base64Data = args.imageBase64;
-      if (base64Data.startsWith('data:')) {
-        base64Data = base64Data.split(',')[1];
-      }
-
-      const buffer = Buffer.from(base64Data, 'base64');
-      const image = nativeImage.createFromBuffer(buffer);
-
-      if (image.isEmpty()) {
-        return { ok: false, error: 'Invalid image data' };
-      }
-
-      clipboard.writeImage(image);
-      return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
-  });
+  // Clipboard image read/write was implemented here and never exposed on the
+  // preload bridge, so no renderer could reach it. Removed rather than left as
+  // unreachable code; the agent reads and writes images through tools, which
+  // are permission-checked.
 }

@@ -30,6 +30,28 @@ describe('dictationExitMessage', () => {
     expect(reason).not.toContain('CLIXML');
     expect(reason).not.toContain('Objs');
   });
+
+  it('recovers the real reason hidden inside CLIXML-wrapped stderr', () => {
+    // Redirected stderr arrives as one giant CLIXML line the noise filter
+    // drops wholesale — the actual failure text must still surface, or the
+    // user only ever sees a bare "exited with code N".
+    const reason = dictationExitMessage(
+      1,
+      [
+        '#< CLIXML',
+        '<Objs Version="1.1.0.1">' +
+          '<S S="Error">No Windows speech recognition language is installed._x000D__x000A_</S>' +
+          '<S S="Error">At line:1 char:1_x000D__x000A_</S>' +
+          '</Objs>',
+      ].join('\r\n'),
+    );
+    expect(reason).toBe(
+      'Windows dictation exited with code 1. No Windows speech recognition language is installed.',
+    );
+    expect(reason).not.toContain('CLIXML');
+    expect(reason).not.toContain('Objs');
+    expect(reason).not.toContain('At line');
+  });
 });
 
 describe.skipIf(process.platform !== 'win32')('Windows standalone dictation', () => {

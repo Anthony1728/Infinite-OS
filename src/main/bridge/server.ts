@@ -18,138 +18,181 @@
   export const BRIDGE_DEFAULT_PORT = 8765;
   const MAX_MESSAGE_SIZE = 48 * 1024 * 1024;
   const DEFAULT_EXEC_TIMEOUT = 45_000;
+  // A socket that completes the TCP upgrade but never delivers the extension's
+  // "hello" (MV3 service worker died mid-connect) must be dropped quickly —
+  // otherwise /status reports connected:true with empty metadata forever.
+  const HELLO_TIMEOUT_MS = 5_000;
+  // The extension pings every 15s while its service worker is alive. If no
+  // app-level frame arrives for 40s (~3 missed keepalives) the socket is a
+  // zombie: Chrome still holds the TCP connection but nothing will ever answer.
+  const HEARTBEAT_INTERVAL_MS = 10_000;
+  const APP_SILENCE_TIMEOUT_MS = 40_000;
 
-  // ── MessagePack decoder (lightweight subset) ──────────────────────────────────
-  function decodeMessagePack(buf: Buffer): unknown {
+  // ── MessagePack codec ────────────────────────────────────────────────────────
+  // Spec-compliant (https://msgpack.org) so the browser extension's codec and
+  // this one always agree. The previous subset tagged 16-bit ints as 0xd2 and
+  // 32-bit ints as 0xd3 while the reader only understood 0xd2-as-int32 — so any
+  // value outside fixint range (every Date.now(), every tab id ≥ 32768) was
+  // undecodable and the frame was silently dropped. Buffers are appended in
+  // chunks rather than spread, so megabyte screenshots no longer blow the stack.
+  export function decodeMessagePack(buf: Buffer): unknown {
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     let offset = 0;
+    const textDecoder = new TextDecoder();
+    function need(n: number): boolean {
+      return offset + n <= buf.length;
+    }
+    function readStr(len: number): string {
+      const slice = buf.subarray(offset, offset + len);
+      offset += len;
+      return textDecoder.decode(slice);
+    }
+    function readBin(len: number): Uint8Array {
+      const slice = buf.subarray(offset, offset + len);
+      offset += len;
+      return new Uint8Array(slice);
+    }
     function read(): unknown {
       if (offset >= buf.length) return undefined;
       const b = buf[offset++];
-      // nil
-      if (b === 0xc0) return null;
-      // boolean
-      if (b === 0xc2) return false;
-      if (b === 0xc3) return true;
-      // positive fixint
-      if ((b & 0x80) === 0x00) return b;
-      // negative fixint
-      if ((b & 0xe0) === 0xe0) return b - 0x100;
-      // fixstr
-      if ((b & 0xe0) === 0xa0) {
-        const len = b & 0x1f;
-        const str = buf.subarray(offset, offset + len).toString('utf8');
-        offset += len;
-        return str;
-      }
-      // fixarray
-      if ((b & 0xf0) === 0x90) {
-        const len = b & 0x0f;
-        const arr = [];
-        for (let i = 0; i < len; i++) arr.push(read());
-        return arr;
-      }
-      // fixmap
-      if ((b & 0xf0) === 0x80) {
-        const len = b & 0x0f;
+      if (b <= 0x7f) return b;                       // positive fixint
+      if (b >= 0xe0) return b - 0x100;               // negative fixint
+      if ((b & 0xf0) === 0x80) {                     // fixmap
         const obj: Record<string, unknown> = {};
-        for (let i = 0; i < len; i++) { const k = read(); obj[String(k)] = read(); }
+        for (let i = 0; i < (b & 0x0f); i++) obj[String(read())] = read();
         return obj;
       }
-      // str 8/16/32
-      if (b === 0xd9 || b === 0xda || b === 0xdb) {
-        let len = 0;
-        if (b === 0xd9) len = buf[offset++];
-        else if (b === 0xda) { len = buf.readUInt16BE(offset); offset += 2; }
-        else { len = buf.readUInt32BE(offset); offset += 4; }
-        const str = buf.subarray(offset, offset + len).toString('utf8');
-        offset += len;
-        return str;
-      }
-      // array 16/32
-      if (b === 0xdc || b === 0xdd) {
-        let len = 0;
-        if (b === 0xdc) { len = buf.readUInt16BE(offset); offset += 2; }
-        else { len = buf.readUInt32BE(offset); offset += 4; }
-        const arr = [];
-        for (let i = 0; i < len; i++) arr.push(read());
+      if ((b & 0xf0) === 0x90) {                     // fixarray
+        const arr: unknown[] = [];
+        for (let i = 0; i < (b & 0x0f); i++) arr.push(read());
         return arr;
       }
-      // map 16/32
-      if (b === 0xde || b === 0xdf) {
-        let len = 0;
-        if (b === 0xde) { len = buf.readUInt16BE(offset); offset += 2; }
-        else { len = buf.readUInt32BE(offset); offset += 4; }
-        const obj: Record<string, unknown> = {};
-        for (let i = 0; i < len; i++) { const k = read(); obj[String(k)] = read(); }
-        return obj;
+      if ((b & 0xe0) === 0xa0) return readStr(b & 0x1f); // fixstr
+      switch (b) {
+        case 0xc0: return null;
+        case 0xc2: return false;
+        case 0xc3: return true;
+        case 0xc4: if (!need(1)) return undefined; return readBin(buf.readUInt8(offset++)); // bin 8
+        case 0xc5: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; return readBin(l); } // bin 16
+        case 0xc6: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; return readBin(l); } // bin 32
+        case 0xca: if (!need(4)) return undefined; { const v = view.getFloat32(offset); offset += 4; return v; }
+        case 0xcb: if (!need(8)) return undefined; { const v = view.getFloat64(offset); offset += 8; return v; }
+        case 0xcc: if (!need(1)) return undefined; { const v = view.getUint8(offset); offset += 1; return v; }
+        case 0xcd: if (!need(2)) return undefined; { const v = view.getUint16(offset); offset += 2; return v; }
+        case 0xce: if (!need(4)) return undefined; { const v = view.getUint32(offset); offset += 4; return v; }
+        case 0xcf: if (!need(8)) return undefined; { const v = view.getBigUint64(offset); offset += 8; return Number(v); }
+        case 0xd0: if (!need(1)) return undefined; { const v = view.getInt8(offset); offset += 1; return v; }
+        case 0xd1: if (!need(2)) return undefined; { const v = view.getInt16(offset); offset += 2; return v; }
+        case 0xd2: if (!need(4)) return undefined; { const v = view.getInt32(offset); offset += 4; return v; }
+        case 0xd3: if (!need(8)) return undefined; { const v = view.getBigInt64(offset); offset += 8; return Number(v); }
+        case 0xd9: if (!need(1)) return undefined; return readStr(buf.readUInt8(offset++));
+        case 0xda: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; return readStr(l); }
+        case 0xdb: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; return readStr(l); }
+        case 0xdc: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; const arr: unknown[] = []; for (let i = 0; i < l; i++) arr.push(read()); return arr; }
+        case 0xdd: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; const arr: unknown[] = []; for (let i = 0; i < l; i++) arr.push(read()); return arr; }
+        case 0xde: if (!need(2)) return undefined; { const l = view.getUint16(offset); offset += 2; const obj: Record<string, unknown> = {}; for (let i = 0; i < l; i++) obj[String(read())] = read(); return obj; }
+        case 0xdf: if (!need(4)) return undefined; { const l = view.getUint32(offset); offset += 4; const obj: Record<string, unknown> = {}; for (let i = 0; i < l; i++) obj[String(read())] = read(); return obj; }
+        default: return null;
       }
-      // int 8/16/32
-      if (b === 0xd0) return buf[offset++]; // int8
-      if (b === 0xd1) { const v = buf.readInt16BE(offset); offset += 2; return v; }
-      if (b === 0xd2) { const v = buf.readInt32BE(offset); offset += 4; return v; }
-      // float 32/64
-      if (b === 0xca) { const v = buf.readFloatBE(offset); offset += 4; return v; }
-      if (b === 0xcb) { const v = buf.readDoubleBE(offset); offset += 8; return v; }
-      // Fallback: try JSON
-      try { return JSON.parse(buf.toString('utf8')); } catch { return null; }
     }
     return read();
   }
 
-  function encodeMessagePack(obj: unknown): Buffer {
-    const bytes: number[] = [];
+  export function encodeMessagePack(obj: unknown): Buffer {
+    // Chunked writer: a single flat array plus spread() dies on payloads over
+    // ~120k elements (screenshots are megabytes), so bytes are pushed in blocks.
+    const chunks: Buffer[] = [];
+    let head: number[] = [];
+    const textEncoder = new TextEncoder();
+    function flush(): void {
+      if (head.length) {
+        chunks.push(Buffer.from(head));
+        head = [];
+      }
+    }
+    function pushByte(b: number): void {
+      head.push(b & 0xff);
+      if (head.length >= 8192) flush();
+    }
+    function pushBytes(src: Uint8Array): void {
+      flush();
+      chunks.push(Buffer.from(src.buffer, src.byteOffset, src.byteLength));
+    }
+    function writeU16(v: number): void { pushByte(v >> 8); pushByte(v); }
+    function writeU32(v: number): void { pushByte(v >>> 24); pushByte((v >>> 16) & 0xff); pushByte((v >>> 8) & 0xff); pushByte(v & 0xff); }
+    function writeU64(v: number): void {
+      const hi = Math.floor(v / 4294967296);
+      const lo = v >>> 0;
+      writeU32(hi); writeU32(lo);
+    }
+    function writeFloat64(val: number): void {
+      const b = Buffer.alloc(8);
+      b.writeDoubleBE(val, 0);
+      pushBytes(new Uint8Array(b));
+    }
     function write(val: unknown): void {
-      if (val === null) { bytes.push(0xc0); return; }
-      if (typeof val === 'boolean') { bytes.push(val ? 0xc3 : 0xc2); return; }
+      if (val === null || val === undefined) { pushByte(0xc0); return; }
+      if (typeof val === 'boolean') { pushByte(val ? 0xc3 : 0xc2); return; }
       if (typeof val === 'number') {
-        if (Number.isInteger(val)) {
-          if (val >= 0 && val <= 127) { bytes.push(val); return; }
-          if (val >= -32 && val <= -1) { bytes.push(0xe0 | (val & 0x1f)); return; }
-          if (val >= -32768 && val <= 32767) { bytes.push(0xd2, (val >> 8) & 0xff, val & 0xff); return; }
-          if (val >= -2147483648 && val <= 2147483647) { bytes.push(0xd3, (val >> 24) & 0xff, (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff); return; }
-          bytes.push(0xcf); writeFloat64(val); return;
+        if (Number.isInteger(val) && Number.isSafeInteger(val)) {
+          if (val >= 0) {
+            if (val <= 0x7f) { pushByte(val); return; }
+            if (val <= 0xff) { pushByte(0xcc); pushByte(val); return; }
+            if (val <= 0xffff) { pushByte(0xcd); writeU16(val); return; }
+            if (val <= 0xffffffff) { pushByte(0xce); writeU32(val); return; }
+            pushByte(0xcf); writeU64(val); return;
+          }
+          if (val >= -32) { pushByte(0xe0 | (val & 0x1f)); return; }
+          if (val >= -0x80) { pushByte(0xd0); pushByte(val & 0xff); return; }
+          if (val >= -0x8000) { pushByte(0xd1); writeU16(val & 0xffff); return; }
+          if (val >= -0x80000000) { pushByte(0xd2); writeU32(val >>> 0); return; }
+          pushByte(0xd3); writeU64(Number(BigInt.asUintN(64, BigInt(val)))); return;
         }
-        bytes.push(0xcb); writeFloat64(val); return;
+        pushByte(0xcb); writeFloat64(val); return;
       }
       if (typeof val === 'string') {
-        const utf8 = Buffer.from(val, 'utf8');
+        const utf8 = textEncoder.encode(val);
         const len = utf8.length;
-        if (len <= 31) { bytes.push(0xa0 | len); }
-        else if (len <= 255) { bytes.push(0xd9, len); }
-        else if (len <= 65535) { bytes.push(0xda, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdb, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-        bytes.push(...utf8);
+        if (len <= 31) pushByte(0xa0 | len);
+        else if (len <= 0xff) { pushByte(0xd9); pushByte(len); }
+        else if (len <= 0xffff) { pushByte(0xda); writeU16(len); }
+        else { pushByte(0xdb); writeU32(len); }
+        pushBytes(utf8);
+        return;
+      }
+      if (val instanceof Uint8Array) {
+        const len = val.length;
+        if (len <= 0xff) { pushByte(0xc4); pushByte(len); }
+        else if (len <= 0xffff) { pushByte(0xc5); writeU16(len); }
+        else { pushByte(0xc6); writeU32(len); }
+        pushBytes(val);
         return;
       }
       if (Array.isArray(val)) {
         const len = val.length;
-        if (len <= 15) { bytes.push(0x90 | len); }
-        else if (len <= 65535) { bytes.push(0xdc, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
+        if (len <= 15) pushByte(0x90 | len);
+        else if (len <= 0xffff) { pushByte(0xdc); writeU16(len); }
+        else { pushByte(0xdd); writeU32(len); }
         for (const item of val) write(item);
         return;
       }
       if (typeof val === 'object') {
-        const keys = Object.keys(val as object);
+        const record = val as Record<string, unknown>;
+        const keys = Object.keys(record);
         const len = keys.length;
-        if (len <= 15) { bytes.push(0x80 | len); }
-        else if (len <= 65535) { bytes.push(0xde, (len >> 8) & 0xff, len & 0xff); }
-        else { bytes.push(0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff); }
-        for (const key of keys) { write(key); write((val as Record<string, unknown>)[key]); }
+        if (len <= 15) pushByte(0x80 | len);
+        else if (len <= 0xffff) { pushByte(0xde); writeU16(len); }
+        else { pushByte(0xdf); writeU32(len); }
+        for (const key of keys) { write(key); write(record[key]); }
         return;
       }
-      // Fallback
-      const json = JSON.stringify(val);
-      const utf8 = Buffer.from(json, 'utf8');
-      bytes.push(0xda, (utf8.length >> 8) & 0xff, utf8.length & 0xff, ...utf8);
-    }
-    function writeFloat64(val: number): void {
-      const buf = Buffer.alloc(8);
-      buf.writeDoubleBE(val, 0);
-      bytes.push(...buf);
+      // Functions/symbols have no MessagePack form — send nil rather than a
+      // malformed frame that would desync the stream.
+      pushByte(0xc0);
     }
     write(obj);
-    return Buffer.from(bytes);
+    flush();
+    return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
   }
 
   export interface BridgeStatus {
@@ -346,6 +389,11 @@
       }
     }
 
+    /** Protocol-level ping — keeps the socket warm and surfaces TCP death. */
+    sendPing(): void {
+      this.sendFrame(0x9, Buffer.alloc(0));
+    }
+
     private closeWithCode(code: number, reason: string): void {
       if (this.closed) return;
       this.closed = true;
@@ -378,7 +426,12 @@ class BridgeServer {
   private commandsServed = 0;
   private inFlight = new Map<string, { promise: Promise<ExecResult>; expires: number }>();
   private readonly COALESCE_WINDOW_MS = 16;
-  readonly port: number;
+  /** Timestamp of the last app-level frame from the extension (hello, ping-server, any reply). */
+  private lastAppActivityAt = 0;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  /** Fired when the extension reports an abort (popup Emergency Stop / "stop"). */
+  onAbort: ((reason: string) => void) | null = null;
+  port: number;
 
   status: BridgeStatus = {
     connected: false,
@@ -474,6 +527,7 @@ class BridgeServer {
     this.status.name = info.name || '';
     this.status.lastError = '';
     this.status.connectedAt = Date.now();
+    this.lastAppActivityAt = Date.now();
     this.log(`Extension connected (${this.status.extensionId || 'unknown id'})`);
     ws.onMessage = (data) => this.handleExtensionMessage(data);
     ws.onClose = () => {
@@ -495,6 +549,7 @@ class BridgeServer {
       return;
     }
     if (!msg || typeof msg !== 'object') return;
+    this.lastAppActivityAt = Date.now();
     const m = msg as { type?: string; id?: string | number; ok?: boolean; data?: unknown; error?: string; time?: number };
     if (m.type === 'hello') {
       this.setConnected(this.ws as WsConnection, {
@@ -508,6 +563,18 @@ class BridgeServer {
     if (m.type === 'pong-server') return;
     if (m.type === 'ping-server') {
       this.ws?.sendText(JSON.stringify({ type: 'pong-server', time: Date.now() }));
+      return;
+    }
+    if (m.type === 'agent:abort') {
+      // The extension's Emergency Stop (or a "stop" utterance). Previously this
+      // frame had no handler at all: it fell into the id branch, matched no
+      // pending request, and vanished — so the AI kept driving the browser
+      // after the user hit stop. Fail every in-flight command now, tell anyone
+      // listening, and forget the coalescing table.
+      const reason = (msg as { reason?: string }).reason || 'stopped by user';
+      this.rejectAllPending(new Error(`Browser control stopped (${reason}).`));
+      this.inFlight.clear();
+      this.onAbort?.(reason);
       return;
     }
     if (m.id != null) {
@@ -586,11 +653,17 @@ class BridgeServer {
   private syncTokenToExtensions(): void {
     if (!this.token) return;
     const configContent = `const BRIDGE_CONFIG = { port: ${this.port}, token: "${this.token}" };\n`;
-    // Source extension directory
-    const sourceDir = join(process.cwd(), 'extensions', 'infinite-os-bridge');
-    // Installed extension directory
-    const installedDir = join(homedir(), '.infinite-ai', 'extensions', 'infinite-os-bridge');
-    for (const dir of [sourceDir, installedDir]) {
+    // Auto-sync the bridge token to every copy of the extension that could be the
+    // loaded one. Previously only the source dir and ~/.infinite-ai were written,
+    // but scripts/install-extension.ps1 loads the unpacked extension from
+    // %LOCALAPPDATA%\InfiniteOS\bridge-extension — so after a token rotation
+    // that copy kept a stale token and every command failed with a 401 that
+    // looked like "the extension is broken".
+    for (const dir of [
+      join(process.cwd(), 'extensions', 'infinite-os-bridge'),
+      join(homedir(), '.infinite-ai', 'extensions', 'infinite-os-bridge'),
+      join(process.env.LOCALAPPDATA ?? '', 'InfiniteOS', 'bridge-extension'),
+    ]) {
       try {
         const configPath = join(dir, 'config.js');
         mkdirSync(dir, { recursive: true });
@@ -623,10 +696,58 @@ class BridgeServer {
     );
     if (head && head.length) socket.unshift(head);
     const conn = new WsConnection(socket);
-    this.setConnected(conn, {});
+
+    // Do NOT mark the bridge connected at TCP-upgrade time. If the extension's
+    // MV3 service worker dies right after opening the socket (or the peer is
+    // anything other than the extension), no hello ever arrives — the old
+    // behaviour then reported connected:true with empty extension metadata and
+    // every /exec command timed out after 45s into a half-open "zombie" socket.
+    // connected:true now strictly means "the extension said hello".
+    let helloTimer: NodeJS.Timeout | null = setTimeout(() => {
+      helloTimer = null;
+      this.log('No extension hello within 5s — dropping half-open socket');
+      try {
+        conn.close();
+      } catch {
+        /* ignore */
+      }
+    }, HELLO_TIMEOUT_MS);
+
+    conn.onClose = () => {
+      if (helloTimer) {
+        clearTimeout(helloTimer);
+        helloTimer = null;
+      }
+    };
+
+    conn.onMessage = (data) => {
+      let msg: { type?: string; extensionId?: string; version?: string; browser?: string; name?: string } | null = null;
+      try {
+        msg = JSON.parse(data);
+      } catch {
+        return;
+      }
+      if (msg?.type !== 'hello') return; // ignore anything else before hello
+      if (helloTimer) {
+        clearTimeout(helloTimer);
+        helloTimer = null;
+      }
+      this.setConnected(conn, {
+        extensionId: msg.extensionId,
+        version: msg.version,
+        browser: msg.browser,
+        name: msg.name,
+      });
+    };
   }
 
-  start(): Promise<void> {
+  start(port?: number): Promise<void> {
+    // Optional port override so tests can bind an ephemeral port instead of
+    // the real one. On the production port the test server is reachable by
+    // anything already talking to it - notably the browser extension, which
+    // connects on its own - so an assertion like "not connected" became
+    // dependent on whether Chrome happened to be running.
+    if (port !== undefined) this.port = port;
     return new Promise((resolve, reject) => {
       this.loadOrCreateToken();
       this.status.tokenConfigured = Boolean(this.token);
@@ -651,10 +772,42 @@ class BridgeServer {
       });
       server.listen(this.port, '127.0.0.1', () => {
         this.server = server;
+        const address = server.address();
+        if (address && typeof address === 'object') {
+          this.port = address.port;
+          this.status.port = address.port;
+        }
+        // Server-side liveness watchdog. The extension pings every 15s while
+        // its service worker lives; if the SW dies Chrome can keep the TCP
+        // socket half-open indefinitely, so only the server can declare it
+        // dead. Tearing the socket down flips connected:false and makes
+        // /exec fail fast (with the CDP fallback hint) instead of hanging
+        // for the full 45s timeout.
+        if (!this.heartbeatTimer) {
+          this.heartbeatTimer = setInterval(() => this.checkConnectionLiveness(), HEARTBEAT_INTERVAL_MS);
+        }
         this.log(`Bridge server listening on ws://127.0.0.1:${this.port} (token ${this.status.tokenConfigured ? 'set' : 'unset'})`);
         resolve();
       });
     });
+  }
+
+  private checkConnectionLiveness(): void {
+    if (!this.ws || !this.status.connected) return;
+    const silenceMs = Date.now() - this.lastAppActivityAt;
+    if (silenceMs > APP_SILENCE_TIMEOUT_MS) {
+      this.log(`Extension silent for ${Math.round(silenceMs / 1000)}s — tearing down half-open socket`);
+      try {
+        this.ws.close();
+      } catch {
+        /* ignore */
+      }
+      // onClose clears this.ws / connected and rejects pending commands.
+      return;
+    }
+    // Protocol-level ping: keeps the connection warm through idle timeouts and
+    // surfaces hard TCP death via the socket's error/close events.
+    this.ws.sendPing();
   }
 
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -706,6 +859,10 @@ class BridgeServer {
   }
 
   stop(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     this.rejectAllPending(new Error('Bridge server stopped'));
     if (this.ws) {
       try {

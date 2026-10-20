@@ -126,11 +126,11 @@ export function CreationsView() {
           <p className="text-xs text-zinc-500">Ask the agent to build an app or a website — it will appear here.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 card-grid-animated pb-6">
           {visible.map((item) => (
             <div
               key={`${item.kind}:${item.id}`}
-              className="agent-card--static rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl p-4"
+              className="agent-card--static rounded-2xl p-4"
             >
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-px rounded bg-violet-500/15 text-violet-300 border border-violet-400/20">

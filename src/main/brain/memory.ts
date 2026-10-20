@@ -114,6 +114,15 @@ export interface LearningMemoryConfig {
   dataDir?: string;
   maxRecords?: number;
   now?: () => number;
+  /**
+   * How long a change may sit in memory before it is written to disk.
+   *
+   * Every tool result and every completed turn lands here, and persisting used
+   * to mean rewriting the entire store synchronously — up to 2,000 records,
+   * each carrying several KB of content — on the Electron main thread. Batching
+   * keeps that off the hot path; `0` restores write-through (used by tests).
+   */
+  saveIntervalMs?: number;
 }
 
 interface PersistedStore {
@@ -195,17 +204,23 @@ function fingerprint(kind: MemoryKind, content: string): string {
   return createHash('sha256').update(`${kind}\n${signature}`).digest('hex').slice(0, 24);
 }
 
+const DEFAULT_SAVE_INTERVAL_MS = 5_000;
+
 export class LearningMemoryStore {
   private readonly dataDir: string;
   private readonly storePath: string;
   private readonly maxRecords: number;
+  private readonly saveIntervalMs: number;
   private readonly now: () => number;
   private records: MemoryRecord[];
+  private dirty = false;
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config: LearningMemoryConfig = {}) {
     this.dataDir = config.dataDir ?? join(infiniteHome(), 'brain');
     this.storePath = join(this.dataDir, 'learning-memory.json');
     this.maxRecords = Math.max(100, config.maxRecords ?? 2_000);
+    this.saveIntervalMs = Math.max(0, config.saveIntervalMs ?? DEFAULT_SAVE_INTERVAL_MS);
     this.now = config.now ?? Date.now;
     this.records = this.load();
   }
@@ -224,7 +239,7 @@ export class LearningMemoryStore {
       existing.intents = unique([...existing.intents, ...normalized.intents], 8) as MemoryIntent[];
       existing.provenance = [...existing.provenance, ...normalized.provenance].slice(-12);
       if (existing.expiresAt !== null && normalized.expiresAt !== null) existing.expiresAt = Math.max(existing.expiresAt, normalized.expiresAt);
-      this.save();
+      this.markDirty();
       return structuredClone(existing);
     }
     this.records.push(normalized);
@@ -233,7 +248,7 @@ export class LearningMemoryStore {
         .sort((a, b) => this.retentionScore(b) - this.retentionScore(a))
         .slice(0, this.maxRecords);
     }
-    this.save();
+    this.markDirty();
     return structuredClone(normalized);
   }
 
@@ -394,27 +409,85 @@ export class LearningMemoryStore {
     }
   }
 
+  /**
+   * Marks the store as needing a write and schedules one.
+   *
+   * Persisting used to happen on every ingest, which meant rewriting the whole
+   * store synchronously after every tool result — the sort of main-thread stall
+   * that makes an Electron app feel like it is dragging. Changes are now
+   * coalesced: the first change in a window schedules a write, later ones ride
+   * along with it.
+   */
+  private markDirty(): void {
+    this.dirty = true;
+    if (this.saveIntervalMs <= 0) {
+      this.flush();
+      return;
+    }
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.flush();
+    }, this.saveIntervalMs);
+    // Never keep the process alive just to write learning records.
+    this.saveTimer.unref?.();
+  }
+
+  /** Writes any pending changes immediately. Safe to call at any time. */
+  flush(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    if (!this.dirty) return;
+    this.save();
+  }
+
   private save(): void {
     try {
       mkdirSync(this.dataDir, { recursive: true });
       const temporaryPath = `${this.storePath}.tmp`;
       writeFileSync(temporaryPath, JSON.stringify({ version: 1, records: this.records } satisfies PersistedStore));
       renameSync(temporaryPath, this.storePath);
+      this.dirty = false;
     } catch {
-      // Memory remains available for the current process if disk persistence fails.
+      // Memory remains available for the current process if disk persistence
+      // fails. Staying dirty means the next flush retries instead of dropping
+      // the change silently.
     }
   }
 }
 
 let instance: LearningMemoryStore | null = null;
+let exitFlushHooked = false;
+
+/**
+ * Last-chance write of anything still in the batching window.
+ *
+ * The store is deliberately dependency-free (no Electron import) so it can be
+ * unit-tested, which means hooking shutdown here rather than in `index.ts`.
+ */
+function hookExitFlush(): void {
+  if (exitFlushHooked) return;
+  exitFlushHooked = true;
+  process.once('exit', () => {
+    try {
+      instance?.flush();
+    } catch {
+      /* nothing useful to do while exiting */
+    }
+  });
+}
 
 export function getLearningMemoryStore(config?: LearningMemoryConfig): LearningMemoryStore {
   if (!instance) instance = new LearningMemoryStore(config);
+  hookExitFlush();
   return instance;
 }
 
 export function createLearningMemoryStore(config?: LearningMemoryConfig): LearningMemoryStore {
   instance = new LearningMemoryStore(config);
+  hookExitFlush();
   return instance;
 }
 

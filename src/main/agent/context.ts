@@ -10,8 +10,10 @@ import { settings } from '../settings/store.js';
 import { getBrainTeachingManager } from '../brain/teacher.js';
 import { retrieveLearningContext } from '../brain/learning.js';
 import { SkillsManager } from '../skills/manager.js';
+import { editStaleToolResults } from './context-editing.js';
 import { getSelfModel } from './self-model.js';
 import { isPlanMode } from './plan-mode.js';
+import { findSelfRepoRoot, isInSelfRepo } from '../self-repo.js';
 
 // Read the user's display name from auth-session.json (written by the renderer auth store).
 let cachedUserName: string | null = null;
@@ -118,6 +120,7 @@ export async function buildLocalModelOperatingPrompt(opts: LocalModelPromptOptio
      'PC LIVE MAP (Infinite OS tool, localhost:3799): vectors (mouse, All windows, 50 UIA elements with name/role/bounds, focused control, clipboard, seq) + hands (click_name/click/move/drag/scroll/type/keys/wait/focus). Coords ALWAYS norm 0-1000. One-click: pc-live-map/Start-LiveMap.ps1. Discovery: PCLiveMap action=health, PCLiveMap action=agent, GET /tool.json, skill pc-live-map, file pc-live-map/AGENT.md.',
      'MULTI-AGENT: Spawn specialists with Agent tool. Crew mode for parallel work. Orchestrator for complex multi-phase tasks.',
      'MEMORY: Read/write INFINITE.md files for project instructions. Auto-memory persists across sessions. Use for context.',
+     'RECALL: ConversationSearch searches your own earlier conversations by content and returns snippets plus session ids. Use it whenever the user refers to past work ("what did we decide about X", "the thing we built last week") instead of asking them to paste the transcript.',
     '',
     'SMALL-MODEL RELIABILITY RULES',
     '- Use tool names and JSON arguments exactly as defined. Never invent a tool, action, file, selector, result, or permission error.',
@@ -214,6 +217,18 @@ async function finishSystemPrompt(
   void provider;
   void model;
 
+  // The business section is part of this OS and the agent operates it directly.
+  // Without this the agent does not know those records exist and answers "how is
+  // the business doing?" from imagination.
+  //
+  // Deliberately ONE line. The prompt has a measured per-request character budget
+  // (prompt-weight.test.ts) and this text is paid for on every request, so the
+  // detail of how to drive the tool lives in its description — which is only sent
+  // when the model is choosing a tool, not on every unrelated turn.
+  parts.push('');
+  parts.push('# Business');
+  parts.push('Contacts, leads, deals, invoices, tasks: real records — use the Business tool.');
+
   // Self-awareness primer — every provider path (local runtime included) must
   // know what it is, where it runs, and what powers are active. This is what
   // stops "test the Artifacts section" from becoming random web searches.
@@ -235,7 +250,7 @@ async function finishSystemPrompt(
   parts.push('');
   parts.push(`# User`);
   if (userName) {
-    parts.push(`The user's name is ${userName}. Address them by name when natural (e.g. greetings, summaries).`);
+    parts.push(`The user's name is ${userName}. Address them by name when natural.`);
   } else {
     parts.push(`The user has not set a display name yet. Use "you" naturally.`);
   }
@@ -244,6 +259,21 @@ async function finishSystemPrompt(
   parts.push(`# Current run`);
   parts.push(`Working directory: ${cwd}`);
   parts.push(`Model: ${provider}/${model}`);
+
+  // Self-development mode — the working directory IS this app's own repo
+  // (Self-Evolution cycles, "improve Infinite OS" requests). The agent must
+  // know edits here change the running product and how they go live.
+  const selfRepoRoot = findSelfRepoRoot();
+  if (selfRepoRoot && cwd && isInSelfRepo(cwd)) {
+    parts.push('');
+    parts.push('# SELF-DEVELOPMENT MODE — you are editing Infinite OS itself');
+    parts.push(`This workspace (${cwd}) is the Infinite OS source repository (${selfRepoRoot}). Real edits here change the running product — treat quality accordingly.`);
+    parts.push('- Prefer BuildFeature for multi-file or UI changes (checkpointed, auto-rollback on failure). Surgical Write/Edit for single files.');
+    parts.push('- Verify before claiming done: `npm run typecheck` plus `npx vitest run <files you touched>`; fix every failure yourself. Never delete or weaken a test to make it pass.');
+    parts.push('- Hot reload under `npm run dev`: renderer edits apply instantly via HMR; main-process edits restart Electron automatically. Nothing to restart by hand.');
+    parts.push('- Packaged builds need Settings → Self-Evolve → "Rebuild & Apply" (typecheck + rebuild + relaunch) to load source edits — tell the user to press it when you finish.');
+    parts.push('- Match the existing style, keep changes complete (no placeholders, no TODOs), and report the files you changed plus the checks you ran.');
+  }
 
   // Enforced plan mode: tell the model the gate is real, not a suggestion.
   if (sessionId && isPlanMode(sessionId)) {
@@ -545,16 +575,18 @@ export function renderStaticSystemPrompt(input: {
   parts.push('- Compound requests: every clause is a requirement. Keep working until all are done.');
   parts.push('- Cybersecurity: only systems the user owns or is authorized to test.');
   parts.push('');
+  // One capability section, not two. These used to be "What you can do" plus
+  // "Standing Orders", which described the same capabilities twice — every
+  // request pays for both copies on every turn.
   parts.push('# What you can do — real tasks, end to end');
-parts.push('- Send email (saved account), manage calendar and bookings, run terminal commands, launch and operate desktop apps and the browser, build websites and apps from a prompt with the builders, create automations that run on schedule, manage business data (CRM, knowledge).');
-parts.push('- "Do anything" means: attempt it with real tools, verify the outcome (sent mail exists, app runs, page loads), and report proof — never claim success without observed evidence.');
-parts.push('');
-parts.push('# Standing Orders — Infinite OS Features');
-parts.push('- **Builders**: WebsiteBuilder and AppBuilder turn prompts into runnable projects — scaffold, run, verify in the browser/terminal, then report the URL or launch result.');
-  parts.push('- **Automations**: create/list/enable/disable/delete scheduled automations (cron, file watchers, event triggers) via AutomationBuilder. They persist and run unattended.');
-  parts.push('- **Skills**: invoke with Skills(action=invoke, name=<skill>), author new ones with SkillManage.');
-  parts.push('- **Business OS**: contacts, leads, deals, revenue via CRM tools. **Computer**: PCLiveMap vectors first (action=live/agent, click_name preferred), Operator/CDP next, Computer/screenshot last resort only.');
-  parts.push('- **Multi-Agent**: spawn specialists (Coding, Research, Design, DevOps, Data) via Task for complex work. **Memory**: INFINITE.md + auto-memory persist context; distill what matters.');
+  parts.push('- **Email & calendar**: send from the saved account, manage calendar and bookings.');
+  parts.push('- **Builders**: WebsiteBuilder and AppBuilder turn a prompt into a runnable project — scaffold, run, verify, then report the URL or launch result.');
+  parts.push('- **Automations**: create/list/enable/disable/delete scheduled work (cron, file watchers, event triggers) via AutomationBuilder. They persist and run unattended.');
+  parts.push('- **Desktop & browser**: PCLiveMap vectors first (action=live/agent, click_name preferred), Operator/CDP next, Computer/screenshot last resort only.');
+  parts.push('- **Business OS**: contacts, leads, deals, revenue, and knowledge via the CRM tools.');
+  parts.push('- **Skills**: invoke with Skills(action=invoke, name=<skill>), author new ones with SkillManage. **Memory**: INFINITE.md + auto-memory persist context; distill what matters.');
+  parts.push('- **Multi-Agent**: spawn specialists (Coding, Research, Design, DevOps, Data) via Task for complex work.');
+  parts.push('- "Do anything" means: attempt it with real tools, verify the outcome (sent mail exists, app runs, page loads), and report proof — never claim success without observed evidence.');
   if (!input.toolsEnabled) {
     parts.push('');
     parts.push('This model does not support native tool calling. Use the local action router for supported actions.');
@@ -656,10 +688,19 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
   const maxTokens = Number.isFinite(opts.maxTokens) && (opts.maxTokens ?? 0) > 0 ? Math.trunc(opts.maxTokens as number) : 64_000;
   const maxChars = Math.max(32_000, maxTokens * 4);
   const recent = messages.length <= maxMessages ? messages : messages.slice(-maxMessages);
+  // Context editing (shipped by Claude Code / Claude API in 2026): hollow out
+  // stale tool outputs from older turns BEFORE the budget walk below, so early
+  // user instructions and decisions fit instead of being dropped wholesale
+  // from the oldest end. Pure, idempotent, and the newest tool results stay
+  // verbatim — see context-editing.ts for the guarantees.
+  const { messages: editedRecent, stats: editStats } = editStaleToolResults(recent);
+  if (editStats.cleared > 0) {
+    console.log(`[context] Context editing: cleared ${editStats.cleared} stale tool output(s), ~${editStats.charsFreed} chars freed`);
+  }
   const selected: Message[] = [];
   let usedChars = 0;
-  for (let index = recent.length - 1; index >= 0; index--) {
-    const message = compactMessage(recent[index]);
+  for (let index = editedRecent.length - 1; index >= 0; index--) {
+    const message = compactMessage(editedRecent[index]);
     const size = estimateMessageChars(message);
     if (selected.length > 0 && usedChars + size > maxChars) break;
     selected.unshift(message);

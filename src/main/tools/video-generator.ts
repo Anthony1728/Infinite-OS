@@ -10,9 +10,11 @@
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mediaEnvelope } from './image-generator.js';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { Tool, ToolResult, ToolContext } from './base.js';
+import { outputDirectoryDenial } from './write-guard.js';
 import { resolveProviderKey, redact } from './media-keys.js';
 
 const OUTPUT_DIR = join(process.env.HOME || process.env.USERPROFILE || '.', 'infinite-videos');
@@ -47,6 +49,8 @@ export const videoGeneratorTool: Tool = {
     const seconds = Math.max(2, Math.min(60, Math.round(a.seconds ?? 6)));
     const size = /^\d{2,5}x\d{2,5}$/.test(a.size ?? '') ? (a.size as string) : '1280x720';
     const outDir = a.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
     await mkdir(outDir, { recursive: true });
 
     // 1) Replicate cloud video
@@ -74,7 +78,7 @@ export const videoGeneratorTool: Tool = {
               const p = join(outDir, `video-${randomUUID().slice(0, 8)}.mp4`);
               await writeFile(p, Buffer.from(await vid.arrayBuffer()));
               return {
-                content: `Video generated via Replicate (${Math.min(20, seconds)}s) — saved to:\n${p}\nPrompt: ${prompt}`,
+                content: `Video generated via Replicate (${Math.min(20, seconds)}s) — saved to:\n${p}\nPrompt: ${prompt}${mediaEnvelope('video', p, 'video/mp4')}`,
               };
             }
           }
@@ -116,9 +120,11 @@ export async function renderSlideshow(
       { prompt: `${prompt} — cinematic still`, size, outputDir: work, n: frameCount } as never,
       { cwd: outDir, abortSignal: signal, sessionId: 'videogen', onUpdate: () => {} } as never,
     );
-    const stills = typeof gen.content === 'string'
-      ? (gen.content.match(/^[A-Za-z]:\\[^:\n]+|\S+\.png|\S+\.svg/gm) ?? [])
-      : [];
+    // Strip the INFINITE_MEDIA envelope before extracting frame paths — its
+    // JSON text (escaped backslashes, trailing ".svg") would otherwise match
+    // the path regex below and break frame rasterization.
+    const text = typeof gen.content === 'string' ? gen.content.split('INFINITE_MEDIA:')[0] : '';
+    const stills = text.match(/^[A-Za-z]:\\[^:\n]+|\S+\.png|\S+\.svg/gm) ?? [];
     if (stills.length === 0) return { content: 'VideoGen: no frames could be produced for the slideshow.', is_error: true };
 
     // ffmpeg has no SVG decoder — rasterize any SVG frames to PNG via sharp
@@ -148,7 +154,7 @@ export async function renderSlideshow(
         stills.some((s) => s.endsWith('.svg'))
           ? '\nHint: save an OpenAI/Stability key for photoreal frames, or a Replicate key for true text-to-video.'
           : ''
-      }`,
+      }${mediaEnvelope('video', out, 'video/mp4')}`,
     };
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {});

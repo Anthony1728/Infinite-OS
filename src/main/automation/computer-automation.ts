@@ -274,13 +274,27 @@ public class Mouse {
    * Type text
    */
   async typeText(text: string, delay: number = 0): Promise<void> {
+    await this.sendText(text);
+    if (delay > 0) await this.delay(delay);
+    this.logAction(`typeText("${text.substring(0, 20)}...")`, true);
+  }
+
+  /**
+   * Type a credential. Same keystrokes as typeText, but the action log only
+   * ever records that a secret was entered — never the secret itself.
+   */
+  async typeSecret(text: string): Promise<void> {
+    await this.sendText(text);
+    this.logAction('typeSecret(*** redacted ***)', true);
+  }
+
+  /** SendKeys passthrough shared by typeText and typeSecret. */
+  private async sendText(text: string): Promise<void> {
     // Escape special characters for SendKeys and single quotes for PowerShell
     const escaped = text.replace(/[{}()[\]^~]/g, (c) => `{${c}}`).replace(/'/g, "''");
     await this.executePowerShell(
       `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
     );
-    if (delay > 0) await this.delay(delay);
-    this.logAction(`typeText("${text.substring(0, 20)}...")`, true);
   }
 
   /**

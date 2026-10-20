@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { infiniteHome } from '../profiles/home.js';
+import { infiniteHome } from '../profiles/home';
 import { normalizeTier, tierForType, scoreMemory, toMs, VALID_TIERS, type MemoryTier } from './tiers.js';
 
 export type { MemoryTier };
@@ -13,6 +13,8 @@ export interface MemoryEntry {
   content: string;
   tags: string[];
   sessionId?: string;
+  /** Cognee-style namespace. Keeps unrelated memories out of recall. */
+  dataset: string;
   createdAt: number;
   updatedAt: number;
   /** Stratified-memory tier (AIOS pattern): episodic = session events that decay,
@@ -50,6 +52,7 @@ export function getDb(): Database.Database {
       content TEXT NOT NULL DEFAULT '',
       tags TEXT NOT NULL DEFAULT '[]',
       session_id TEXT,
+      dataset TEXT NOT NULL DEFAULT 'default',
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
@@ -63,13 +66,15 @@ export function getDb(): Database.Database {
     (db.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>).map((c) => c.name),
   );
   if (!columns.has('tier')) db.exec(`ALTER TABLE memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'semantic'`);
+  if (!columns.has('dataset')) db.exec(`ALTER TABLE memories ADD COLUMN dataset TEXT NOT NULL DEFAULT 'default'`);
   if (!columns.has('importance')) db.exec(`ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5`);
   if (!columns.has('access_count')) db.exec(`ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`);
-  if (!columns.has('last_accessed')) db.exec(`ALTER TABLE memories ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT (unixepoch())`);
+  if (!columns.has('last_accessed')) db.exec(`ALTER TABLE memories ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT 0`); // SQLite forbids non-constant ALTER defaults; toMs() falls back to updated_at when reading.
   // Backfill pre-tier rows: chats are episodic events, everything else is semantic.
   // The importance/access guard keeps user-promoted rows untouched.
   db.exec(`UPDATE memories SET tier = 'episodic' WHERE type = 'chat' AND tier = 'semantic' AND importance = 0.5 AND access_count = 0`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_tier ON memories(tier)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_dataset ON memories(dataset)`);
 
   return db;
 }
@@ -83,6 +88,7 @@ function mapRow(row: Record<string, unknown>): MemoryEntry {
     content: row.content as string,
     tags: JSON.parse((row.tags as string) || '[]'),
     sessionId: (row.session_id as string | null) ?? undefined,
+    dataset: typeof row.dataset === 'string' && row.dataset ? row.dataset : 'default',
     createdAt: toMs(row.created_at, updatedAt),
     updatedAt,
     tier: normalizeTier(row.tier),
@@ -98,8 +104,15 @@ export interface NewMemory {
   content: string;
   tags: string[];
   sessionId?: string;
+  dataset?: string;
   tier?: MemoryTier;
   importance?: number;
+}
+
+/** Trim to a safe, path-free namespace label. */
+export function normalizeDataset(dataset?: string): string {
+  const value = (dataset ?? '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return value.slice(0, 64) || 'default';
 }
 
 export function createMemory(entry: NewMemory): MemoryEntry {
@@ -108,11 +121,12 @@ export function createMemory(entry: NewMemory): MemoryEntry {
   const now = Date.now();
   const tier = normalizeTier(entry.tier ?? tierForType(entry.type));
   const importance = Math.max(0, Math.min(1, typeof entry.importance === 'number' ? entry.importance : 0.5));
+  const dataset = normalizeDataset(entry.dataset);
 
   d.prepare(`
-    INSERT INTO memories (id, type, title, content, tags, session_id, created_at, updated_at, tier, importance, access_count, last_accessed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-  `).run(id, entry.type, entry.title, entry.content, JSON.stringify(entry.tags), entry.sessionId ?? null, now, now, tier, importance, now);
+    INSERT INTO memories (id, type, title, content, tags, session_id, dataset, created_at, updated_at, tier, importance, access_count, last_accessed)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+  `).run(id, entry.type, entry.title, entry.content, JSON.stringify(entry.tags), entry.sessionId ?? null, dataset, now, now, tier, importance, now);
 
   return getMemory(id)!;
 }
@@ -124,7 +138,7 @@ export function getMemory(id: string): MemoryEntry | null {
   return mapRow(row);
 }
 
-export function listMemories(type?: string, search?: string): MemoryEntry[] {
+export function listMemories(type?: string, search?: string, dataset?: string): MemoryEntry[] {
   const d = getDb();
   let query = 'SELECT * FROM memories';
   const conditions: string[] = [];
@@ -133,6 +147,10 @@ export function listMemories(type?: string, search?: string): MemoryEntry[] {
   if (type && type !== 'all') {
     conditions.push('type = ?');
     params.push(type);
+  }
+  if (dataset) {
+    conditions.push('dataset = ?');
+    params.push(normalizeDataset(dataset));
   }
   if (search) {
     conditions.push('(title LIKE ? OR content LIKE ?)');
@@ -163,6 +181,7 @@ export function updateMemory(id: string, updates: Partial<Omit<MemoryEntry, 'id'
   if (updates.content !== undefined) { fields.push('content = ?'); values.push(updates.content); }
   if (updates.tags !== undefined) { fields.push('tags = ?'); values.push(JSON.stringify(updates.tags)); }
   if (updates.sessionId !== undefined) { fields.push('session_id = ?'); values.push(updates.sessionId); }
+  if (updates.dataset !== undefined) { fields.push('dataset = ?'); values.push(normalizeDataset(updates.dataset)); }
   if ((updates as { tier?: unknown }).tier !== undefined) { fields.push('tier = ?'); values.push(normalizeTier((updates as { tier?: unknown }).tier)); }
   if (typeof (updates as { importance?: unknown }).importance === 'number') {
     fields.push('importance = ?');
@@ -184,18 +203,21 @@ export function deleteMemory(id: string): boolean {
   return result.changes > 0;
 }
 
-export function searchMemories(query: string): MemoryEntry[] {
-  return listMemories(undefined, query);
+export function searchMemories(query: string, dataset?: string): MemoryEntry[] {
+  return listMemories(undefined, query, dataset);
 }
 
-export function getMemoryStats(): { total: number; byType: Record<string, number>; byTier: Record<string, number> } {
+export function getMemoryStats(dataset?: string): { total: number; byType: Record<string, number>; byTier: Record<string, number>; datasets: number } {
   const d = getDb();
-  const total = (d.prepare('SELECT COUNT(*) as count FROM memories').get() as { count: number }).count;
-  const rows = d.prepare('SELECT type, COUNT(*) as count FROM memories GROUP BY type').all() as { type: string; count: number }[];
+  const where = dataset ? ' WHERE dataset = ?' : '';
+  const params = dataset ? [normalizeDataset(dataset)] : [];
+  const total = (d.prepare(`SELECT COUNT(*) as count FROM memories${where}`).get(...params) as { count: number }).count;
+  const rows = d.prepare(`SELECT type, COUNT(*) as count FROM memories${where} GROUP BY type`).all(...params) as { type: string; count: number }[];
   const byType = Object.fromEntries(rows.map((r) => [r.type, r.count]));
-  const tierRows = d.prepare('SELECT tier, COUNT(*) as count FROM memories GROUP BY tier').all() as { tier: string; count: number }[];
+  const tierRows = d.prepare(`SELECT tier, COUNT(*) as count FROM memories${where} GROUP BY tier`).all(...params) as { tier: string; count: number }[];
   const byTier = Object.fromEntries(tierRows.map((r) => [r.tier, r.count]));
-  return { total, byType, byTier };
+  const datasets = (d.prepare('SELECT COUNT(DISTINCT dataset) as count FROM memories').get() as { count: number }).count;
+  return { total, byType, byTier, datasets };
 }
 
 function touchAccess(ids: string[]): void {
@@ -212,12 +234,16 @@ function touchAccess(ids: string[]): void {
  * procedural memories outrank stale episodic ones at equal match quality.
  * Every returned memory counts as a use (tunes future ranking).
  */
-export function recallMemories(query: string, opts?: { tiers?: MemoryTier[]; limit?: number }): MemoryEntry[] {
+export function recallMemories(query: string, opts?: { tiers?: MemoryTier[]; limit?: number; dataset?: string }): MemoryEntry[] {
   const d = getDb();
   const tiers = (opts?.tiers ?? []).filter((t) => VALID_TIERS.includes(t));
   const limit = Math.max(1, Math.min(50, opts?.limit ?? 10));
   const conditions: string[] = ['(title LIKE ? OR content LIKE ? OR tags LIKE ?)'];
   const params: unknown[] = [`%${query}%`, `%${query}%`, `%${query}%`];
+  if (opts?.dataset) {
+    conditions.push('dataset = ?');
+    params.push(normalizeDataset(opts.dataset));
+  }
   if (tiers.length > 0) {
     conditions.push(`tier IN (${tiers.map(() => '?').join(',')})`);
     params.push(...tiers);

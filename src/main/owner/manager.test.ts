@@ -17,8 +17,14 @@ try {
 const maybeDescribe = canUseNative ? describe : describe.skip;
 
 const createdDirectories: string[] = [];
+const createdManagers: OwnerManager[] = [];
 
 afterEach(async () => {
+  // Close every database BEFORE unlinking: open SQLite handles make rm() fail
+  // with EBUSY on Windows.
+  for (const manager of createdManagers.splice(0)) {
+    try { manager.close(); } catch { /* already closed */ }
+  }
   await Promise.all(createdDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -26,6 +32,7 @@ async function createManager(): Promise<{ manager: OwnerManager; cleanup: () => 
   const directory = await mkdtemp(join(tmpdir(), 'infinite-os-owner-test-'));
   createdDirectories.push(directory);
   const manager = new OwnerManager(join(directory, 'owner.db'));
+  createdManagers.push(manager);
   return { manager, cleanup: async () => undefined };
 }
 
@@ -114,6 +121,7 @@ maybeDescribe('OwnerManager', () => {
     first.close();
 
     const second = new OwnerManager(dbPath);
+    createdManagers.push(second);
     expect(second.getProfile().preferredName).toBe('A.M.');
   });
 });

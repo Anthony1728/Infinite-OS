@@ -1,11 +1,11 @@
 allowBuilds:
-  '@whiskeysockets/baileys': set this to true or false
+  '@whiskeysockets/baileys': false
   better-sqlite3: true
   canvas: true
   electron: true
   electron-winstaller: false
   esbuild: true
-  protobufjs: set this to true or false
+  protobufjs: true
 overrides:
   dompurify: 3.4.11
   esbuild: 0.25.12

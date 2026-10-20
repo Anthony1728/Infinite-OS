@@ -339,30 +339,58 @@ export class WebsiteBuilder {
   private generateComponentHTML(comp: WebsiteComponent, theme: Website['theme']): string {
     const props = comp.props;
     switch (comp.type) {
-      case 'hero':
+      case 'header': {
+        const links = Array.isArray(props.links) ? (props.links as unknown[]) : [];
+        return `
+    <nav>
+      <div class="logo">${(props.logo as string) || ''}</div>
+      <ul>${links.map((l) => `<li><a href="#">${String(l)}</a></li>`).join('')}</ul>
+    </nav>`;
+      }
+      case 'hero': {
+        const ctaLabel = (props.ctaText as string) || (props.cta as string) || 'Get Started';
+        const ctaHref = (props.ctaLink as string) || (props.ctaHref as string) || '#';
         return `
     <section class="hero" id="hero">
       <h1>${(props.title as string) || 'Welcome'}</h1>
       <p>${(props.subtitle as string) || 'Build something amazing'}</p>
-      <a href="${(props.ctaLink as string) || '#'}" class="btn">${(props.ctaText as string) || 'Get Started'}</a>
+      <a href="${ctaHref}" class="btn">${ctaLabel}</a>
     </section>`;
+      }
       case 'features': {
-        const features = (props.items as Array<{ title: string; description: string }>) || [];
+        const rawItems = Array.isArray(props.items) ? props.items : [];
+        const features = rawItems.map((item) => {
+          if (typeof item === 'string') return { title: item, description: '' };
+          const obj = (item ?? {}) as Record<string, unknown>;
+          return {
+            title: String(obj.title ?? obj.name ?? item ?? ''),
+            description: String(obj.description ?? obj.subtitle ?? ''),
+          };
+        });
         return `
     <section id="features">
       <h2 style="text-align:center;margin-bottom:40px;font-size:36px;">Features</h2>
       <div class="grid">
-        ${features.map(f => `<div class="card"><h3>${f.title}</h3><p>${f.description}</p></div>`).join('\n        ')}
+        ${features.map(f => `<div class="card"><h3>${f.title}</h3><p>${f.description}</p></div>`).join('\\n        ')}
       </div>
     </section>`;
       }
       case 'pricing': {
-        const plans = (props.plans as Array<{ name: string; price: string; features: string[] }>) || [];
+        const rawPlans = Array.isArray(props.plans) ? props.plans : [];
+        const plans = rawPlans.map((p) => {
+          const obj = (p ?? {}) as Record<string, unknown>;
+          const feats = Array.isArray(obj.features) ? (obj.features as unknown[]) : [];
+          return {
+            name: String(obj.name ?? 'Plan'),
+            price: obj.price ?? '',
+            features: feats.map((f) => String(f)),
+          };
+        });
         return `
     <section id="pricing">
       <h2 style="text-align:center;margin-bottom:40px;font-size:36px;">Pricing</h2>
       <div class="grid">
-        ${plans.map(p => `<div class="card"><h3>${p.name}</h3><div style="font-size:32px;font-weight:700;margin:16px 0;">${p.price}</div><ul style="list-style:none;margin-bottom:24px;">${p.features.map(f => `<li style="padding:8px 0;border-bottom:1px solid ${theme.darkMode ? '#334155' : '#e2e8f0'};">✓ ${f}</li>`).join('')}</ul><a href="#" class="btn" style="width:100%;text-align:center;">Choose Plan</a></div>`).join('\n        ')}
+        ${plans.map(p => `<div class="card"><h3>${p.name}</h3><div style="font-size:32px;font-weight:700;margin:16px 0;">${p.price}</div><ul style="list-style:none;margin-bottom:24px;">${p.features.map(f => `<li style="padding:8px 0;border-bottom:1px solid ${theme.darkMode ? '#334155' : '#e2e8f0'};">&#10003; ${f}</li>`).join('')}</ul><a href="#" class="btn" style="width:100%;text-align:center;">Choose Plan</a></div>`).join('\\n        ')}
       </div>
     </section>`;
       }
@@ -430,21 +458,26 @@ const theme = {
         <p className="text-xl text-slate-400 mb-8 max-w-xl mx-auto">
           ${(props.subtitle as string) || 'Build something amazing'}
         </p>
-        <a href="${(props.ctaLink as string) || '#'}" className="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
-          ${(props.ctaText as string) || 'Get Started'}
+        <a href="${(props.ctaLink as string) || (props.ctaHref as string) || '#'}" className="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
+          ${(props.ctaText as string) || (props.cta as string) || 'Get Started'}
         </a>
       </section>\n`;
       case 'features': {
-        const features = (props.items as Array<{ title: string; description: string }>) || [];
+        const rawItems = Array.isArray(props.items) ? props.items : [];
+        const features = rawItems.map((item) => {
+          if (typeof item === 'string') return { title: item, description: '' };
+          const obj = (item ?? {}) as Record<string, unknown>;
+          return { title: String(obj.title ?? obj.name ?? item ?? ''), description: String(obj.description ?? obj.subtitle ?? '') };
+        });
         return `      <section className="py-16 px-6">
         <h2 className="text-3xl font-bold text-center mb-12">Features</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           ${features.map(f => `<div className="p-6 bg-slate-800 rounded-xl border border-slate-700">
             <h3 className="text-lg font-semibold text-indigo-400 mb-3">${f.title}</h3>
             <p className="text-slate-400">${f.description}</p>
-          </div>`).join('\n          ')}
+          </div>`).join('\\n          ')}
         </div>
-      </section>\n`;
+      </section>\\n`;
       }
       default:
         return `      {/* ${comp.name} (${comp.type}) */}\n`;

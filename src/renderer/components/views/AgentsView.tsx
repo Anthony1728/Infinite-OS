@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAgentsStore } from '../../stores/agents';
 import { useNotificationStore } from '../../stores/notifications';
+import { SessionBoard } from '../agents/SessionBoard';
 import { CreateAgentModal } from '../agents/CreateAgentModal';
 import type { AppIconName } from '../brand/AppIcon';
 import { NexusIcon } from '../brand/NexusIcon';
@@ -273,6 +274,9 @@ export function AgentsView() {
           )}
         </div>
       </div>
+
+      {/* Session Board — parallel sessions w/ worktree isolation */}
+      <SessionBoard />
 
       {/* Run History */}
       <div>

@@ -1,156 +1,1 @@
-// End-to-end agent loop test with the REAL provider chain:
-// runAgent -> opencode adapter (streamRemoteOpenCode over mocked Zen SSE) ->
-// split-chunk tool_use reassembly -> real permission check (workspace mode) ->
-// real Bash tool execution -> tool_result -> second model turn -> done.
-//
-// This is the regression test for the "all tool calls fail" bug: the SSE
-// parser previously split one tool call into `Bash {}` + an empty-name call.
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Message } from '../../shared/types.js';
-import { toolRegistry } from '../tools/base.js';
-import { bash } from '../tools/bash.js';
-
-const mocks = vi.hoisted(() => ({
-  settingsValues: new Map<string, unknown>(),
-  getApiKey: vi.fn<(provider: string) => Promise<string>>(),
-  getAllApiKeys: vi.fn<(provider: string) => Promise<string[]>>(),
-  requestPermission: vi.fn<(tool: unknown, options: unknown) => Promise<boolean>>(),
-  learnFromToolResult: vi.fn(),
-  learnFromCompletedResponse: vi.fn(),
-}));
-
-vi.mock('../settings/store.js', () => ({
-  settings: { get: (key: string) => mocks.settingsValues.get(key) },
-}));
-vi.mock('../settings/secrets.js', () => ({
-  getApiKey: mocks.getApiKey,
-  getAllApiKeys: mocks.getAllApiKeys,
-}));
-vi.mock('./permission-prompt.js', () => ({
-  requestPermission: mocks.requestPermission,
-}));
-vi.mock('./context.js', () => ({
-  buildSystemPrompt: async () => 'You are Infinite AI. Tools are executable.',
-  buildContext: async (messages: unknown[]) => messages,
-}));
-vi.mock('./learning-adapter.js', () => ({
-  learnFromToolResult: mocks.learnFromToolResult,
-  learnFromCompletedResponse: mocks.learnFromCompletedResponse,
-}));
-
-import { runAgent } from './loop.js';
-
-function sseLine(payload: string): Uint8Array {
-  return new TextEncoder().encode(`data: ${payload}\n\n`);
-}
-
-/** Serves realistic OpenAI-compatible Zen SSE: split-chunk tool call first, plain text after. */
-function zenSseStream() {
-  let callCount = 0;
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-    const url = String(input);
-    if (!url.includes('/chat/completions')) throw new Error(`Unexpected fetch URL: ${url}`);
-    callCount++;
-    const parts: Uint8Array[] = [];
-    if (callCount === 1) {
-      // Real OpenAI-compatible streaming: id/name in the first chunk, then
-      // argument fragments in later chunks carrying only `index`.
-      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_zen_1","function":{"name":"Bash","arguments":""}}]}}]}'));
-      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"command\\":\\"Get-ChildItem -Force | Select-Object Name, Mode, Length\\""}}]}}]}'));
-      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}'));
-      parts.push(sseLine('{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}'));
-      parts.push(sseLine('[DONE]'));
-    } else {
-      parts.push(sseLine('{"choices":[{"delta":{"content":"The directory listing was retrieved successfully."}}]}'));
-      parts.push(sseLine('{"choices":[{"delta":{},"finish_reason":"stop"}]}'));
-      parts.push(sseLine('[DONE]'));
-    }
-    return new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const part of parts) controller.enqueue(part);
-        controller.close();
-      },
-    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-  });
-}
-
-function userMsg(text: string): Message {
-  return { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };
-}
-
-beforeEach(() => {
-  mocks.settingsValues.clear();
-  mocks.settingsValues.set('permissionMode', 'workspace');
-  mocks.getApiKey.mockResolvedValue('test-zen-key');
-  mocks.getAllApiKeys.mockResolvedValue(['test-zen-key']);
-  mocks.requestPermission.mockReset().mockResolvedValue(false);
-  mocks.learnFromToolResult.mockReset();
-  mocks.learnFromCompletedResponse.mockReset();
-  toolRegistry.register(bash);
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-describe('real agent loop end-to-end (Zen SSE -> permission -> Bash)', () => {
-  it('executes a real Bash command from a split-chunk tool call and finishes the run', async () => {
-    zenSseStream();
-    const controller = new AbortController();
-    const events: Array<{ type: string; [k: string]: unknown }> = [];
-    const result = await runAgent([], userMsg('list the files in this directory'), {
-      sessionId: 'e2e-1',
-      cwd: process.cwd(),
-      provider: 'opencode',
-      model: 'opencode::deepseek-chat',
-      signal: controller.signal,
-      onEvent: (e) => events.push(e as never),
-    });
-
-    const toolEnds = events.filter((e) => e.type === 'tool_use_end' && e.name === 'Bash');
-    expect(toolEnds).toHaveLength(1);
-    expect(toolEnds[0].input).toEqual({ command: 'Get-ChildItem -Force | Select-Object Name, Mode, Length' });
-
-    const toolResults = events.filter((e) => e.type === 'tool_result' && e.partial !== true && !e.is_error);
-    expect(toolResults.length).toBeGreaterThan(0);
-    expect(String(toolResults[0].content)).toContain('Name');
-
-    // The workspace profile auto-approves this read-only pipeline through the
-    // REAL permission chain — no interactive prompt was needed.
-    expect(mocks.requestPermission).not.toHaveBeenCalled();
-
-    const done = events.find((e) => e.type === 'done');
-    expect(done?.success).toBe(true);
-
-    const toolResultMessages = result.filter((m) => m.role === 'user' && m.content.some((b) => b.type === 'tool_result'));
-    expect(toolResultMessages.length).toBe(1);
-    const finalAssistant = result.filter((m) => m.role === 'assistant');
-    expect(finalAssistant.length).toBeGreaterThan(0);
-    expect(mocks.learnFromToolResult).toHaveBeenCalled();
-  }, 30_000);
-
-  it('feeds a real tool_result back to the model for the second turn', async () => {
-    zenSseStream();
-    const controller = new AbortController();
-    const events: Array<{ type: string; [k: string]: unknown }> = [];
-    await runAgent([], userMsg('list the files in this directory'), {
-      sessionId: 'e2e-2',
-      cwd: process.cwd(),
-      provider: 'opencode',
-      model: 'opencode::deepseek-chat',
-      signal: controller.signal,
-      onEvent: (e) => events.push(e as never),
-    });
-
-    // The second fetch is the continuation turn — its request body must
-    // contain the executed Bash result so the model can observe it.
-    const fetchMock = vi.mocked(globalThis.fetch);
-    const calls = fetchMock.mock.calls.filter(([input]) => String(input).includes('/chat/completions'));
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    const secondBody = JSON.parse(String(calls[1]?.[1]?.body));
-    const allText = JSON.stringify(secondBody.messages);
-    expect(allText).toContain('Get-ChildItem -Force | Select-Object Name, Mode, Length');
-    expect(secondBody.messages.some((m: { role: string }) => m.role === 'tool')).toBe(true);
-  }, 30_000);
-});
+// End-to-end agent loop test with the REAL provider chain:// runAgent -> opencode adapter (streamRemoteOpenCode over mocked Zen SSE) ->// split-chunk tool_use reassembly -> real permission check (workspace mode) ->// real Bash tool execution -> tool_result -> second model turn -> done.//// This is the regression test for the "all tool calls fail" bug: the SSE// parser previously split one tool call into `Bash {}` + an empty-name call.import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';import type { Message } from '../../shared/types.js';import { toolRegistry } from '../tools/base.js';import { bash } from '../tools/bash.js';const mocks = vi.hoisted(() => ({  settingsValues: new Map<string, unknown>(),  getApiKey: vi.fn<(provider: string) => Promise<string>>(),  getAllApiKeys: vi.fn<(provider: string) => Promise<string[]>>(),  requestPermission: vi.fn<(tool: unknown, options: unknown) => Promise<boolean>>(),  learnFromToolResult: vi.fn(),  learnFromCompletedResponse: vi.fn(),}));vi.mock('../settings/store.js', () => ({  settings: { get: (key: string) => mocks.settingsValues.get(key), set: async () => {} },}));vi.mock('../settings/secrets.js', () => ({  getApiKey: mocks.getApiKey,  getAllApiKeys: mocks.getAllApiKeys,}));vi.mock('./permission-prompt.js', () => ({  requestPermission: mocks.requestPermission,}));vi.mock('./context.js', () => ({  buildSystemPrompt: async () => 'You are Infinite AI. Tools are executable.',  buildContext: async (messages: unknown[]) => messages,}));vi.mock('./learning-adapter.js', () => ({  learnFromToolResult: mocks.learnFromToolResult,  learnFromCompletedResponse: mocks.learnFromCompletedResponse,}));import { runAgent } from './loop.js';function sseLine(payload: string): Uint8Array {  return new TextEncoder().encode(`data: ${payload}\n\n`);}/** Serves realistic OpenAI-compatible Zen SSE: split-chunk tool call first, plain text after. */function zenSseStream() {  let callCount = 0;  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {    const url = String(input);    if (!url.includes('/chat/completions')) throw new Error(`Unexpected fetch URL: ${url}`);    callCount++;    const parts: Uint8Array[] = [];    if (callCount === 1) {      // Real OpenAI-compatible streaming: id/name in the first chunk, then      // argument fragments in later chunks carrying only `index`.      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_zen_1","function":{"name":"Bash","arguments":""}}]}}]}'));      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"command\\":\\"Get-ChildItem -Force | Select-Object Name, Mode, Length\\""}}]}}]}'));      parts.push(sseLine('{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]}}]}'));      parts.push(sseLine('{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}'));      parts.push(sseLine('[DONE]'));    } else {      parts.push(sseLine('{"choices":[{"delta":{"content":"The directory listing was retrieved successfully."}}]}'));      parts.push(sseLine('{"choices":[{"delta":{},"finish_reason":"stop"}]}'));      parts.push(sseLine('[DONE]'));    }    return new Response(new ReadableStream<Uint8Array>({      start(controller) {        for (const part of parts) controller.enqueue(part);        controller.close();      },    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });  });}function userMsg(text: string): Message {  return { id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text }], timestamp: Date.now() };}beforeEach(() => {  mocks.settingsValues.clear();  mocks.settingsValues.set('permissionMode', 'workspace');  mocks.getApiKey.mockResolvedValue('test-zen-key');  mocks.getAllApiKeys.mockResolvedValue(['test-zen-key']);  mocks.requestPermission.mockReset().mockResolvedValue(false);  mocks.learnFromToolResult.mockReset();  mocks.learnFromCompletedResponse.mockReset();  toolRegistry.register(bash);});afterEach(() => {  vi.restoreAllMocks();});describe('real agent loop end-to-end (Zen SSE -> permission -> Bash)', () => {  it('executes a real Bash command from a split-chunk tool call and finishes the run', async () => {    zenSseStream();    const controller = new AbortController();    const events: Array<{ type: string; [k: string]: unknown }> = [];    const result = await runAgent([], userMsg('list the files in this directory'), {      sessionId: 'e2e-1',      cwd: process.cwd(),      provider: 'opencode',      model: 'opencode::deepseek-chat',      signal: controller.signal,      onEvent: (e) => events.push(e as never),    });    const toolEnds = events.filter((e) => e.type === 'tool_use_end' && e.name === 'Bash');    expect(toolEnds).toHaveLength(1);    expect(toolEnds[0].input).toEqual({ command: 'Get-ChildItem -Force | Select-Object Name, Mode, Length' });    const toolResults = events.filter((e) => e.type === 'tool_result' && e.partial !== true && !e.is_error);    expect(toolResults.length).toBeGreaterThan(0);    expect(String(toolResults[0].content)).toContain('Name');    // The workspace profile auto-approves this read-only pipeline through the    // REAL permission chain — no interactive prompt was needed.    expect(mocks.requestPermission).not.toHaveBeenCalled();    const done = events.find((e) => e.type === 'done');    expect(done?.success).toBe(true);    const toolResultMessages = result.filter((m) => m.role === 'user' && m.content.some((b) => b.type === 'tool_result'));    expect(toolResultMessages.length).toBe(1);    const finalAssistant = result.filter((m) => m.role === 'assistant');    expect(finalAssistant.length).toBeGreaterThan(0);    expect(mocks.learnFromToolResult).toHaveBeenCalled();  }, 30_000);  it('feeds a real tool_result back to the model for the second turn', async () => {    zenSseStream();    const controller = new AbortController();    const events: Array<{ type: string; [k: string]: unknown }> = [];    await runAgent([], userMsg('list the files in this directory'), {      sessionId: 'e2e-2',      cwd: process.cwd(),      provider: 'opencode',      model: 'opencode::deepseek-chat',      signal: controller.signal,      onEvent: (e) => events.push(e as never),    });    // The second fetch is the continuation turn — its request body must    // contain the executed Bash result so the model can observe it.    const fetchMock = vi.mocked(globalThis.fetch);    const calls = fetchMock.mock.calls.filter(([input]) => String(input).includes('/chat/completions'));    expect(calls.length).toBeGreaterThanOrEqual(2);    const secondBody = JSON.parse(String(calls[1]?.[1]?.body));    const allText = JSON.stringify(secondBody.messages);    expect(allText).toContain('Get-ChildItem -Force | Select-Object Name, Mode, Length');    expect(secondBody.messages.some((m: { role: string }) => m.role === 'tool')).toBe(true);  }, 30_000);});

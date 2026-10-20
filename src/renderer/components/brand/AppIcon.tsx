@@ -46,6 +46,8 @@ const CUSTOM: Record<string, InfinityIconName> = {
   'nav.tabs': 'inf.panel',
   'nav.capabilities': 'inf.hex-stack',
   'nav.settings': 'inf.gear',
+  'nav.voice': 'inf.mic',
+  'nav.spell': 'inf.spell',
 
   // ── Top bar ─────────────────────────────────────────────────────
   'topbar.menu': 'inf.menu',

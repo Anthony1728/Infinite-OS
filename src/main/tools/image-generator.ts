@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Tool, ToolContext, ToolResult } from './base.js';
+import { outputDirectoryDenial } from './write-guard.js';
 
 /**
  * Image Generator — Hermes-beating image generation.
@@ -37,6 +38,8 @@ export const imageGeneratorTool: Tool = {
     const size = a.size || '1024x1024';
     const n = Math.max(1, Math.min(2, a.n ?? 1));
     const outDir = a.outputDir || OUTPUT_DIR;
+    const denied = outputDirectoryDenial(outDir, ctx?.cwd);
+    if (denied) return { content: denied, is_error: true };
     await mkdir(outDir, { recursive: true });
     const wantProvider = a.provider || 'auto';
 
@@ -57,7 +60,7 @@ export const imageGeneratorTool: Tool = {
             if (b64) {
               const p = join(outDir, `gen-${randomUUID().slice(0, 8)}.png`);
               await writeFile(p, Buffer.from(b64, 'base64'));
-              return { content: `Generated via OpenAI (${size}): ${p}\nPrompt: ${prompt}` };
+              return { content: `Generated via OpenAI (${size}): ${p}\nPrompt: ${prompt}${mediaEnvelope('image', p, 'image/png')}` };
             }
           } else if (wantProvider === 'openai') {
             const txt = await safeText(res);
@@ -94,7 +97,7 @@ export const imageGeneratorTool: Tool = {
             if (b64) {
               const p = join(outDir, `gen-${randomUUID().slice(0, 8)}.png`);
               await writeFile(p, Buffer.from(b64, 'base64'));
-              return { content: `Generated via Stability (${size}): ${p}\nPrompt: ${prompt}` };
+              return { content: `Generated via Stability (${size}): ${p}\nPrompt: ${prompt}${mediaEnvelope('image', p, 'image/png')}` };
             }
           } else if (wantProvider === 'stability') {
             return { content: `Stability ${res.status}: ${await safeText(res)}`, is_error: true };
@@ -111,9 +114,18 @@ export const imageGeneratorTool: Tool = {
       await writeFile(p, svg, 'utf8');
       paths.push(p);
     }
-    return { content: `Generated placeholder SVG (${size}) — no API key required, real file for preview/verification:\n${paths.join('\n')}\nPrompt: ${prompt}${wantProvider === 'auto' ? '\nHint: save OpenAI/Stability key in Settings → AI Provider for photoreal.' : ''}` };
+    return { content: `Generated placeholder SVG (${size}) — no API key required, real file for preview/verification:\n${paths.join('\n')}\nPrompt: ${prompt}${wantProvider === 'auto' ? '\nHint: save OpenAI/Stability key in Settings → AI Provider for photoreal.' : ''}${mediaEnvelope('image', paths[0], 'image/svg+xml')}` };
   },
 };
+
+/**
+ * Inline-preview envelope appended to media tool results. The renderer
+ * (chat store) extracts it to show the media inline in chat; the model sees
+ * only the plain text — media bytes never enter the model context.
+ */
+export function mediaEnvelope(kind: 'image' | 'video' | 'audio', path: string, mime: string): string {
+  return `\nINFINITE_MEDIA: ${JSON.stringify([{ kind, path, mime }])}`;
+}
 
 async function resolveImageKey(providerId: string, envName: string): Promise<string> {
   try {

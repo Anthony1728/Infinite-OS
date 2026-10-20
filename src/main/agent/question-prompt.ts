@@ -117,9 +117,20 @@ export async function askUserQuestions(
     opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     if (target) {
+      // Spread the event into the payload, do NOT nest it under `event`.
+      //
+      // Every other producer on this channel (plan-mode-events, todo-store,
+      // whatsapp-link, evolution-loop, the main chat loop) sends
+      // `{ sessionId, ...event }`, and the renderer listener reads
+      // `payload.type` to switch on. This one nested the event instead, so
+      // `payload.type` was undefined, the store fell through its switch, and
+      // the answer cards never rendered — the agent would block on a question
+      // the user could never see. Keep this in step with the other producers.
       target.webContents.send(IPC.CHAT_STREAM_EVENT, {
         sessionId: opts.sessionId,
-        event: { type: 'question_request', request_id: id, questions: specs },
+        type: 'question_request',
+        request_id: id,
+        questions: specs,
       });
     }
     try {

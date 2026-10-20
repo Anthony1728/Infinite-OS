@@ -253,6 +253,17 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
               const obj = JSON.parse(payload);
               const choice = obj.choices?.[0];
               const delta = choice?.delta ?? {};
+              // Reasoning channel, which OpenAI-compatible servers spell in
+              // several ways depending on which one is behind the URL
+              // (DeepSeek and friends use `reasoning_content`; others use
+              // `reasoning`). Without this, a reasoning model streams its
+              // thinking into the answer and the user sees a wall of working-out
+              // where the response should be.
+              const reasoning =
+                delta.reasoning_content ?? delta.reasoning ?? undefined;
+              if (typeof reasoning === 'string' && reasoning) {
+                yield { type: 'thinking_delta', text: reasoning };
+              }
               if (delta.content) {
                 yield { type: 'text_delta', text: delta.content };
               }

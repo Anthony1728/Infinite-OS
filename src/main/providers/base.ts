@@ -12,6 +12,20 @@ export interface ChatRequest {
   temperature?: number;
   stream: true;
   signal?: AbortSignal;
+  /**
+   * Ask the provider to emit its reasoning as a separate channel.
+   *
+   * Off by default because a reasoning model on a slow machine can spend its
+   * whole output budget reasoning and return no answer at all — measured here as
+   * a 1.7b model taking 41 s and returning an empty reply for "17x23". Providers
+   * that support it handle a `false` by simply not reasoning.
+   */
+  thinking?: boolean;
+  /**
+   * Hard cap on reasoning tokens, when the provider allows one. Providers that
+   * cannot separate the two budgets ignore this.
+   */
+  thinkingBudget?: number;
 }
 
 export interface ToolSpec {
@@ -23,6 +37,15 @@ export interface ToolSpec {
 export type StreamChunk =
   | { type: 'message_start'; id: string; model: string }
   | { type: 'text_delta'; text: string }
+  /**
+   * A piece of the model's reasoning.
+   *
+   * A distinct channel from `text_delta` on purpose. Reasoning is shown to the
+   * user as collapsible "thinking" and is stored apart from the answer; if it
+   * arrived as ordinary text it would be indistinguishable from the answer and
+   * would be replayed to the model on the next turn.
+   */
+  | { type: 'thinking_delta'; text: string }
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_delta'; id: string; partial_json: string }
   | { type: 'tool_use_end'; id: string; name: string; input: unknown }
@@ -56,14 +79,10 @@ export interface ProviderAdapter {
   defaultModel: string;
   freeModels: ModelInfo[];
   homepage?: string;
-
   /** Test that a key works. */
   testConnection(apiKey: string, baseUrl?: string): Promise<{ ok: boolean; error?: string }>;
-
   /** Fetch the live model list. */
   listModels(apiKey: string, baseUrl?: string): Promise<ModelInfo[]>;
-
   /** Stream a chat completion. */
   streamChat(req: ChatRequest, apiKey: string, baseUrl?: string): AsyncIterable<StreamChunk>;
 }
-

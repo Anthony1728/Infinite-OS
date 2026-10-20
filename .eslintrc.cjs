@@ -14,5 +14,5 @@ module.exports = {
     'react/prop-types': 'off',
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
   },
-  ignorePatterns: ['out/', 'dist/', 'release/', 'node_modules/'],
+  ignorePatterns: ['out/', 'dist/', 'release/', 'node_modules/', 'Infinite OS/'],
 };

@@ -1,6 +1,7 @@
 // IPC handler registration — wires every channel declared in shared/ipc.ts to a main-process function.
 
-import { ipcMain, BrowserWindow, dialog, shell, clipboard } from 'electron';
+import { ipcMain, BrowserWindow, dialog, shell, clipboard, app } from 'electron';
+import { isAbsolute, resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { IPC } from '../../shared/ipc.js';
@@ -11,7 +12,9 @@ import { toolRegistry } from '../tools/base.js';
 import { actionAuditLog } from '../audit/action-log.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect, getStatus as mcpGetStatus, listTools as mcpListTools } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
+import { markRunStarted, clearRunMarker, findInterruptedRuns } from '../agent/resume.js';
 import { interjectAgent, runAgent } from '../agent/loop.js';
+import { UNTIL_DONE_MAX_TURNS, UNTIL_DONE_WALL_CLOCK_MS } from '../agent/run-budget.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
 import { resolveUserQuestions } from '../agent/question-prompt.js';
 import {
@@ -45,8 +48,8 @@ import { osPush, osPushStatus } from '../github/push.js';
 import { registerBrainIpc } from './brain.js';
 import { registerBrowserIpc } from './browser.js';
 import { registerBridgeIpc } from './bridge.js';
-import { registerComputerIpc } from './computer.js';
 import { registerAutomationIpc } from './automation.js';
+import { registerWorkersIpc } from './workers.js';
 import { registerWebsiteIpc } from './website.js';
 import { registerAppIpc } from './app.js';
 import { registerBusinessIpc } from './business.js';
@@ -67,6 +70,8 @@ import { registerGapIpc } from './gaps.js';
 import { registerGitHubIpc } from './github.js';
 import { registerIndexingIpc } from './indexing.js';
 import { registerNotificationIpc } from './notification.js';
+import { registerProjectIpc } from './projects.js';
+import { registerOptimizeIpc } from './optimize.js';
 import { registerOllamaIpc } from './ollama.js';
 import { registerQueueIpc } from './queue.js';
 import { registerGitIpc } from './git.js';
@@ -77,11 +82,15 @@ import { registerCommandsIpc } from './commands.js';
 import { registerWindowIpc } from './window.js';
 import { SelfImprovementAgent } from '../agent/self-improvement.js';
 import { SelfEvolutionEngine } from '../brain/self-evolution.js';
+import { createEvolutionLoop, type EvolutionLoop } from '../brain/evolution-loop.js';
+import { SelfApplyRunner } from '../self-apply.js';
+import { findSelfRepoRoot } from '../self-repo.js';
 import { getEngine } from '../engine/intelligence.js';
 import { SkillsManager } from '../skills/manager.js';
 import { PersonalizationManager } from '../personalization/manager.js';
 import { orchestrator, type OrchestratorEvent } from '../agent/orchestrator.js';
 import { buildCrewPlan, runCrew, listCrewRuns, type CrewEvent } from '../agent/crew.js';
+import { sessionBoard } from '../agent/session-board.js';
 import { selectBestModel, getAllFreeModels } from '../providers/model-selector.js';
 import { videoEngine } from '../video/index.js';
 import { deploySystem } from '../deploy/index.js';
@@ -90,6 +99,33 @@ import { enterpriseManager } from '../enterprise/index.js';
 import { callCenter } from '../callcenter/index.js';
 import { browserOperator } from '../operator/browser-operator.js';
 import { windowsDictation } from '../voice/windows-dictation.js';
+import { getLocalVoice, isLocalVoiceScriptAvailable } from '../voice/local-voice.js';
+import { voiceSession } from '../voice/session.js';
+import { startWorkspaceServer, getWorkspaceServer, serveExternalFile } from '../workspace-server.js';
+import {
+  createTabBrowserView,
+  updateTabBrowserBounds,
+  navigateTabBrowser,
+  goBackTabBrowser,
+  goForwardTabBrowser,
+  reloadTabBrowser,
+  tabBrowserState,
+  closeTabBrowserView,
+  readTabBrowserState,
+  tabBrowserViewport,
+} from '../tab-browser-view.js';
+import { replaceTabs, upsertTab, removeTab, listTabs } from '../tab-index.js';
+import {
+  addCustomCommand,
+  clearHistory,
+  getVoiceConfig,
+  listCustomCommands,
+  listHistory,
+  processTranscript,
+  removeCustomCommand,
+  setVoiceConfig,
+  type VoiceConfig,
+} from '../voice/assistant.js';
 import {
   getEmailConfig,
   hasEmailConfig,
@@ -115,6 +151,19 @@ function messageTextOf(message: unknown): string {
   }
 }
 
+// Created lazily so importing this module (or registering IPC in tests) never
+// starts timers or spawns builds as a side effect.
+let evolutionLoopSingleton: EvolutionLoop | null = null;
+let selfApplySingleton: SelfApplyRunner | null = null;
+function getEvolutionLoop(): EvolutionLoop {
+  evolutionLoopSingleton ??= createEvolutionLoop();
+  return evolutionLoopSingleton;
+}
+function getSelfApplyRunner(): SelfApplyRunner {
+  selfApplySingleton ??= new SelfApplyRunner();
+  return selfApplySingleton;
+}
+
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Plan-mode + todo events ride the chat stream channel, so wire the emitters here.
   const chatStreamSend: (channel: string, payload: unknown) => void = (channel, payload) =>
@@ -136,18 +185,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   registerIndexingIpc();
   registerNotificationIpc();
   registerOllamaIpc();
+registerOptimizeIpc();
   registerQueueIpc();
   registerGitIpc();
   registerLearningIpc(getMainWindow);
   registerMessagingIpc();
   registerWhatsAppLinkIpc();
   registerCommandsIpc();
-  ipcMain.handle(IPC.HEARTBEAT_STATUS, async () => {
-    const { heartbeatStatus } = await import('../heartbeat/index.js');
-    return heartbeatStatus();
-  });
-
   // Background build — app stays running while AI edits code
+  //
+  // These were registered with no preload exposure and no renderer caller, so
+  // a finished background-build feature (auto-update/index.ts, including its
+  // own progress events) was unreachable. Now exposed and surfaced in
+  // Settings so a rebuild triggered by the agent is visible rather than silent.
   ipcMain.handle(IPC.BUILD_START, async () => {
     const { buildInBackground } = await import('../auto-update/index.js');
     const cwd = settings.get('cwd') as string | undefined ?? process.cwd();
@@ -159,6 +209,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     }
     return result;
   });
+
+  // Forward every background-build state change to the renderer.
+  //
+  // `onBuildStatusChange` existed in auto-update/index.ts with no subscriber,
+  // so a build could finish, fail or be cancelled and the UI would never learn:
+  // the app just sat there looking idle while a rebuild ran or died.
+  {
+    void import('../auto-update/index.js').then(({ onBuildStatusChange }) => {
+      onBuildStatusChange((status) => {
+        getMainWindow()?.webContents.send(IPC.BUILD_STATUS_CHANGED, status);
+      });
+    });
+  }
   ipcMain.handle(IPC.BUILD_STATUS, async () => {
     const { getBuildStatus } = await import('../auto-update/index.js');
     return getBuildStatus();
@@ -197,7 +260,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
 
   ipcMain.handle(IPC.BACKGROUND_TASKS_LIST, async () => listBackgroundTasks());
 
-  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd, planMode, background }) => {
+  ipcMain.handle(IPC.CHAT_SEND, async (_e, { sessionId, message, displayMessage, provider, model, cwd, planMode, background, untilDone }) => {
     // Mark heartbeat as active — don't run consolidation while user is chatting.
     void import('../heartbeat/index.js').then(({ heartbeatTouch }) => heartbeatTouch()).catch(() => {});
     const win = getMainWindow();
@@ -225,6 +288,16 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     const history = await sessionStore.loadMessages(sessionId);
     await sessionStore.appendMessage(sessionId, storedUserMessage);
 
+    // How much of the run's output is already safely on disk. Messages are
+    // appended as the agent produces them rather than only at the end, because
+    // the most common way to lose a whole conversation is Infinite AI editing
+    // its own source: the app restarts mid-run, the run never returns, and
+    // everything it had already done was only ever held in memory.
+    const persistedThrough = { value: history.length + 1 };
+
+    // Mark the run as live so a restart is detectable at the next launch.
+    markRunStarted(sessionId, message);
+
     try {
       const startTime = Date.now();
       const completedMessages = await runAgent(history, userMessage, {
@@ -233,10 +306,27 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
         provider,
         model,
         signal: controller.signal,
+        // "Keep working until done": this run gets the marathon budget — the
+        // completeness contract rides the prompt, the ceiling rides here.
+        ...(untilDone
+          ? { maxTurns: UNTIL_DONE_MAX_TURNS, wallClockMs: UNTIL_DONE_WALL_CLOCK_MS }
+          : {}),
         onEvent: (ev) => {
           win.webContents.send(IPC.CHAT_STREAM_EVENT, { sessionId, ...ev });
         },
+        // Persist each message as the agent finishes it. Sequential on purpose:
+        // the transcript has to stay in the order the model actually saw.
+        onMessage: async (produced) => {
+          // A chat cleared mid-run must not be resurrected by a straggling write.
+          if (discardedRuns.has(sessionId)) return;
+          await sessionStore.appendMessage(sessionId, produced);
+          persistedThrough.value += 1;
+          // Refresh the mark so "still working" is distinguishable from "died".
+          markRunStarted(sessionId, message);
+        },
       });
+      // The run finished normally, so there is nothing to report on next boot.
+      clearRunMarker(sessionId);
       const duration = Date.now() - startTime;
       if (background) {
         const lastAssistant = [...completedMessages].reverse().find((m) => m.role === 'assistant');
@@ -295,7 +385,10 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       // was winding down after cancellation. Never recreate a deleted chat.
       const wasDiscarded = discardedRuns.delete(sessionId);
       if (!wasDiscarded && (await sessionStore.loadSessionMeta(sessionId))) {
-        for (const message of completedMessages.slice(history.length + 1)) {
+        // Only the tail the run never streamed. Messages already handed to
+        // `onMessage` during the run are on disk, and appending them again
+        // would double every tool call in the transcript.
+        for (const message of completedMessages.slice(persistedThrough.value)) {
           await sessionStore.appendMessage(sessionId, message);
         }
       }
@@ -308,6 +401,9 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
             : String(err);
       if (background) finishBackgroundTask(sessionId, 'failed', errorMessage);
       console.error('[IPC] CHAT_SEND: runAgent failed:', errorMessage);
+      // The run ended, so it must not be reported as an interrupted one next
+      // boot. The marker only surviving a hard process death is the signal.
+      clearRunMarker(sessionId);
       try {
         win.webContents.send(IPC.CHAT_STREAM_EVENT, {
           sessionId,
@@ -402,6 +498,13 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
   ipcMain.handle(IPC.SESSION_RENAME, async (_e, { sessionId, title }) => sessionStore.renameSession(sessionId, title));
   ipcMain.handle(IPC.SESSION_PIN, async (_e, { sessionId, pinned }) => sessionStore.pinSession(sessionId, pinned));
+
+  // Archive — a flag on the session, never a move. The caller refreshes its own
+  // list, so no broadcast channel is needed for a user-initiated change.
+  ipcMain.handle(IPC.SESSION_ARCHIVE_SET, async (_e, { sessionId, archived }) =>
+    sessionStore.setSessionArchived(sessionId, archived));
+  ipcMain.handle(IPC.SESSION_ARCHIVE_LIST, async () => sessionStore.listArchivedSessions());
+  ipcMain.handle(IPC.SESSION_ARCHIVE_SEARCH, async (_e, { query }) => sessionStore.searchArchivedSessions(query));
   ipcMain.handle(IPC.SESSION_SEARCH, async (_e, { query }) => sessionStore.searchSessions(query));
   ipcMain.handle(IPC.SESSION_BRANCH, async (_e, { sessionId, messageId }) =>
     sessionStore.branchSession(sessionId, messageId),
@@ -490,16 +593,14 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.PROVIDER_HAS_KEY, async (_e, { provider }) => hasApiKey(provider));
 
   ipcMain.handle(IPC.OPENCODE_CLI_VERSION, async () => {
-    const { getInstalledOpenCodeVersion, isOpenCodeVersionAtLeast, openCodeServerVersion, OPENCODE_MIN_FREE_VERSION, openCodeKeylessStatus } =
-      await import('../providers/opencode.js');
+    const { getInstalledOpenCodeVersion, isOpenCodeVersionAtLeast, openCodeServerVersion, OPENCODE_MIN_FREE_VERSION, openCodeKeylessStatus } =      await import('../providers/opencode.js');
     const version = await getInstalledOpenCodeVersion();
     const serverVersion = await openCodeServerVersion();
     // The running server answers turns — it decides free-tier support. When
     // no server is running yet, the installed binary (which will be spawned)
     // decides.
     const effective = serverVersion ?? version;
-    const keyless = await openCodeKeylessStatus().catch(() => null);
-    return {
+    const keyless = await openCodeKeylessStatus().catch(() => null);    return {
       version,
       serverVersion,
       minFreeVersion: OPENCODE_MIN_FREE_VERSION,
@@ -508,8 +609,7 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
       connected: keyless?.connected ?? null,
       opencodeCount: keyless?.opencodeCount ?? null,
       goCount: keyless?.goCount ?? null,
-      freeCount: keyless?.freeCount ?? null,
-    };
+      freeCount: keyless?.freeCount ?? null,    };
   });
   ipcMain.handle(IPC.OPENCODE_SERVER_RESTART, async () => {
     const { restartStaleOpenCodeServer } = await import('../providers/opencode.js');
@@ -626,7 +726,96 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   });
 
   // Blocking question cards (AskUserQuestion)
-  ipcMain.handle(IPC.CHAT_QUESTION_RESOLVE, async (_e, { id, answers, skipped }) => {
+  // ── Workspace static server ─────────────────────────────────────────────────
+// Serves the workspace over loopback so the Tabs browser can display a file the
+// agent produced without launching an external browser window. A file outside
+// the workspace (the agent often writes a scratch page to the temp directory)
+// gets its own single-file root rather than widening the served tree.
+ipcMain.handle(IPC.WORKSPACE_SERVE, async (_e, { root }: { root?: string }) => {
+  try {
+    const server = await startWorkspaceServer(root || process.cwd());
+    return { ok: true, origin: server.origin, root: server.root };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+ipcMain.handle(IPC.WORKSPACE_URL_FOR, async (_e, { path: filePath }: { path?: string }) => {
+  try {
+    if (!filePath) return { ok: false, error: 'path is required' };
+    const absolute = isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);
+    const server = getWorkspaceServer();
+    // Inside the served workspace? Use it directly.
+    const url = server?.urlFor(absolute);
+    if (url) return { ok: true, url };
+    // Otherwise give the file its own root so a scratch page is still viewable.
+    const external = await serveExternalFile(absolute);
+    return external ? { ok: true, url: external } : { ok: false, error: 'Could not serve that file' };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+});
+
+// ── Tab index (renderer mirrors its tabs so the agent can see them) ─────────
+ipcMain.handle(IPC.TAB_INDEX_REPLACE, async (_e, { tabs }: { tabs?: unknown }) => {
+  replaceTabs(Array.isArray(tabs) ? (tabs as Array<{ id: string }>) : []);
+  return { ok: true, count: listTabs().length };
+});
+ipcMain.handle(IPC.TAB_INDEX_UPSERT, async (_e, { tab }: { tab?: { id: string } }) => {
+  if (!tab?.id) return { ok: false, error: 'tab.id is required' };
+  return { ok: true, tab: upsertTab(tab) };
+});
+ipcMain.handle(IPC.TAB_INDEX_REMOVE, async (_e, { id }: { id?: string }) => {
+  if (id) removeTab(id);
+  return { ok: true };
+});
+
+// ── In-app browser (Tabs section) ───────────────────────────────────────────
+// The guest is a WebContentsView child of the app window, so browsing happens
+// inside Infinite OS and nothing ever appears over it. State changes are pushed
+// back to every window so the toolbar, address bar and title stay truthful.
+const pushTabBrowserEvent = (viewId: string): void => {
+  const state = readTabBrowserState(viewId);
+  if (!state) return;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(IPC.TAB_BROWSER_EVENT, { viewId, ...state });
+  }
+};
+ipcMain.handle(IPC.TAB_BROWSER_CREATE, async (event, args) => {
+  const result = createTabBrowserView({
+    viewId: String(args?.viewId ?? ''),
+    windowId: event.sender.id,
+    url: String(args?.url ?? 'about:blank'),
+    bounds: args?.bounds,
+  });
+  if (result.ok) {
+    pushTabBrowserEvent(String(args.viewId));
+    // Follow the guest's own lifecycle so the UI never goes stale.
+    const { getTabBrowserWebContents } = await import('../tab-browser-view.js');
+    const wc = getTabBrowserWebContents(String(args.viewId));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (wc) {
+      for (const channel of ['did-stop-loading', 'did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-fail-load'] as const) {
+        wc.on(channel as never, () => pushTabBrowserEvent(String(args.viewId)));
+      }
+    }
+  }
+  return result;
+});
+ipcMain.handle(IPC.TAB_BROWSER_BOUNDS, async (_e, args) => updateTabBrowserBounds({ viewId: String(args?.viewId), bounds: args?.bounds }));
+ipcMain.handle(IPC.TAB_BROWSER_NAVIGATE, async (_e, args) => navigateTabBrowser({ viewId: String(args?.viewId), url: String(args?.url ?? '') }));
+ipcMain.handle(IPC.TAB_BROWSER_BACK, async (_e, args) => goBackTabBrowser({ viewId: String(args?.viewId) }));
+ipcMain.handle(IPC.TAB_BROWSER_FORWARD, async (_e, args) => goForwardTabBrowser({ viewId: String(args?.viewId) }));
+ipcMain.handle(IPC.TAB_BROWSER_RELOAD, async (_e, args) => reloadTabBrowser({ viewId: String(args?.viewId) }));
+ipcMain.handle(IPC.TAB_BROWSER_STATE, async (_e, args) => {
+  const viewId = String(args?.viewId);
+  const result = tabBrowserState({ viewId });
+  if (!result.ok) return result;
+  const viewport = await tabBrowserViewport(viewId);
+  return { ...result, state: { ...result.state, viewport } };
+});
+ipcMain.handle(IPC.TAB_BROWSER_CLOSE, async (_e, args) => closeTabBrowserView({ viewId: String(args?.viewId) }));
+
+ipcMain.handle(IPC.CHAT_QUESTION_RESOLVE, async (_e, { id, answers, skipped }) => {
     const ok = resolveUserQuestions(id, { answers: answers ?? {}, skipped: skipped ?? {} });
     return { ok };
   });
@@ -834,13 +1023,18 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Phase 2 IPC
   registerBrowserIpc();
   registerBridgeIpc();
-  registerComputerIpc();
   registerAutomationIpc(getMainWindow);
+  registerWorkersIpc(getMainWindow);
 
   // Phase 3 IPC
   registerWebsiteIpc();
   registerAppIpc();
   registerBusinessIpc();
+registerProjectIpc();
+
+// Runs that a restart interrupted, so the app can tell the user what it had
+// already done instead of dropping them back into a blank chat.
+ipcMain.handle(IPC.RESUME_INTERRUPTED, async () => findInterruptedRuns());
   registerPluginIpc();
 
   // Phase 4 IPC
@@ -882,6 +1076,35 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IPC.SELF_EVOLVE_EVOLVE, async () => {
     return selfEvolutionEngine.evolve();
   });
+
+  // Continuous self-evolution loop (the Settings "Evolve continuously" toggle).
+  ipcMain.handle(IPC.EVOLVE_LOOP_START, async (_e, args?: { intervalMs?: number }) => {
+    getEvolutionLoop().start(args);
+    return getEvolutionLoop().status();
+  });
+  ipcMain.handle(IPC.EVOLVE_LOOP_STOP, async () => getEvolutionLoop().stop());
+  ipcMain.handle(IPC.EVOLVE_LOOP_STATUS, async () => getEvolutionLoop().status());
+  ipcMain.handle(IPC.EVOLVE_LOOP_RUN_NOW, async () => getEvolutionLoop().runNow());
+
+  // Self-apply: typecheck + rebuild + relaunch so packaged builds load the
+  // app's own source edits (dev mode hot-reloads — no rebuild needed).
+  ipcMain.handle(IPC.SELF_APPLY_RUN, async () => {
+    const win = getMainWindow();
+    return getSelfApplyRunner().run({
+      isPackaged: app.isPackaged,
+      repoRoot: findSelfRepoRoot(),
+      relaunch: () => {
+        app.relaunch();
+        app.exit(0);
+      },
+      onEvent: (event) => {
+        try {
+          win?.webContents.send(IPC.SELF_APPLY_EVENT, event);
+        } catch { /* window may be gone mid-relaunch */ }
+      },
+    });
+  });
+  ipcMain.handle(IPC.SELF_APPLY_STATUS, async () => getSelfApplyRunner().status());
 
   // Skills IPC
   ipcMain.handle(IPC.SKILLS_LIST, async () => {
@@ -1168,6 +1391,38 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     return listCrewRuns();
   });
 
+  // ── Session Board IPC (kanban management of parallel agent sessions) ────
+  sessionBoard.onEvent((event) => {
+    const win = getMainWindow();
+    win?.webContents.send(IPC.SESSION_BOARD_EVENT, event);
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_CREATE, async (_e, { title, options }) => {
+    return sessionBoard.createSession(title, options);
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_START, async (_e, { sessionId, task, agentId, model, provider }) => {
+    const session = await sessionBoard.startSession(sessionId, task, agentId, model, provider);
+    if (!session) throw new Error('Unknown session.');
+    return session;
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_CANCEL, async (_e, { sessionId }) => {
+    return { ok: sessionBoard.cancelSession(sessionId) };
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_INTERJECT, async (_e, { sessionId, message }) => {
+    return { ok: sessionBoard.interject(sessionId, message) };
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_LIST, async () => {
+    return sessionBoard.getBoardData();
+  });
+
+  ipcMain.handle(IPC.SESSION_BOARD_GET, async (_e, { sessionId }) => {
+    return sessionBoard.getSession(sessionId) ?? null;
+  });
+
   // Model Selector IPC
   ipcMain.handle(IPC.MODEL_SELECT, async (_e, { taskType }) => {
     const availableProviders = new Map<string, { apiKey?: string; baseUrl?: string }>();
@@ -1182,25 +1437,157 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
     return getAllFreeModels();
   });
 
-  // Voice Assistant IPC (stubbed — VoiceManager supports speechToText/textToSpeech)
-  ipcMain.handle(IPC.VOICE_CONFIG_GET, async () => ({}));
-  ipcMain.handle(IPC.VOICE_CONFIG_SET, async () => ({ ok: true }));
+  // Voice Assistant IPC — settings, commands, history, and transcript routing
+  // are persisted by src/main/voice/assistant.ts.
+  ipcMain.handle(IPC.VOICE_CONFIG_GET, async () => getVoiceConfig());
+  ipcMain.handle(IPC.VOICE_CONFIG_SET, async (_e, { config }: { config?: Partial<VoiceConfig> }) =>
+    setVoiceConfig(config ?? {}),
+  );
+  // ── Dictation engine selection ─────────────────────────────────────────
+  // Order: fully local (mic → energy VAD → Faster-Whisper, offline) →
+  // Windows SAPI dictation → the browser engine in the renderer. Each layer
+  // only starts when the one above it is unavailable or refuses to start, so
+  // a missing Python install still ends in a working microphone.
+  let localVoiceForward: (() => void) | null = null;
+  let localVoiceStartError: string | null = null;
+  // Bumped by every Stop so a Stop that lands while start() is still awaiting
+  // the Python handshake cannot leave a freshly-started session orphaned
+  // behind an already-unsubscribed listener.
+  let listenEpoch = 0;
+
+  // The server also emits mic-meter/status chatter (level, speech_start,
+  // status, tts_*); only the renderer's dictation contract is forwarded.
+  const LOCAL_DICTATION_TYPES = new Set(['ready', 'result', 'error', 'ended']);
+
   ipcMain.handle(IPC.VOICE_START_LISTENING, async (event) => {
-    return windowsDictation.start((payload) => {
+    localVoiceStartError = null;
+    const epoch = ++listenEpoch;
+
+    if (isLocalVoiceScriptAvailable()) {
+      const local = getLocalVoice();
+      // Subscribe before start(): the server emits `ready` as part of
+      // starting the capture stream.
+      localVoiceForward?.();
+      localVoiceForward = local.onEvent((payload) => {
+        if (!LOCAL_DICTATION_TYPES.has(payload.type) || event.sender.isDestroyed()) return;
+        event.sender.send(IPC.VOICE_TRANSCRIPT_EVENT, {
+          type: payload.type,
+          transcript: payload.transcript,
+          // VAD-gated local results are always whole-utterance finals.
+          final: payload.type === 'result' ? true : undefined,
+          confidence: payload.confidence,
+          language: payload.language,
+          message: payload.message,
+        });
+      });
+
+      const config = getVoiceConfig();
+      const result = await local.start({
+        language: config.language,
+        model: config.sttModel,
+        // Bias decoding toward the wake phrase — small models garble it.
+        hotwords: config.wakeWord,
+      });
+
+      if (result.ok) {
+        if (epoch !== listenEpoch) {
+          // Stopped while starting: tear the session back down instead of
+          // returning a live engine nobody is listening to.
+          await local.stop().catch(() => undefined);
+          localVoiceForward?.();
+          localVoiceForward = null;
+          return { ok: false, error: 'Stopped before the speech engine finished starting.' };
+        }
+        return { ok: true, engine: 'local-whisper', model: result.model };
+      }
+
+      localVoiceForward?.();
+      localVoiceForward = null;
+      localVoiceStartError = result.error ?? 'Local speech engine failed to start.';
+    }
+
+    if (epoch !== listenEpoch) {
+      return { ok: false, error: 'Stopped before the speech engine finished starting.' };
+    }
+
+    const started = await windowsDictation.start((payload) => {
       if (!event.sender.isDestroyed()) event.sender.send(IPC.VOICE_TRANSCRIPT_EVENT, payload);
     });
+    if (started.ok && epoch !== listenEpoch) {
+      windowsDictation.stop();
+      return { ok: false, error: 'Stopped before the speech engine finished starting.' };
+    }
+    if (started.ok) return started;
+    const parts = [localVoiceStartError, started.error].filter(Boolean) as string[];
+    return { ok: false, error: parts.join(' — ') || 'No speech engine is available.' };
   });
+
   ipcMain.handle(IPC.VOICE_STOP_LISTENING, async () => {
+    listenEpoch += 1;
+    localVoiceForward?.();
+    localVoiceForward = null;
+    // Both are safe no-ops when they never started, and stopping one must
+    // never leave the other holding the microphone.
+    await getLocalVoice().stop().catch(() => undefined);
     windowsDictation.stop();
     return { ok: true };
   });
-  ipcMain.handle(IPC.VOICE_PROCESS_TRANSCRIPT, async (_e, { transcript }) => transcript);
-  ipcMain.handle(IPC.VOICE_SET_WAKE_WORD, async () => ({ ok: true }));
-  ipcMain.handle(IPC.VOICE_ADD_CUSTOM_COMMAND, async () => ({ ok: true }));
-  ipcMain.handle(IPC.VOICE_REMOVE_CUSTOM_COMMAND, async () => ({ ok: true }));
-  ipcMain.handle(IPC.VOICE_CUSTOM_COMMANDS, async () => []);
-  ipcMain.handle(IPC.VOICE_HISTORY, async () => []);
-  ipcMain.handle(IPC.VOICE_CLEAR_HISTORY, async () => ({ ok: true }));
+  ipcMain.handle(IPC.VOICE_PROCESS_TRANSCRIPT, async (_e, { transcript }: { transcript?: string }) =>
+    processTranscript(transcript ?? ''),
+  );
+  ipcMain.handle(IPC.VOICE_SET_WAKE_WORD, async (_e, { word }: { word?: string }) => {
+    setVoiceConfig({ wakeWord: word ?? '' });
+    return { ok: true, config: getVoiceConfig() };
+  });
+  ipcMain.handle(IPC.VOICE_ADD_CUSTOM_COMMAND, async (_e, { trigger, action }: { trigger?: string; action?: string }) => {
+    addCustomCommand(trigger ?? '', action ?? '');
+    return { ok: true, commands: listCustomCommands() };
+  });
+  ipcMain.handle(IPC.VOICE_REMOVE_CUSTOM_COMMAND, async (_e, { trigger }: { trigger?: string }) => {
+    removeCustomCommand(trigger ?? '');
+    return { ok: true, commands: listCustomCommands() };
+  });
+  ipcMain.handle(IPC.VOICE_CUSTOM_COMMANDS, async () => listCustomCommands());
+  ipcMain.handle(IPC.VOICE_HISTORY, async () => listHistory());
+
+  // ── Always-on voice ───────────────────────────────────────────────────────
+  // The listening loop is owned by the main process (voice/session.ts), so it
+  // keeps working whichever view is open. These handlers are a thin control
+  // surface; state is broadcast to every window on every change.
+  const broadcastVoiceState = (): void => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      win.webContents.send(IPC.VOICE_SESSION_EVENT, voiceSession.getState());
+    }
+  };
+  ipcMain.handle(IPC.VOICE_SESSION_STATE, async () => voiceSession.getState());
+  ipcMain.handle(IPC.VOICE_SESSION_SET_ENABLED, async (_e, { enabled, cwd }: { enabled?: boolean; cwd?: string }) =>
+    voiceSession.setEnabled(enabled === true, cwd || '.'),
+  );
+  ipcMain.handle(IPC.VOICE_SESSION_PAUSE, async () => {
+    voiceSession.pause();
+    return voiceSession.getState();
+  });
+  ipcMain.handle(IPC.VOICE_SESSION_RESUME, async () => voiceSession.resume());
+  ipcMain.handle(IPC.VOICE_SESSION_INTERRUPT, async () => {
+    voiceSession.interrupt();
+    return voiceSession.getState();
+  });
+  ipcMain.handle(IPC.VOICE_SESSION_SAY, async (_e, { text }: { text?: string }) => {
+    // Fire and forget: the renderer only needs the audio to start.
+    void voiceSession.say(text ?? '');
+    return { ok: true };
+  });
+  voiceSession.on('state', broadcastVoiceState);
+  voiceSession.on('utterance', (payload) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC.VOICE_SESSION_EVENT, voiceSession.getState(), payload);
+    }
+  });
+  ipcMain.handle(IPC.VOICE_CLEAR_HISTORY, async () => {
+    clearHistory();
+    return { ok: true };
+  });
   ipcMain.handle(IPC.VOICE_SPEAK, async (_e, { text }) => {
     try {
       const { getVoiceAsync } = await import('../voice/index.js');
@@ -1416,6 +1803,19 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('screenshot:stats', async () => {
     const { getScreenshotStats } = await import('../system/screenshot-cleanup.js');
     return getScreenshotStats();
+  });
+
+  // Token and cost totals. Providers report usage per response and the
+  // pricing table can price it, but nothing connected the two, so the numbers
+  // were captured and thrown away.
+  ipcMain.handle(IPC.USAGE_GET, async () => {
+    const { getUsageTotals } = await import('../providers/usage-store.js');
+    return getUsageTotals();
+  });
+  ipcMain.handle(IPC.USAGE_RESET, async () => {
+    const { resetUsage } = await import('../providers/usage-store.js');
+    resetUsage();
+    return true;
   });
 
   // Window controls are registered by registerWindowIpc() — no duplicates here.

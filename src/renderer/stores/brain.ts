@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { audioDataMime, speakWithBrowserVoice } from '../lib/voiceConversation';
 
 // ── Infinite AI Brain — core identity ──────────────────────────────────────
 // The Brain is a fast, on-device inference layer. It is not a remote LLM:
@@ -745,11 +746,35 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
 
     // Voice handlers — TTS and STT
     if (actType === 'command' && action.command?.includes('TTS:')) {
-      const textToSpeak = action.command.replace('TTS: ', '');
+      const raw = action.command.trim().replace(/^echo\s+/i, '');
+      const unwrapped = raw.replace(/^"([\s\S]*)"$/, '$1').replace(/^'([\s\S]*)'$/, '$1');
+      const textToSpeak = unwrapped.replace(/^TTS:\s*/i, '').trim();
+      if (!textToSpeak) return '❌ TTS: no text to speak.';
       try {
-        await window.api.voiceTTS({ text: textToSpeak });
-        return `🔊 Speaking: "${textToSpeak}"`;
-      } catch (e: unknown) { const error = e instanceof Error ? e : new Error(String(e)); return `❌ TTS failed: ${error.message}`; }
+        // voice:tts answers { audio, provider } (base64 string in older
+        // builds) — checking only for a string meant the local voice never
+        // played and every TTS: command fell through to the browser voice.
+        const tts = (await window.api.voiceTTS({ text: textToSpeak })) as
+          | string
+          | { audio?: string; provider?: string }
+          | null
+          | undefined;
+        const encoded = typeof tts === 'string' ? tts : tts?.audio;
+        if (encoded) {
+          const audio = new Audio(`data:${audioDataMime(encoded)};base64,${encoded}`);
+          await audio.play();
+          return `🔊 Speaking: "${textToSpeak}"`;
+        }
+        const fallback = await speakWithBrowserVoice(textToSpeak).done;
+        return fallback.ok
+          ? `🔊 Speaking: "${textToSpeak}"`
+          : `❌ TTS failed: ${fallback.error ?? 'no audible output'}`;
+      } catch (e: unknown) {
+        const fallback = await speakWithBrowserVoice(textToSpeak).done;
+        if (fallback.ok) return `🔊 Speaking: "${textToSpeak}" (browser voice)`;
+        const error = e instanceof Error ? e : new Error(String(e));
+        return `❌ TTS failed: ${error.message}`;
+      }
     }
 
     if (actType === 'command' && (action.command?.includes('voice recognition enabled') || action.command?.includes('voice recognition disabled'))) {

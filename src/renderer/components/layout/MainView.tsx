@@ -12,14 +12,20 @@ const FileManager = lazy(() => import('../workspace/FileManager').then(m => ({ d
 const MemoryPanel = lazy(() => import('../memory/MemoryPanel').then(m => ({ default: m.MemoryPanel })));
 const SettingsView = lazy(() => import('../views/SettingsView').then(m => ({ default: m.SettingsView })));
 const AutomationView = lazy(() => import('../views/AutomationView').then(m => ({ default: m.AutomationView })));
+// Workers: Warmwind-style autonomous tasks — step lists, Teaching mode, app catalog, vault.
+const WorkersView = lazy(() => import('../views/WorkersView').then(m => ({ default: m.WorkersView })));
 const WorkspaceView = lazy(() => import('../views/WorkspaceView').then(m => ({ default: m.WorkspaceView })));
 const ActivityTrackerView = lazy(() => import('../views/ActivityTrackerView').then(m => ({ default: m.ActivityTrackerView })));
 const AppBuilderView = lazy(() => import('../views/AppBuilderView').then(m => ({ default: m.AppBuilderView })));
 const ProjectsView = lazy(() => import('../views/ProjectsView').then(m => ({ default: m.ProjectsView })));
+// The real Kanban board over the project/task store. The Project tool wrote
+// this data all along, but ProjectsView is a scaffolding generator, so nothing
+// ever showed the board itself.
+const BoardView = lazy(() => import('../views/BoardView'));
+const ArchiveView = lazy(() => import('../views/ArchiveView').then(m => ({ default: m.ArchiveView })));
 const BrowserControlView = lazy(() => import('../views/BrowserControlView').then(m => ({ default: m.BrowserControlView })));
 const CallCenterView = lazy(() => import('../views/CallCenterView').then(m => ({ default: m.CallCenterView })));
 const CloudSyncView = lazy(() => import('../views/CloudSyncView').then(m => ({ default: m.CloudSyncView })));
-const ComputerControlView = lazy(() => import('../views/ComputerControlView').then(m => ({ default: m.ComputerControlView })));
 const DeployView = lazy(() => import('../views/DeployView').then(m => ({ default: m.DeployView })));
 const EnterpriseView = lazy(() => import('../views/EnterpriseView').then(m => ({ default: m.EnterpriseView })));
 const PluginStoreView = lazy(() => import('../views/PluginStoreView').then(m => ({ default: m.PluginStoreView })));
@@ -40,6 +46,12 @@ const PowerCenterView = lazy(() => import('../views/PowerCenterView').then(m => 
 const CreationsView = lazy(() => import('../views/CreationsView').then(m => ({ default: m.CreationsView })));
 const BusinessOSView = lazy(() => import('../views/BusinessOSView').then(m => ({ default: m.BusinessOSView })));
 const KnowledgeView = lazy(() => import('../views/KnowledgeView').then(m => ({ default: m.KnowledgeView })));
+const InfiniteGuideView = lazy(() => import('../views/InfiniteGuideView').then(m => ({ default: m.InfiniteGuideView })));
+const InfiniteOverviewView = lazy(() => import('../views/InfiniteOverviewView').then(m => ({ default: m.InfiniteOverviewView })));
+const InfiniteTabView = lazy(() => import('../views/InfiniteTabView').then(m => ({ default: m.InfiniteTabView })));
+// Power Center = the Infinite tab surface (route: home | universe)
+const SpellForgeView = lazy(() => import('../views/SpellForgeView').then(m => ({ default: m.SpellForgeView })));
+const JournalView = lazy(() => import('../views/JournalView').then(m => ({ default: m.JournalView })));
 
 interface MainViewProps {
   activeView: string;
@@ -80,6 +92,10 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'projects':
         return <ProjectsView onOpenWorkspace={() => onViewChange('workspace')} />;
+      case 'board':
+        return <BoardView />;
+      case 'archive':
+        return <ArchiveView />;
       case 'documents':
         return (
           <div className="flex-1 overflow-hidden p-6 animate-fade-in flex flex-col">
@@ -94,6 +110,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         );
       case 'automations':
         return <AutomationView />;
+      case 'workers':
+        return <WorkersView />;
       case 'memory':
         return <MemoryPanel onClose={() => onViewChange('chats')} />;
       case 'workspace':
@@ -101,7 +119,9 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
       case 'browser':
         return <BrowserControlView />;
       case 'computer':
-        return <ComputerControlView />;
+        // The standalone PC Control page was removed; the capability lives in
+        // the agent's hands plus the live-desktop strip inside Browser Control.
+        return <BrowserControlView />;
       case 'research':
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'activity':
@@ -123,7 +143,7 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
       case 'video':
         return <VideoView />;
       case 'voice':
-        return <VoiceView />;
+        return <VoiceView onViewChange={onViewChange} />;
       case 'replay':
         return <TaskReplayView />;
       case 'standing-orders':
@@ -136,6 +156,14 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <BusinessOSView />;
       case 'knowledge':
         return <KnowledgeView />;
+      case 'guide':
+        return <InfiniteGuideView onViewChange={onViewChange} />;
+            case 'overview':
+        return <InfiniteOverviewView onViewChange={onViewChange} />;
+      case 'infinite':
+        return <InfiniteTabView onViewChange={onViewChange} />;
+      case 'universe':
+        return <PowerCenterView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
       case 'creations':
         return <CreationsView />;
       case 'capabilities':
@@ -152,6 +180,10 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <TerminalView />;
       case 'settings':
         return <SettingsView />;
+      case 'spell':
+        return <SpellForgeView />;
+      case 'journal':
+        return <JournalView />;
       default:
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
     }

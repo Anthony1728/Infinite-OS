@@ -4,7 +4,6 @@ import { runHooks } from './hooks.js';
 import type { Tool, ToolResult } from '../tools/base.js';
 import { actionAuditLog } from '../audit/action-log.js';
 import { planModeGuard } from './plan-mode.js';
-
 export const TOOL_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 
 // Tool-specific timeouts: some tools need more time
@@ -43,6 +42,44 @@ const PARALLEL_SAFE_TOOLS = new Set([
 /** Read-only/compute-only tools can safely fan out in one model turn. */
 export function isParallelSafeTool(name: string): boolean {
   return PARALLEL_SAFE_TOOLS.has(name);
+}
+
+/**
+ * How many parallel-safe tools from one model turn may run at the same time.
+ *
+ * Unlimited fan-out is a liability rather than a feature: a model that emits
+ * fifteen WebSearch calls fires fifteen requests into a rate-limited API at
+ * once, most get throttled, and the retries cost more wall time than the
+ * parallelism saved. Six is comfortably above any realistic single turn while
+ * keeping a burst from stampeding a provider.
+ */
+export const PARALLEL_TOOL_CONCURRENCY = 6;
+
+/**
+ * Runs `fn` over `items` with at most `limit` calls in flight.
+ *
+ * Results come back in input order, so callers do not have to re-sort. Used for
+ * the parallel-safe half of a tool batch; the sequential half keeps its own
+ * order by construction.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  const workerCount = Math.max(1, Math.min(Math.floor(limit) || 1, items.length));
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index] as T, index);
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
 }
 
 type ToolUse = Extract<ContentBlock, { type: 'tool_use' }>;

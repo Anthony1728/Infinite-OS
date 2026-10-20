@@ -7,9 +7,9 @@
 //   WebFetch(domain:example.com)
 
 import type { ContentBlock } from '../../shared/types.js';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep, join } from 'node:path';
 import { dirname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { settings } from '../settings/store.js';
 import { requestPermission } from './permission-prompt.js';
@@ -29,10 +29,72 @@ type PermissionProfile = ':read-only' | ':workspace' | ':accept-edits' | ':full-
 
 type ToolUse = Extract<ContentBlock, { type: 'tool_use' }>;
 
+/**
+ * Project-scoped rules, committed next to the code at `.infinite/permissions.json`:
+ *   { "allow": ["Bash(npm run *)"], "deny": ["Edit(./secrets/**)"], "ask": ["WebFetch(domain:example.com)"] }
+ *
+ * Unlike the global settings these travel with the repository, so a team can
+ * encode "never touch prod credentials" once instead of asking every member to
+ * configure their machine. The file is advisory input, never executable code.
+ */
+export interface ScopedPermissionRules {
+  allow: string[];
+  deny: string[];
+  ask: string[];
+}
+
+const MAX_PROJECT_RULES = 80;
+const MAX_RULE_LENGTH = 240;
+const EMPTY_RULES: ScopedPermissionRules = { allow: [], deny: [], ask: [] };
+let projectRulesCache: { path: string; mtimeMs: number; size: number; rules: ScopedPermissionRules } | null = null;
+
+export function projectRulesPath(cwd: string): string {
+  return join(cwd, '.infinite', 'permissions.json');
+}
+
+function cleanRuleList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((rule): rule is string => typeof rule === 'string')
+    .map((rule) => rule.trim())
+    .filter((rule) => rule.length > 2 && rule.length <= MAX_RULE_LENGTH)
+    .filter((rule) => /^[A-Za-z][A-Za-z0-9_-]*\(.+\)$/.test(rule))
+    .slice(0, MAX_PROJECT_RULES);
+}
+
+/** Read and validate project rules. A missing or malformed file means "no extra rules". */
+export function loadProjectRules(cwd: string): ScopedPermissionRules {
+  if (!cwd.trim()) return EMPTY_RULES;
+  const path = projectRulesPath(cwd);
+  try {
+    const stat = statSync(path);
+    if (projectRulesCache && projectRulesCache.path === path && projectRulesCache.mtimeMs === stat.mtimeMs && projectRulesCache.size === stat.size) {
+      return projectRulesCache.rules;
+    }
+    if (stat.size > 64_000) return EMPTY_RULES;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    const rules: ScopedPermissionRules = {
+      allow: cleanRuleList(parsed.allow),
+      deny: cleanRuleList(parsed.deny),
+      ask: cleanRuleList(parsed.ask),
+    };
+    projectRulesCache = { path, mtimeMs: stat.mtimeMs, size: stat.size, rules };
+    return rules;
+  } catch {
+    return EMPTY_RULES;
+  }
+}
+
+/** Test hook: forces the next load to hit disk. */
+export function clearProjectRulesCache(): void {
+  projectRulesCache = null;
+}
+
 export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cwd: string; signal?: AbortSignal }): Promise<boolean> {
   const perms = (settings.get('permissions') ?? {}) as { allow?: string[]; deny?: string[]; ask?: string[] };
-  const allow = perms.allow ?? [];
-  const deny = perms.deny ?? [];
+  const project = loadProjectRules(opts.cwd);
+  const allow = [...project.allow, ...(perms.allow ?? [])];
+  const deny = [...project.deny, ...(perms.deny ?? [])];
   const ask = perms.ask ?? [];
   const tool = toolRegistry.get(tu.name);
 
@@ -55,6 +117,12 @@ export async function checkPermission(tu: ToolUse, opts: { sessionId: string; cw
   // For restricted modes, deny rules and disabled tools remain authoritative
   if (tool?.permission === 'deny' || deny.some((rule) => matchRule(rule, canonicalTu, opts.cwd))) return false;
   if (profile === ':read-only') return checkReadOnlyPermission(canonicalTu, opts);
+  // A project "ask" rule forces a prompt even in modes that would otherwise
+  // auto-approve (workspace edits, acceptEdits). Read-only is stricter and
+  // already returned above, so a project file can never widen it.
+  if (project.ask.some((rule) => matchRule(rule, canonicalTu, opts.cwd))) {
+    return await requestPermission(canonicalTu, opts);
+  }
   if (profile === ':workspace') return checkWorkspacePermission(canonicalTu, opts);
 
   const mode = profile === ':accept-edits'
@@ -288,6 +356,28 @@ function minimatch(s: string, pattern: string): boolean {
 }
 
 function pathMatch(filePath: string, pattern: string, cwd: string): boolean {
-  const abs = filePath.startsWith('/') || /^[A-Z]:/i.test(filePath) ? filePath : `${cwd}/${filePath}`;
-  return minimatch(abs, pattern) || minimatch(filePath, pattern);
+  const toPosix = (value: string) => value.replace(/\\/g, '/');
+  const normalizedFile = toPosix(filePath);
+  const normalizedPattern = toPosix(pattern);
+  const candidates = new Set<string>([filePath, normalizedFile]);
+  if (filePath) {
+    const absolute = isAbsolute(filePath) ? resolve(filePath) : resolve(cwd, filePath);
+    candidates.add(absolute);
+    candidates.add(toPosix(absolute));
+  }
+  // Project rules are usually written relative to the repo (`./src/**`).
+  // Resolve them against cwd so they match both absolute and relative tool input.
+  if (!isAbsolute(pattern)) {
+    const absolutePattern = resolve(cwd, pattern);
+    candidates.add(toPosix(absolutePattern));
+  }
+  const patterns = new Set<string>([pattern, normalizedPattern]);
+  if (!isAbsolute(pattern)) patterns.add(toPosix(resolve(cwd, pattern)));
+  for (const candidate of candidates) {
+    for (const candidatePattern of patterns) {
+      if (minimatch(candidate, candidatePattern)) return true;
+      if (minimatch(toPosix(candidate), toPosix(candidatePattern))) return true;
+    }
+  }
+  return false;
 }
