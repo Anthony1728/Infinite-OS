@@ -50,7 +50,7 @@ export function StatusBar() {
   }, []);
 
   return (
-    <footer className="flex h-6 shrink-0 items-center gap-2 border-t border-white/[0.06] bg-[#0a0a0e]/90 px-2 text-[10px] text-zinc-500 select-none">
+    <footer className="os-statusbar flex h-6 shrink-0 items-center gap-2 border-t border-white/[0.06] bg-[#0a0a0e]/90 px-2 text-[10px] text-zinc-500 select-none">
       <span className="inline-flex items-center gap-1.5" title={engineOk === false ? 'Engine issue' : 'Engine status'}>
         <span
           className={`h-1.5 w-1.5 rounded-full ${

@@ -52,6 +52,8 @@ const InfiniteTabView = lazy(() => import('../views/InfiniteTabView').then(m => 
 // Power Center = the Infinite tab surface (route: home | universe)
 const SpellForgeView = lazy(() => import('../views/SpellForgeView').then(m => ({ default: m.SpellForgeView })));
 const JournalView = lazy(() => import('../views/JournalView').then(m => ({ default: m.JournalView })));
+const StudioView = lazy(() => import('../studio/StudioView').then(m => ({ default: m.StudioView })));
+const PlannerView = lazy(() => import('../planner/PlannerView').then(m => ({ default: m.PlannerView })));
 
 interface MainViewProps {
   activeView: string;
@@ -184,6 +186,10 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <SpellForgeView />;
       case 'journal':
         return <JournalView />;
+      case 'studio':
+        return <StudioView />;
+      case 'planner':
+        return <PlannerView />;
       default:
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
     }

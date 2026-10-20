@@ -428,19 +428,20 @@ export const freebuff: ProviderAdapter = {
     // app release). Falls back to the built-in catalog on any failure.
     try {
       const creds = await getFreebuffCredentials();
-      if (creds) {
-        const res = await fetch(`${FREEBUFF_BASE_URL}${SESSION_PATH}`, {
-          headers: { Authorization: `Bearer ${creds.authToken}` },
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (res.ok) {
-          const body = await res.json() as { prices?: Record<string, unknown> };
-          const liveIds = Object.keys(body.prices ?? {}).filter((id) => typeof id === 'string' && id.includes('/'));
-          if (liveIds.length > 0) {
-            models = buildFreebuffCatalog(liveIds);
-            liveCatalogIds.clear();
-            for (const model of models) liveCatalogIds.add(model.id);
-          }
+      // An unauthenticated probe is a cheap way to discover a server-side
+      // catalog in tests and local tooling. A real 401 simply falls back to
+      // the built-in rows below.
+      const res = await fetch(`${FREEBUFF_BASE_URL}${SESSION_PATH}`, {
+        headers: creds ? { Authorization: `Bearer ${creds.authToken}` } : {},
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        const body = await res.json() as { prices?: Record<string, unknown> };
+        const liveIds = Object.keys(body.prices ?? {}).filter((id) => typeof id === 'string' && id.includes('/'));
+        if (liveIds.length > 0) {
+          models = buildFreebuffCatalog(liveIds);
+          liveCatalogIds.clear();
+          for (const model of models) liveCatalogIds.add(model.id);
         }
       }
     } catch { /* built-in catalog is the fallback */ }
@@ -449,11 +450,6 @@ export const freebuff: ProviderAdapter = {
   },
 
   async *streamChat(req: ChatRequest): AsyncIterable<StreamChunk> {
-    const creds = await getFreebuffCredentials();
-    if (!creds) {
-      yield { type: 'error', error: freebuffLoginHint() };
-      return;
-    }
     const entry: FreebuffTurnEntry = { id: req.model, label: freebuffLabel(req.model), ...resolveFreebuffAgent(req.model) };
     const knownModel = FREEBUFF_AGENT_ROOTS.some((m) => m.id === req.model)
       || FREEBUFF_FREE_MODELS.some((m) => m.id === req.model)
@@ -462,6 +458,12 @@ export const freebuff: ProviderAdapter = {
       yield { type: 'error', error: `Unknown Freebuff model: ${req.model}. Pick one of: ${FREEBUFF_FREE_MODELS.map((m) => m.id).join(', ')}.` };
       return;
     }
+    // Older CLI builds wrote the token into credentials.json. Newer builds
+    // can keep it in the OS keychain, which we cannot read without native
+    // bindings; attempting admission without a token surfaces the exact
+    // `freebuff login` hint instead of pretending the provider is signed out
+    // before the network has said so.
+    const creds = (await getFreebuffCredentials()) ?? { authToken: '' };
     const releaseSlot = await acquireFreebuffSlot();
     try {
       yield* runFreebuffTurn(req, creds, entry);

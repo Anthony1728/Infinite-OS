@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebsiteBuilder } from './website.js';
@@ -14,7 +14,7 @@ describe('website generate quality', () => {
       const site = builder.createWebsite({ name: 'Acme Site', framework: 'html', templateId: 'portfolio' });
       const files = builder.generateFiles(site.id);
       expect(files.length).toBeGreaterThan(0);
-      const html = require('node:fs').readFileSync(files[0], 'utf-8') as string;
+      const html = readFileSync(files[0], 'utf-8') as string;
       expect(html).not.toContain('undefined');
       expect(html).toContain('React');
       expect(html).toContain('TypeScript');
@@ -40,7 +40,7 @@ describe('website generate quality', () => {
         order: 0,
       });
       const files = builder.generateFiles(site.id);
-      const html = require('node:fs').readFileSync(files[0], 'utf-8') as string;
+      const html = readFileSync(files[0], 'utf-8') as string;
       expect(html).toContain('Free');
       expect(html).toContain('Pro');
       expect(html).not.toContain('undefined');

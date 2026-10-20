@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { useAuthStore } from '../../stores/auth';
+import { prepareWallpaperImage, WALLPAPER_PRESETS } from '../../lib/wallpapers';
 import {
   TEMPLATE_PRESETS,
   appearanceFromPrompt,
@@ -41,7 +42,10 @@ export function ExperienceSettingsModal({
   const [name, setName] = useState(user?.name ?? '');
   const [prompt, setPrompt] = useState('');
   const [designerMessage, setDesignerMessage] = useState('');
+  const [wallpaperError, setWallpaperError] = useState('');
+  const [wallpaperBusy, setWallpaperBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const wallpaperFileRef = useRef<HTMLInputElement>(null);
 
   const applyTemplate = (id: UITemplate) => appearance.setAppearance(TEMPLATE_PRESETS[id]);
   const runDesigner = () => {
@@ -52,6 +56,25 @@ export function ExperienceSettingsModal({
     }
     appearance.setAppearance(patch);
     setDesignerMessage('Applied instantly. Your workspace remembers this design.');
+  };
+
+  const chooseWallpaper = async (file?: File) => {
+    if (!file) return;
+    setWallpaperBusy(true);
+    setWallpaperError('');
+    try {
+      const prepared = await prepareWallpaperImage(file);
+      appearance.setAppearance({
+        wallpaper: 'custom',
+        wallpaperImage: prepared.dataUrl,
+        wallpaperImageName: prepared.name,
+      });
+    } catch (error) {
+      setWallpaperError(error instanceof Error ? error.message : 'That image could not be used.');
+    } finally {
+      setWallpaperBusy(false);
+      if (wallpaperFileRef.current) wallpaperFileRef.current.value = '';
+    }
   };
 
   const chooseAvatar = (file?: File) => {
@@ -112,6 +135,66 @@ export function ExperienceSettingsModal({
 
           {section === 'appearance' && (
             <section className="animate-fade-in space-y-6">
+              <div><h3 className="os-section-title">Desktop wallpaper</h3><p className="os-section-copy">A backdrop that follows you across every view. Presets are rendered in CSS, so they cost almost nothing.</p></div>
+              <div className="os-wallpaper-grid">
+                {WALLPAPER_PRESETS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-id={item.id}
+                    onClick={() => appearance.setAppearance({ wallpaper: item.id })}
+                    className={`os-wallpaper-tile ${appearance.wallpaper === item.id ? 'is-active' : ''}`}
+                    aria-pressed={appearance.wallpaper === item.id}
+                  >
+                    <span className="os-wallpaper-thumb" style={{ background: item.background }} />
+                    <span className="os-wallpaper-meta"><strong>{item.name}</strong><small>{item.description}</small></span>
+                    {appearance.wallpaper === item.id && <span className="os-wallpaper-check">✓</span>}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  data-id="custom"
+                  onClick={() => {
+                    // An existing photo should come back with one click; only
+                    // open the picker when there is nothing to switch back to.
+                    if (appearance.wallpaperImage) appearance.setAppearance({ wallpaper: 'custom' });
+                    else wallpaperFileRef.current?.click();
+                  }}
+                  className={`os-wallpaper-tile ${appearance.wallpaper === 'custom' ? 'is-active' : ''}`}
+                  aria-pressed={appearance.wallpaper === 'custom'}
+                >
+                  <span className="os-wallpaper-thumb">
+                    {appearance.wallpaperImage
+                      ? <img src={appearance.wallpaperImage} alt="" />
+                      : <span className="text-lg text-zinc-500">{wallpaperBusy ? '…' : '+'}</span>}
+                  </span>
+                  <span className="os-wallpaper-meta">
+                    <strong>Your photo</strong>
+                    <small>{appearance.wallpaperImageName || (wallpaperBusy ? 'Preparing…' : 'JPG, PNG, or WebP')}</small>
+                  </span>
+                  {appearance.wallpaper === 'custom' && <span className="os-wallpaper-check">✓</span>}
+                </button>
+              </div>
+              <input
+                ref={wallpaperFileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(event) => void chooseWallpaper(event.target.files?.[0])}
+              />
+              {wallpaperError && <p className="rounded-lg border border-rose-400/20 bg-rose-500/[0.06] px-3 py-2 text-[9px] text-rose-300">{wallpaperError}</p>}
+              <div className="grid grid-cols-2 gap-4">
+                <label className="os-control"><span>Wallpaper dim <b>{appearance.wallpaperDim}%</b></span><input type="range" min="0" max="85" value={appearance.wallpaperDim} onChange={(event) => appearance.setAppearance({ wallpaperDim: Number(event.target.value) })} /></label>
+                <label className="os-control"><span>Wallpaper blur <b>{appearance.wallpaperBlur}px</b></span><input type="range" min="0" max="24" value={appearance.wallpaperBlur} onChange={(event) => appearance.setAppearance({ wallpaperBlur: Number(event.target.value) })} /></label>
+              </div>
+              {appearance.wallpaper === 'custom' && appearance.wallpaperImage && (
+                <div className="os-wallpaper-toolbar">
+                  <span className="truncate">Using {appearance.wallpaperImageName || 'your photo'}</span>
+                  <button type="button" className="os-text-button" onClick={() => wallpaperFileRef.current?.click()}>Replace</button>
+                  <button type="button" className="os-text-button ml-auto" onClick={() => appearance.setAppearance({ wallpaper: 'midnight', wallpaperImage: null, wallpaperImageName: '' })}>Remove photo</button>
+                </div>
+              )}
+
               <div><h3 className="os-section-title">Workspace templates</h3><p className="os-section-copy">Switch the entire visual language with one click.</p></div>
               <div className="grid grid-cols-2 gap-3">
                 {TEMPLATES.map((item) => (

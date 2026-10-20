@@ -1,0 +1,169 @@
+/* ── Desktop wallpaper ───────────────────────────────────────────────────
+   A single fixed layer under the shell. Gradients are presets; a custom
+   photo is pre-downscaled before it reaches this layer. */
+.os-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #060609;
+}
+.os-wallpaper-media {
+  position: absolute;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform: scale(1.02);
+  transform-origin: center;
+  will-change: filter;
+  transition: filter .3s ease;
+}
+.os-wallpaper-dim {
+  position: absolute;
+  inset: 0;
+  background: #040407;
+  transition: opacity .2s ease;
+}
+.os-wallpaper-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 120% 90% at 50% 34%, transparent 30%, rgba(2,3,7,.34) 100%),
+    linear-gradient(180deg, rgba(2,3,7,.18) 0%, transparent 22%, transparent 72%, rgba(2,3,7,.28) 100%);
+}
+.os-wallpaper-noise {
+  position: absolute;
+  inset: -50%;
+  opacity: .055;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+html[data-wallpaper='on'] .app-shell { background: transparent !important; }
+html[data-wallpaper='on'] .app-shell::before {
+  z-index: 1;
+  opacity: .5;
+  mix-blend-mode: screen;
+}
+html[data-wallpaper='on'] .os-window-titlebar {
+  background: rgba(8, 9, 14, .66) !important;
+  backdrop-filter: blur(22px) saturate(1.35) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.35) !important;
+}
+html[data-wallpaper='on'] .os-sidebar {
+  background: rgba(8, 10, 15, .68) !important;
+  backdrop-filter: blur(26px) saturate(1.3);
+  -webkit-backdrop-filter: blur(26px) saturate(1.3);
+  box-shadow: inset -1px 0 0 rgba(255,255,255,.035);
+}
+html[data-wallpaper='on'] .os-topbar {
+  background: rgba(8, 10, 15, .52) !important;
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+}
+html[data-wallpaper='on'] .os-statusbar {
+  background: rgba(8, 9, 13, .62) !important;
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+}
+html[data-wallpaper='on'] main { background: rgba(4, 5, 9, .12); }
+html[data-wallpaper='on'][data-ui-template='cloud'] .os-sidebar,
+html[data-wallpaper='on'][data-ui-template='cloud'] .os-topbar {
+  background: rgba(248, 250, 255, .76) !important;
+}
+html[data-wallpaper='on'][data-ui-template='cloud'] .os-window-titlebar {
+  background: rgba(248, 250, 255, .78) !important;
+}
+html[data-ui-motion='off'] .os-wallpaper-media { transition: none; }
+
+/* Wallpaper picker */
+.os-wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+.os-wallpaper-tile {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 11px;
+  background: rgba(255,255,255,.018);
+  text-align: left;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.os-wallpaper-tile:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255,255,255,.16);
+}
+.os-wallpaper-tile.is-active {
+  border-color: color-mix(in srgb, var(--os-accent) 64%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-accent) 26%, transparent), 0 8px 22px rgba(0,0,0,.22);
+}
+.os-wallpaper-thumb {
+  display: block;
+  height: 58px;
+  background-position: center;
+  background-size: cover;
+}
+.os-wallpaper-tile[data-id='none'] .os-wallpaper-thumb {
+  background:
+    linear-gradient(135deg, transparent 46%, rgba(255,255,255,.14) 47%, rgba(255,255,255,.14) 53%, transparent 54%),
+    linear-gradient(160deg, #0c0c11, #07070a);
+}
+.os-wallpaper-tile[data-id='custom'] .os-wallpaper-thumb {
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.025);
+  color: #71717a;
+}
+.os-wallpaper-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.os-wallpaper-meta {
+  display: block;
+  padding: 7px 9px 8px;
+}
+.os-wallpaper-meta strong {
+  display: block;
+  overflow: hidden;
+  color: #d9d9e0;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-wallpaper-meta small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: #66666f;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.os-wallpaper-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--os-accent) 82%, black);
+  box-shadow: 0 2px 8px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.2);
+  color: #fff;
+}
+.os-wallpaper-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #71717a;
+  font-size: 9px;
+}
+.os-wallpaper-toolbar .os-text-button { color: #a1a1aa; }
+@media (max-width: 720px) {
+  .os-wallpaper-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

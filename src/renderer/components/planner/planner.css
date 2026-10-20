@@ -1,0 +1,87 @@
+/* Planner surfaces — restrained chrome, readable density, one accent. */
+
+.planner-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.planner-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.planner-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+  background-clip: content-box;
+}
+
+.modal-input {
+  width: 100%;
+  min-height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 6px 9px;
+  font-size: 11.5px;
+  color: #e4e4eb;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.modal-input::placeholder {
+  color: #55555f;
+}
+
+.modal-input:focus {
+  border-color: rgba(139, 92, 246, 0.42);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.modal-input::-webkit-calendar-picker-indicator {
+  opacity: 0.45;
+  cursor: pointer;
+}
+
+.modal-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 0.8;
+}
+
+/* Date/time controls inherit the app's dark palette instead of the OS default. */
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'] {
+  color-scheme: dark;
+}
+
+input[type='checkbox'] {
+  color-scheme: dark;
+}
+
+/* A quiet completion beat when a task is checked. */
+@keyframes planner-check {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.planner-check-pop {
+  animation: planner-check 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Keep today's column readable without shouting. */
+.planner-today-cell {
+  background:
+    linear-gradient(180deg, rgba(139, 92, 246, 0.08), transparent 55%);
+}

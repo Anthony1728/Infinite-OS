@@ -17,6 +17,8 @@ const COMMANDS = [
   { id: 'workers', label: 'Workers', icon: 'WK', category: 'Automation' },
   { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace' },
   { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace' },
+  { id: 'planner', label: 'Planner', icon: 'PL', category: 'Life' },
+  { id: 'studio', label: 'Studio', icon: 'SD', category: 'Create' },
   { id: 'documents', label: 'Knowledge Hub', icon: 'KH', category: 'Knowledge' },
   { id: 'terminal', label: 'Terminal', icon: 'TM', category: 'Tools', shortcut: 'Ctrl+`' },
   { id: 'voice', label: 'Voice Assistant', icon: 'VA', category: 'Tools' },

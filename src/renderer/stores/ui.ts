@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { WallpaperId } from '../lib/wallpapers';
 
 export type UITheme = 'dark' | 'light' | 'system';
 export type UITemplate = 'infinite' | 'aurora' | 'onyx' | 'cloud' | 'chatgpt' | 'zcode' | 'matrix';
@@ -15,6 +16,11 @@ export interface AppearancePreferences {
   motion: boolean;
   shinyBars: boolean;
   logoStyle: LogoStyle;
+  wallpaper: WallpaperId;
+  wallpaperImage: string | null;
+  wallpaperImageName: string;
+  wallpaperDim: number;
+  wallpaperBlur: number;
 }
 
 interface UIState extends AppearancePreferences {
@@ -31,6 +37,8 @@ interface UIState extends AppearancePreferences {
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
   template: 'infinite', accent: '#8b5cf6', radius: 14, glass: 72, glow: 70,
   density: 'comfortable', motion: true, shinyBars: true, logoStyle: 'spectrum',
+  wallpaper: 'midnight', wallpaperImage: null, wallpaperImageName: '',
+  wallpaperDim: 42, wallpaperBlur: 0,
 };
 
 export const TEMPLATE_PRESETS: Record<UITemplate, Partial<AppearancePreferences>> = {
@@ -53,6 +61,9 @@ export function applyAppearance(prefs: AppearancePreferences, theme: UITheme = '
   root.dataset.uiMotion = prefs.motion ? 'on' : 'off';
   root.dataset.uiShine = prefs.shinyBars ? 'on' : 'off';
   root.dataset.logoStyle = prefs.logoStyle;
+  root.dataset.wallpaper = prefs.wallpaper !== 'none' && (prefs.wallpaper !== 'custom' || prefs.wallpaperImage)
+    ? 'on'
+    : 'off';
   root.dataset.colorMode = resolvedTheme;
   root.classList.toggle('light', resolvedTheme === 'light');
   root.style.setProperty('--os-accent', prefs.accent);
@@ -71,6 +82,20 @@ export function appearanceFromPrompt(prompt: string): Partial<AppearancePreferen
   if (/\b(chatgpt|mint|warm graphite)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.chatgpt);
   if (/\b(zcode|z code|cobalt|terminal blue)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.zcode);
   if (/\b(matrix|phosphor|scanline)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.matrix);
+  if (/\b(no wallpaper|plain background|remove wallpaper|solid background)\b/.test(text)) patch.wallpaper = 'none';
+  else {
+    const wallpapers: Array<[WallpaperId, RegExp]> = [
+      ['midnight', /\bmidnight\b/],
+      ['aurora', /\baurora wallpaper\b|\baurora background\b/],
+      ['sunset', /\bsunset\b/],
+      ['forest', /\bforest\b/],
+      ['ocean', /\bocean\b/],
+      ['bloom', /\bbloom\b|\brose background\b/],
+      ['graphite', /\bgraphite\b/],
+      ['dusk', /\bdusk\b/],
+    ];
+    for (const [id, pattern] of wallpapers) if (pattern.test(text)) patch.wallpaper = id;
+  }
   if (/\b(shiny|glossy|glassier|glassmorphism)\b/.test(text)) { patch.shinyBars = true; patch.glass = 90; patch.glow = 90; }
   if (/\b(matte|less glow|no glow)\b/.test(text)) { patch.shinyBars = false; patch.glow = 15; }
   if (/\b(compact|dense|smaller)\b/.test(text)) patch.density = 'compact';
@@ -114,8 +139,13 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'infinite:appearance-v2',
-      partialize: ({ theme, template, accent, radius, glass, glow, density, motion, shinyBars, logoStyle }) =>
-        ({ theme, template, accent, radius, glass, glow, density, motion, shinyBars, logoStyle }),
+      partialize: ({
+        theme, template, accent, radius, glass, glow, density, motion, shinyBars, logoStyle,
+        wallpaper, wallpaperImage, wallpaperImageName, wallpaperDim, wallpaperBlur,
+      }) => ({
+        theme, template, accent, radius, glass, glow, density, motion, shinyBars, logoStyle,
+        wallpaper, wallpaperImage, wallpaperImageName, wallpaperDim, wallpaperBlur,
+      }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           applyAppearance(state, state.theme);

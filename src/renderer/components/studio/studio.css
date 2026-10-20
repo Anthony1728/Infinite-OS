@@ -1,0 +1,340 @@
+/* Studio surfaces — editor typography, paper, grid, and present mode.
+   Kept local to Studio so a document never restyles the rest of the shell. */
+
+.studio-paper-scroll {
+  background:
+    radial-gradient(1200px 380px at 50% -10%, rgba(139, 92, 246, 0.06), transparent 70%),
+    #0d0d12;
+}
+
+.studio-paper {
+  position: relative;
+  width: min(880px, calc(100% - 48px));
+  min-height: calc(100% - 64px);
+  margin: 28px auto 64px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, #191920 0%, #15151b 100%);
+  box-shadow:
+    0 30px 80px -40px rgba(0, 0, 0, 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.studio-editor {
+  min-height: 72vh;
+  padding: 58px 68px 24px;
+  outline: none;
+  color: #e8e8ee;
+  font-size: 16.5px;
+  line-height: 1.78;
+  letter-spacing: 0.004em;
+  caret-color: var(--os-accent, #8b5cf6);
+}
+
+.studio-placeholder {
+  pointer-events: none;
+  position: absolute;
+  top: 62px;
+  left: 68px;
+  right: 68px;
+  color: #5b5b68;
+  font-size: 16.5px;
+  line-height: 1.78;
+}
+
+.studio-editor > *:first-child {
+  margin-top: 0;
+}
+
+.studio-editor h1 {
+  margin: 0.8em 0 0.42em;
+  font-size: 2.05em;
+  line-height: 1.16;
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  color: #fafaff;
+}
+
+.studio-editor h2 {
+  margin: 1.25em 0 0.42em;
+  font-size: 1.52em;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  color: #f6f6fb;
+}
+
+.studio-editor h3 {
+  margin: 1.1em 0 0.35em;
+  font-size: 1.16em;
+  font-weight: 650;
+  color: #f1f1f8;
+}
+
+.studio-editor p {
+  margin: 0 0 0.9em;
+}
+
+.studio-editor strong,
+.studio-editor b {
+  font-weight: 680;
+  color: #ffffff;
+}
+
+.studio-editor em,
+.studio-editor i {
+  font-style: italic;
+}
+
+.studio-editor u {
+  text-decoration-color: color-mix(in srgb, var(--os-accent, #8b5cf6) 70%, transparent);
+  text-underline-offset: 3px;
+}
+
+.studio-editor a {
+  color: var(--os-accent, #a78bfa);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.studio-editor ul,
+.studio-editor ol {
+  margin: 0 0 1em;
+  padding-left: 1.5em;
+}
+
+.studio-editor ul {
+  list-style: disc;
+}
+
+.studio-editor ol {
+  list-style: decimal;
+}
+
+.studio-editor li {
+  margin: 0.22em 0;
+}
+
+.studio-editor li::marker {
+  color: #77778a;
+}
+
+.studio-editor blockquote {
+  margin: 1.25em 0;
+  padding: 0.2em 0 0.2em 1.15em;
+  border-left: 2px solid color-mix(in srgb, var(--os-accent, #8b5cf6) 65%, transparent);
+  color: #b9b9c7;
+  font-style: italic;
+}
+
+.studio-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+.studio-editor hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.studio-editor ::selection,
+.studio-editor *::selection {
+  background: color-mix(in srgb, var(--os-accent, #8b5cf6) 34%, transparent);
+}
+
+/* Spreadsheet */
+.sheet-wrap {
+  background:
+    radial-gradient(1000px 300px at 50% -10%, rgba(56, 189, 248, 0.045), transparent 70%),
+    #0d0d12;
+}
+
+.sheet-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet-grid th,
+.sheet-grid td {
+  height: 28px;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-grid th {
+  position: sticky;
+  z-index: 3;
+  background: #15151c;
+  color: #797986;
+  font-weight: 550;
+  text-align: center;
+  user-select: none;
+}
+
+.sheet-grid thead th {
+  top: 0;
+}
+
+.sheet-grid tbody th {
+  left: 0;
+  z-index: 2;
+  width: 48px;
+}
+
+.sheet-grid thead th.corner {
+  left: 0;
+  z-index: 4;
+}
+
+.sheet-grid td {
+  color: #d7d7e0;
+  cursor: cell;
+}
+
+.sheet-grid td.is-selected {
+  outline: 2px solid color-mix(in srgb, var(--os-accent, #8b5cf6) 82%, transparent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--os-accent, #8b5cf6) 10%, transparent);
+}
+
+.sheet-grid td.is-error {
+  color: #fb7185;
+}
+
+.sheet-grid td.is-number {
+  text-align: right;
+}
+
+.sheet-grid tr:hover td {
+  background: rgba(255, 255, 255, 0.014);
+}
+
+.sheet-grid td.is-selected:hover {
+  background: color-mix(in srgb, var(--os-accent, #8b5cf6) 12%, transparent);
+}
+
+/* Slides */
+.slide-canvas {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  max-width: 880px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    radial-gradient(120% 120% at 0% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+    radial-gradient(120% 120% at 100% 100%, rgba(34, 211, 238, 0.1), transparent 55%),
+    linear-gradient(145deg, #1a1a23, #121218);
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.slide-title-input {
+  background: transparent;
+  border: 0;
+  outline: none;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+}
+
+.slide-body-input {
+  background: transparent;
+  border: 0;
+  outline: none;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.55;
+}
+
+.slide-body-input::placeholder,
+.slide-title-input::placeholder,
+.studio-title-input::placeholder {
+  color: #4e4e5b;
+}
+
+/* Present mode */
+.present-stage {
+  background:
+    radial-gradient(80% 80% at 20% 10%, rgba(139, 92, 246, 0.12), transparent 60%),
+    radial-gradient(80% 80% at 90% 90%, rgba(34, 211, 238, 0.08), transparent 60%),
+    #07070a;
+}
+
+.present-slide {
+  aspect-ratio: 16 / 9;
+  width: min(92vw, 1500px);
+  max-height: 82vh;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(145deg, #1c1c26, #121218);
+  box-shadow: 0 50px 120px -40px rgba(0, 0, 0, 0.9);
+}
+
+.present-slide-title {
+  font-size: clamp(28px, 4.4vw, 68px);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.present-slide-body {
+  font-size: clamp(16px, 1.75vw, 27px);
+  line-height: 1.55;
+  color: #c9c9d6;
+  white-space: pre-wrap;
+}
+
+.studio-title-input {
+  background: transparent;
+  border: 0;
+  outline: none;
+  min-width: 0;
+  width: 100%;
+}
+
+.studio-scroll::-webkit-scrollbar,
+.studio-paper-scroll::-webkit-scrollbar,
+.sheet-wrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.studio-scroll::-webkit-scrollbar-thumb,
+.studio-paper-scroll::-webkit-scrollbar-thumb,
+.sheet-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.studio-scroll::-webkit-scrollbar-thumb:hover,
+.studio-paper-scroll::-webkit-scrollbar-thumb:hover,
+.sheet-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
+  background-clip: content-box;
+}
+
+@media (max-width: 900px) {
+  .studio-editor {
+    padding: 40px 32px 24px;
+  }
+  .studio-placeholder {
+    top: 44px;
+    left: 32px;
+    right: 32px;
+  }
+  .studio-paper {
+    width: calc(100% - 24px);
+  }
+}

@@ -15,6 +15,8 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   // The Kanban board over the real project/task store. ProjectsView is a
   // scaffolding generator, so nothing ever showed the board itself.
   { id: 'board', label: 'Board', icon: 'nav.projects', color: 'text-emerald-400' },
+  { id: 'planner', label: 'Planner', icon: 'nav.planner', color: 'text-violet-400' },
+  { id: 'studio', label: 'Studio', icon: 'nav.studio', color: 'text-cyan-400' },
   // Filed-away conversations. Searchable, and every entry can be restored and
   // carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document', color: 'text-slate-400' },

@@ -19,6 +19,10 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
   // The Kanban board over the real project/task store, next to the
   // scaffolding Projects view. See BoardView.
   { id: 'board', label: 'Board', icon: 'nav.projects' },
+  // Personal operating layer: tasks, calendar, reminders.
+  { id: 'planner', label: 'Planner', icon: 'nav.planner' },
+  // Documents, sheets, and decks with AI writing beside them.
+  { id: 'studio', label: 'Studio', icon: 'nav.studio' },
   // Filed-away conversations. Searchable, and every entry can be
   // restored and carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document' },

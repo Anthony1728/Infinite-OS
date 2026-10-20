@@ -7,11 +7,13 @@ import { useAiTabsStore } from './stores/aiTabs';
 import { useLayoutStore } from './stores/layout';
 import { useEditorStore } from './stores/editor';
 import { useChatStore } from './stores/chat';
+import { usePlannerStore } from './stores/planner';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
 import { OnboardingFlow } from './components/auth/OnboardingFlow';
 import { TopBar } from './components/layout/TopBar';
 import { TitleBar } from './components/layout/TitleBar';
+import { WallpaperLayer } from './components/layout/WallpaperLayer';
 import { Sidebar } from './components/layout/Sidebar';
 import { SidebarClassic } from './components/layout/SidebarClassic';
 import { RightPanel } from './components/layout/RightPanel';
@@ -436,6 +438,27 @@ export function App() {
     } catch { /* startup continues without optional engine status */ }
   }, [isAuthenticated, isNewUser, restoreSession]);
 
+  // Reminders are an OS-level promise: check them even when Planner is closed.
+  // The store guards against overlapping ticks, and a failed check simply
+  // retries on the next one instead of surfacing a scary error.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      await usePlannerStore.getState().checkDue().catch(() => {});
+    };
+    void (async () => {
+      await usePlannerStore.getState().load().catch(() => {});
+      await tick();
+    })();
+    const timer = window.setInterval(() => void tick(), 15_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [isAuthenticated]);
+
   // Initialize agents store on mount
   useEffect(() => {
     useAgentsStore.getState().init();
@@ -485,6 +508,8 @@ export function App() {
   return (
     <ErrorBoundary>
     <div className="app-shell h-screen w-full flex flex-col overflow-hidden text-[12px] selection:bg-indigo-500/30 bg-[#09090c] animate-fade-in">
+      <WallpaperLayer />
+      <div className="os-shell-content relative z-10 flex min-h-0 flex-1 flex-col">
       <TitleBar fullscreen={fullscreen} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {uiTheme === 'classic' ? (
@@ -565,6 +590,7 @@ export function App() {
       <PermissionDialog />
       <PlanApprovalDialog />
       <ToastContainer />
+      </div>
       </div>
     </div>
     </ErrorBoundary>

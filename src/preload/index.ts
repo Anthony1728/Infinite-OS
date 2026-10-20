@@ -1269,6 +1269,60 @@ const api = {
     ipcRenderer.on(IPC.MINI_STATE, handler);
     return () => ipcRenderer.removeListener(IPC.MINI_STATE, handler);
   },
+
+  // Studio — documents, spreadsheets, decks
+  studioList: () => ipcRenderer.invoke(IPC.STUDIO_LIST),
+  studioGet: (args: { id: string }) => ipcRenderer.invoke(IPC.STUDIO_GET, args),
+  studioCreate: (args: { kind: 'document' | 'sheet' | 'slides'; title?: string }) =>
+    ipcRenderer.invoke(IPC.STUDIO_CREATE, args),
+  studioUpdate: (args: { id: string; patch: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.STUDIO_UPDATE, args),
+  studioDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.STUDIO_DELETE, args),
+  studioDuplicate: (args: { id: string }) => ipcRenderer.invoke(IPC.STUDIO_DUPLICATE, args),
+  studioAi: (args: {
+    action: string;
+    kind: 'document' | 'sheet' | 'slides';
+    prompt: string;
+    context?: string;
+    itemId?: string;
+    language?: string;
+  }) => ipcRenderer.invoke(IPC.STUDIO_AI, args),
+  studioExport: (args: { id: string; format?: string }) => ipcRenderer.invoke(IPC.STUDIO_EXPORT, args),
+
+  // Planner — tasks, events, reminders
+  plannerGet: () => ipcRenderer.invoke(IPC.PLANNER_GET),
+  plannerTaskCreate: (args: {
+    title: string;
+    notes?: string;
+    due?: number;
+    priority?: 'low' | 'medium' | 'high';
+    tags?: string[];
+    list?: string;
+  }) => ipcRenderer.invoke(IPC.PLANNER_TASK_CREATE, args),
+  plannerTaskUpdate: (args: { id: string; patch: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.PLANNER_TASK_UPDATE, args),
+  plannerTaskToggle: (args: { id: string }) => ipcRenderer.invoke(IPC.PLANNER_TASK_TOGGLE, args),
+  plannerTaskDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.PLANNER_TASK_DELETE, args),
+  plannerEventCreate: (args: {
+    title: string;
+    start: number;
+    end?: number;
+    allDay?: boolean;
+    location?: string;
+    notes?: string;
+    color?: string;
+  }) => ipcRenderer.invoke(IPC.PLANNER_EVENT_CREATE, args),
+  plannerEventUpdate: (args: { id: string; patch: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.PLANNER_EVENT_UPDATE, args),
+  plannerEventDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.PLANNER_EVENT_DELETE, args),
+  plannerReminderCreate: (args: { title: string; at: number; taskId?: string }) =>
+    ipcRenderer.invoke(IPC.PLANNER_REMINDER_CREATE, args),
+  plannerReminderUpdate: (args: { id: string; patch: Record<string, unknown> }) =>
+    ipcRenderer.invoke(IPC.PLANNER_REMINDER_UPDATE, args),
+  plannerReminderDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.PLANNER_REMINDER_DELETE, args),
+  plannerDue: () => ipcRenderer.invoke(IPC.PLANNER_DUE),
+  plannerFired: (args: { id: string }) => ipcRenderer.invoke(IPC.PLANNER_FIRED, args),
+  plannerStats: () => ipcRenderer.invoke(IPC.PLANNER_STATS),
 };
 
 contextBridge.exposeInMainWorld('api', api);

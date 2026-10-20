@@ -885,4 +885,30 @@ export const IPC = {
   VAULT_ADD: 'vault:add',
   VAULT_AUTHORIZE: 'vault:authorize',
   VAULT_DELETE: 'vault:delete',
+
+  // Studio — documents, spreadsheets, decks, and their AI writing actions
+  STUDIO_LIST: 'studio:list',
+  STUDIO_GET: 'studio:get',
+  STUDIO_CREATE: 'studio:create',
+  STUDIO_UPDATE: 'studio:update',
+  STUDIO_DELETE: 'studio:delete',
+  STUDIO_DUPLICATE: 'studio:duplicate',
+  STUDIO_AI: 'studio:ai',
+  STUDIO_EXPORT: 'studio:export',
+
+  // Planner — personal tasks, calendar events, reminders
+  PLANNER_GET: 'planner:get',
+  PLANNER_TASK_CREATE: 'planner:task:create',
+  PLANNER_TASK_UPDATE: 'planner:task:update',
+  PLANNER_TASK_TOGGLE: 'planner:task:toggle',
+  PLANNER_TASK_DELETE: 'planner:task:delete',
+  PLANNER_EVENT_CREATE: 'planner:event:create',
+  PLANNER_EVENT_UPDATE: 'planner:event:update',
+  PLANNER_EVENT_DELETE: 'planner:event:delete',
+  PLANNER_REMINDER_CREATE: 'planner:reminder:create',
+  PLANNER_REMINDER_UPDATE: 'planner:reminder:update',
+  PLANNER_REMINDER_DELETE: 'planner:reminder:delete',
+  PLANNER_DUE: 'planner:due',
+  PLANNER_FIRED: 'planner:fired',
+  PLANNER_STATS: 'planner:stats',
 } as const;
