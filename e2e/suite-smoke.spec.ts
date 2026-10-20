@@ -275,6 +275,49 @@ test.describe('Infinite OS Studio, Planner, and wallpaper', () => {
     expect(pageErrors, 'Uncaught renderer exceptions').toEqual([]);
   });
 
+  test('Studio AI changes the document only when the writer applies it', async () => {
+    test.setTimeout(180_000);
+    const launched = await launchApp();
+    app = launched.app;
+    cleanups = launched.cleanups;
+    const page = launched.page;
+
+    // Keep the test deterministic: model output is replaced with a fixed
+    // response so the editor apply bridge can be checked on its own.
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('studio:ai');
+      ipcMain.handle('studio:ai', () => ({
+        text: 'The corrected cat sat on the mat.',
+        provider: 'test',
+        model: 'test',
+      }));
+    });
+
+    await page.locator('[data-nav="studio"]').click();
+    await page.getByRole('button', { name: 'Create new Studio item' }).click();
+    await page.locator('button').filter({ hasText: 'Write, edit, and export Word files' }).first().click();
+    await expect(page.getByLabel('Document title')).toHaveValue('Untitled document');
+
+    const body = page.getByLabel('Document body');
+    await body.click();
+    await page.keyboard.type('teh cat sat on teh mat.');
+    await page.keyboard.press('Control+a');
+
+    await page.getByRole('button', { name: 'AI', exact: true }).click();
+    await expect(page.getByText(/chars selected/)).toBeVisible();
+    await page.getByRole('button', { name: 'Grammar', exact: true }).click();
+    await page.getByRole('button', { name: /Generate/ }).click();
+    await expect(page.getByText('The corrected cat sat on the mat.')).toBeVisible();
+
+    // Generated text is a proposal until the writer explicitly applies it.
+    await expect(body).toContainText('teh cat sat on teh mat.');
+
+    await page.getByRole('button', { name: 'Replace selection' }).click();
+    await expect(body).toContainText('The corrected cat sat on the mat.');
+    await expect(body).not.toContainText('teh cat sat on teh mat.');
+    await expect(page.getByText('Replaced selection')).toBeVisible();
+  });
+
   test('wallpaper presets, custom image, and persistence work', async () => {
     test.setTimeout(240_000);
     const launched = await launchApp();

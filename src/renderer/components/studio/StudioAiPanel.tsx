@@ -90,6 +90,9 @@ export function StudioAiPanel({ item, onClose }: StudioAiPanelProps) {
         setSelectionLength(text.length);
       }
     };
+    // A writer often selects text first and then opens the panel. Pick up that
+    // existing selection now rather than waiting for the next selection event.
+    capture();
     document.addEventListener('selectionchange', capture);
     return () => document.removeEventListener('selectionchange', capture);
   }, []);
