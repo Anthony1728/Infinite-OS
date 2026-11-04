@@ -474,6 +474,28 @@
       return { rightClicked: cssPath(el) };
     },
 
+    doubleClick(params) {
+      const el = findCandidate(params.selector, params.text);
+      if (!el) return { error: 'doubleClick: element not found' };
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      const r = el.getBoundingClientRect();
+      const base = {
+        bubbles: true,
+        cancelable: true,
+        clientX: r.x + r.width / 2,
+        clientY: r.y + r.height / 2,
+        button: 0,
+      };
+      el.dispatchEvent(new MouseEvent('mousedown', base));
+      el.dispatchEvent(new MouseEvent('mouseup', base));
+      el.dispatchEvent(new MouseEvent('click', base));
+      el.dispatchEvent(new MouseEvent('mousedown', { ...base, detail: 2 }));
+      el.dispatchEvent(new MouseEvent('mouseup', { ...base, detail: 2 }));
+      el.dispatchEvent(new MouseEvent('click', { ...base, detail: 2 }));
+      el.dispatchEvent(new MouseEvent('dblclick', { ...base, detail: 2 }));
+      return { doubleClicked: cssPath(el) };
+    },
+
     getScreenshot() {
       // Can't capture from content script, but can signal background
       return { needsBackground: true, op: 'screenshot' };

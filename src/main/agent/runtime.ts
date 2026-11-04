@@ -37,6 +37,7 @@ import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
 import { StreamCoalescer } from './stream-coalescer.js';
 import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
 import { settings } from '../settings/store.js';
+import { resolveThinkingPreference } from './thinking-preference.js';
 
 type EventSink = (e: AgentEvent) => void;
 
@@ -382,6 +383,12 @@ export async function runSubagent(
   const failedAttemptCounts = new Map<string, number>();
   let recoveryContext: Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'> | null = null;
   const providerProgressSeen = new Set<string>();
+  // Remote-runtime telemetry (OpenCode's own tool loop) is display-only. The
+  // block is synthesized so the transcript can render/persist a live tool
+  // card, but its ID is excluded from local execution below: running it again
+  // would duplicate every command the remote runtime already performed.
+  const remoteTelemetryIds = new Set<string>();
+  const remoteTelemetryClosed = new Set<string>();
   const runSystemPrompts = new Map<string, string>();
   // Per-candidate failure log: the exhausted-run error names every model
   // tried and why each failed (mirrors loop.ts) instead of only the last.
@@ -520,6 +527,7 @@ export async function runSubagent(
         system: baseSystem,
         tools,
         stream: true,
+        ...resolveThinkingPreference(activeCandidate.provider),
         signal: subagentStreamController.signal,
       },
       activeCandidate.apiKey,
@@ -573,6 +581,12 @@ export async function runSubagent(
         // aborts it at 45s.
         runProgressAt.set(state.id, Date.now());
         if (signal.aborted) break;
+        if (chunk.type === 'thinking_delta') {
+          // Reasoning belongs on the assistant message (persisted with the
+          // answer) and streams live so the user sees progress, not a spinner.
+          appendOrCreate(assistant.content, { type: 'thinking', text: chunk.text });
+          opts.sink({ type: 'thinking_delta', runId: state.id, message_id: assistant.id, text: chunk.text });
+        }
         if (chunk.type === 'text_delta') {
           appendOrCreate(assistant.content, { type: 'text', text: chunk.text });
           state.preview = (state.preview ?? '') + chunk.text;
@@ -599,6 +613,44 @@ export async function runSubagent(
             state.toolCallCount++;
             opts.sink({ type: 'tool_call', runId: state.id, toolName: chunk.name });
             activity(state, opts.sink, 'tool', `Running ${chunk.name}`, summarize(chunk.input));
+            // Synthesize the tool_use block that the transcript renders. The
+            // remote runtime has already executed this call, so the ID is
+            // marked remote and skipped by the local executor below.
+            remoteTelemetryIds.add(chunk.id);
+            const progressBlock: ContentBlock = {
+              type: 'tool_use',
+              id: chunk.id,
+              name: chunk.name,
+              input: chunk.input ?? {},
+            };
+            assistant.content.push(progressBlock);
+            opts.sink({
+              type: 'tool_use_start',
+              runId: state.id,
+              message_id: assistant.id,
+              tool_use_id: chunk.id,
+              name: chunk.name,
+            });
+          }
+          if (chunk.status === 'completed' || chunk.status === 'error') {
+            // Fill in the final arguments before closing the card so the
+            // persisted block carries the command/path the runtime actually ran.
+            const progressBlock = assistant.content.find(
+              (block): block is Extract<ContentBlock, { type: 'tool_use' }> =>
+                block.type === 'tool_use' && block.id === chunk.id,
+            );
+            if (progressBlock && chunk.input !== undefined) progressBlock.input = chunk.input;
+            if (!remoteTelemetryClosed.has(chunk.id)) {
+              remoteTelemetryClosed.add(chunk.id);
+              opts.sink({
+                type: 'tool_use_end',
+                runId: state.id,
+                message_id: assistant.id,
+                tool_use_id: chunk.id,
+                name: chunk.name || progressBlock?.name || 'tool',
+                input: progressBlock?.input ?? chunk.input ?? {},
+              });
+            }
           }
           opts.sink({
             type: 'tool_progress',
@@ -710,7 +762,7 @@ export async function runSubagent(
     const allToolUses = assistant.content.filter(
       (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
     );
-    const toolUses = allToolUses.filter((tu) => tu.name?.trim());
+    const toolUses = allToolUses.filter((tu) => tu.name?.trim() && !remoteTelemetryIds.has(tu.id));
     const emptyToolUses = allToolUses.filter((tu) => !tu.name?.trim());
 
     // Emit synthetic errors for empty tool names so the model sees the

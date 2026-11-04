@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc.js';
+import type {
+  PageCreateInput,
+  PageDatabaseRowInput,
+  PageUpdateInput,
+} from '../shared/pages.js';
 
 const api = {
   sendMessage: (args: { sessionId: string; message: unknown; displayMessage?: unknown; provider: string; model: string; cwd: string; planMode?: boolean; background?: boolean; untilDone?: boolean }) =>
@@ -16,6 +21,12 @@ const api = {
   bridgeStatus: () => ipcRenderer.invoke(IPC.BRIDGE_STATUS),
   bridgeExec: (args: { command: string; params?: Record<string, unknown>; timeoutMs?: number }) =>
     ipcRenderer.invoke(IPC.BRIDGE_EXEC, args),
+  bridgeSetupStatus: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_STATUS),
+  bridgeSetupLaunch: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_LAUNCH),
+  bridgeSetupRestart: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_RESTART),
+  bridgeSetupInstall: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_INSTALL),
+  bridgeSetupOpenFolder: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_OPEN_FOLDER),
+  bridgeSetupCopyPath: () => ipcRenderer.invoke(IPC.BRIDGE_SETUP_COPY_PATH),
   onStreamEvent: (cb: (e: unknown) => void) => {
     const handler = (_e: unknown, payload: unknown) => {
       cb(payload);
@@ -466,9 +477,13 @@ const api = {
 
   // Multi-Agent
   multiAgentCreateTeam: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_CREATE_TEAM, args),
+  multiAgentUpdateTeam: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_UPDATE_TEAM, args),
   multiAgentAddToTeam: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_ADD_TO_TEAM, args),
   multiAgentRemoveFromTeam: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_REMOVE_FROM_TEAM, args),
+  multiAgentSetRole: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_SET_ROLE, args),
+  multiAgentSetLeader: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_SET_LEADER, args),
   multiAgentListTeams: () => ipcRenderer.invoke(IPC.MULTI_AGENT_LIST_TEAMS),
+  multiAgentOrg: () => ipcRenderer.invoke(IPC.MULTI_AGENT_ORG),
   multiAgentCreateTask: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_CREATE_TASK, args),
   multiAgentAssignTask: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_ASSIGN_TASK, args),
   multiAgentStartTask: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_START_TASK, args),
@@ -477,6 +492,7 @@ const api = {
   multiAgentSendMessage: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_SEND_MESSAGE, args),
   multiAgentGetMessages: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_GET_MESSAGES, args),
   multiAgentExecuteTeamTask: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_EXECUTE_TEAM_TASK, args),
+  multiAgentRunOrgMission: (args: unknown) => ipcRenderer.invoke(IPC.MULTI_AGENT_RUN_ORG_MISSION, args),
   multiAgentStats: () => ipcRenderer.invoke(IPC.MULTI_AGENT_STATS),
 
   // Workspaces
@@ -1288,6 +1304,30 @@ const api = {
     language?: string;
   }) => ipcRenderer.invoke(IPC.STUDIO_AI, args),
   studioExport: (args: { id: string; format?: string }) => ipcRenderer.invoke(IPC.STUDIO_EXPORT, args),
+
+  // Pages — Notion-style pages, blocks, databases, comments, versions
+  pagesList: () => ipcRenderer.invoke(IPC.PAGES_LIST),
+  pagesGet: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_GET, args),
+  pagesCreate: (args: PageCreateInput) => ipcRenderer.invoke(IPC.PAGES_CREATE, args),
+  pagesUpdate: (args: { id: string; patch: PageUpdateInput }) => ipcRenderer.invoke(IPC.PAGES_UPDATE, args),
+  pagesDuplicate: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_DUPLICATE, args),
+  pagesTrash: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_TRASH, args),
+  pagesRestore: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_RESTORE, args),
+  pagesDelete: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_DELETE, args),
+  pagesEmptyTrash: () => ipcRenderer.invoke(IPC.PAGES_EMPTY_TRASH),
+  pagesSearch: (args: { query: string; limit?: number }) => ipcRenderer.invoke(IPC.PAGES_SEARCH, args),
+  pagesBacklinks: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_BACKLINKS, args),
+  pagesCommentAdd: (args: { id: string; text: string; blockId?: string }) => ipcRenderer.invoke(IPC.PAGES_COMMENT_ADD, args),
+  pagesCommentDelete: (args: { id: string; commentId: string }) => ipcRenderer.invoke(IPC.PAGES_COMMENT_DELETE, args),
+  pagesCommentResolve: (args: { id: string; commentId: string; resolved: boolean }) => ipcRenderer.invoke(IPC.PAGES_COMMENT_RESOLVE, args),
+  pagesVersionSave: (args: { id: string }) => ipcRenderer.invoke(IPC.PAGES_VERSION_SAVE, args),
+  pagesVersionRestore: (args: { id: string; versionId: string }) => ipcRenderer.invoke(IPC.PAGES_VERSION_RESTORE, args),
+  pagesRowCreate: (args: { databaseId: string; input?: PageDatabaseRowInput }) => ipcRenderer.invoke(IPC.PAGES_ROW_CREATE, args),
+  pagesRowUpdate: (args: { databaseId: string; rowId: string; patch: PageDatabaseRowInput }) => ipcRenderer.invoke(IPC.PAGES_ROW_UPDATE, args),
+  pagesRowDelete: (args: { databaseId: string; rowId: string }) => ipcRenderer.invoke(IPC.PAGES_ROW_DELETE, args),
+  pagesRowDuplicate: (args: { databaseId: string; rowId: string }) => ipcRenderer.invoke(IPC.PAGES_ROW_DUPLICATE, args),
+  pagesRowOpen: (args: { databaseId: string; rowId: string }) => ipcRenderer.invoke(IPC.PAGES_ROW_OPEN, args),
+  pagesExport: (args: { id: string; format?: 'md' | 'csv' }) => ipcRenderer.invoke(IPC.PAGES_EXPORT, args),
 
   // Planner — tasks, events, reminders
   plannerGet: () => ipcRenderer.invoke(IPC.PLANNER_GET),

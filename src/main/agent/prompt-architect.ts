@@ -37,6 +37,13 @@ const CATEGORY_KEYWORDS: Array<{ category: TaskCategory; re: RegExp; capabilitie
     skills: [],
   },
   {
+    category: 'knowledge',
+    re: /\b(page|pages|wiki|notes?|notebook|database|notion|workspace|knowledge\s*base|docs?|documents?|template|outline|journal|diary)\b/i,
+    capabilities: [{ domain: 'knowledge', reason: 'Durable notes, pages, and structured workspace data' }],
+    tools: ['Pages', 'Studio', 'Planner', 'Knowledge', 'DocumentGenerator', 'Read', 'Bash', 'TodoWrite'],
+    skills: [],
+  },
+  {
     category: 'computer_automation',
     re: /\b(computer|desktop|window|app\b.*open|click|type|keyboard|mouse|screenshot|clipboard|notification|automate|control this pc|live map|pc live)\b/i,
     capabilities: [{ domain: 'computer_automation', reason: 'OS-level control and observation' }, { domain: 'terminal', reason: 'System inspection' }],
@@ -131,6 +138,7 @@ export function architectBrief(objective: string, opts: BriefOptions): Execution
   else if (primary === 'research') successCriteria.push('Key questions are addressed with sourced evidence', 'Conflicts and uncertainties are called out', 'Citations link to real sources', 'Separate facts from conclusions');
   else if (primary === 'computer_automation') successCriteria.push('Observable system state matches the requested outcome', 'No stray side effects left behind', 'Failure leaves a clear, actionable report');
   else if (primary === 'business') successCriteria.push('Recommendation is specific and actionable', 'Audience and trade-offs are stated', 'Next steps are concrete');
+  else if (primary === 'knowledge') successCriteria.push('Content is saved in the right page or database', 'Structure is clear and reusable', 'The user can find and edit the result immediately');
   else if (primary === 'file_operation') successCriteria.push('Correct files in correct locations', 'No unintended deletions or overwrites', 'Structure matches the stated goal');
   else successCriteria.push('Result demonstrably satisfies the stated objective', 'No obvious errors or regressions', 'User can use or verify the outcome immediately');
 
@@ -146,6 +154,7 @@ export function architectBrief(objective: string, opts: BriefOptions): Execution
   else if (primary === 'research') strategy.push('Define research questions and success bar', 'Search and retrieve authoritative sources', 'Cross-check, synthesize, and separate facts from interpretation', 'Produce a structured brief with links', 'Re-check claims and tighten where needed');
   else if (primary === 'computer_automation') strategy.push('Observe current state', 'Construct the minimal action sequence', 'Execute step by step with observation after each', 'Verify the end state matches the objective', 'Correct and retry on failure');
   else if (primary === 'business') strategy.push('Clarify objective and audience', 'Gather relevant evidence / prior decisions', 'Enumerate options with assumptions and risks', 'Choose and justify a recommendation', 'List concrete next steps');
+  else if (primary === 'knowledge') strategy.push('Search existing pages before creating duplicates', 'Choose the right page or database shape', 'Write or update the content through Pages', 'Verify the saved result by reading it back', 'Link related pages and summarize what changed');
   else strategy.push('Understand the objective and its success bar', 'Choose the narrowest capable tools', 'Execute the smallest correct sequence', 'Observe and verify the result', 'Correct if needed and finalize');
 
   const relevantPaths = relevantPathsFor(trimmed, allCats, projectHints);

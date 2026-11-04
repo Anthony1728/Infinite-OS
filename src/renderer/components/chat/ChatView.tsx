@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
-import { inferExecutionMode, useChatStore, type ChatExecutionMode } from '../../stores/chat';
+import { inferExecutionMode, useChatStore, type ActivityItem, type ChatExecutionMode } from '../../stores/chat';
 import { ThinkingPanel } from './ThinkingPanel';
 import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
@@ -2127,6 +2127,14 @@ function RealChat({
   const runningToolIds = new Set(
     activity.filter((a) => a.status === 'running').map((a) => a.toolUseId),
   );
+  // Per-tool metadata (streaming input, duration, result, error) is kept in
+  // the activity feed so a ToolCallCard can render the complete story of a
+  // call — not just the arguments the provider has already finished sending.
+  const activityByToolId = useMemo(() => {
+    const map = new Map<string, ActivityItem>();
+    for (const item of activity) map.set(item.toolUseId, item);
+    return map;
+  }, [activity]);
   const hasRunningTool = runningToolIds.size > 0;
   // When the inline live-activity feed is showing steps, it carries the
   // "working" signal — don't also render the generic thinking bubble.
@@ -2253,7 +2261,7 @@ function RealChat({
               <span className="ml-3 text-sm text-zinc-400">Loading conversation…</span>
             </div>
           ) : messages.map((m) => (
-            <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} />
+            <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} activityByToolId={activityByToolId} />
           ))}
           {showThinking && <ThinkingBubble />}
           {/* A pending AskUserQuestion is rendered by the global QuestionOverlay
@@ -2318,7 +2326,15 @@ function RealChat({
   );
 }
 
-function MessageBubble({ message, runningToolIds }: { message: Message; runningToolIds?: Set<string> }) {
+function MessageBubble({
+  message,
+  runningToolIds,
+  activityByToolId,
+}: {
+  message: Message;
+  runningToolIds?: Set<string>;
+  activityByToolId?: Map<string, ActivityItem>;
+}) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
   const isToolResult = message.role === 'tool';
@@ -2605,10 +2621,20 @@ function MessageBubble({ message, runningToolIds }: { message: Message; runningT
               if (block.type === 'thinking') return null;
               if (block.type === 'tool_use') {
                 const tu = block as { id: string; name: string; input: unknown };
-                const isRunning = runningToolIds?.has(tu.id) ?? false;
+                const live = activityByToolId?.get(tu.id);
+                const isRunning = (live?.status ?? (runningToolIds?.has(tu.id) ? 'running' : 'done')) === 'running';
                 return (
                   <div key={`tool-${tu.id || i}`} className="mt-2">
-                    <ToolCallCard name={tu.name} input={tu.input} status={isRunning ? 'running' : 'done'} startTime={isRunning ? Date.now() - 1000 : undefined} />
+                    <ToolCallCard
+                      name={tu.name}
+                      input={live?.input ?? tu.input}
+                      partialInput={live?.partialInput}
+                      status={live?.status ?? (isRunning ? 'running' : 'done')}
+                      startTime={live?.timestamp ?? (isRunning ? Date.now() - 1000 : undefined)}
+                      endTime={live?.finishedAt}
+                      result={live?.result}
+                      error={live?.isError ? live.result : undefined}
+                    />
                   </div>
                 );
               }

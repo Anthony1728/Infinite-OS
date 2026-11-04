@@ -54,6 +54,7 @@ const SpellForgeView = lazy(() => import('../views/SpellForgeView').then(m => ({
 const JournalView = lazy(() => import('../views/JournalView').then(m => ({ default: m.JournalView })));
 const StudioView = lazy(() => import('../studio/StudioView').then(m => ({ default: m.StudioView })));
 const PlannerView = lazy(() => import('../planner/PlannerView').then(m => ({ default: m.PlannerView })));
+const PagesView = lazy(() => import('../pages/PagesView').then(m => ({ default: m.PagesView })));
 
 interface MainViewProps {
   activeView: string;
@@ -190,6 +191,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <StudioView />;
       case 'planner':
         return <PlannerView />;
+      case 'pages':
+        return <PagesView />;
       default:
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
     }

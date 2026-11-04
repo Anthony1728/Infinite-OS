@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { IPC } from '../../shared/ipc.js';
 import { adoptProfileData, getActiveUid, setActiveUid, sessionUidFor } from '../profiles/home.js';
+import { getOwnerManager } from '../owner/manager.js';
 
 const authPath = join(homedir(), '.infinite-ai', 'auth.json');
 const sessionPath = join(homedir(), '.infinite-ai', 'auth-session.json');
@@ -25,6 +26,37 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await rename(temporary, path);
 }
 
+/**
+ * Tie the local owner record to the account that is actually signed in.
+ *
+ * Every installation starts with a generic owner and updates it on first
+ * sign-in, so a new user never inherits the identity or elevated local
+ * privileges of whoever built the app. Failures here must never block auth.
+ */
+function syncLocalOwner(session: unknown): void {
+  const user = (session as { user?: { name?: unknown; email?: unknown } } | null)?.user;
+  if (!user || typeof user.email !== 'string' || !user.email.trim()) return;
+  const email = user.email.trim();
+  const fullName = typeof user.name === 'string' ? user.name.trim() : '';
+  try {
+    const owner = getOwnerManager();
+    const current = owner.getProfile();
+    const preferredName = fullName ? fullName.split(/\s+/)[0] : current.preferredName;
+    if (
+      current.email.toLowerCase() === email.toLowerCase() &&
+      (!fullName || current.fullName === fullName)
+    ) {
+      return;
+    }
+    owner.updateProfile({
+      email,
+      ...(fullName ? { fullName, preferredName } : {}),
+    });
+  } catch {
+    /* owner store failure must never block sign-in */
+  }
+}
+
 export function registerAuthIpc(): void {
   ipcMain.handle(IPC.AUTH_GET_USERS, async () => readJson<Record<string, unknown>>(authPath, {}));
   ipcMain.handle(IPC.AUTH_SET_USERS, async (_event, users: unknown) => {
@@ -32,9 +64,14 @@ export function registerAuthIpc(): void {
     await writeJson(authPath, users);
     return { ok: true };
   });
-  ipcMain.handle(IPC.AUTH_GET_SESSION, async () => readJson<unknown>(sessionPath, null));
+  ipcMain.handle(IPC.AUTH_GET_SESSION, async () => {
+    const session = await readJson<unknown>(sessionPath, null);
+    syncLocalOwner(session);
+    return session;
+  });
   ipcMain.handle(IPC.AUTH_SET_SESSION, async (_event, session: unknown) => {
     await writeJson(sessionPath, session);
+    syncLocalOwner(session);
     // Netflix-style switch: a different account (or logout) re-homes all
     // user data. Main caches the home + holds open DBs, so relaunch —
     // every store then re-resolves under the new profile from boot.

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { audioDataMime, speakWithBrowserVoice } from '../lib/voiceConversation';
+import type { SystemRoots } from '../lib/systemPaths';
 
 // ── Infinite AI Brain — core identity ──────────────────────────────────────
 // The Brain is a fast, on-device inference layer. It is not a remote LLM:
@@ -41,6 +42,23 @@ const BRAIN_REFUSAL: Array<{ pattern: RegExp; refusal: string }> = [
 
 /** Follow-up words — used by the digest to roll multi-turn context in. */
 const BRAIN_CONTEXT_WORDS = new Set(['it', 'this', 'that', 'them', 'those', 'these', 'then', 'and', 'but', 'so', 'how', 'why', 'what', 'which', 'now', 'continue', 'again', 'more', 'another', 'explain', 'show']);
+
+/**
+ * Brain actions are produced by pure pattern handlers, so they cannot query
+ * Electron paths directly. Handlers use the `%DESKTOP%` token and this helper
+ * swaps it for the real desktop directory of whoever is signed in.
+ */
+async function resolveBrainPath(path: string): Promise<string> {
+  if (!path.includes('%DESKTOP%')) return path;
+  try {
+    const roots = (await window.api.fileSystemRoots()) as SystemRoots;
+    const desktop = roots?.common?.find((item) => item.kind === 'common' && /desktop/i.test(item.name));
+    if (desktop?.path) return path.replace(/%DESKTOP%/g, desktop.path);
+  } catch {
+    /* fall through to a relative path rather than a foreign absolute one */
+  }
+  return path.replace(/%DESKTOP%[\\/]?/g, '');
+}
 
 interface KnowledgeEntry {
   id: string;
@@ -547,7 +565,7 @@ const INTENT_PATTERNS: PatternRule[] = [
   { pattern: /\b(create|make|write|save|put)\b.*\b(notepad|file|document|text)\b.*\b(desktop|here|folder)\b/i, handler: (input) => {
     const name = input.match(/(?:called|named|as|to)\s+["']?(\S+)["']?/i)?.[1] || 'notes';
     const ext = input.match(/\.(txt|md|doc|docx)/i)?.[1] || 'txt';
-    const desktopPath = `C:\\Users\\user\\Desktop\\${name}.${ext}`;
+    const desktopPath = `%DESKTOP%\\${name}.${ext}`;
     const content = input.match(/(?:about|containing|with content|saying)\s+(.+)/i)?.[1] || `Created by Infinite AI Brain`;
     return { type: 'write_file', path: desktopPath, content };
   }},
@@ -555,7 +573,7 @@ const INTENT_PATTERNS: PatternRule[] = [
   // Create folder on desktop
   { pattern: /\b(create|make|mkdir|new)\b.*\b(folder|directory)\b.*\b(desktop|here)\b/i, handler: (input) => {
     const name = input.match(/(?:called|named|as|to)\s+["']?(\S+)["']?/i)?.[1] || 'New Folder';
-    const desktopPath = `C:\\Users\\user\\Desktop\\${name}`;
+    const desktopPath = `%DESKTOP%\\${name}`;
     return { type: 'mkdir', path: desktopPath };
   }},
 
@@ -819,13 +837,15 @@ async function executeBrainAction(action: BrainAction, cwd: string): Promise<str
             return 'Safety validation was unavailable, so Infinite OS did not write this sensitive file.';
           }
         }
-        await window.api.fileWrite({ path: action.path || 'output.txt', content: action.content || '' });
-        return `**File created:** \`${action.path}\`\n\n\`\`\`\n${action.content}\n\`\`\`\n\n✅ File written successfully.`;
+        const resolvedPath = await resolveBrainPath(action.path || 'output.txt');
+        await window.api.fileWrite({ path: resolvedPath, content: action.content || '' });
+        return `**File created:** \`${resolvedPath}\`\n\n\`\`\`\n${action.content}\n\`\`\`\n\n✅ File written successfully.`;
       }
 
       case 'mkdir': {
-        await window.api.fileMkdir({ path: action.path || 'new-folder' });
-        return `**Directory created:** \`${action.path}\`\n\n✅ Directory created successfully.`;
+        const resolvedDir = await resolveBrainPath(action.path || 'new-folder');
+        await window.api.fileMkdir({ path: resolvedDir });
+        return `**Directory created:** \`${resolvedDir}\`\n\n✅ Directory created successfully.`;
       }
 
       case 'build_website': {

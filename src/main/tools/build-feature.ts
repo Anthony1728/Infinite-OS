@@ -77,12 +77,11 @@ async function applyStep(repoRoot: string | null): Promise<string> {
 export const buildFeatureTool: Tool = {
   name: 'BuildFeature',
   description: [
-    'Atomically add, fix, or improve any feature in Infinite OS itself or the current workspace.',
-    'This is your primary self-improvement tool: use it whenever the user says "improve Infinite OS", "add a feature", "fix this", "make it better", or asks for a capability that does not exist yet.',
-    'It creates and modifies files, UI components and tools, with automatic rollback checkpoints, workspace sandboxing and typecheck/test/build validation.',
-    'A successful build applies itself (dev: hot reload; packaged: rebuild and relaunch) — report what the apply step said instead of telling the user to restart the app.',
-    'Inspect the code first, then use BuildFeature instead of separate Write/Edit for any multi-file or UI change.',
-    'If you still cannot do it, create a Tab explaining the next step and add the missing capability with BuildFeature.',
+    'Atomically add, fix, or improve a feature in Infinite OS or the current workspace.',
+    'Primary self-improvement tool: use for "improve Infinite OS", "add a feature", "fix this", or any capability that does not exist yet.',
+    'Creates/modifies files and UI, with rollback checkpoints, workspace sandboxing, and typecheck/test/build validation.',
+    'A successful build applies itself (dev: hot reload; packaged: rebuild + relaunch) — report the apply result, do not tell the user to restart.',
+    'Inspect code first; use BuildFeature instead of separate Write/Edit for multi-file or UI changes.',
   ].join(' '),
   inputSchema: {
     type: 'object',

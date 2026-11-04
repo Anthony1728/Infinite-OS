@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { joinSystemPath, normalizeSystemPath, parentSystemPath, systemBaseName } from './systemPaths';
 
 describe('system path navigation', () => {
@@ -11,6 +11,6 @@ describe('system path navigation', () => {
   it('joins Windows and POSIX paths correctly', () => {
     expect(joinSystemPath('C:\\Users', 'user')).toBe('C:\\Users\\user');
     expect(joinSystemPath('/', 'tmp')).toBe('/tmp');
-    expect(systemBaseName('C:\\Users\\user')).toBe('user');
+    expect(systemBaseName('C:\\Users\\example')).toBe('example');
   });
 });

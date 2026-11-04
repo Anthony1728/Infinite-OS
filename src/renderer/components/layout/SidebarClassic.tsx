@@ -17,6 +17,7 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'board', label: 'Board', icon: 'nav.projects', color: 'text-emerald-400' },
   { id: 'planner', label: 'Planner', icon: 'nav.planner', color: 'text-violet-400' },
   { id: 'studio', label: 'Studio', icon: 'nav.studio', color: 'text-cyan-400' },
+  { id: 'pages', label: 'Pages', icon: 'nav.pages', color: 'text-violet-400' },
   // Filed-away conversations. Searchable, and every entry can be restored and
   // carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document', color: 'text-slate-400' },

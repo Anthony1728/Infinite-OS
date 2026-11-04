@@ -9,11 +9,9 @@ import type { AgentId } from '../agents/types.js';
 export const agent: Tool = {
   name: 'Agent',
   description: [
-    'Spawn a specialised subagent to handle a focused task in isolation.',
-    'The subagent gets its own context, tool restrictions, and report.',
-    'Use this for parallelisable or specialised work like research, code edits, design, data analysis, or SEO audits.',
-    'Supports single or batch mode. For batch, pass multiple prompts to run agents in parallel.',
-    'When delegating, the main agent should clearly describe the task in `prompt` and trust the subagent to handle it.',
+    'Spawn a specialised subagent with its own context, tool restrictions, and report.',
+    'Use for parallel or focused work: research, code, design, data, SEO. Batch mode runs multiple prompts in parallel.',
+    'Describe the task clearly in prompt and trust the subagent to execute it.',
   ].join(' '),
   inputSchema: {
     type: 'object',

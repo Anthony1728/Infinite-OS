@@ -1,21 +1,31 @@
+# Dependencies
 node_modules/
-release/
+.pnpm-store/
+
+# Build output
 dist/
+release/
 out/
 .vite/
-*.log
-.DS_Store
-.env
-.env.local
-.env.*.local
-.idea/
-.vscode/
-!src/renderer/.vscode/
 *.tsbuildinfo
 coverage/
 playwright-report/
 test-results/
-.pnpm-store/
+
+# Logs and OS noise
+*.log
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editors
+.idea/
+.vscode/
+!src/renderer/.vscode/
 
 # Local safety snapshots (scripts/backup.mjs)
 .backups/
@@ -23,23 +33,20 @@ test-results/
 # Per-session self-edit snapshots (agent Snapshot tool)
 .infinite-backups/
 
-nul
+# Local agent/session state
+.infinite/
+.freebuff/
 
-# Scratch/backup junk (keep real zips like extensions/ tracked)
+# Scratch and unpacked tool output
 /src-backup-*.zip
 /c
+nul
 
-# Bridge extension config: regenerated at runtime with a LIVE auth token that
-# grants browser control (ws://127.0.0.1:8765 /exec). Never commit it.
+# Bridge extension config: regenerated at runtime with a live auth token.
+# Never commit it.
 extensions/*/config.js
 !extensions/*/config.example.js
-
-# Nested project secrets — only .env.example (with placeholders) belongs in git
-Infinite OS/**/.env
-Infinite OS/**/.env.local
-Infinite OS/**/.env.*.local
 
 # Python bytecode (local scripts)
 __pycache__/
 *.pyc
-

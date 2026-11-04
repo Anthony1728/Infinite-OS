@@ -241,7 +241,9 @@ test.describe('Infinite OS Studio, Planner, and wallpaper', () => {
     await page.getByRole('button', { name: /New event/ }).click();
     await page.getByPlaceholder('Design review').fill('E2E event');
     await page.getByRole('button', { name: 'Add event' }).click();
-    await expect(page.getByText('E2E event')).toBeVisible();
+    // The event renders in both the day list and the "Today" upcoming card,
+    // so match the first instance rather than relying on a unique hit.
+    await expect(page.getByText('E2E event').first()).toBeVisible();
 
     const planner = await page.evaluate(async () => {
       const data = (await (window as unknown as {
@@ -404,5 +406,273 @@ test.describe('Infinite OS Studio, Planner, and wallpaper', () => {
     await page.locator('.os-wallpaper-tile[data-id="custom"]').click();
     await expect(page.locator('.os-wallpaper-tile[data-id="custom"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText('Using suite-wallpaper.png')).toBeVisible();
+  });
+
+  test('Pages writes, searches, applies AI, manages database rows, and survives reload', async () => {
+    test.setTimeout(300_000);
+    const launched = await launchApp();
+    app = launched.app;
+    cleanups = launched.cleanups;
+    const page = launched.page;
+
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => pageErrors.push(String(error)));
+
+    // Deterministic model output: database generation gets CSV, everything
+    // else gets a closing paragraph. The UI must not apply either on its own.
+    await app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('studio:ai');
+      ipcMain.handle('studio:ai', (_event, args?: { kind?: string }) => {
+        if (args?.kind === 'sheet') {
+          return {
+            text: [
+              'Name,Status,Owner,Date',
+              'Plan the launch,Not started,Ada,2026-11-02',
+              'Draft the announcement,In progress,Grace,2026-11-05',
+            ].join('\n'),
+            provider: 'test',
+            model: 'test',
+          };
+        }
+        return {
+          text: 'A closing line written by Pages AI.',
+          provider: 'test',
+          model: 'test',
+        };
+      });
+    });
+
+    await page.locator('[data-nav="pages"]').click();
+    await expect(page.getByRole('heading', { name: 'A home for every thought.' })).toBeVisible();
+
+    // -- Database ----------------------------------------------------------
+    await page.locator('.pages-landing-actions .pages-secondary-button').click();
+    await expect(page.locator('.pages-title')).toHaveValue('Untitled database');
+    await page.locator('.pages-title').fill('E2E database');
+
+    await page.locator('.pages-db-new-row').click();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(1);
+    await page.locator('.pages-title-cell input').first().fill('First launch task');
+
+    await page.locator('.pages-ai-trigger').click();
+    await expect(page.locator('.pages-ai-panel')).toBeVisible();
+    await page.locator('#pages-ai-prompt-input').fill('Realistic launch tasks');
+    await page.locator('.pages-ai-run').click();
+    await expect(page.getByText('2 rows ready to add')).toBeVisible();
+    await page.locator('.pages-ai-apply').click();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(3);
+    await expect(page.locator('.pages-title-cell input').nth(1)).toHaveValue('Plan the launch');
+    // Applying rows closes the panel so the database is immediately usable.
+    await expect(page.locator('.pages-ai-panel')).toBeHidden();
+
+    // Every shipped view renders this database without crashing.
+    await page.locator('.pages-view-tab').filter({ hasText: 'Board' }).click();
+    await expect(page.locator('.pages-database-body')).toBeVisible();
+    await page.locator('.pages-view-tab').filter({ hasText: 'Calendar' }).click();
+    await expect(page.locator('.pages-database-body')).toBeVisible();
+    await page.locator('.pages-view-tab').filter({ hasText: 'Table' }).click();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(3);
+
+    // Deleting a row asks first. Cancel keeps it, confirm removes it.
+    await page.locator('.pages-db-row-menu').first().click();
+    await page.locator('.pages-popover').getByText('Delete row', { exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Delete this row?' })).toBeVisible();
+    await page.locator('.pages-confirm-modal').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('.pages-confirm-modal')).toBeHidden();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(3);
+
+    await page.locator('.pages-db-row-menu').first().click();
+    await page.locator('.pages-popover').getByText('Delete row', { exact: true }).click();
+    await page.locator('.pages-confirm-modal').getByRole('button', { name: 'Delete row' }).click();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(2);
+    await expect(page.locator('.pages-title-cell input').first()).toHaveValue('Plan the launch');
+    await page.screenshot({ path: test.info().outputPath('pages-database.png') });
+
+    // -- Document ----------------------------------------------------------
+    await page.locator('.pages-sidebar-actions .pages-primary-button').click();
+    await expect(page.locator('.pages-title')).toHaveValue('Untitled');
+    await page.locator('.pages-title').fill('E2E knowledge page');
+    const firstBlock = page.locator('.pages-blocks .pages-text-block').first();
+    await firstBlock.click();
+    await page.keyboard.type('Pages keep the plan and the proof together.');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('A second line stays linked.');
+
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async () => {
+            const api = (window as unknown as {
+              api: {
+                pagesList: () => Promise<Array<{ id: string; title: string }>>;
+                pagesGet: (args: { id: string }) => Promise<{ blocks: Array<{ html: string }> } | null>;
+              };
+            }).api;
+            const list = await api.pagesList();
+            const summary = list.find((item) => item.title === 'E2E knowledge page');
+            if (!summary) return null;
+            const record = await api.pagesGet({ id: summary.id });
+            return record?.blocks.map((block) => block.html).join(' ') ?? null;
+          }),
+        { timeout: 15_000 },
+      )
+      .toContain('A second line stays linked.');
+
+    // The generated paragraph is a proposal until the writer applies it.
+    await page.locator('.pages-ai-trigger').click();
+    await page.locator('#pages-ai-prompt-input').fill('Add a closing line.');
+    await page.locator('.pages-ai-run').click();
+    await expect(page.locator('.pages-ai-preview')).toContainText('A closing line written by Pages AI.');
+    await expect(page.locator('.pages-blocks')).not.toContainText('A closing line written by Pages AI.');
+    await page.getByRole('button', { name: 'Append to page' }).click();
+    await expect(page.locator('.pages-blocks')).toContainText('A closing line written by Pages AI.');
+    await expect(page.locator('.pages-ai-panel')).toBeHidden();
+    await page.screenshot({ path: test.info().outputPath('pages-document.png') });
+
+    // Search spans titles and flattened body text.
+    await page.getByLabel('Search pages').fill('knowledge');
+    await expect(page.locator('.pages-search-result-title').filter({ hasText: 'E2E knowledge page' })).toBeVisible();
+    await page.getByLabel('Clear search').click();
+
+    // Trash is recoverable, not a dead end.
+    const treeRow = page.locator('.pages-tree-row').filter({
+      has: page.locator('.pages-tree-title', { hasText: 'E2E knowledge page' }),
+    });
+    await treeRow.locator('button[title="Page options"]').click();
+    await page.locator('.pages-popover').getByText('Move to trash', { exact: true }).click();
+    await page.locator('.pages-sidebar-link').filter({ hasText: 'Trash' }).click();
+    await expect(page.getByRole('heading', { name: 'Trash' })).toBeVisible();
+    await page.locator('.pages-trash-row').filter({ hasText: 'E2E knowledge page' })
+      .getByRole('button', { name: 'Restore' }).click();
+    await expect(page.locator('.pages-title')).toHaveValue('E2E knowledge page');
+
+    // -- Reload: the files on disk must be the source of truth ------------
+    await page.waitForTimeout(1_200);
+    await page.reload();
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[data-nav="studio"]')),
+      undefined,
+      { timeout: 60_000 },
+    );
+    await page.locator('[data-nav="pages"]').click();
+    // The last opened page is restored, including its saved body.
+    await expect(page.locator('.pages-title')).toHaveValue('E2E knowledge page');
+    await expect(page.locator('.pages-blocks')).toContainText('A closing line written by Pages AI.');
+
+    const persisted = await page.evaluate(async () => {
+      const api = (window as unknown as {
+        api: {
+          pagesList: () => Promise<Array<{ id: string; title: string; kind: string }>>;
+          pagesGet: (args: { id: string }) => Promise<{
+            blocks: Array<{ html: string }>;
+            database?: { rows: Array<{ values: Record<string, unknown> }> };
+          } | null>;
+        };
+      }).api;
+      const list = await api.pagesList();
+      const docSummary = list.find((item) => item.title === 'E2E knowledge page');
+      const databaseSummary = list.find((item) => item.title === 'E2E database');
+      const doc = docSummary ? await api.pagesGet({ id: docSummary.id }) : null;
+      const database = databaseSummary ? await api.pagesGet({ id: databaseSummary.id }) : null;
+      return {
+        docText: doc?.blocks.map((block) => block.html).join(' ') ?? '',
+        rows: (database?.database?.rows ?? []).map((row) => (
+          Object.values(row.values).filter((value) => typeof value === 'string').join(' ')
+        )),
+      };
+    });
+    expect(persisted.docText).toContain('Pages keep the plan and the proof together.');
+    expect(persisted.docText).toContain('A closing line written by Pages AI.');
+    expect(persisted.rows).toHaveLength(2);
+    expect(persisted.rows.some((row) => row.includes('Plan the launch'))).toBe(true);
+    expect(persisted.rows.some((row) => row.includes('Draft the announcement'))).toBe(true);
+
+    // Reopen through the UI, not just the API.
+    await page.locator('.pages-tree-label[title="E2E database"]').click();
+    await expect(page.locator('.pages-title-cell input')).toHaveCount(2);
+    await expect(page.locator('.pages-title-cell input').first()).toHaveValue('Plan the launch');
+    await page.locator('.pages-tree-label[title="E2E knowledge page"]').click();
+    await expect(page.locator('.pages-blocks')).toContainText('A closing line written by Pages AI.');
+
+    expect(pageErrors, 'Uncaught renderer exceptions').toEqual([]);
+  });
+
+  test('agent-control surfaces are wired for computer, browser, and tools', async () => {
+    test.setTimeout(180_000);
+    const launched = await launchApp();
+    app = launched.app;
+    cleanups = launched.cleanups;
+    const page = launched.page;
+
+    const surfaces = await page.evaluate(async () => {
+      const api = (window as unknown as {
+        api: {
+          listTools: () => Promise<Array<{ name: string; description: string; input_schema: unknown }>>;
+          computerGetScreenSize: () => Promise<{ ok: boolean; width: number; height: number }>;
+          bridgeStatus: () => Promise<{ ok: boolean; status: { port: number; tokenConfigured: boolean } }>;
+        };
+      }).api;
+      const [tools, screen, bridge] = await Promise.all([
+        api.listTools(),
+        api.computerGetScreenSize(),
+        api.bridgeStatus(),
+      ]);
+      return { tools, screen, bridge };
+    });
+
+    const names = surfaces.tools.map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining([
+      'Computer',
+      'PCLiveMap',
+      'browser_extension',
+      'Operator',
+      'Pages',
+      'Studio',
+      'Planner',
+      'Bash',
+      'Email',
+    ]));
+
+    const computer = surfaces.tools.find((tool) => tool.name === 'Computer');
+    const schema = computer?.input_schema as { properties?: { action?: { enum?: string[] } } } | undefined;
+    expect(schema?.properties?.action?.enum).toEqual(expect.arrayContaining([
+      'mouse_click',
+      'type_text',
+      'key_press',
+      'hotkey',
+      'screenshot',
+      'launch_app',
+      'focus_window',
+      'list_processes',
+      'get_clipboard',
+      'set_clipboard',
+    ]));
+
+    const liveMap = surfaces.tools.find((tool) => tool.name === 'PCLiveMap');
+    const liveSchema = liveMap?.input_schema as { properties?: { action?: { enum?: string[] } } } | undefined;
+    expect(liveSchema?.properties?.action?.enum).toEqual(expect.arrayContaining([
+      'status',
+      'live',
+      'changes',
+      'agent',
+      'elements',
+      'health',
+      'events',
+      'click_name',
+      'type',
+      'keys',
+      'focus',
+      'start',
+    ]));
+
+    expect(surfaces.screen.ok).toBe(true);
+    expect(surfaces.screen.width).toBeGreaterThan(0);
+    expect(surfaces.screen.height).toBeGreaterThan(0);
+
+    // The bridge generates its own token in a fresh profile instead of
+    // shipping a hardcoded secret with the extension.
+    expect(surfaces.bridge.ok).toBe(true);
+    expect(surfaces.bridge.status.port).toBeGreaterThan(0);
+    expect(surfaces.bridge.status.tokenConfigured).toBe(true);
   });
 });

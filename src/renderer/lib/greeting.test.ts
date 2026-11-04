@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { creativeGreeting, dayOfYearSeed } from './greeting.js';
 
-const base = { firstName: 'Anthony', weekday: 3, dayOfYear: 100 };
+const base = { firstName: 'Alex', weekday: 3, dayOfYear: 100 };
 
 describe('creativeGreeting', () => {
   it('greets by time of day', () => {

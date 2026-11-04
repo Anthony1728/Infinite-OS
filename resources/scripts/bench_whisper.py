@@ -7,13 +7,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from local_voice_server import read_wav, resample  # noqa: E402
 
-DEFAULT_CLIP = r"C:\Users\user\AppData\Local\Temp\mic-utt-0.wav"
-FALLBACK_CLIP = r"C:\Users\user\AppData\Local\Temp\inf-tts-test.wav"
+DEFAULT_CLIP = os.path.join(tempfile.gettempdir(), "mic-utt-0.wav")
+FALLBACK_CLIP = os.path.join(tempfile.gettempdir(), "inf-tts-test.wav")
 TRUTH = "Infinite OS Voice Pipeline is online."
 MODELS = ["tiny", "base", "base.en", "small", "small.en"]
 

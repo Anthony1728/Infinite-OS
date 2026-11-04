@@ -1,11 +1,11 @@
-import { describe, expect, it, beforeEach, vi, afterAll } from 'vitest';
+﻿import { describe, expect, it, beforeEach, vi, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // The guard persists its runaway-loop window to the profile directory. Without
 // this override the tests would write to the developer's real Infinite OS
-// profile — the same hazard that left a stale provider-health timestamp
+// profile â€” the same hazard that left a stale provider-health timestamp
 // skipping a provider for minutes.
 process.env.INFINITE_TEST_HOME ??= mkdtempSync(join(tmpdir(), 'infinite-guard-test-'));
 afterAll(() => {
@@ -114,7 +114,7 @@ describe('the agent is otherwise left alone', () => {
   });
 
   it('does not touch the user\'s own files outside the repo', () => {
-    for (const p of ['C:\\Users\\user\\Documents\\notes.md', 'D:\\photos\\cat.png', '..\\..\\anything']) {
+    for (const p of ['C:\\Users\\example\\Documents\\notes.md', 'D:\\photos\\cat.png', '..\\..\\anything']) {
       expect(guardSelfModification(ROOT, p, 'delete').allowed, p).toBe(true);
     }
   });
@@ -159,7 +159,7 @@ describe('a runaway edit loop is stopped', () => {
     resetSelfModificationGuard();
   });
 
-  it('lets a real fix through — iterating on one file many times is normal', () => {
+  it('lets a real fix through â€” iterating on one file many times is normal', () => {
     for (let i = 0; i < 10; i++) {
       expect(guardSelfModification(ROOT, 'src/main/tools/browser.ts', 'modify').allowed).toBe(true);
     }

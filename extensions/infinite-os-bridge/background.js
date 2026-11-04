@@ -20,6 +20,40 @@ try {
   }
 } catch (_e) {}
 
+// config.js is written by the desktop app and can change after a token
+// rotation. Re-read it before reconnecting so the extension never stays pinned
+// to a stale port/token until the user manually reloads it.
+let configLoadedAt = Date.now();
+let configRefreshPromise = null;
+async function refreshBridgeConfig(force) {
+  const now = Date.now();
+  if (!force && configLoadedAt && now - configLoadedAt < 2000) return;
+  if (configRefreshPromise) return configRefreshPromise;
+  configRefreshPromise = (async () => {
+    try {
+      const response = await fetch(chrome.runtime.getURL('config.js'), { cache: 'no-store' });
+      if (!response.ok) return;
+      const text = await response.text();
+      const portMatch = text.match(/port\s*:\s*(\d+)/);
+      const tokenMatch = text.match(/token\s*:\s*["']([^"']*)["']/);
+      if (portMatch) {
+        const port = Number(portMatch[1]);
+        if (port > 0 && port < 65536) BRIDGE_PORT = port;
+      }
+      if (tokenMatch) BRIDGE_TOKEN = tokenMatch[1];
+      status.port = BRIDGE_PORT;
+      status.hasToken = Boolean(BRIDGE_TOKEN);
+      configLoadedAt = Date.now();
+      broadcastToPopup();
+    } catch (_e) {
+      // Keep the last known values; the reconnect loop will retry.
+    } finally {
+      configRefreshPromise = null;
+    }
+  })();
+  return configRefreshPromise;
+}
+
 // ── MessagePack codec ─────────────────────────────────────────────────────────
 // Spec-compliant (https://msgpack.org) so this codec and the Infinite OS bridge
 // server always agree. The old subset tagged 16-bit ints as 0xd2 and 32-bit ints
@@ -311,6 +345,11 @@ function broadcastToPopup() {
 }
 
 function connect() {
+  if (manualClose || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+  void refreshBridgeConfig(false).finally(openSocket);
+}
+
+function openSocket() {
     if (manualClose || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
     const url = `ws://127.0.0.1:${BRIDGE_PORT}/bridge?token=${encodeURIComponent(BRIDGE_TOKEN || '')}`;
     try {
@@ -324,6 +363,7 @@ function connect() {
     }
 
     ws.onopen = () => {
+      useBinaryProtocol = false;
       connectionAttempts = 0;
       latencyMs = 0;
       status.latencyMs = 0;
@@ -433,6 +473,11 @@ function stopKeepalive() {
 
 // ── Incoming message handling ─────────────────────────────────────────────────
 async function handleIncoming(msg) {
+  if (msg?.type === 'refresh-config') {
+    await refreshBridgeConfig(true);
+    forceReconnect('config refreshed');
+    return;
+  }
   if (msg?.type === 'pong-server') {
     pingPending = false;
     pingMisses = 0;
@@ -616,7 +661,7 @@ async function handleCommand(rawCommand, params) {
       break;
 
     case 'screenshot':
-      result = await screenshotActiveTab();
+      result = await screenshotActiveTab(params.forceDebugger === true);
       break;
 
     case 'execute_js':
@@ -746,6 +791,12 @@ async function handleCommand(rawCommand, params) {
     case 'right_click':
     case 'context_menu': {
       result = await contentScriptOp('rightClick', { selector: params.selector, text: params.text });
+      break;
+    }
+
+    case 'double_click':
+    case 'doubleclick': {
+      result = await contentScriptOp('doubleClick', { selector: params.selector, text: params.text });
       break;
     }
 
@@ -1498,30 +1549,142 @@ async function inspectActiveTab() {
   };
 }
 
-async function screenshotActiveTab() {
+async function screenshotActiveTab(forceDebugger = false) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab) throw new Error('No active tab');
   if (!/^(https?|file):/.test(String(tab.url || ''))) throw new Error(`Cannot capture: ${tab.url}`);
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  return { base64: dataUrl.replace(/^data:image\/png;base64,/, ''), format: 'png' };
+  if (!forceDebugger) {
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      return { base64: dataUrl.replace(/^data:image\/png;base64,/, ''), format: 'png' };
+    } catch (err) {
+      // captureVisibleTab fails with "image readback failed" on some Windows GPU
+      // paths and whenever the tab's window is occluded or minimized. The
+      // debugger screenshot reads the renderer directly and keeps the agent
+      // working while the user has another app in front.
+      return await captureViaDebugger(tab, err);
+    }
+  }
+  // Explicit fallback request (used by diagnostics and when a user chooses the
+  // reliable path after a repeat captureVisibleTab failure).
+  return await captureViaDebugger(tab, new Error('forced debugger screenshot'));
+}
+
+async function captureViaDebugger(tab, cause) {
+  const target = { tabId: tab.id };
+  let attached = false;
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach(target, '1.3', () => {
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve();
+      });
+    });
+    attached = true;
+  } catch (err) {
+    if (!/already attached|another debugger/i.test(String(err?.message || err))) {
+      throw new Error(
+        `Failed to capture tab: ${cause?.message || cause}; debugger fallback failed: ${err?.message || err}`,
+      );
+    }
+  }
+  try {
+    const response = await new Promise((resolve, reject) => {
+      chrome.debugger.sendCommand(
+        target,
+        'Page.captureScreenshot',
+        { format: 'png', fromSurface: true, captureBeyondViewport: false },
+        (result) => {
+          const err = chrome.runtime.lastError;
+          if (err) reject(new Error(err.message));
+          else resolve(result);
+        },
+      );
+    });
+    if (!response?.data) throw new Error('empty screenshot');
+    return { base64: response.data, format: 'png', source: 'debugger' };
+  } catch (err) {
+    throw new Error(
+      `Failed to capture tab: ${cause?.message || cause}; debugger fallback failed: ${err?.message || err}`,
+    );
+  } finally {
+    if (attached) {
+      try {
+        await new Promise((resolve) => chrome.debugger.detach(target, () => resolve()));
+      } catch {
+        /* tab may have closed */
+      }
+    }
+  }
 }
 
 async function runInPage(code) {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id) throw new Error('No active tab available');
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: (src) => {
-      const clone = (v) => {
-        try { return JSON.parse(JSON.stringify(v)); }
-        catch { return typeof v === 'string' ? v.slice(0, 200000) : { __unserializable: typeof v }; }
-      };
-      try { return { ok: true, value: clone(new Function(src)()) }; }
-      catch (e) { return { ok: false, error: String(e?.message || e) }; }
-    },
-    args: [code],
-  });
-  return results?.[0]?.result || { ok: false, error: 'no result' };
+  const target = { tabId: tab.id };
+
+  // Content-script isolated worlds enforce an extension CSP that blocks
+  // new Function()/eval, so the old implementation failed on every page. The
+  // debugger Runtime.evaluate path is the same one DevTools uses and is not
+  // subject to the page or isolated-world CSP.
+  let attached = false;
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach(target, '1.3', () => {
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve();
+      });
+    });
+    attached = true;
+  } catch (err) {
+    // If this extension (e.g. console_log) or DevTools already holds the
+    // target, try to reuse the existing session instead of failing outright.
+    if (!/already attached|another debugger/i.test(String(err?.message || err))) throw err;
+  }
+
+  try {
+    const response = await new Promise((resolve, reject) => {
+      chrome.debugger.sendCommand(
+        target,
+        'Runtime.evaluate',
+        {
+          expression: code,
+          returnByValue: true,
+          awaitPromise: true,
+          userGesture: true,
+        },
+        (result) => {
+          const err = chrome.runtime.lastError;
+          if (err) reject(new Error(err.message));
+          else resolve(result);
+        },
+      );
+    });
+
+    if (response?.exceptionDetails) {
+      const details = response.exceptionDetails;
+      const message =
+        details.exception?.description ||
+        details.text ||
+        'JavaScript evaluation failed';
+      throw new Error(message);
+    }
+    return {
+      ok: true,
+      value: response?.result?.value ?? null,
+      type: response?.result?.type || 'undefined',
+    };
+  } finally {
+    if (attached) {
+      try {
+        await new Promise((resolve) => chrome.debugger.detach(target, () => resolve()));
+      } catch {
+        /* tab may have closed */
+      }
+    }
+  }
 }
 
 // ── PAGE_EXEC — DOM automation (runs in isolated content world) ────────────────

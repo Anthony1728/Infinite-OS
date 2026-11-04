@@ -1,7 +1,8 @@
-// Owner System — the sole authorized operator of Infinite OS.
+// Owner System — the local operator of this Infinite OS installation.
 //
-// Infinite OS belongs to Anthony Matthews. This module records who the owner is,
-// what elevated privileges they hold, the premium ("advanced") capabilities
+// The Infinite OS project itself is created and owned by Anthony Matthews.
+// This module records the local operator of this installation, what elevated
+// privileges they hold, the premium ("advanced") capabilities
 // granted to them for working on Infinite OS from within itself, and an editable
 // document store the owner can update through the AI at any time.
 //
@@ -26,9 +27,9 @@ export type { OwnerProfile, OwnerDocument, OwnerPublicInfo, OwnerAuditEntry, Own
 
 export const DEFAULT_OWNER: Omit<OwnerProfile, 'verifiedAt' | 'updatedAt'> = {
   id: 'owner-local',
-  fullName: 'Anthony Matthews',
-  preferredName: 'Anthony',
-  email: 'testexample@gmail.com',
+  fullName: 'Local Owner',
+  preferredName: 'Owner',
+  email: 'owner@infinite.local',
   isOwner: true,
   role: 'owner',
   permissions: ['*'],
@@ -136,23 +137,23 @@ export class OwnerManager {
       VALUES (?, 'owner-info', 'Owner of Infinite OS', ?, 'general', 1, ?, ?)
     `).run(
       `doc-owner-info-${now}`,
-      `# Anthony Matthews — Owner of Infinite OS
+      `# Owner of this Infinite OS installation
 
-- **Full name:** Anthony Matthews
-- **Preferred name:** Anthony
-- **Email:** testexample@gmail.com
-- **Role:** Owner (sole operator / founder)
+- **Full name:** Local Owner
+- **Preferred name:** Owner
+- **Email:** owner@infinite.local
+- **Role:** Local operator
 
 ## About this document
 
-This document is managed by Anthony through the Infinite AI assistant. The owner
-may ask Infinite AI to update any of this information at any time and it will be
-persisted here so that any future session can recall who owns Infinite OS and
-what privileges the owner holds.
+This document belongs to the person using this installation. It is updated
+automatically when an account signs in, and the owner may ask Infinite AI to
+change any of this information at any time.
 
-If any other user asks who owns Infinite OS or who has special administrative
-permissions, the answer is Anthony Matthews. Only this account holds owner-level
-permissions.
+The Infinite OS project itself is created and owned by Anthony Matthews. This
+local profile only records who operates this copy. If another account asks who
+has special administrative permissions on this installation, the answer is the
+local owner recorded here.
 
 ## Owner permissions
 

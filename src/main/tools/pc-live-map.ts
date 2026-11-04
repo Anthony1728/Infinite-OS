@@ -67,9 +67,9 @@ export function livemapCandidates(): LivemapSource[] {
   const candidates: LivemapSource[] = [];
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    // Dev: src/main/tools -> repo root -> Infinite OS/pc-live-map
+    // Dev: src/main/tools -> repo root -> pc-live-map
     const repoRoot = join(here, '..', '..', '..');
-    candidates.push({ dir: join(repoRoot, 'Infinite OS', 'pc-live-map'), root: join(repoRoot, 'Infinite OS'), packaged: false });
+    candidates.push({ dir: join(repoRoot, 'pc-live-map'), root: repoRoot, packaged: false });
   } catch { /* import.meta unavailable in some test harnesses */ }
 
   // Packaged: copied next to app.asar by extraResources.
@@ -90,35 +90,48 @@ export function resolveLivemapSource(): LivemapSource | null {
 export const pcLiveMapTool: Tool = {
   name: 'PCLiveMap',
   description: [
-    'PC Live Map - screenshot-free eyes + hands: live vectors of all windows, 50 UIA elements WITH values, clipboard, idle.',
-    'Cheapest loop: action=changes with the id from your last call tells you only what HAPPENED since - focus, clicks, cursor, text, windows. If nothing changed you already know the state.',
-    'ACT via click_name/click/drag/scroll/type/keys/wait/focus (norm 0-1000). ALWAYS prefer over screenshots: cheaper, faster, works with text-only models.',
-    'Screenshot only when vectors cannot see (canvas/game/PDF) - say why.',
+    'PC Live Map — screenshot-free eyes + hands. Cheapest loop: action=changes with last id; act by name (click_name/rightclick_name/doubleclick_name/hover_name/scroll_at_name/type_name) with zero coords.',
+    'Also live windows, 50 UIA elements with values, clipboard, idle, vector actions, window control, launch apps/files, held keys, wait_for.',
+    'Prefer over screenshots; screenshot only when vectors cannot see (canvas/game/PDF) and say why.',
   ].join(' '),
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['status', 'live', 'changes', 'agent', 'elements', 'health', 'events', 'click', 'click_name', 'move', 'doubleclick', 'drag', 'scroll', 'type', 'keys', 'wait', 'focus', 'start'],
-        description: 'observe: status|live|changes|agent. changes = what happened since the id you pass back. search: elements. act: click|click_name|move|doubleclick|drag|scroll|type|keys|wait|focus. start: auto-launch bridge+tracker. health/events for diagnostics.',
+        enum: [
+          'status', 'live', 'changes', 'agent', 'elements', 'windows', 'health', 'events', 'wait_for',
+          'click', 'click_name', 'rightclick', 'rightclick_name', 'doubleclick', 'doubleclick_name',
+          'hover', 'hover_name', 'move', 'drag', 'scroll', 'scroll_at', 'scroll_at_name',
+          'type', 'type_name', 'keys', 'keydown', 'keyup', 'release_keys', 'wait', 'focus',
+          'window', 'launch', 'start',
+        ],
+        description: 'Observe, act, manage, or wait (see enum). Named actions use name; vector actions use x/y; window uses op + proc/title/pid; wait_for blocks until the target appears (gone:true waits for disappearance).',
       },
-      q: { type: 'string', description: 'For elements: substring of UIA name.' },
-      since: { type: 'number', description: 'For changes: only what changed after this id (use next_since from last call).' },
-      name: { type: 'string', description: 'UIA element name to click, e.g. Save' },
-      role: { type: 'string', description: 'UIA role filter, e.g. Button' },
-      x_norm: { type: 'number', description: 'Norm X 0-1000' },
-      y_norm: { type: 'number', description: 'Norm Y 0-1000' },
-      x1_norm: { type: 'number', description: 'Drag start X 0-1000' },
-      y1_norm: { type: 'number', description: 'Drag start Y 0-1000' },
-      x2_norm: { type: 'number', description: 'Drag end X 0-1000' },
-      y2_norm: { type: 'number', description: 'Drag end Y 0-1000' },
-      amount: { type: 'number', description: 'Scroll amount (-1200..1200, default 120)' },
-      text: { type: 'string', description: 'Text to type. keys: ^s=ctrl+s, %{F4}=alt+F4, {ENTER}.' },
-      keys: { type: 'string', description: 'SendKeys string for keys' },
-      proc: { type: 'string', description: 'Process name for focus' },
-      ms: { type: 'number', description: 'Wait ms (50-10000)' },
-      button: { type: 'string', enum: ['left', 'right'], description: 'Mouse button for click' },
+      q: { type: 'string', description: 'Element/window substring filter.' },
+      since: { type: 'number', description: 'changes cursor (next_since from last call).' },
+      name: { type: 'string', description: 'UIA element name for named actions.' },
+      role: { type: 'string', description: 'UIA role filter (e.g. Button).' },
+      x_norm: { type: 'number', description: 'X 0-1000.' },
+      y_norm: { type: 'number', description: 'Y 0-1000.' },
+      x1_norm: { type: 'number', description: 'Drag start X 0-1000.' },
+      y1_norm: { type: 'number', description: 'Drag start Y 0-1000.' },
+      x2_norm: { type: 'number', description: 'Drag end X 0-1000.' },
+      y2_norm: { type: 'number', description: 'Drag end Y 0-1000.' },
+      amount: { type: 'number', description: 'Scroll amount (-1200..1200).' },
+      text: { type: 'string', description: 'Text to type/paste.' },
+      keys: { type: 'string', description: 'SendKeys (^s) or held-key names (ctrl+shift).' },
+      proc: { type: 'string', description: 'Process name (chrome, FL64…).' },
+      title: { type: 'string', description: 'Window title fragment.' },
+      pid: { type: 'number', description: 'Process id (most precise).' },
+      op: { type: 'string', enum: ['focus', 'restore', 'minimize', 'maximize', 'close'], description: 'Window op.' },
+      path: { type: 'string', description: 'Exe or file to launch.' },
+      args: { type: 'string', description: 'Launch arguments.' },
+      timeout_ms: { type: 'number', description: 'wait_for timeout (default 15000, max 60000).' },
+      interval_ms: { type: 'number', description: 'wait_for poll interval (default 400).' },
+      gone: { type: 'boolean', description: 'wait_for: wait for disappearance.' },
+      ms: { type: 'number', description: 'Wait ms (50-10000).' },
+      button: { type: 'string', enum: ['left', 'right'], description: 'Mouse button.' },
     },
     required: ['action'],
   },
@@ -132,10 +145,10 @@ export const pcLiveMapTool: Tool = {
     const src = resolveLivemapSource();
     const baseHint = `Is the Live Map running? Run PCLiveMap action=start to auto-launch it, or start it by hand: powershell -ExecutionPolicy Bypass -File "${src ? joinForHint(src.dir, 'Start-LiveMap.ps1') : '<live-map>/Start-LiveMap.ps1'}". Bridge: ${BASE}/health`;
     // Claude Code-style live narration: stream a brief intent before the fetch so the user sees "eyes opening" instantly
-    const liveActions = new Set(['live', 'agent', 'elements', 'health', 'status', 'events', 'start']);
-    const actLabels: Record<string, string> = { live: 'Reading live vectors (no screenshot)…', agent: 'Reading agent entry + live vectors…', elements: 'Searching UIA elements…', health: 'Checking health…', status: 'Checking health…', events: 'Reading last actions…', start: 'Starting Live Map bridge…' };
+    const liveActions = new Set(['live', 'agent', 'elements', 'windows', 'health', 'status', 'events', 'start', 'wait_for']);
+    const actLabels: Record<string, string> = { live: 'Reading live vectors (no screenshot)…', agent: 'Reading agent entry + live vectors…', elements: 'Searching UIA elements…', windows: 'Listing windows…', health: 'Checking health…', status: 'Checking health…', events: 'Reading last actions…', start: 'Starting Live Map bridge…', wait_for: 'Waiting for the UI to change…' };
     if (liveActions.has(action) && ctx?.onUpdate) ctx.onUpdate({ content: actLabels[action] || `PCLiveMap ${action}…` });
-    const clickLabels: Record<string, string> = { click: 'Clicking…', click_name: `Clicking "${String(a.name || '').slice(0, 30)}"…`, move: 'Moving cursor…', doubleclick: 'Double-clicking…', drag: 'Dragging…', scroll: 'Scrolling…', type: `Typing ${String(a.text || '').slice(0, 20)}…`, keys: `Pressing keys ${String(a.keys || a.text || '').slice(0, 16)}…`, wait: 'Waiting…', focus: `Focusing ${String(a.proc || '').slice(0, 20)}…` };
+    const clickLabels: Record<string, string> = { click: 'Clicking…', click_name: `Clicking "${String(a.name || '').slice(0, 30)}"…`, rightclick: 'Right-clicking…', rightclick_name: `Right-clicking "${String(a.name || '').slice(0, 30)}"…`, doubleclick: 'Double-clicking…', doubleclick_name: `Double-clicking "${String(a.name || '').slice(0, 30)}"…`, hover: 'Hovering…', hover_name: `Hovering "${String(a.name || '').slice(0, 30)}"…`, move: 'Moving cursor…', drag: 'Dragging…', scroll: 'Scrolling…', scroll_at: 'Scrolling at point…', scroll_at_name: `Scrolling "${String(a.name || '').slice(0, 30)}"…`, type: `Typing ${String(a.text || '').slice(0, 20)}…`, type_name: `Typing into "${String(a.name || '').slice(0, 30)}"…`, keys: `Pressing keys ${String(a.keys || a.text || '').slice(0, 16)}…`, keydown: `Holding ${String(a.keys || '').slice(0, 16)}…`, keyup: `Releasing ${String(a.keys || '').slice(0, 16)}…`, release_keys: 'Releasing held keys…', wait: 'Waiting…', focus: `Focusing ${String(a.proc || '').slice(0, 20)}…`, window: `Window ${String(a.op || 'focus')}…`, launch: `Launching ${String(a.path || '').slice(-28)}…` };
     if (!liveActions.has(action) && ctx?.onUpdate && clickLabels[action]) ctx.onUpdate({ content: clickLabels[action] });
 
     // ---- START (self-healing: try to launch bridge if down) ----
@@ -149,7 +162,7 @@ export const pcLiveMapTool: Tool = {
       } catch { /* bridge down — try to launch */ }
       try {
         const source = resolveLivemapSource();
-        if (!source) return bad(`PCLiveMap runtime files not found. Looked in the repo (Infinite OS/pc-live-map) and next to the app (resources/pc-live-map). ${baseHint}`);
+        if (!source) return bad(`PCLiveMap runtime files not found. Looked in the repo (pc-live-map) and next to the app (resources/pc-live-map). ${baseHint}`);
         const collector = join(source.dir, 'collector-server.js');
 
         // In a packaged build `process.execPath` is the Infinite OS executable,
@@ -249,6 +262,100 @@ export const pcLiveMapTool: Tool = {
         return ok(`PCLiveMap elements matching "${q}" (${j.count}):\n${pretty(j.elements)}\n\nEach has x,y,w,h norm 0-1000. Prefer click_name; or compute center: x_norm=x+w/2, y_norm=y+h/2.`);
       } catch (e) { return bad(`PCLiveMap unreachable at ${BASE}/api/elements: ${(e as Error).message}`, baseHint); }
     }
+    if (action === 'windows') {
+      // Window/app inventory straight from the tracker: title, process, pid,
+      // normalized rect, and maximized/overlay flags. This is how the agent
+      // chooses a target for window/launch without guessing process names.
+      try {
+        const r = await fetchJson('/api/live');
+        if (!r.ok) return bad(`PCLiveMap /api/live failed (${r.status}): ${r.text.slice(0, 400)}`, baseHint);
+        const j = r.json as {
+          fg?: { proc?: string; win?: string; pid?: number; rect_norm?: string | number[]; max?: boolean };
+          windows?: { proc?: string; title?: string; pid?: number; rect_norm?: string | number[]; max?: boolean; overlay?: boolean }[];
+          mode?: string;
+        };
+        if (j.mode === 'browser-only') {
+          return bad('PCLiveMap tracker is not running, so there are no real windows to list.', 'Run PCLiveMap action=start, then start tracker.ps1 if it stays waiting.');
+        }
+        const q = String(a.q ?? '').toLowerCase();
+        const wins = (j.windows ?? []).filter((w) => {
+          const hay = `${w.proc ?? ''} ${w.title ?? ''} ${w.pid ?? ''}`.toLowerCase();
+          return !q || hay.includes(q);
+        });
+        const fg = j.fg ?? {};
+        const lines = wins.map((w) => {
+          const tags = [w.max ? 'maximized' : '', w.overlay ? 'overlay' : ''].filter(Boolean).join(', ');
+          return `- ${w.proc ?? '?'}${w.pid ? ` (pid ${w.pid})` : ''}: ${w.title ?? ''}${tags ? ` [${tags}]` : ''} rect=${Array.isArray(w.rect_norm) ? w.rect_norm.join(' ') : (w.rect_norm ?? '?')}`;
+        });
+        return ok(
+          `PCLiveMap windows${q ? ` matching "${q}"` : ''} (${wins.length}):\n` +
+          (lines.length ? lines.join('\n') : '  (none)') +
+          `\n\nForeground: ${fg.proc ?? '?'}${fg.pid ? ` (pid ${fg.pid})` : ''} :: ${fg.win ?? ''}\n\n` +
+          'Manage with action=window op=focus|minimize|maximize|restore|close proc/title/pid. Launch with action=launch path=...',
+        );
+      } catch (e) { return bad(`PCLiveMap unreachable at ${BASE}/api/live: ${(e as Error).message}`, baseHint); }
+    }
+    if (action === 'wait_for') {
+      // Blocking wait inside one tool call: the model does not burn turns
+      // polling, and a slow app can finish loading before the next decision.
+      const name = String(a.name ?? '').trim().toLowerCase();
+      const proc = String(a.proc ?? '').trim().toLowerCase();
+      const title = String(a.title ?? '').trim().toLowerCase();
+      if (!name && !proc && !title) {
+        return bad('wait_for needs name (UIA element), proc, or title. Add gone:true to wait for disappearance.');
+      }
+      const timeout = Math.min(60_000, Math.max(200, Math.floor(Number(a.timeout_ms ?? 15_000) || 15_000)));
+      const interval = Math.min(2_000, Math.max(100, Math.floor(Number(a.interval_ms ?? 400) || 400)));
+      const wantGone = a.gone === true;
+      const startedAt = Date.now();
+      const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+      let lastSeen = '';
+      while (Date.now() - startedAt <= timeout) {
+        try {
+          const r = await fetchJson('/api/live');
+          if (!r.ok) return bad(`PCLiveMap /api/live failed (${r.status}): ${r.text.slice(0, 300)}`, baseHint);
+          const j = r.json as {
+            fg?: { proc?: string; win?: string; pid?: number };
+            windows?: { proc?: string; title?: string; pid?: number }[];
+            elements?: { r?: string; n?: string; x?: number; y?: number; w?: number; h?: number }[];
+          };
+          const wins = [...(j.windows ?? []), ...(j.fg ? [{ proc: j.fg.proc, title: j.fg.win, pid: j.fg.pid }] : [])];
+          const windowHit = (proc || title)
+            ? wins.find((w) => {
+                const p = String(w.proc ?? '').toLowerCase();
+                const t = String(w.title ?? '').toLowerCase();
+                return (!proc || p.includes(proc)) && (!title || t.includes(title));
+              })
+            : undefined;
+          const elementHit = name
+            ? (j.elements ?? []).find((el) => String(el.n ?? '').toLowerCase().includes(name))
+            : undefined;
+          const hit = elementHit || windowHit;
+          if (hit) {
+            lastSeen = elementHit
+              ? `element "${elementHit.n}" (${elementHit.r ?? '?'}) at ${elementHit.x ?? '?'},${elementHit.y ?? '?'}`
+              : `window ${windowHit?.proc ?? '?'} :: ${windowHit?.title ?? ''}`;
+          }
+          if (wantGone ? !hit : Boolean(hit)) {
+            const elapsed = Date.now() - startedAt;
+            return ok(
+              `PCLiveMap wait_for ${wantGone ? 'disappearance' : 'appearance'} satisfied after ${elapsed}ms.\n` +
+              (hit ? `Found: ${lastSeen}\n\nNext: act with a *_name action or window op.` : 'The target is gone; the UI is ready for the next step.'),
+            );
+          }
+        } catch (e) {
+          // A transient connection error should not abort a wait that may still
+          // succeed once the tracker/bridge settles.
+          lastSeen = `transient error: ${(e as Error).message}`;
+        }
+        await sleep(interval);
+      }
+      return bad(
+        `PCLiveMap wait_for timed out after ${timeout}ms (${wantGone ? 'still present' : 'never appeared'})` +
+        `${lastSeen ? `; last seen: ${lastSeen}` : ''}. ` +
+        'Check action=windows/elements, or increase timeout_ms.',
+      );
+    }
     if (action === 'events') {
       // Last 20 actions for debug
       try {
@@ -261,29 +368,49 @@ export const pcLiveMapTool: Tool = {
     // ---- ACT ----
     const actMap: Record<string, Record<string, unknown>> = {
       click: { type: 'click', x_norm: a.x_norm, y_norm: a.y_norm, ...(a.button ? { button: a.button } : {}) },
+      rightclick: { type: 'rightclick', x_norm: a.x_norm, y_norm: a.y_norm },
+      hover: { type: 'hover', x_norm: a.x_norm, y_norm: a.y_norm },
       move: { type: 'move', x_norm: a.x_norm, y_norm: a.y_norm },
       doubleclick: { type: 'doubleclick', x_norm: a.x_norm, y_norm: a.y_norm },
       drag: { type: 'drag', x1_norm: a.x1_norm, y1_norm: a.y1_norm, x2_norm: a.x2_norm, y2_norm: a.y2_norm },
       scroll: { type: 'scroll', amount: a.amount ?? 120 },
+      scroll_at: { type: 'scroll_at', x_norm: a.x_norm, y_norm: a.y_norm, amount: a.amount ?? 120 },
       type: { type: 'type', text: a.text },
       keys: { type: 'keys', keys: a.keys ?? a.text },
+      keydown: { type: 'keydown', keys: a.keys },
+      keyup: { type: 'keyup', keys: a.keys },
+      release_keys: { type: 'release_keys' },
       wait: { type: 'wait', ms: a.ms ?? 500 },
       focus: { type: 'focus', proc: a.proc },
       click_name: { type: 'click_name', name: a.name, ...(a.role ? { role: a.role } : {}) },
+      rightclick_name: { type: 'rightclick_name', name: a.name, ...(a.role ? { role: a.role } : {}) },
+      doubleclick_name: { type: 'doubleclick_name', name: a.name, ...(a.role ? { role: a.role } : {}) },
+      hover_name: { type: 'hover_name', name: a.name, ...(a.role ? { role: a.role } : {}) },
+      scroll_at_name: { type: 'scroll_at_name', name: a.name, ...(a.role ? { role: a.role } : {}), amount: a.amount ?? 120 },
+      type_name: { type: 'type_name', name: a.name, ...(a.role ? { role: a.role } : {}), text: a.text },
+      window: { type: 'window', op: a.op ?? 'focus', ...(a.proc ? { proc: a.proc } : {}), ...(a.title ? { title: a.title } : {}), ...(a.pid != null ? { pid: a.pid } : {}) },
+      launch: { type: 'launch', path: a.path, ...(a.args ? { args: a.args } : {}) },
     };
     const payload = actMap[action];
-    if (!payload) return bad(`Unknown PCLiveMap action: ${action}. Use status|live|agent|elements|click|click_name|move|doubleclick|drag|scroll|type|keys|wait|focus|start.`);
+    if (!payload) return bad(`Unknown PCLiveMap action: ${action}. Use status|live|agent|elements|windows|wait_for|click|click_name|rightclick_name|doubleclick_name|hover_name|scroll_at_name|type_name|window|launch|keys|keydown|keyup|release_keys|start.`);
     // Minimal validation (coords ALWAYS norm 0-1000 both axes)
     const inRange = (v: unknown) => Number.isFinite(+String(v)) && +String(v) >= 0 && +String(v) <= 1000;
-    if (payload.type === 'click_name' && !String(payload.name || '').trim()) return bad('click_name requires name (UIA element name, e.g. Save). Try elements action first: PCLiveMap action=elements q=save');
-    if (['click', 'move', 'doubleclick'].includes(String(payload.type)) && (payload.x_norm == null || payload.y_norm == null)) return bad(`${payload.type} requires x_norm and y_norm (0-1000 both axes). Got ${pretty(payload)}`);
-    if (['click', 'move', 'doubleclick'].includes(String(payload.type)) && (!inRange(payload.x_norm) || !inRange(payload.y_norm))) return bad(`${payload.type} coords must be 0-1000 both axes. Got x=${payload.x_norm} y=${payload.y_norm}. Use elements to list valid x,y,w,h.`);
+    const NAMED = new Set(['click_name', 'rightclick_name', 'doubleclick_name', 'hover_name', 'scroll_at_name', 'type_name']);
+    const COORD = new Set(['click', 'rightclick', 'hover', 'move', 'doubleclick', 'scroll_at']);
+    if (NAMED.has(String(payload.type)) && !String(payload.name || '').trim()) {
+      return bad(`${payload.type} requires name (UIA element name, e.g. Save). Try elements action first: PCLiveMap action=elements q=save`);
+    }
+    if (payload.type === 'type_name' && !String(payload.text || '').length) return bad('type_name requires text');
+    if (COORD.has(String(payload.type)) && (payload.x_norm == null || payload.y_norm == null)) return bad(`${payload.type} requires x_norm and y_norm (0-1000 both axes). Got ${pretty(payload)}`);
+    if (COORD.has(String(payload.type)) && (!inRange(payload.x_norm) || !inRange(payload.y_norm))) return bad(`${payload.type} coords must be 0-1000 both axes. Got x=${payload.x_norm} y=${payload.y_norm}. Use elements to list valid x,y,w,h.`);
     if (payload.type === 'drag' && (payload.x1_norm == null || payload.y1_norm == null || payload.x2_norm == null || payload.y2_norm == null)) return bad('drag requires x1_norm,y1_norm,x2_norm,y2_norm (0-1000)');
     if (payload.type === 'type' && !String(payload.text || '').length) return bad('type requires text');
     if (payload.type === 'type' && String(payload.text || '').length > 500) return bad('type max 500 chars (paste via clipboard). Split longer text into chunks.');
-    if (payload.type === 'keys' && !String(payload.keys || '').length) return bad('keys requires keys (SendKeys string)');
+    if (['keys', 'keydown', 'keyup'].includes(String(payload.type)) && !String(payload.keys || '').length) return bad(`${payload.type} requires keys (SendKeys string, or key names like ctrl+shift)`);
     if (payload.type === 'keys' && String(payload.keys || '').length > 64) return bad('keys max 64 chars. SendKeys: ^s=ctrl+s, %{F4}=alt+F4, {ENTER}, {TAB}.');
     if (payload.type === 'focus' && !String(payload.proc || '').length) return bad('focus requires proc (process name)');
+    if (payload.type === 'window' && !String(payload.proc || payload.title || '').length && payload.pid == null) return bad('window requires proc, title, or pid');
+    if (payload.type === 'launch' && !String(payload.path || '').length) return bad('launch requires path (exe or file to open)');
 
     try {
       const r = await fetchJson('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

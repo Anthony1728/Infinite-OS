@@ -321,7 +321,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Anthony', [user?.name]);
+  const firstName = useMemo(() => user?.name?.split(' ')[0] || 'there', [user?.name]);
   const dateLabel = useMemo(() => now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), [now]);
   const timeLabel = useMemo(() => now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }), [now]);
 

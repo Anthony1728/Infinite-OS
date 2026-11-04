@@ -882,6 +882,7 @@ interface OpenCodeBusEvent {
 // re-publish parts, so deltas are computed against this. Bounded to avoid
 // unbounded growth across long sessions.
 const textSeen = new Map<string, string>();
+const reasoningSeen = new Map<string, string>();
 // messageID -> role, learned from message.updated events. The runtime echoes
 // the USER's own text back as parts too — those must never stream into the
 // assistant bubble.
@@ -948,6 +949,27 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
       textSeen.set(key, raw);
     }
     if (delta) return { type: 'text_delta', text: delta };
+    return null;
+  }
+
+  // Reasoning parts stream separately from the answer so the chat can show a
+  // live "thinking" panel. Snapshot/delta handling mirrors text parts above.
+  if (part.type === 'reasoning' || part.type === 'thinking') {
+    const state = (part.state ?? {}) as Record<string, unknown>;
+    const raw = typeof part.text === 'string' && part.text
+      ? part.text
+      : typeof state.text === 'string' ? state.text : '';
+    if (!raw) return null;
+    const key = String(part.id ?? part.messageID ?? part.sessionID ?? '');
+    const seen = key ? reasoningSeen.get(key) ?? '' : '';
+    if (raw === seen) return null;
+    let delta = raw;
+    if (key && seen && raw.startsWith(seen)) delta = raw.slice(seen.length);
+    if (key) {
+      if (reasoningSeen.size > 500) reasoningSeen.clear();
+      reasoningSeen.set(key, raw);
+    }
+    if (delta) return { type: 'thinking_delta', text: delta };
     return null;
   }
 
@@ -1052,6 +1074,9 @@ async function* streamSessionMessage(args: {
   // When the progress stream already delivered the model's text live, do not
   // re-emit the full text from the final response (avoids duplicate bubbles).
   let liveTextStreamed = false;
+  // Reasoning may arrive live (SSE parts) or only in the final message parts.
+  // Track which so the answer is never preceded by a duplicate thinking block.
+  let liveReasoningStreamed = false;
   // Fails-fast state: when the turn produced zero output (no bus chunks at
   // all) the runtime is retrying upstream — rate limits and model-not-found
   // both look like hangs. Abort with a sentinel the first-byte wrapper
@@ -1097,6 +1122,7 @@ async function* streamSessionMessage(args: {
     ready,
     (chunk) => {
       if (chunk.type === 'text_delta') liveTextStreamed = true;
+      if (chunk.type === 'thinking_delta') liveReasoningStreamed = true;
       // A provider_status error chunk carries the real failure (model not
       // found, upstream rejection). Capture it and break the wedged POST —
       // its response never arrives on these errors.
@@ -1252,6 +1278,11 @@ async function* streamSessionMessage(args: {
       .map((part) => part.text)
       .join('\n');
     if (text && !liveTextStreamed) yield { type: 'text_delta', text };
+    const reasoning = (result.parts ?? [])
+      .filter((part) => (part.type === 'reasoning' || part.type === 'thinking') && part.text)
+      .map((part) => part.text)
+      .join('\n');
+    if (reasoning && !liveReasoningStreamed) yield { type: 'thinking_delta', text: reasoning };
     yield {
       type: 'message_end',
       stop_reason: 'end_turn',

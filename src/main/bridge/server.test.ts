@@ -204,4 +204,88 @@ describe('BridgeServer', () => {
       await wait(100);
     }
   }, 10_000);
+
+  // ── Multiple simultaneous extensions ───────────────────────────────────────
+  // The dedicated Infinite OS browser and the user's own Chrome can both run
+  // the extension. A second hello used to close the first connection, so the
+  // two browsers kicked each other off in a reconnect loop. The newest hello
+  // must become active while older sockets stay attached as standbys, and a
+  // standby must be promoted when the active one disappears.
+
+  function sendHello(sock: Socket, id: string, version: string): void {
+    sock.write(
+      wsTextFrame(
+        JSON.stringify({
+          type: 'hello',
+          version,
+          browser: `TestBrowser/${id}`,
+          extensionId: id,
+          name: 'Infinite AI Bridge',
+        }),
+      ),
+    );
+  }
+
+  async function waitForConnectionCount(count: number): Promise<BridgeStatus> {
+    let status = await fetchStatus();
+    for (let i = 0; i < 30 && status.connections.length !== count; i++) {
+      await wait(100);
+      status = await fetchStatus();
+    }
+    return status;
+  }
+
+  it('keeps both extensions attached and makes the newest hello active', async () => {
+    const first = await wsUpgrade(bridgeServer.getStatus().port, testToken);
+    const second = await wsUpgrade(bridgeServer.getStatus().port, testToken);
+    try {
+      sendHello(first, 'first-extension', '1.0.0');
+      await waitForConnectionCount(1);
+      await wait(20);
+      sendHello(second, 'second-extension', '2.0.0');
+
+      const status = await waitForConnectionCount(2);
+      expect(status.connected).toBe(true);
+      expect(status.extensionId).toBe('second-extension');
+      expect(status.connections).toHaveLength(2);
+      expect(status.connections.filter((c) => c.active)).toHaveLength(1);
+      expect(status.connections.find((c) => c.active)?.extensionId).toBe('second-extension');
+      expect(status.connections.map((c) => c.extensionId).sort()).toEqual([
+        'first-extension',
+        'second-extension',
+      ]);
+      expect(first.destroyed).toBe(false);
+    } finally {
+      first.destroy();
+      second.destroy();
+      await wait(150);
+    }
+  }, 10_000);
+
+  it('promotes the standby extension when the active connection drops', async () => {
+    const first = await wsUpgrade(bridgeServer.getStatus().port, testToken);
+    const second = await wsUpgrade(bridgeServer.getStatus().port, testToken);
+    try {
+      sendHello(first, 'standby-extension', '1.0.0');
+      await waitForConnectionCount(1);
+      await wait(20);
+      sendHello(second, 'active-extension', '2.0.0');
+      await waitForConnectionCount(2);
+
+      second.destroy();
+
+      let status = await fetchStatus();
+      for (let i = 0; i < 30 && status.extensionId !== 'standby-extension'; i++) {
+        await wait(100);
+        status = await fetchStatus();
+      }
+      expect(status.connected).toBe(true);
+      expect(status.extensionId).toBe('standby-extension');
+      expect(status.connections).toHaveLength(1);
+      expect(status.connections[0].active).toBe(true);
+    } finally {
+      first.destroy();
+      await wait(150);
+    }
+  }, 10_000);
 });

@@ -1,4 +1,4 @@
-# InfantOS Source-Available Community License
+# Infinite OS Source-Available Community License
 
 **Copyright © 2026 Anthony Matthews. All Rights Reserved.**
 
@@ -6,17 +6,19 @@
 
 ## 1. Purpose
 
-InfantOS is a source-available software project intended to encourage experimentation, learning, collaboration, community development, and innovation while preserving the ownership, identity, and commercial rights of the InfantOS project and its copyright holder.
+Infinite OS is a source-available software project created and owned by Anthony Matthews. It is published to encourage learning, experimentation, collaboration, and community improvement while preserving the ownership, identity, and commercial rights of the project and its copyright holder.
 
-This license allows members of the community to inspect, study, modify, improve, and contribute to InfantOS under the conditions described below.
+This license allows members of the community to inspect, study, run, modify, improve, and contribute to Infinite OS under the conditions below. It is **not** an OSI-approved open-source license.
 
 ## 2. Copyright and Ownership
 
-**The InfantOS source code, original software, architecture, documentation, designs, graphics, interfaces, branding, logos, trademarks, and other original project materials remain the property of their respective copyright holders.**
+**The Infinite OS source code, original software, architecture, documentation, designs, graphics, interfaces, branding, logos, trademarks, and other original project materials remain the property of Anthony Matthews and the respective copyright holders of any third-party components.**
 
-**Access to or use of the source code does not transfer ownership of InfantOS or any intellectual-property rights to the user.**
+**Access to or use of the source code does not transfer ownership of Infinite OS or any intellectual-property rights to the user.**
 
-**No contributor, user, fork owner, or other party may claim ownership of the InfantOS project itself.**
+**No contributor, user, fork owner, or other party may claim ownership of the Infinite OS project itself, its name, or its brand.**
+
+Infinite OS is created and owned by **Anthony Matthews**. Community participation does not change that ownership.
 
 ## 3. Permissions Granted
 
@@ -24,52 +26,53 @@ Subject to the terms of this license, you are permitted to:
 
 - View and study the source code.
 - Download the source code for personal use.
+- Run Infinite OS on your own machines.
 - Modify the source code for personal, educational, research, and development purposes.
 - Experiment with modified versions.
 - Create private forks for development and experimentation.
 - Fix bugs and improve existing functionality.
 - Develop new features and improvements.
-- Submit contributions, pull requests, patches, and other improvements to the official InfantOS project.
-- Participate in the development and improvement of InfantOS.
+- Submit contributions, pull requests, patches, and other improvements to the official Infinite OS project.
+- Participate in the development and improvement of Infinite OS.
 - Use the project for non-commercial learning and development.
 
 **These permissions do not constitute a transfer of ownership.**
 
 ## 4. Community Contributions
 
-Contributions to the official InfantOS project are encouraged.
+Contributions to the official Infinite OS project are encouraged.
 
-By submitting code, documentation, designs, fixes, features, or other material to the official InfantOS project, **you represent that you have the necessary rights to submit that contribution.**
+By submitting code, documentation, designs, fixes, features, or other material to the official Infinite OS project, **you represent that you have the necessary rights to submit that contribution.**
 
-**You grant the InfantOS project and its copyright holder a perpetual, worldwide, non-exclusive, royalty-free license to use, reproduce, modify, adapt, incorporate, distribute, publish, and sublicense your contribution as part of InfantOS and its future versions.**
+**You grant Anthony Matthews and the Infinite OS project a perpetual, worldwide, non-exclusive, royalty-free license to use, reproduce, modify, adapt, incorporate, distribute, publish, and sublicense your contribution as part of Infinite OS and its future versions.**
 
 **Contributors retain ownership of intellectual property that they independently own, except for rights specifically granted under this license or another written agreement.**
 
-**Contributing to InfantOS does not grant the contributor ownership, control, or management rights over the InfantOS project.**
+**Contributing to Infinite OS does not grant the contributor ownership, control, or management rights over the Infinite OS project.**
 
 ## 5. Commercial Use
 
-**Commercial use of InfantOS or substantial portions of its source code is not permitted without explicit written permission from the copyright holder.**
+**Commercial use of Infinite OS or substantial portions of its source code is not permitted without explicit written permission from the copyright holder.**
 
 Without written permission, you may not:
 
-- Sell InfantOS.
-- Sell a modified version of InfantOS.
-- Offer InfantOS as a paid service.
-- Use substantial portions of InfantOS in a commercial product.
-- Monetize a fork of InfantOS.
-- License InfantOS to third parties for commercial purposes.
-- Use InfantOS as the foundation of a competing commercial product.
+- Sell Infinite OS.
+- Sell a modified version of Infinite OS.
+- Offer Infinite OS as a paid service.
+- Use substantial portions of Infinite OS in a commercial product.
+- Monetize a fork of Infinite OS.
+- License Infinite OS to third parties for commercial purposes.
+- Use Infinite OS as the foundation of a competing commercial product.
 
 **Commercial licensing may be granted separately by the copyright holder.**
 
 ## 6. Redistribution
 
-**You may not publicly redistribute, publish, mirror, package, sublicense, or otherwise distribute the InfantOS source code or a modified version of the project as a separate software project without explicit written permission from the copyright holder.**
+**You may not publicly redistribute, publish, mirror, package, sublicense, or otherwise distribute the Infinite OS source code or a modified version of the project as a separate software project without explicit written permission from the copyright holder.**
 
-Contributing changes to the official InfantOS repository is permitted and encouraged.
+Contributing changes to the official Infinite OS repository is permitted and encouraged.
 
-**Private copies and private development forks are permitted provided that they comply with the remainder of this license.**
+**Private copies and private development forks are permitted provided they comply with the remainder of this license.**
 
 ## 7. Forks and Modified Versions
 
@@ -77,22 +80,23 @@ Contributing changes to the official InfantOS repository is permitted and encour
 
 **You may not publicly release a fork or modified version as an independent competing project without written permission.**
 
-**You may not present a modified version as the official InfantOS project.**
+**You may not present a modified version as the official Infinite OS project.**
 
 **You may not remove copyright notices or this license from copies of the source code.**
 
 ## 8. Branding and Trademarks
 
-**The names InfantOS, associated project names, logos, icons, artwork, visual identity, slogans, and other branding are not granted under this license.**
+**The names Infinite OS, Infinite AI, associated project names, logos, icons, artwork, visual identity, slogans, and other branding are not granted under this license.**
 
-**Permission to use the source code does not grant permission to use the InfantOS name or branding in a way that suggests endorsement, ownership, partnership, or official status.**
+**Permission to use the source code does not grant permission to use the Infinite OS name or branding in a way that suggests endorsement, ownership, partnership, or official status.**
 
 You may not:
 
-- Claim that your fork is the official InfantOS project.
+- Claim that your fork is the official Infinite OS project.
 - Register confusingly similar names or trademarks.
-- Use InfantOS branding to market an unauthorized commercial product.
-- Represent yourself or your organization as the owner of InfantOS.
+- Use Infinite OS branding to market an unauthorized commercial product.
+- Represent yourself or your organization as the owner of Infinite OS.
+- Rebrand Infinite OS and present it as a separate product.
 
 **Separate permission may be granted for approved community projects.**
 
@@ -100,13 +104,13 @@ You may not:
 
 **Copyright notices, license notices, and applicable attribution notices included in the original project must remain intact in permitted copies and modifications.**
 
-You may add your own copyright notices for original modifications you create, provided that doing so does not imply ownership of the original InfantOS project.
+You may add your own copyright notices for original modifications you create, provided that doing so does not imply ownership of the original Infinite OS project.
 
 ## 10. No Warranty
 
-**InfantOS is provided "as is", without warranty of any kind, express or implied.**
+**Infinite OS is provided "as is", without warranty of any kind, express or implied.**
 
-**The copyright holder and contributors are not responsible for damages, losses, security issues, data loss, or other consequences resulting from the use or modification of the software.**
+**Anthony Matthews and the contributors are not responsible for damages, losses, security issues, data loss, or other consequences resulting from the use or modification of the software.**
 
 ## 11. No Grant of Additional Rights
 
@@ -114,8 +118,8 @@ You may add your own copyright notices for original modifications you create, pr
 
 This license does not grant rights to:
 
-- InfantOS trademarks.
-- InfantOS branding.
+- Infinite OS trademarks.
+- Infinite OS branding.
 - Patents not expressly licensed.
 - Commercial distribution.
 - Commercial sublicensing.
@@ -132,7 +136,7 @@ Permissions may be restored at the discretion of the copyright holder following 
 
 ## 13. Future Versions
 
-The copyright holder may release future versions of InfantOS under this license, a revised version of this license, or another license.
+Anthony Matthews may release future versions of Infinite OS under this license, a revised version of this license, or another license.
 
 **Existing versions remain governed by the license under which they were originally released unless otherwise stated.**
 
@@ -144,16 +148,16 @@ Organizations or individuals seeking commercial use, redistribution rights, inco
 
 ## 15. Final Statement
 
-InfantOS is intended to be a community-developed project.
+Infinite OS is intended to be a community-developed project.
 
 **You are encouraged to learn from the project, experiment with it, improve it, report problems, develop features, and contribute improvements back to the official project.**
 
-**However, participation in the InfantOS community does not transfer ownership or control of the InfantOS project.**
+**However, participation in the Infinite OS community does not transfer ownership or control of the Infinite OS project.**
 
-**The community may help build InfantOS. The project remains owned and controlled by its copyright holder.**
+**The community may help build Infinite OS. The project remains owned and controlled by Anthony Matthews.**
 
 ---
 
 **Copyright © 2026 Anthony Matthews. All Rights Reserved.**
 
-**InfantOS is source-available software and is not licensed as open-source software under the OSI Open Source Definition.**
+**Infinite OS is source-available software and is not licensed as open-source software under the OSI Open Source Definition.**

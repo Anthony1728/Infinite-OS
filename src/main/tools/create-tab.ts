@@ -38,10 +38,9 @@ const KIND_ICONS: Record<string, string> = {
 export const createTabTool: Tool = {
   name: 'CreateTab',
   description: [
-    'YOUR CREATIVE CANVAS — build anything as a persistent tab under Tabs (websites, media, charts, dashboards, tables, documents).',
-    'Use when the user asks to visualize, track, plan, compare or calculate.',
-    'CONTENT: htmlContent | sections | chartData | tableData | metrics | filePath | actions (see schema).',
-    'RULES: dark theme, no custom backgrounds; content must work and be interactive; match kind to content.',
+    'YOUR CREATIVE CANVAS — build websites, media, charts, dashboards, tables, or documents as persistent Tabs.',
+    'Use when the user wants to visualize, track, plan, compare, or calculate.',
+    'Rules: dark theme, no custom backgrounds, working interactive content, kind matches content.',
   ].join(' '),
   permission: 'allow',
   inputSchema: {

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useChatStore } from '../../stores/chat';
 import {
   Globe,
@@ -21,6 +21,11 @@ import {
   ListOrdered,
   Activity,
   X,
+  FolderOpen,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { LiveDesktopStrip } from './LiveDesktopStrip';
 
@@ -38,6 +43,31 @@ interface SequenceStep {
   selector?: string;
   value?: string;
   seconds?: number;
+}
+
+interface LiveBridgeStatus {
+  connected: boolean;
+  port: number;
+  extensionVersion: string;
+  browser: string;
+  lastError: string;
+  connections?: Array<{ id: string; browser: string; extensionVersion: string; active: boolean }>;
+}
+
+interface ExtensionSetupInfo {
+  installed: boolean;
+  extensionPath: string;
+  extensionVersion: string;
+  browser: { kind: string; path: string } | null;
+  profilePath: string;
+  cdpRunning: boolean;
+  cdpPort: number | null;
+  extensionLoaded: boolean;
+  extensionId: string;
+  bridgeConnected: boolean;
+  bridgeConnections: number;
+  needsRestart: boolean;
+  lastError: string;
 }
 
 export function BrowserControlView() {
@@ -60,6 +90,70 @@ export function BrowserControlView() {
   const [addStepValue, setAddStepValue] = useState('');
   const [addStepSeconds, setAddStepSeconds] = useState('1');
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<LiveBridgeStatus | null>(null);
+  const [setupStatus, setSetupStatus] = useState<ExtensionSetupInfo | null>(null);
+  const [setupOpen, setSetupOpen] = useState(true);
+  const [setupBusy, setSetupBusy] = useState('');
+  const [setupMessage, setSetupMessage] = useState('');
+
+  const refreshBridgeStatus = useCallback(async () => {
+    try {
+      const live = await window.api.bridgeStatus();
+      if (live?.ok) setBridgeStatus(live.status as LiveBridgeStatus);
+      const setup = await window.api.bridgeSetupStatus();
+      if (setup?.ok) setSetupStatus(setup.status as ExtensionSetupInfo);
+    } catch {
+      /* bridge IPC is unavailable during shutdown */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBridgeStatus();
+    const timer = setInterval(() => void refreshBridgeStatus(), 4_000);
+    return () => clearInterval(timer);
+  }, [refreshBridgeStatus]);
+
+  const runBridgeSetup = useCallback(
+    async (kind: 'launch' | 'restart' | 'install' | 'folder' | 'test') => {
+      setSetupBusy(kind);
+      setSetupMessage('');
+      try {
+        if (kind === 'launch' || kind === 'restart') {
+          const result = kind === 'launch'
+            ? await window.api.bridgeSetupLaunch()
+            : await window.api.bridgeSetupRestart();
+          if (result?.ok) {
+            setSetupMessage(
+              result.installedExtension
+                ? 'Browser launched and the extension was installed automatically.'
+                : 'Browser is ready and the extension is attached.',
+            );
+          } else {
+            setSetupMessage(String(result?.error || 'Could not start the browser.'));
+          }
+        } else if (kind === 'install') {
+          const result = await window.api.bridgeSetupInstall();
+          setSetupMessage(
+            result?.ok
+              ? 'Folder path copied and chrome://extensions opened. Choose "Load unpacked" and paste the path.'
+              : String(result?.error || 'Could not prepare the extension folder.'),
+          );
+        } else if (kind === 'folder') {
+          const result = await window.api.bridgeSetupOpenFolder();
+          setSetupMessage(result?.ok ? 'Opened the extension folder.' : String(result?.error || 'Could not open the folder.'));
+        } else if (kind === 'test') {
+          const result = await window.api.bridgeExec({ command: 'ping' });
+          setSetupMessage(result?.ok ? 'Bridge replied — the connection is live.' : String(result?.error || 'No reply from the bridge.'));
+        }
+      } catch (err) {
+        setSetupMessage(String((err as Error)?.message || err));
+      } finally {
+        setSetupBusy('');
+        void refreshBridgeStatus();
+      }
+    },
+    [refreshBridgeStatus],
+  );
 
   const addLog = useCallback((action: string, detail: string, result: string) => {
     setActivityLog((prev) => [
@@ -270,10 +364,24 @@ export function BrowserControlView() {
                 Browser Control
               </h1>
               <div className="flex items-center gap-2">
-                <div className="px-2 py-1 rounded-full bg-green-500/10 border border-green-500/20 flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-[10px] font-medium text-green-400 uppercase tracking-wider">Bridge Active</span>
-                </div>
+                <button
+                  onClick={() => setSetupOpen((v) => !v)}
+                  title="Show browser connection setup"
+                  className={`px-2 py-1 rounded-full border flex items-center gap-1.5 transition-all ${
+                    bridgeStatus?.connected
+                      ? 'bg-green-500/10 border-green-500/20 hover:bg-green-500/15'
+                      : 'bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/15'
+                  }`}
+                >
+                  {bridgeStatus?.connected ? (
+                    <Wifi className="w-3 h-3 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-3 h-3 text-amber-400" />
+                  )}
+                  <span className={`text-[10px] font-medium uppercase tracking-wider ${bridgeStatus?.connected ? 'text-green-400' : 'text-amber-400'}`}>
+                    {bridgeStatus?.connected ? 'Bridge Connected' : 'Bridge Offline'}
+                  </span>
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -355,6 +463,109 @@ export function BrowserControlView() {
 
         <div className="w-full md:w-80 border-l border-white/10 bg-[#0a0a0f] flex flex-col overflow-hidden flex-shrink-0 h-full">
           <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-white/10">
+            <div className="p-4 border-b border-white/10">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xs font-bold text-textMain uppercase tracking-widest flex items-center gap-2">
+                  <Activity className="w-3.5 h-3.5 text-green-400" />
+                  Browser Connection
+                </h2>
+                <button
+                  onClick={() => setSetupOpen((v) => !v)}
+                  className="text-[10px] font-medium text-textMuted hover:text-textMain transition-colors"
+                >
+                  {setupOpen ? 'Hide' : 'Setup'}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${bridgeStatus?.connected ? 'bg-green-500 animate-pulse' : 'bg-amber-400'}`} />
+                <span className="text-xs font-medium text-textMain truncate">
+                  {bridgeStatus?.connected
+                    ? 'Extension connected'
+                    : setupStatus?.cdpRunning
+                      ? 'Browser ready — extension not attached'
+                      : 'Browser not running'}
+                </span>
+              </div>
+              <p className="mt-1.5 text-[10px] text-textMuted truncate" title={setupStatus?.extensionPath}>
+                {setupStatus?.browser ? `${setupStatus.browser.kind} · port ${bridgeStatus?.port ?? '—'}` : 'Chrome or Edge not found'}
+                {setupStatus?.extensionVersion ? ` · v${setupStatus.extensionVersion}` : ''}
+              </p>
+              {(bridgeStatus?.connections?.length ?? 0) > 1 && (
+                <p className="mt-1 text-[10px] text-blue-300/80">
+                  {bridgeStatus?.connections?.length} browsers attached — newest is active
+                </p>
+              )}
+
+              {setupOpen && (
+                <div className="mt-3 space-y-2">
+                  <button
+                    onClick={() => void runBridgeSetup('launch')}
+                    disabled={Boolean(setupBusy)}
+                    className="w-full px-3 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-semibold hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {setupBusy === 'launch' ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                    {setupStatus?.cdpRunning ? 'Connect browser' : 'Launch Infinite OS browser'}
+                  </button>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => void runBridgeSetup('install')}
+                      disabled={Boolean(setupBusy)}
+                      title="Use the extension in your main Chrome (guided one-time install)"
+                      className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10 text-textMuted hover:text-textMain hover:bg-white/10 text-[10px] font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      My Chrome
+                    </button>
+                    <button
+                      onClick={() => void runBridgeSetup('folder')}
+                      disabled={Boolean(setupBusy)}
+                      title="Open the installed extension folder"
+                      className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10 text-textMuted hover:text-textMain hover:bg-white/10 text-[10px] font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                      Folder
+                    </button>
+                    <button
+                      onClick={() => void runBridgeSetup('test')}
+                      disabled={Boolean(setupBusy)}
+                      title="Send a ping through the bridge"
+                      className="px-2 py-1.5 rounded-md bg-white/5 border border-white/10 text-textMuted hover:text-textMain hover:bg-white/10 text-[10px] font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {setupBusy === 'test' ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Wifi className="w-3 h-3" />}
+                      Test
+                    </button>
+                  </div>
+
+                  {setupStatus?.needsRestart && (
+                    <button
+                      onClick={() => void runBridgeSetup('restart')}
+                      disabled={Boolean(setupBusy)}
+                      className="w-full px-3 py-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-medium hover:bg-amber-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {setupBusy === 'restart' ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" />}
+                      Restart the Infinite OS browser
+                    </button>
+                  )}
+
+                  {setupMessage && (
+                    <p className="text-[10px] leading-relaxed text-textMuted bg-white/5 border border-white/10 rounded-md px-2 py-1.5">
+                      {setupMessage}
+                    </p>
+                  )}
+                  {setupStatus?.lastError && !setupMessage && (
+                    <p className="text-[10px] leading-relaxed text-amber-300/90 bg-amber-500/5 border border-amber-500/20 rounded-md px-2 py-1.5">
+                      {setupStatus.lastError}
+                    </p>
+                  )}
+                  <p className="text-[10px] leading-relaxed text-textMuted/70">
+                    The agent uses a dedicated Chrome profile, so it keeps control while you use your own browser.
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div className="p-4 border-b border-white/10">
               <h2 className="text-xs font-bold text-textMain uppercase tracking-widest flex items-center gap-2 mb-4">
                 <Terminal className="w-3.5 h-3.5 text-blue-400" />

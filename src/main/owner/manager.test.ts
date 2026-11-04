@@ -37,11 +37,11 @@ async function createManager(): Promise<{ manager: OwnerManager; cleanup: () => 
 }
 
 maybeDescribe('OwnerManager', () => {
-  it('boots with Anthony Matthews as the sole owner', async () => {
+  it('boots with a generic local owner', async () => {
     const { manager } = await createManager();
     const profile = manager.getProfile();
-    expect(profile.fullName).toBe('Anthony Matthews');
-    expect(profile.preferredName).toBe('Anthony');
+    expect(profile.fullName).toBe(DEFAULT_OWNER.fullName);
+    expect(profile.preferredName).toBe(DEFAULT_OWNER.preferredName);
     expect(profile.email).toBe(DEFAULT_OWNER.email);
     expect(profile.isOwner).toBe(true);
     expect(profile.role).toBe('owner');

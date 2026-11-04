@@ -1,171 +1,145 @@
-# Infinite OS — the AI operating workspace
+<p align="center">
+  <img src="resources/icon.png" width="96" height="96" alt="Infinite OS icon" />
+</p>
 
-Infinite OS is an AI-powered desktop workspace that puts chat, code, files,
-terminal, browser + PC automation, builders, and business tools in one native app.
-Infinite AI is the brain inside it.
+<h1 align="center">Infinite OS</h1>
 
-> Why best: keyboard-first and instant (~270ms startup splash), local-first and
-> private (Ollama + encrypted store + per-account isolation), and build-oriented
-> (App Builder, Website Builder, Canvas, Automations — ship from a prompt).
+<p align="center">
+  <strong>A local-first AI operating workspace for chat, code, browser and PC automation, builders, and everyday work.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Anthony5109/Infinite-OS/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Anthony5109/Infinite-OS/actions/workflows/ci.yml/badge.svg" /></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078d6" />
+  <img alt="Electron" src="https://img.shields.io/badge/Electron-39-47848f" />
+  <img alt="License" src="https://img.shields.io/badge/license-source--available-blue" />
+</p>
+
+---
+
+## What is Infinite OS?
+
+Infinite OS is a native desktop application that brings an AI assistant, a coding workspace, a browser controller, and a set of build tools into one place. It runs on your machine, keeps its data on your machine, and lets the assistant act through real tools instead of only producing text.
+
+The app is built with **Electron, React, TypeScript, and Vite**. A Manifest V3 browser extension provides browser control over a local WebSocket bridge, and an optional bundled PC Live Map runtime provides screenshot-free desktop state for automation.
+
+> **Project status:** active development. Interfaces and internal APIs may change between releases. Review the [license](#license) before using the project.
+
+## Highlights
+
+- **One workspace** — chat, files, terminal, editor, browser, projects, and automation share a single window and a single command palette.
+- **Local-first by default** — conversations, memory, settings, and account profiles live under `~/.infinite-ai`. No telemetry is sent by the app itself.
+- **Per-account isolation** — every account gets its own profile directory. Signing into a different account cannot read or inherit another account's data.
+- **Real browser control** — the bundled MV3 extension drives a normal Chrome or Edge session: open tabs, navigate, read pages, fill forms, click, extract links, and take screenshots.
+- **Desktop automation** — optional PC Live Map reads window, control, and input state without screenshots, and can execute clicks and keystrokes.
+- **Bring your own models** — use a local Ollama model or connect a hosted provider with your own key. Credentials stay on your machine.
+- **Build from a prompt** — app and website builders, a visual canvas, and deployment helpers.
+- **Extensible tools** — a typed tool registry, plugin and MCP support, multi-agent teams, and a self-extension surface guarded by safety checks.
+- **Fast and keyboard-first** — a lightweight splash, a global command palette, and keyboard navigation throughout.
+
+## Requirements
+
+| Requirement | Details |
+| --- | --- |
+| Node.js | 20 or newer |
+| Package manager | npm, pnpm, or Bun |
+| OS | Windows 10/11, macOS, or Linux |
+| Browser | Chrome or Edge for the optional browser bridge |
+| Local models | Optional. [Ollama](https://ollama.com) is detected automatically. |
 
 ## Quick start
 
-```powershell
+```bash
+git clone https://github.com/Anthony5109/Infinite-OS.git
+cd Infinite-OS
 npm install
-npm run dev        # Electron + Vite dev (window opens, hot reload)
-npm run typecheck  # tsc node + web — must stay clean
-npm test           # vitest run
-npm run build      # typecheck + electron-vite build
-npm run build:win  # + electron-builder Windows (nsis + portable)
+npm run dev
 ```
 
-Requirements: Node >= 20. Ollama optional but recommended for local models
-(`minicpm-v4.6:latest`, `qwen3:4b`, `llama3.1:8b` auto-detected as local primary).
+`npm run dev` starts Electron with Vite hot reload.
 
-## Power Center (home / the Infinite tab)
+### Useful commands
 
-`src/renderer/components/views/PowerCenterView.tsx` is the one home surface. It is
-the former **Infinite** tab (`universe`) rebuilt: the living orbit + hero from the
-Infinite tab now carries the full Power Center feature set, and the standalone
-Power Center screen it replaced is gone.
-
-- Spotlight **jumps** to any surface (the orbit map plus the quick surfaces, shown
-  as pills while you type) and filters **recent chats + automations + pillars**
-  live; `/` focuses it, `⌘K` opens everything.
-- The orbit turns even when the OS reports `prefers-reduced-motion: reduce`
-  (Windows animations off): the rings keep a slow rotation with the chips
-  counter-rotated so their labels stay upright, and only decorative motion stops.
-  `globals.css` flattens every animation under that preference, so the orbit
-  re-asserts its own.
-- Hero greeting is pure/offline (`src/renderer/lib/greeting.ts` + `greeting.test.ts`):
-  time-aware, Monday-reset, Friday-ship, weekend-build, late-night care,
-  live-agent acknowledgement. Deterministic per day-of-year.
-- Live counters (chats, agents, automations, tabs), recents,
-  Quick Capture (`Ctrl+Shift+Y` / `⌘⇧Y`), system pulse + engine status.
-- Focus toggle sets `html[data-focus]` and genuinely dims marketing/pulse/sidebar
-  noise via `src/renderer/styles/globals.css` — chat + editor stay dominant.
-- Below the fold: six pillars, OS-vs-AI duality, the five-step pipeline, the
-  four-layer stack and an FAQ — every orbit node is a real navigation target.
-- Both routes resolve here: `home` (rail + palette) and `universe` (legacy deep
-  links). `InfiniteUniverseView.tsx` was folded into this file and removed.
-
-## Keyboard map
-
-| Keys | Action |
-|---|---|
-| `Ctrl/⌘ K` | Command palette (recent-first, grouped) |
-| `Ctrl/⌘ N` | New chat |
-| `Ctrl/⌘ \`` | Terminal (idle-prefetched) |
-| `Ctrl/⌘ B` | Toggle sidebar |
-| `Ctrl/⌘ .` | Activity panel |
-| `Ctrl/⌘ /` | Shortcuts |
-| `/` | Focus Spotlight (Power Center) |
-| `Ctrl/⌘ Shift Y` | Quick Capture append |
-
-## Browser Bridge (extension)
-
-`extensions/infinite-os-bridge/` is the browser half of Infinite OS: the app
-talks to it over `ws://127.0.0.1:8765/bridge` and drives the real browser —
-logged-in sessions included.
-
-- **One wire format, spec-compliant MessagePack.** `src/main/bridge/server.ts`
-  and the extension each carry a codec and must agree byte-for-byte;
-  `src/main/bridge/msgpack.test.ts` loads the extension's real codec out of
-  `background.js` and asserts both encode identically and decode each other.
-  Integer tagging used to disagree, which silently killed every timestamped
-  frame (including `ping`).
-- **Frames are chunked, never spread** — screenshots and page HTML run to
-  megabytes, well past the argument limit of `push(...bytes)`.
-- **The response cache is invalidated by every mutating command**, so a click is
-  never followed by a read of the pre-click DOM.
-- **Top-frame by default.** Content-script messages target `frameId: 0`; pass
-  `frameId` to drive a subframe on purpose instead of broadcasting to every
-  iframe on the page.
-- **Emergency Stop works.** The extension's `agent:abort` frame is handled host
-  side: in-flight commands fail immediately and any agent run driving the
-  browser is aborted.
-- **Token hygiene.** The token in `config.js` is gitignored and the app syncs
-  it to every copy that could be loaded (source, `~/.infinite-ai`, and the
-  `%LOCALAPPDATA%` copy the installer loads). Never commit a `config.js`.
-- `config.js` holds `{ port, token }`; copy `config.example.js` if it is missing.
-
-## Self-Evolution Engine
-
-Infinite OS's biggest moat — turns user behavior into automated skills.
-
-- **Pattern Memory**: Detects recurring actions from the Activity Tracker. When you repeat a task 3+ times, it generates an automation suggestion: *"You do X 3x per week — want me to automate it?"*
-- **Auto-Skill Generation**: High-confidence patterns (≥0.8) auto-create skills that can be triggered on demand
-- **Improvement Integration**: The `SelfImprovementEngine` feeds low-success-rate patterns into the evolution pipeline
-- **IPC Channels**: `self-evolve:analyze`, `self-evolve:suggestions`, `self-evolve:accept`, `self-evolve:evolve`, `self-evolve:prompt`
-
-### How it works
-
-```
-ActivityTracker → detects recurring patterns (frequency ≥ 3, confidence ≥ 0.5)
-     ↓
-SelfEvolutionEngine → creates PatternSuggestion objects
-     ↓
-User accepts → skill is created via SkillsManager
-     ↓
-Auto-evolve loop (every 10 min) → automatically creates high-confidence skills
+```bash
+npm run typecheck     # TypeScript checks for main, renderer, and e2e
+npm test              # Vitest unit and integration suite
+npm run test:e2e      # Playwright end-to-end suite (builds first)
+npm run build         # Typecheck and production bundle
+npm run build:win     # Windows installer and portable build
+npm run build:mac     # macOS DMG
+npm run build:linux   # Linux AppImage
 ```
 
-### Files
+## Browser bridge
 
-- `src/main/brain/self-evolution.ts` — Core engine: pattern detection, suggestion generation, auto-skill creation
-- `src/main/brain/self-evolution.test.ts` — Full test suite (10 tests)
-- `src/main/brain/improvement.ts` — `autoGenerateSkills()` method added for pattern-to-skill conversion
-- `src/main/ipc/index.ts` — 7 new IPC channels for self-evolution
-- `src/shared/ipc.ts` — `SELF_EVOLVE_*` channel constants
+Infinite OS can control a real browser through the `extensions/infinite-os-bridge` extension.
+
+1. Open **Settings → Browser Bridge** in the app.
+2. Choose **Install extension**. The app copies the extension to a local folder and opens the browser's extension page.
+3. Enable **Developer mode**, choose **Load unpacked**, and select the folder the app shows.
+4. Return to the app. The bridge indicator turns green when the extension connects.
+
+On first launch the app can also create a dedicated Chrome profile, so the assistant never touches your everyday browsing profile unless you explicitly install the extension there.
+
+The bridge listens only on `127.0.0.1`, authenticates with a token stored at `~/.infinite-ai/bridge-token`, and is not exposed to the network.
+
+## Privacy and account isolation
+
+- Application data is stored under `~/.infinite-ai`.
+- Each signed-in account is mapped to `~/.infinite-ai/profiles/<uid>`, and the app relaunches when the profile changes.
+- API keys and provider credentials are stored locally. They are never bundled into the repository.
+- The local owner record starts generic and is linked to the account that signs in. A new installation never inherits another person's name, email, or local privileges.
+- The app contains no analytics or crash-reporting SDK.
+
+See [SECURITY.md](SECURITY.md) for reporting a vulnerability.
 
 ## Architecture
 
 ```
-src/main/       Electron main: brain/, agent/, automation/, builders/,
-                 business/, providers/, tools/, bridge/, messaging/,
-                 orchestrator/, guard/, heartbeat/, ipc/, self-evolution/
-src/renderer/   React: App.tsx shell, views/ (36 lazy modules), layout/
-                 (Sidebar/MainView/TopBar/RightPanel/StatusBar), stores/
-                 (zustand: chat/session/auth/agents/brain/automation),
-                 lib/greeting.ts, theme/, styles/globals.css
-src/preload/    contextIsolation bridge (window.api)
-src/shared/     ipc.ts contract, types.ts, owner.ts
+src/
+  main/       Electron main process: agents, tools, providers, IPC, bridge, storage
+  preload/    Typed context bridge exposed to the renderer
+  renderer/   React UI, Zustand stores, views, and components
+  shared/     Types and IPC contracts shared by all processes
+extensions/
+  infinite-os-bridge/   Manifest V3 browser extension
+pc-live-map/            Optional screenshot-free desktop state runtime
+resources/              Icons and local voice scripts
+e2e/                    Playwright end-to-end tests
 ```
 
-Main entry `src/main/index.ts`: single-instance lock, frameless window with
-`ready-to-show` + 8s failsafe, bridge server `:8765`, phone companion, Telegram
-inbound, model pre-warm, settings + MCP background init, 60s health loop,
-5min self-improvement loop, **10min self-evolution loop**, screenshot cleanup.
-
-Renderer entry `src/renderer/App.tsx`: auth → onboarding → OS shell.
-`MainView.tsx` lazy-loads every heavy view; `ChatView` stays eager (default route).
-
-## Conventions
-
-- Smallest targeted edit wins. Prefer `Edit` over rewrites, mimic existing style.
-- Never commit unless asked. Never `Remove-Item -Recurse` project dirs.
-- Secrets stay in OS store / `.env` — never in git (`git log -p` check).
-- Validate with project commands, not invented ones:
-  `npm run typecheck`, `npm test`, `npm run lint`.
-- No placeholders, no TODOs in shipped code. Verify: re-read edited files,
-  report "Typecheck clean" / "All tests passing" only after running.
+The renderer never receives Node.js access directly. All privileged work goes through typed IPC handlers in the main process, and the browser bridge is a separate authenticated WebSocket channel.
 
 ## Testing
 
-- `vitest run` — unit (greeting rotation, brain teaching, paths, agents, chat).
-- `npm run test:e2e` — Playwright.
-- Focus/Spotlight changes are covered by existing greeting tests + manual:
-  Home → type in Spotlight → chats + automations filter; toggle Focus → dims.
+The project uses Vitest for unit and integration tests and Playwright for end-to-end tests. Live browser tests are opt-in and hit the real network:
 
-## Security model
+```bash
+INFINITE_LIVE=1 npm test -- src/main/bridge/live-web.test.ts
+```
 
-- `contextIsolation: true`, `nodeIntegration: false`, external URLs denied
-  (`will-navigate` guard + `setWindowOpenHandler` → `shell.openExternal`).
-- Microphone gated to trusted window only.
-- Source guard warns on external edits — only Infinite AI edits OS source.
-- Netflix-style account isolation: device storage wiped on account switch,
-  files + secrets re-homed in main.
+Normal test runs use isolated temporary homes and stubs, so they do not read or modify your real `~/.infinite-ai` data.
 
-## Version
+## Contributing
 
-`v0.1.1` — `com.infiniteai.os` / `Infinite OS`.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and run the checks below first:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+By contributing you agree that your contribution is licensed to the project as described in the [LICENSE](LICENSE).
+
+## License
+
+Infinite OS is **source-available**, not OSI open source.
+
+**Copyright © 2026 Anthony Matthews. All Rights Reserved.**
+
+You may study, run, modify, and improve the project for personal, educational, research, and development purposes, and you may submit improvements back to the official repository. You may not claim ownership of the project, rebrand it, redistribute it as a separate product, or use it commercially without written permission. See [LICENSE](LICENSE) for the complete terms.
+
+## Disclaimer
+
+Infinite OS can run commands, edit files, control a browser, and automate a desktop when you grant it permission. Review actions before approving them, keep backups of important data, and use the safety controls provided by the app. The software is provided "as is", without warranty of any kind.

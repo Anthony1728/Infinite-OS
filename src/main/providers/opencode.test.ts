@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 import { availableOpenCodeModels, clearInvalidCliCredential, compareVersions, describeOpenCodeFailure, freeOpenCodeModels, getInstalledOpenCodeVersion, heartbeatDue, isOpenCodeVersionAtLeast, isTierRetryable, openCodeAuthLoginHint, openCodeFundsHint, openCodeHeartbeatIntervalMs, openCodeKeylessModels, openCodeOwnModels, openCodeProgressChunk, openCodeQuietTurnTimeoutReasons, openCodeUnavailableError, openCodeUpgradeHint, openCodeZenModels, opencode, orderFreeRotation, otherTier, resolveLiveOpenCodeModel, setLastGoodFreeModel, setOpenCodeFirstByteTimeout, setOpenCodeStallTimeout, tierFor, timeoutSignal, transcript, tryRemote, withOpenCodeHints, withUpgradeHint, OPENCODE_MIN_FREE_VERSION, OPENCODE_STALL_TIMEOUT_MS } from './opencode.js';
 import type { ChatRequest, StreamChunk } from './base.js';
 import type { Message } from '../../shared/types.js';
@@ -389,12 +389,12 @@ describe('OpenCode free chat model filtering', () => {
     // Re-publish with more text streams only the suffix.
     expect(openCodeProgressChunk({
       type: 'message.part.updated',
-      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Anthony, working on it' } },
-    }, sid)).toEqual({ type: 'text_delta', text: 'Anthony, working on it' });
+      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Alex, working on it' } },
+    }, sid)).toEqual({ type: 'text_delta', text: 'Alex, working on it' });
     // Identical re-publish streams nothing.
     expect(openCodeProgressChunk({
       type: 'message.part.updated',
-      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Anthony, working on it' } },
+      properties: { part: { id: 'prt-live-1', messageID: 'msg-assistant-1', sessionID: sid, type: 'text', text: 'Hey Alex, working on it' } },
     }, sid)).toBeNull();
     // The user's own echoed text is never streamed into the answer.
     expect(openCodeProgressChunk({

@@ -5,7 +5,7 @@ import { getWorkspaceIndexer } from '../indexing/indexer.js';
 
 export const knowledgeTool: Tool = {
   name: 'Knowledge',
-  description: 'Long-term memory, connected graph, and semantic workspace index. Store/recall facts by dataset; remember with graph=true to extract entities; graph_recall traverses neighbours. Search repository code with semantic_search.',
+  description: 'Long-term memory and semantic workspace index. Store/recall facts, remember with graph=true, traverse with graph_recall, and search code with semantic_search.',
   inputSchema: {
     type: 'object',
     properties: {

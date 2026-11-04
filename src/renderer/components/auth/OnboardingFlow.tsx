@@ -154,11 +154,10 @@ export function OnboardingFlow() {
                   </button>
                 ))}
               </div>
-              {/* Live preview — PRIVATE to Anthony only (testexample@gmail.com). Other users see simple buttons. */}
-              {user?.email?.toLowerCase() === 'testexample@gmail.com' && (
+              {/* Theme live preview — shown to all users so anyone can see what the workspace will look like. */}
               <div className="mt-3 rounded-xl border border-white/[0.06] overflow-hidden">
                 <div className="px-3 py-1.5 border-b border-white/[0.06] flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-textMuted">Live Preview — {theme} · private</span>
+                  <span className="text-[10px] uppercase tracking-wider text-textMuted">Live Preview — {theme}</span>
                   <span className="text-[10px] text-textMuted/70">Infinite OS</span>
                 </div>
                 <div className="p-3">
@@ -223,7 +222,6 @@ export function OnboardingFlow() {
                   </div>
                 </div>
               </div>
-              )}
             </div>
 
             <div className="flex items-center justify-between">

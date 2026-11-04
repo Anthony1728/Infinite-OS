@@ -279,6 +279,16 @@ export interface ActivityItem {
   category: string;
   status: 'running' | 'done' | 'error';
   timestamp: number;
+  /** Full tool input once the provider has finished streaming the call. */
+  input?: unknown;
+  /** Latest partial input JSON while the call is still being formed. */
+  partialInput?: string;
+  /** Final (or latest streamed) tool output. */
+  result?: string;
+  /** True when the tool actually failed, so the card can render red state. */
+  isError?: boolean;
+  /** Wall-clock completion time, used for the card's duration label. */
+  finishedAt?: number;
 }
 
 export interface BrainTeachingLiveState extends BrainTeachingStatus {
@@ -665,6 +675,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           | 'tool_use_end'
           | 'tool_progress'
           | 'tool_result'
+          | 'thinking_delta'
           | 'provider_status'
           | 'message_end'
           | 'message_discard';
@@ -2862,7 +2873,7 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
         activity: s.activity.some((item) => item.toolUseId === toolId)
           ? s.activity.map((item) =>
               item.toolUseId === toolId
-                ? { ...item, name: toolName, label: summary.label, detail: summary.detail, category: summary.category }
+                ? { ...item, name: toolName, label: summary.label, detail: summary.detail, category: summary.category, input: ev.input }
                 : item,
             )
           : [
@@ -2876,6 +2887,7 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
                 category: summary.category,
                 status: 'running' as const,
                 timestamp: Date.now(),
+                input: ev.input,
               },
             ],
       }));
@@ -2887,11 +2899,10 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
       if (!ev.tool_use_id || typeof ev.partial_json !== 'string') break;
       target.toolInputs.set(ev.tool_use_id, ev.partial_json);
       const preview = formatToolArgPreview(ev.partial_json);
-      if (!preview) break;
       set((s) => ({
         activity: s.activity.map((item) =>
           item.toolUseId === ev.tool_use_id && item.status === 'running'
-            ? { ...item, detail: preview }
+            ? { ...item, detail: preview || item.detail, partialInput: ev.partial_json }
             : item,
         ),
       }));
@@ -2910,7 +2921,7 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
         activity: s.activity.some((item) => item.toolUseId === toolId)
           ? s.activity.map((item) =>
               item.toolUseId === toolId
-                ? { ...item, name: toolName, label: summary.label, detail, category: summary.category, status }
+                ? { ...item, name: toolName, label: summary.label, detail, category: summary.category, status, ...(ev.input !== undefined ? { input: ev.input } : {}), ...(status !== 'running' ? { finishedAt: Date.now() } : {}) }
                 : item,
             )
           : [
@@ -2924,6 +2935,8 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
                 category: summary.category,
                 status,
                 timestamp: Date.now(),
+                ...(ev.input !== undefined ? { input: ev.input } : {}),
+                ...(status !== 'running' ? { finishedAt: Date.now() } : {}),
               },
             ],
       }));
@@ -2935,15 +2948,16 @@ function applySubagentLiveEvent(target: SubagentLiveTarget, raw: unknown): void 
         const progressText = typeof ev.content === 'string' ? ev.content : 'Working...';
         set((s) => ({
           activity: s.activity.map((item) =>
-            item.toolUseId === ev.tool_use_id ? { ...item, detail: progressText, status: 'running' as const } : item,
+            item.toolUseId === ev.tool_use_id ? { ...item, detail: progressText, status: 'running' as const, result: progressText } : item,
           ),
         }));
         break;
       }
+      const resultText = typeof ev.content === 'string' ? ev.content : JSON.stringify(ev.content ?? '');
       set((s) => ({
         activity: s.activity.map((item) =>
-          item.toolUseId === ev.tool_use_id && item.status === 'running'
-            ? { ...item, status: ev.is_error ? 'error' : 'done' }
+          item.toolUseId === ev.tool_use_id
+            ? { ...item, status: ev.is_error ? 'error' : 'done', result: resultText, isError: Boolean(ev.is_error), finishedAt: Date.now() }
             : item,
         ),
       }));
@@ -3072,6 +3086,23 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       }));
       break;
     }
+    case 'thinking_delta': {
+      // Reasoning streams into its own block on the live assistant message.
+      // Keep it separate from the answer so the UI can show it in the
+      // ThinkingPanel and persist it with the turn.
+      if (!ev.message_id || typeof ev.text !== 'string' || !ev.text) break;
+      setState((s) => ({
+        messages: s.messages.map((m) => {
+          if (m.id !== ev.message_id) return m;
+          const last = m.content[m.content.length - 1];
+          if (last && last.type === 'thinking') {
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'thinking', text: last.text + ev.text }] };
+          }
+          return { ...m, content: [...m.content, { type: 'thinking', text: ev.text }] };
+        }),
+      }));
+      break;
+    }
     case 'tool_use_start': {
       setState((s) => ({
         // Plant the card in the live transcript bubble NOW (running pulse),
@@ -3099,11 +3130,10 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       // detail (the card appears once the full input arrives via tool_use_end).
       if (typeof ev.partial_json !== 'string' || !ev.partial_json) break;
       const preview = formatToolArgPreview(ev.partial_json);
-      if (!preview) break;
       setState((s) => ({
         activity: s.activity.map((item) =>
           item.toolUseId === ev.tool_use_id && item.status === 'running'
-            ? { ...item, detail: preview }
+            ? { ...item, detail: preview || item.detail, partialInput: ev.partial_json }
             : item,
         ),
       }));
@@ -3117,12 +3147,12 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         messages: upsertLiveToolUse(s.messages, ev.message_id, { id: ev.tool_use_id, name: ev.name, input: ev.input }),
         activity: s.activity.some((item) => item.toolUseId === ev.tool_use_id)
           ? s.activity.map((item) => item.toolUseId === ev.tool_use_id
-            ? { ...item, name: ev.name, label: summary.label, detail: summary.detail, category: summary.category }
+            ? { ...item, name: ev.name, label: summary.label, detail: summary.detail, category: summary.category, input: ev.input }
             : item)
           : [...s.activity, {
               id: crypto.randomUUID(), toolUseId: ev.tool_use_id, name: ev.name,
               label: summary.label, detail: summary.detail, category: summary.category,
-              status: 'running' as const, timestamp: Date.now(),
+              status: 'running' as const, timestamp: Date.now(), input: ev.input,
             }],
       }));
       break;
@@ -3140,6 +3170,8 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
                 detail: ev.detail || summary.detail || (status === 'running' ? 'Working…' : 'Completed'),
                 category: summary.category,
                 status,
+                ...(ev.input !== undefined ? { input: ev.input } : {}),
+                ...(status !== 'running' ? { finishedAt: Date.now() } : {}),
               }
             : item)
           : [...state.activity, {
@@ -3151,6 +3183,8 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
               category: summary.category,
               status,
               timestamp: Date.now(),
+              ...(ev.input !== undefined ? { input: ev.input } : {}),
+              ...(status !== 'running' ? { finishedAt: Date.now() } : {}),
             }],
       }));
       break;
@@ -3160,7 +3194,7 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         const progressText = typeof ev.content === 'string' ? ev.content : 'Working...';
         setState((s) => ({
           activity: s.activity.map((item) => item.toolUseId === ev.tool_use_id
-            ? { ...item, detail: progressText, status: 'running' as const }
+            ? { ...item, detail: progressText, status: 'running' as const, result: progressText }
             : item),
         }));
         break;
@@ -3253,10 +3287,17 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         }));
       }
       // Mark the matching live activity as completed (or errored).
+      const resultText = typeof ev.content === 'string' ? ev.content : JSON.stringify(ev.content ?? '');
       setState((s) => ({
         activity: s.activity.map((a) =>
-          a.toolUseId === ev.tool_use_id && a.status === 'running'
-            ? { ...a, status: ev.is_error ? 'error' : 'done' }
+          a.toolUseId === ev.tool_use_id
+            ? {
+                ...a,
+                status: ev.is_error ? 'error' : 'done',
+                result: resultText,
+                isError: Boolean(ev.is_error),
+                finishedAt: Date.now(),
+              }
             : a,
         ),
       }));
@@ -3441,7 +3482,9 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
         streaming: false,
         providerStatus: null,
         activity: s.activity.map((a) =>
-          a.status === 'running' ? { ...a, status: ev.success === false ? 'error' : 'done' } : a,
+          a.status === 'running'
+            ? { ...a, status: ev.success === false ? 'error' : 'done', finishedAt: a.finishedAt ?? Date.now() }
+            : a,
         ),
       }));
       {

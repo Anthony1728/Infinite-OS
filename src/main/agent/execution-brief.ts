@@ -10,6 +10,7 @@ export type TaskCategory =
   | 'research'
   | 'computer_automation'
   | 'business'
+  | 'knowledge'
   | 'file_operation'
   | 'general';
 

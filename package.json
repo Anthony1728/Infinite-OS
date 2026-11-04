@@ -3,9 +3,17 @@
   "version": "0.1.1",
   "private": true,
   "main": "out/main/index.js",
-  "description": "Open-source AI-powered desktop and cloud workspace.",
-  "author": "Infinite OS contributors",
-  "license": "MIT",
+  "description": "A local-first AI operating workspace for chat, code, browser and PC automation, builders, and business tools.",
+  "author": "Anthony Matthews",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Anthony5109/Infinite-OS.git"
+  },
+  "homepage": "https://github.com/Anthony5109/Infinite-OS#readme",
+  "bugs": {
+    "url": "https://github.com/Anthony5109/Infinite-OS/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -33,6 +41,8 @@
   "build": {
     "appId": "com.infiniteai.os",
     "productName": "Infinite OS",
+    "copyright": "Copyright © 2026 Anthony Matthews",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -42,8 +52,12 @@
     ],
     "extraResources": [
       {
-        "from": "Infinite OS/pc-live-map",
+        "from": "pc-live-map",
         "to": "pc-live-map"
+      },
+      {
+        "from": "extensions/infinite-os-bridge",
+        "to": "infinite-os-bridge"
       }
     ],
     "asarUnpack": [
@@ -57,8 +71,16 @@
         "portable"
       ]
     },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
     "mac": {
       "icon": "resources/icon.png",
+      "category": "public.app-category.developer-tools",
       "target": [
         "dmg"
       ]

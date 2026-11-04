@@ -12,9 +12,9 @@ import { listProviders } from '../providers/registry.js';
 export const crewTool: Tool = {
   name: 'Crew',
   description: [
-    'Recruit a crew of specialist agents that work together on a large, multi-domain project, with each specialist auto-assigned its own best-fit model from every provider key the user has configured (OpenRouter, NVIDIA, Groq, etc). The user\'s selected model remains the LEADER and integrates everything at the end.',
-    'Use ONLY for genuinely large, multi-domain projects (build + design + research + data, full apps with UI, multi-part deliverables). For a single focused task use the Agent tool instead.',
-    'Members are chosen by the task: coding, design, research, data, seo/marketing, writer, tester, devops, automation. Passing `agents` forces a specific roster.',
+    'Recruit a crew of specialist agents on a large, multi-domain project; each gets its own best-fit model from the user\'s configured providers, and the selected model leads integration.',
+    'Use only for genuinely large projects (build + design + research + data, full apps, multi-part deliverables). For one focused task use Agent.',
+    'Members auto-select by task (code, design, research, data, seo/marketing, writer, tester, devops, automation); pass agents to force a roster.',
   ].join(' '),
   inputSchema: {
     type: 'object',

@@ -332,9 +332,13 @@ export const IPC = {
 
   // Multi-Agent
   MULTI_AGENT_CREATE_TEAM: 'multi-agent:create-team',
+  MULTI_AGENT_UPDATE_TEAM: 'multi-agent:update-team',
   MULTI_AGENT_ADD_TO_TEAM: 'multi-agent:add-to-team',
   MULTI_AGENT_REMOVE_FROM_TEAM: 'multi-agent:remove-from-team',
+  MULTI_AGENT_SET_ROLE: 'multi-agent:set-role',
+  MULTI_AGENT_SET_LEADER: 'multi-agent:set-leader',
   MULTI_AGENT_LIST_TEAMS: 'multi-agent:list-teams',
+  MULTI_AGENT_ORG: 'multi-agent:org',
   MULTI_AGENT_CREATE_TASK: 'multi-agent:create-task',
   MULTI_AGENT_ASSIGN_TASK: 'multi-agent:assign-task',
   MULTI_AGENT_START_TASK: 'multi-agent:start-task',
@@ -343,6 +347,7 @@ export const IPC = {
   MULTI_AGENT_SEND_MESSAGE: 'multi-agent:send-message',
   MULTI_AGENT_GET_MESSAGES: 'multi-agent:get-messages',
   MULTI_AGENT_EXECUTE_TEAM_TASK: 'multi-agent:execute-team-task',
+  MULTI_AGENT_RUN_ORG_MISSION: 'multi-agent:run-org-mission',
   MULTI_AGENT_STATS: 'multi-agent:stats',
 
   // Team Workspaces
@@ -754,6 +759,12 @@ export const IPC = {
   // Browser Bridge (Infinite OS Bridge browser extension)
   BRIDGE_STATUS: 'bridge:status',
   BRIDGE_EXEC: 'bridge:exec',
+  BRIDGE_SETUP_STATUS: 'bridge:setup-status',
+  BRIDGE_SETUP_LAUNCH: 'bridge:setup-launch',
+  BRIDGE_SETUP_RESTART: 'bridge:setup-restart',
+  BRIDGE_SETUP_INSTALL: 'bridge:setup-install',
+  BRIDGE_SETUP_OPEN_FOLDER: 'bridge:setup-open-folder',
+  BRIDGE_SETUP_COPY_PATH: 'bridge:setup-copy-path',
 
   // ============ OpenClaw Gateway/Node ============
   NODE_PAIRING_REQUEST: 'node:pairing-request',
@@ -895,6 +906,30 @@ export const IPC = {
   STUDIO_DUPLICATE: 'studio:duplicate',
   STUDIO_AI: 'studio:ai',
   STUDIO_EXPORT: 'studio:export',
+
+  // Pages — Notion-style pages, blocks, databases, comments, versions
+  PAGES_LIST: 'pages:list',
+  PAGES_GET: 'pages:get',
+  PAGES_CREATE: 'pages:create',
+  PAGES_UPDATE: 'pages:update',
+  PAGES_DUPLICATE: 'pages:duplicate',
+  PAGES_TRASH: 'pages:trash',
+  PAGES_RESTORE: 'pages:restore',
+  PAGES_DELETE: 'pages:delete',
+  PAGES_EMPTY_TRASH: 'pages:empty-trash',
+  PAGES_SEARCH: 'pages:search',
+  PAGES_BACKLINKS: 'pages:backlinks',
+  PAGES_COMMENT_ADD: 'pages:comment:add',
+  PAGES_COMMENT_DELETE: 'pages:comment:delete',
+  PAGES_COMMENT_RESOLVE: 'pages:comment:resolve',
+  PAGES_VERSION_SAVE: 'pages:version:save',
+  PAGES_VERSION_RESTORE: 'pages:version:restore',
+  PAGES_ROW_CREATE: 'pages:row:create',
+  PAGES_ROW_UPDATE: 'pages:row:update',
+  PAGES_ROW_DELETE: 'pages:row:delete',
+  PAGES_ROW_DUPLICATE: 'pages:row:duplicate',
+  PAGES_ROW_OPEN: 'pages:row:open',
+  PAGES_EXPORT: 'pages:export',
 
   // Planner — personal tasks, calendar events, reminders
   PLANNER_GET: 'planner:get',

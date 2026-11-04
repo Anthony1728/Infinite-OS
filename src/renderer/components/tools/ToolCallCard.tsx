@@ -1,8 +1,8 @@
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useMemo, memo, type ReactNode } from 'react';
 
 export const ToolIcon = memo(function ToolIcon({ name }: { name: string }) {
   const n = name.toLowerCase();
-  let inner: React.ReactNode;
+  let inner: ReactNode;
 
   if (/(file|read|write|edit|save|document|markdown)/.test(n)) {
     inner = (
@@ -82,102 +82,289 @@ export const ToolIcon = memo(function ToolIcon({ name }: { name: string }) {
   );
 });
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
+function safeJson(value: unknown, limit = 16_000): string {
+  try {
+    const text = JSON.stringify(value, null, 2) ?? String(value);
+    return text.length > limit
+      ? `${text.slice(0, limit)}\n… (${text.length - limit} more characters)`
+      : text;
+  } catch {
+    return String(value);
+  }
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
+/**
+ * Best-effort preview from a still-forming JSON string. Models stream tool
+ * arguments a fragment at a time, so before the JSON parses we extract the
+ * first useful string field with a regex. This is what makes the card's title
+ * turn into `Bash — npm run build` while the command is still arriving.
+ */
+function liveSummary(input: unknown, partialInput?: string): string {
+  const direct = asRecord(input);
+  const pick = ['command', 'cmd', 'path', 'file_path', 'file', 'query', 'url', 'pattern', 'prompt', 'task', 'text'];
+  for (const key of pick) {
+    const value = direct[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.replace(/\s+/g, ' ').trim().slice(0, 96);
+    }
+  }
+  if (partialInput) {
+    try {
+      const parsed = asRecord(JSON.parse(partialInput));
+      for (const key of pick) {
+        const value = parsed[key];
+        if (typeof value === 'string' && value.trim()) {
+          return value.replace(/\s+/g, ' ').trim().slice(0, 96);
+        }
+      }
+    } catch {
+      // Mid-stream JSON — fall through to a targeted regex.
+    }
+    for (const key of pick) {
+      const match = partialInput.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`));
+      if (match?.[1]) {
+        return match[1]
+          .replace(/\\n/g, ' ')
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 96);
+      }
+    }
+    return partialInput.replace(/\s+/g, ' ').trim().slice(-96);
+  }
+  return '';
+}
+
+type DiffLine = { kind: 'context' | 'add' | 'remove'; text: string };
+
+/** Line diff capped to something a card can render at 60fps. */
+function buildLineDiff(before: string, after: string): DiffLine[] {
+  const MAX_LINES = 320;
+  const a = before.split(/\r?\n/).slice(0, MAX_LINES);
+  const b = after.split(/\r?\n/).slice(0, MAX_LINES);
+  if (a.length * b.length > 90_000) {
+    return [
+      ...a.map((text) => ({ kind: 'remove' as const, text })),
+      ...b.map((text) => ({ kind: 'add' as const, text })),
+    ];
+  }
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  const lcs = Array.from({ length: rows }, () => new Uint32Array(cols));
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j]
+        ? lcs[i + 1][j + 1] + 1
+        : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+  const out: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      out.push({ kind: 'context', text: a[i] });
+      i += 1;
+      j += 1;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      out.push({ kind: 'remove', text: a[i] });
+      i += 1;
+    } else {
+      out.push({ kind: 'add', text: b[j] });
+      j += 1;
+    }
+  }
+  while (i < a.length) out.push({ kind: 'remove', text: a[i++] });
+  while (j < b.length) out.push({ kind: 'add', text: b[j++] });
+  return out.slice(0, 700);
+}
+
+function EditDiff({ lines }: { lines: DiffLine[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-white/[0.06] bg-black/25 font-mono text-[11px] leading-[1.55]">
+      {lines.map((line, index) => (
+        <div
+          key={index}
+          className={
+            line.kind === 'add'
+              ? 'flex bg-emerald-500/[0.09] text-emerald-200/85'
+              : line.kind === 'remove'
+                ? 'flex bg-red-500/[0.09] text-red-200/80'
+                : 'flex text-zinc-500'
+          }
+        >
+          <span className="w-6 shrink-0 select-none border-r border-white/[0.04] px-1 text-right text-zinc-600">
+            {line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '}
+          </span>
+          <span className="whitespace-pre px-2">{line.text || ' '}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1200);
+        }).catch(() => {});
+      }}
+      className="rounded px-1.5 py-0.5 text-[9px] font-medium text-zinc-600 transition-colors hover:bg-white/[0.05] hover:text-zinc-300"
+      title={`Copy ${label}`}
+    >
+      {copied ? 'copied' : 'copy'}
+    </button>
+  );
+}
+
 export const ToolCallCard = memo(function ToolCallCard({
   name,
   input,
   status,
   startTime,
+  endTime,
   error,
-  onRetry,
+  result,
+  partialInput,
 }: {
   name: string;
   input: unknown;
   status: 'running' | 'done' | 'error';
   startTime?: number;
+  endTime?: number;
   error?: string;
-  onRetry?: () => void;
+  result?: string;
+  /** Latest partial tool-argument JSON while the provider is still streaming. */
+  partialInput?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const running = status === 'running';
   const failed = status === 'error';
-  const summary = (() => {
-    const i = (input ?? {}) as Record<string, unknown>;
-    const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
-    const cmd = s(i.command ?? i.cmd ?? i.path ?? i.file_path ?? i.query ?? i.url ?? '').slice(0, 80);
-    return cmd ? `· ${cmd}` : '';
-  })();
 
   useEffect(() => {
-    if (!running || !startTime) return;
-    const interval = setInterval(() => {
-      setElapsed(Date.now() - startTime);
-    }, 100);
-    return () => clearInterval(interval);
-  }, [running, startTime]);
+    if (failed) setOpen(true);
+  }, [failed]);
 
-  const formatElapsed = (ms: number) => {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-  };
+  useEffect(() => {
+    if (!running || !startTime) {
+      if (startTime && endTime) setElapsed(Math.max(0, endTime - startTime));
+      return;
+    }
+    setElapsed(Math.max(0, Date.now() - startTime));
+    const interval = window.setInterval(() => {
+      setElapsed(Math.max(0, Date.now() - startTime));
+    }, 100);
+    return () => window.clearInterval(interval);
+  }, [running, startTime, endTime]);
+
+  const record = asRecord(input);
+  const summary = liveSummary(input, partialInput);
+  const hasInput = Object.keys(record).length > 0;
+  const rawInput = hasInput ? safeJson(input) : (partialInput ? safeJson(partialInput, 12_000) : '');
+  const lowerName = name.toLowerCase();
+
+  const before = stringValue(record, ['old_string', 'oldString', 'old_text', 'oldText', 'before']);
+  const after = stringValue(record, ['new_string', 'newString', 'new_text', 'newText', 'after']);
+  const written = stringValue(record, ['content', 'file_text', 'text']);
+  const isEdit = /(edit|patch|replace)/.test(lowerName) || Boolean(before && after);
+  const isWrite = /(write|create.*file)/.test(lowerName);
+  const diff = useMemo(
+    () => (isEdit && before && after ? buildLineDiff(before, after) : []),
+    [isEdit, before, after],
+  );
+
+  const resultText = result ?? (failed ? error : undefined);
+  const shownResult = resultText && resultText.length > 40_000
+    ? `${resultText.slice(0, 40_000)}\n… (${resultText.length - 40_000} more characters)`
+    : resultText;
+  const firstErrorLine = failed && error ? error.split(/\r?\n/).find((line) => line.trim()) : '';
+  const statusLabel = failed ? 'failed' : running ? 'running' : 'done';
 
   return (
     <div
-      className={`group my-2 rounded-xl border bg-[#0c1018] overflow-hidden transition-colors ${
-        failed ? 'border-red-500/40' : running ? 'border-indigo-500/40 animate-glow-border' : 'border-white/[0.06]'
+      className={`group my-2 overflow-hidden rounded-xl border bg-[#0c1018] transition-colors ${
+        failed ? 'border-red-500/35' : running ? 'border-indigo-500/35' : 'border-white/[0.06]'
       }`}
     >
       <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.03]"
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
         title={summary || name}
+        aria-expanded={open}
       >
         <span
-          className={`relative flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 ${
+          className={`relative flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
             failed ? 'bg-red-500/15 text-red-300' : running ? 'bg-indigo-500/15 text-indigo-300' : 'bg-white/[0.04] text-zinc-400'
           }`}
         >
-          {running && (
+          {running ? (
             <>
-              <span className="absolute inset-0 rounded-lg border border-indigo-400/50 animate-ping" />
+              <span className="absolute inset-0 rounded-lg border border-indigo-400/40 animate-ping" />
               <span className="absolute inset-0 rounded-lg border-2 border-transparent border-t-indigo-400 animate-spin" />
             </>
-          )}
+          ) : null}
           <ToolIcon name={name} />
         </span>
 
-        <span className="min-w-0 flex-1 truncate text-sm font-medium font-mono text-zinc-200">
-          {name} <span className="font-sans text-xs font-normal text-zinc-500 truncate">{summary}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="shrink-0 font-mono text-[13px] font-medium text-zinc-200">{name}</span>
+            {summary ? (
+              <span className="min-w-0 truncate font-sans text-[11px] font-normal text-zinc-500">
+                {summary}
+              </span>
+            ) : running && partialInput ? (
+              <span className="min-w-0 truncate font-sans text-[11px] font-normal text-indigo-300/60">
+                streaming arguments…
+              </span>
+            ) : null}
+          </span>
+          {failed && firstErrorLine && !open ? (
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-red-400/80">
+              {firstErrorLine}
+            </span>
+          ) : null}
         </span>
 
-        <span className="ml-auto flex items-center gap-2 text-xs flex-shrink-0">
+        <span className="ml-auto flex flex-shrink-0 items-center gap-2 text-[11px]">
           {running ? (
             <>
-              <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-current/40 border-t-current text-indigo-300" />
+              <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-indigo-400/30 border-t-indigo-300" />
               <span className="text-indigo-300">running</span>
-              {elapsed > 0 && (
-                <span className="text-indigo-400/60 font-mono text-[10px]">
-                  {formatElapsed(elapsed)}
-                </span>
-              )}
             </>
           ) : failed ? (
             <>
               <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
               <span className="text-red-400">failed</span>
-              {onRetry && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRetry(); }}
-                  className="ml-1 p-0.5 rounded hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors"
-                  title="Retry"
-                  aria-label="Retry"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </button>
-              )}
             </>
           ) : (
             <>
@@ -185,25 +372,100 @@ export const ToolCallCard = memo(function ToolCallCard({
               <span className="text-zinc-500">done</span>
             </>
           )}
-          <span className="text-zinc-600 ml-1 text-[10px]">{open ? '▾' : '▸'}</span>
+          {(running || (startTime && endTime)) && elapsed > 0 ? (
+            <span className={`font-mono text-[10px] ${running ? 'text-indigo-400/60' : 'text-zinc-600'}`}>
+              {formatElapsed(elapsed)}
+            </span>
+          ) : null}
+          <svg
+            className={`h-3 w-3 text-zinc-600 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+          </svg>
         </span>
       </button>
 
-      {open && (
-        <pre className="max-h-48 overflow-auto border-t border-white/[0.06] bg-black/20 px-3 py-2 font-mono text-[11px] leading-relaxed text-zinc-400">
-          {failed && error ? (
-            <span className="text-red-400">{error}</span>
-          ) : (
-            (() => {
-              try {
-                return JSON.stringify(input, null, 2).slice(0, 4000);
-              } catch {
-                return String(input).slice(0, 4000);
-              }
-            })()
-          )}
-        </pre>
-      )}
+      {open ? (
+        <div className="border-t border-white/[0.06] bg-black/15">
+          <div className="flex items-center justify-between border-b border-white/[0.04] px-3 py-1.5">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-600">Input</span>
+            <div className="flex items-center gap-2">
+              {running && !hasInput && partialInput ? (
+                <span className="text-[9px] text-indigo-300/60">streaming</span>
+              ) : null}
+              {rawInput ? <CopyButton text={rawInput} label="input" /> : null}
+            </div>
+          </div>
+
+          <div className="px-3 py-2">
+            {diff.length > 0 ? (
+              <EditDiff lines={diff} />
+            ) : isWrite && written ? (
+              <div className="space-y-1.5">
+                <div className="text-[10px] text-zinc-600">
+                  {written.split(/\r?\n/).length} line{written.split(/\r?\n/).length === 1 ? '' : 's'} written
+                </div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-white/[0.06] bg-black/25 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-zinc-400">
+                  {written.length > 20_000 ? `${written.slice(0, 20_000)}\n… (${written.length - 20_000} more characters)` : written}
+                </pre>
+              </div>
+            ) : rawInput ? (
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
+                {rawInput}
+              </pre>
+            ) : (
+              <div className="py-1 text-[11px] italic text-zinc-600">
+                {running ? 'Waiting for arguments…' : 'No arguments.'}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between border-y border-white/[0.04] px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-600">Output</span>
+              <span className={`text-[9px] ${failed ? 'text-red-400/80' : running ? 'text-indigo-300/60' : 'text-emerald-400/70'}`}>
+                {statusLabel}
+              </span>
+              {shownResult ? (
+                <span className="font-mono text-[9px] text-zinc-700">
+                  {shownResult.split(/\r?\n/).length} lines
+                </span>
+              ) : null}
+            </div>
+            {shownResult ? <CopyButton text={resultText ?? ''} label="output" /> : null}
+          </div>
+
+          <div className="px-3 py-2">
+            {shownResult ? (
+              <pre
+                className={`max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border px-2.5 py-2 font-mono text-[11px] leading-relaxed ${
+                  failed
+                    ? 'border-red-500/20 bg-red-500/[0.04] text-red-300/85'
+                    : 'border-white/[0.05] bg-black/25 text-zinc-400'
+                }`}
+              >
+                {shownResult}
+              </pre>
+            ) : (
+              <div className="flex items-center gap-2 py-1 text-[11px] italic text-zinc-600">
+                {running ? (
+                  <>
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+                    Waiting for the tool to return…
+                  </>
+                ) : (
+                  'No output returned.'
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 });

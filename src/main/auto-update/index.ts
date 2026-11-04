@@ -1,7 +1,7 @@
 // Background Build — lets Infinite AI edit & rebuild while the app stays running.
 // Uses a staging pattern: build → stage → notify → apply on restart.
-// The installed app (C:\Users\user\AppData\Local\Programs\infinite-ai) is NEVER
-// overwritten while running. New builds are staged alongside it.
+// The installed app (for example %LOCALAPPDATA%\Programs\infinite-ai on Windows)
+// is NEVER overwritten while running. New builds are staged alongside it.
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';

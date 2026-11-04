@@ -58,6 +58,7 @@ import { registerCloudIpc } from './cloud.js';
 import { registerMultiAgentIpc } from './multi-agent.js';
 import { registerRemoteIpc } from './remote.js';
 import { registerStudioIpc } from './studio.js';
+import { registerPagesIpc } from './pages.js';
 import { registerWorkspaceIpc } from './workspace.js';
 import { registerAuthIpc } from './auth.js';
 import { registerOwnerIpc } from './owner.js';
@@ -1035,6 +1036,8 @@ registerProjectIpc();
 
   // Studio + Planner: the personal document and life-operating surfaces.
   registerStudioIpc(getMainWindow);
+  // Pages: the Notion-style workspace (pages, blocks, databases).
+  registerPagesIpc(getMainWindow);
 
 // Runs that a restart interrupted, so the app can tell the user what it had
 // already done instead of dropping them back into a blank chat.

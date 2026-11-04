@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PC Live Map AI state v6",
+  "description": "Infinite OS PC Live Map v6 — future-grade, screenshot-free vector state. Cursor 0-1000 + clicks + idle + foreground window + ALL windows + 50 UIA elements with value + focused element with value + clipboard + seq + virtual screen. ~500-950 tokens at 4 Hz, 13-15x cheaper and 50x faster than screenshots. Text-only models drive it fully. Actions: POST /api/action (click|click_name|move|drag|type|keys|scroll|wait|focus). Coords ALWAYS norm 0-1000. Future rule: vectors ALWAYS, screenshot ONLY when zone=unknown or text inside canvas/game/scanned PDF.",
+  "type": "object",
+  "required": ["v", "t", "screen", "mouse", "keyboard", "apps", "os", "heat", "session", "recent"],
+  "properties": {
+    "v": { "type": "integer", "enum": [3, 4, 5, 6] },
+    "t": { "type": "string", "format": "date-time" },
+    "seq": { "type": "integer", "description": "v4: tracker sequence number — gaps mean dropped/slow cycles" },
+    "screen": {
+      "type": "object",
+      "properties": {
+        "w": { "type": "integer", "enum": [1000] },
+        "h": { "type": "integer", "enum": [1000] },
+        "mode": { "enum": ["mono-vector", "color-vector"] }
+      }
+    },
+    "mouse": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "y": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "vel_px_s": { "type": "number" },
+        "state": { "enum": ["move", "drag", "idle"] },
+        "idle_ms": { "type": "integer", "description": "OS-level idle from GetLastInputInfo (v4) or browser estimate" },
+        "clicks": {
+          "type": ["integer", "object"],
+          "description": "v3+: {left,right} OS-level via GetAsyncKeyState"
+        },
+        "drags": { "type": "integer" },
+        "wheel": { "type": "integer" },
+        "zone": { "type": "string", "description": "Named app zone containing the cursor" }
+      }
+    },
+    "keyboard": {
+      "type": "object",
+      "properties": {
+        "keys_per_min": { "type": "integer" },
+        "mods": { "type": "string" },
+        "last": { "type": "array", "items": { "type": "string" }, "maxItems": 5 }
+      }
+    },
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "rect_norm": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4 },
+          "focused": { "type": "boolean" }
+        }
+      }
+    },
+    "os": {
+      "type": "object",
+      "description": "Live OS truth from tracker.ps1 v6 — everything on screen right now, zero pixels, including focused value and element values",
+      "properties": {
+        "proc": { "type": "string" },
+        "win": { "type": "string" },
+        "pid": { "type": "integer" },
+        "exe": { "type": "string", "description": "full exe path of foreground process" },
+        "max": { "type": "boolean", "description": "foreground window maximized" },
+        "rect_norm": { "type": "array", "items": { "type": "integer" }, "minItems": 0, "maxItems": 4 },
+        "cursor_norm": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "idle_ms": { "type": "integer" },
+        "clicks": { "type": "object", "properties": { "left": { "type": "integer" }, "right": { "type": "integer" } } },
+        "tops": {
+          "type": "array", "maxItems": 20,
+          "description": "ALL visible windows with rects. overlay=true means fullscreen transparent layer — do NOT click it.",
+          "items": { "type": "object", "properties": { "proc": { "type": "string" }, "title": { "type": "string" }, "pid": { "type": "integer" }, "rect_norm": { "type": "array" }, "max": { "type": "boolean" }, "overlay": { "type": "boolean" } } }
+        },
+        "elements": {
+          "type": "array", "maxItems": 50,
+          "description": "Clickable / readable UIA controls in the foreground window, norm 0-1000 both axes. v6 adds value (Edit text / Combo selection) where available.",
+          "items": {
+            "type": "object",
+            "required": ["role", "x", "y", "w", "h"],
+            "properties": {
+              "role": { "type": "string", "description": "Button, Edit, ComboBox, CheckBox, Hyperlink, ListItem, Document, Pane..." },
+              "name": { "type": "string" },
+              "value": { "type": "string", "description": "v6: ValuePattern text for Edit/Combo/Document (first 80 chars) or empty" },
+              "x": { "type": "integer", "minimum": 0, "maximum": 1000 }, "y": { "type": "integer", "minimum": 0, "maximum": 1000 },
+              "w": { "type": "integer" }, "h": { "type": "integer" }
+            }
+          }
+        },
+        "focused": {
+          "type": ["object", "null"],
+          "description": "keyboard-focused UIA element (what typing would hit) — v6 includes value where available",
+          "properties": { "role": { "type": "string" }, "name": { "type": "string" }, "value": { "type": "string" }, "x": { "type": "integer" }, "y": { "type": "integer" } }
+        },
+        "clip": { "type": "string", "description": "clipboard preview, first 120 chars only" },
+        "stale_ms": { "type": "integer", "description": "ms since last OS tracker packet (999999 = browser-only)" }
+      }
+    },
+    "heat": { "type": "string", "description": "Downsampled 72-cell activity grid: # active, + warm, . cold" },
+    "session": {
+      "type": "object",
+      "properties": {
+        "events": { "type": "integer" },
+        "uptime_s": { "type": "integer" }
+      }
+    },
+    "recent": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "properties": {
+          "t": { "type": "string" },
+          "k": { "type": "string" },
+          "m": { "type": "string" }
+        }
+      }
+    }
+  }
+}

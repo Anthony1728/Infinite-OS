@@ -23,6 +23,8 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'planner', label: 'Planner', icon: 'nav.planner' },
   // Documents, sheets, and decks with AI writing beside them.
   { id: 'studio', label: 'Studio', icon: 'nav.studio' },
+  // The connected workspace: pages, wikis, and databases.
+  { id: 'pages', label: 'Pages', icon: 'nav.pages' },
   // Filed-away conversations. Searchable, and every entry can be
   // restored and carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document' },

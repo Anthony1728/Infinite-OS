@@ -4,9 +4,7 @@
 
 import type { Tool, ToolResult } from './base.js';
 import { bridgeServer } from '../bridge/server.js';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { spawnWithTimeout } from './spawn-timeout.js';
+import { ensureBrowserReady, installBridgeExtension } from '../bridge/extension-setup.js';
 
 const ACTIONS = [
   'prepare_install',
@@ -14,6 +12,7 @@ const ACTIONS = [
   'inspect',
   'click',
   'click_text',
+  'double_click',
   'type',
   'fill',
   'press',
@@ -51,6 +50,40 @@ const ACTIONS = [
   'batch',
   'console_log',
   'get_page_performance',
+  // Browser-window and tab management
+  'get_windows',
+  'create_window',
+  'focus_window',
+  'minimize_window',
+  'maximize_window',
+  'get_tab_tree',
+  'get_tab_info',
+  'duplicate_tab',
+  'pin_tab',
+  'move_tab',
+  'zoom',
+  // Downloads, history and cookies
+  'get_downloads',
+  'download',
+  'get_history',
+  'clear_history',
+  'get_cookies',
+  'clear_cookies',
+  // Page structure, forms, search and device info
+  'get_page_html',
+  'get_page_meta',
+  'get_page_structured',
+  'get_table_data',
+  'get_form_data',
+  'submit_form',
+  'find_in_page',
+  'get_browser_info',
+  'get_network_info',
+  'get_cpu_info',
+  'get_battery',
+  'get_idle_state',
+  'get_permissions',
+  'get_storage_info',
 ] as const;
 
 function commandFor(action: string): string {
@@ -110,7 +143,7 @@ function commandFor(action: string): string {
 export const browserExtensionTool: Tool = {
   name: 'browser_extension',
   description:
-    'PRIMARY browser control — ALWAYS use this FIRST for any web/browser task. Drives the user\'s EXISTING Chrome/Edge via the Infinite OS Bridge extension (localhost:8765). Fast DOM control with logged-in sessions. The tool auto-retries if the extension is temporarily unreachable, then falls back to Operator (CDP) silently. The action enum below is the authoritative list of what it can do.',
+    'PRIMARY browser control — use FIRST for web tasks. Drives logged-in Chrome/Edge through the Infinite OS Bridge extension, auto-heals the connection, and falls back to Operator (CDP). The action enum is authoritative.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -118,36 +151,36 @@ export const browserExtensionTool: Tool = {
         type: 'string',
         enum: [...ACTIONS],
         description:
-          'What to do. navigate→url; inspect→page state+snapshot+screenshot; click/right_click/highlight/hover/focus/clear→selector; click_text→text; type→selector+text; fill→fields map; press→key; scroll→direction+pixels; extract_text/links/forms→page content; screenshot→base64 PNG; execute_js→script; list_tabs/new_tab/activate_tab/close_tab→tabId; reload/back/forward→history; wait→ms; set_value/get_value→selector+value; get_element/get_elements→selector; select→dropdown option; drag→fromSelector+toSelector; cookie_get/cookie_set→name/domain/path/value; clipboard_read/clipboard_write→text; storage_get→keys, storage_set→data; batch→ops [{op,params}]; console_log→duration ms; get_page_performance→metrics.',
+          'Action to perform (see enum). Selector actions use selector; click_text/types use text; fill uses fields; navigate uses url; batch uses ops; tab actions use tabId.',
       },
-      url: { type: 'string', description: 'URL for navigate/new_tab.' },
-      selector: { type: 'string', description: 'CSS selector of the element to act on.' },
-      text: { type: 'string', description: 'Visible text to click, or value to type.' },
-      value: { type: 'string', description: 'Value to set.' },
-      fromSelector: { type: 'string', description: 'CSS selector of the drag source element.' },
-      toSelector: { type: 'string', description: 'CSS selector of the drag target element.' },
+      url: { type: 'string', description: 'navigate/new_tab URL.' },
+      selector: { type: 'string', description: 'CSS selector.' },
+      text: { type: 'string', description: 'Click text or typed value.' },
+      value: { type: 'string', description: 'Value to set/select.' },
+      fromSelector: { type: 'string', description: 'Drag source selector.' },
+      toSelector: { type: 'string', description: 'Drag target selector.' },
       fields: {
         type: 'object',
-        description: 'Map of selector -> value for fill (e.g. {"#email":"a@b.com","#pass":"secret"}).',
+        description: 'Map of selector→value for fill.',
         additionalProperties: { type: 'string' },
       },
-      key: { type: 'string', description: 'Key name for press (Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace…).' },
+      key: { type: 'string', description: 'Key name for press.' },
       direction: { type: 'string', enum: ['down', 'up', 'left', 'right', 'top', 'bottom'], description: 'Scroll direction.' },
-      pixels: { type: 'number', description: 'Pixels to scroll (optional).' },
-      script: { type: 'string', description: 'JavaScript source for execute_js.' },
-      tabId: { type: 'number', description: 'Tab id for activate_tab/close_tab/navigate.' },
-      ms: { type: 'number', description: 'Milliseconds for wait.' },
-      name: { type: 'string', description: 'Cookie name for cookie_get/cookie_set.' },
-      domain: { type: 'string', description: 'Cookie domain for cookie_set.' },
-      path: { type: 'string', description: 'Cookie path for cookie_set.' },
-      secure: { type: 'boolean', description: 'Cookie secure flag for cookie_set.' },
-      httpOnly: { type: 'boolean', description: 'Cookie httpOnly flag for cookie_set.' },
-      keys: { type: 'array', items: { type: 'string' }, description: 'Storage keys for storage_get.' },
-      data: { type: 'object', description: 'Data for storage_set or cookie_set value.' },
-      bypassCache: { type: 'boolean', description: 'Bypass cache for reload.' },
+      pixels: { type: 'number', description: 'Scroll distance.' },
+      script: { type: 'string', description: 'JavaScript for execute_js.' },
+      tabId: { type: 'number', description: 'Target tab id.' },
+      ms: { type: 'number', description: 'Wait milliseconds.' },
+      name: { type: 'string', description: 'Cookie name.' },
+      domain: { type: 'string', description: 'Cookie domain.' },
+      path: { type: 'string', description: 'Cookie path.' },
+      secure: { type: 'boolean', description: 'Cookie secure flag.' },
+      httpOnly: { type: 'boolean', description: 'Cookie httpOnly flag.' },
+      keys: { type: 'array', items: { type: 'string' }, description: 'Storage keys.' },
+      data: { type: 'object', description: 'Storage or cookie payload.' },
+      bypassCache: { type: 'boolean', description: 'Reload without cache.' },
       ops: {
         type: 'array',
-        description: 'Array of {op, params} for batch (e.g. [{"op":"click","params":{"selector":"#btn"}},{"op":"type","params":{"selector":"#input","text":"hello"}}]).',
+        description: 'Batch ops [{op,params}].',
         items: {
           type: 'object',
           properties: {
@@ -156,7 +189,28 @@ export const browserExtensionTool: Tool = {
           },
         },
       },
-      duration: { type: 'number', description: 'Duration in ms for console_log capture (100-10000, default 2000).' },
+      duration: { type: 'number', description: 'Console capture ms (100-10000).' },
+      windowId: { type: 'number', description: 'Window id.' },
+      index: { type: 'number', description: 'Tab/match index.' },
+      filename: { type: 'string', description: 'Download path.' },
+      saveAs: { type: 'boolean', description: 'Show Save As dialog.' },
+      conflictAction: { type: 'string', description: 'uniquify|overwrite|prompt.' },
+      maxResults: { type: 'number', description: 'History result cap.' },
+      query: { type: 'string', description: 'History/download search.' },
+      limit: { type: 'number', description: 'Download result cap.' },
+      orderBy: { type: 'array', items: { type: 'string' }, description: 'Download sort order.' },
+      startTime: { type: 'number', description: 'History start (epoch ms).' },
+      type: { type: 'string', description: 'Window type: normal|popup|panel.' },
+      state: { type: 'string', description: 'Window state: normal|minimized|maximized|fullscreen.' },
+      width: { type: 'number', description: 'Window width.' },
+      height: { type: 'number', description: 'Window height.' },
+      left: { type: 'number', description: 'Window left.' },
+      top: { type: 'number', description: 'Window top.' },
+      focused: { type: 'boolean', description: 'Focus new window.' },
+      pinned: { type: 'boolean', description: 'Pin tab.' },
+      factor: { type: 'number', description: 'Zoom factor (1 = 100%).' },
+      zoomAction: { type: 'string', enum: ['in', 'out', 'reset'], description: 'Relative zoom.' },
+      interval: { type: 'number', description: 'Idle threshold seconds.' },
     },
     required: ['action'],
   },
@@ -169,33 +223,45 @@ export const browserExtensionTool: Tool = {
       return { content: JSON.stringify({ ok: false, error: `Unknown action "${action}"` }, null, 2), is_error: true };
     }
     if (action === 'prepare_install') {
-      const root = process.cwd();
-      const script = join(root, 'scripts', 'install-extension.ps1');
-      if (!existsSync(script)) return { content: `Extension installer not found at ${script}`, is_error: true };
-      const result = await spawnWithTimeout({
-        command: 'powershell.exe',
-        args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script],
-        cwd: root,
-        timeoutMs: 120_000,
-        windowsHide: true,
-      });
-      if (result.timedOut || result.exitCode !== 0) {
-        return { content: result.stderr || result.stdout || 'Extension preparation failed.', is_error: true };
+      const installed = installBridgeExtension();
+      if (!installed.ok) {
+        return { content: JSON.stringify({ ok: false, error: installed.error, extensionPath: installed.path }, null, 2), is_error: true };
       }
-      const extensionPath = join(process.env.USERPROFILE ?? root, '.infinite-ai', 'extensions', 'infinite-os-bridge');
+      // The dedicated profile is the zero-click path: launch it, install the
+      // unpacked extension over CDP, and wait for the bridge handshake. If that
+      // fails, the same folder can still be loaded by hand in the user's Chrome.
+      const ready = await ensureBrowserReady({ launch: true });
       return {
-        content: JSON.stringify({
-          prepared: true,
-          extensionPath,
-          next: [
-            'Open chrome://extensions in Chrome.',
-            'Enable Developer mode.',
-            `Click Load unpacked and choose ${extensionPath}.`,
-            'Use Computer visual_observe and visual_click to complete and verify installation.',
-          ],
-          output: result.stdout.slice(-4_000),
-        }, null, 2),
+        content: JSON.stringify(
+          {
+            ok: ready.ok,
+            prepared: true,
+            extensionPath: installed.path,
+            version: installed.version,
+            launchedBrowser: ready.launched,
+            installedExtension: ready.installedExtension,
+            bridgeConnected: ready.status.bridgeConnected,
+            cdpRunning: ready.status.cdpRunning,
+            needsBrowserRestart: ready.needsRestart,
+            error: ready.error || undefined,
+            next: ready.ok
+              ? ['The Infinite OS browser is running and connected. No manual step is needed.']
+              : [
+                  'If a Chrome window opened, give it a few seconds and run action "inspect" to verify.',
+                  'To use your main Chrome instead: open chrome://extensions, enable Developer mode, click Load unpacked, and choose the extensionPath above.',
+                  'If the panel says the browser needs a restart, use its Restart browser button.',
+                ],
+          },
+          null,
+          2,
+        ),
+        is_error: !ready.ok,
       };
+    }
+    // Self-heal before a command: if the extension is not connected, try to
+    // attach to or launch the dedicated browser instead of failing the action.
+    if (!bridgeServer.getStatus().connected && !process.env.VITEST) {
+      await ensureBrowserReady({ launch: true }).catch(() => null);
     }
     const command = commandFor(action);
     const params: Record<string, unknown> = {};
@@ -222,6 +288,28 @@ export const browserExtensionTool: Tool = {
     if (input.duration != null) params.duration = input.duration;
     if (input.fromSelector != null) params.from = input.fromSelector;
     if (input.toSelector != null) params.to = input.toSelector;
+    // Window, tab, download, history and form controls
+    if (input.windowId != null) params.windowId = input.windowId;
+    if (input.index != null) params.index = input.index;
+    if (input.filename != null) params.filename = input.filename;
+    if (input.saveAs != null) params.saveAs = input.saveAs;
+    if (input.conflictAction != null) params.conflictAction = input.conflictAction;
+    if (input.maxResults != null) params.maxResults = input.maxResults;
+    if (input.query != null) params.query = input.query;
+    if (input.limit != null) params.limit = input.limit;
+    if (input.orderBy != null) params.orderBy = input.orderBy;
+    if (input.startTime != null) params.startTime = input.startTime;
+    if (input.type != null) params.type = input.type;
+    if (input.state != null) params.state = input.state;
+    if (input.width != null) params.width = input.width;
+    if (input.height != null) params.height = input.height;
+    if (input.left != null) params.left = input.left;
+    if (input.top != null) params.top = input.top;
+    if (input.focused != null) params.focused = input.focused;
+    if (input.pinned != null) params.pinned = input.pinned;
+    if (input.factor != null) params.factor = input.factor;
+    if (input.zoomAction != null) params.action = input.zoomAction;
+    if (input.interval != null) params.interval = input.interval;
     if (action === 'click_text' && input.text != null) params.value = input.text;
     if (action === 'click' && input.selector == null && input.text != null) params.text = input.text;
 

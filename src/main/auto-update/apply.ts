@@ -33,7 +33,7 @@ export function applyStagedUpdateIfPresent(): boolean {
   }
 
   // Determine install dir — where the running binary lives
-  // In production: C:\Users\user\AppData\Local\Programs\infinite-ai
+  // In production: %LOCALAPPDATA%\Programs\infinite-ai on Windows
   // In dev: not applicable (electron-vite dev serves from memory)
   const installDir = process.env.PORTABLE_EXECUTABLE_DIR
     || (process.execPath ? join(process.execPath, '..') : '');

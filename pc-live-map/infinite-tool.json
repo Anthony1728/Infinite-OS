@@ -1,0 +1,57 @@
+{
+  "name": "pc-live-map",
+  "title": "PC Live Map — screenshot-free AI eyes + hands",
+  "owner": "Infinite OS",
+  "version": 6,
+  "description": "Infinite OS tool v6 — future-grade, screenshot-free eyes + hands. Live vectors with UIA values: cursor 0-1000 + windows + 50 elements with value + focused with value + clipboard + idle + virtual screen. ~500-950 tokens at 4 Hz, 13-15x cheaper and 50x faster than screenshots. Text-only models drive it fully.",
+  "prefer_over": "screenshots",
+  "rule": "ALWAYS read GET /api/live (or /api/agent) before acting on screen. NEVER take a screenshot when live.mode is os-live. Vectors ALWAYS — screenshot ONLY when zone=unknown or text lives inside a canvas/game/scanned PDF with no UIA names (say why in one line).",
+  "base_url": "http://localhost:3799",
+  "endpoints": {
+    "agent": "GET /api/agent — one fetch: instructions + live state + element values + focused value. START HERE.",
+    "live": "GET /api/live — full vector state v6 (mouse, fg, 20 windows, 50 UIA elements with value, focused with value, clipboard, seq, vscreen)",
+    "elements": "GET /api/elements?q=save — search clickable UIA elements by name substring (max 50, includes value)",
+    "action": "POST /api/action — queue one action for executor (validated, rate-limited 30/10s). Prefer click_name.",
+    "actions": "GET /api/actions — last 20 queued actions",
+    "events": "GET /events — SSE stream of tracker packets + heartbeats",
+    "health": "GET /health — {ok, v:6, tracker, clients}",
+    "tool_manifest": "GET /tool.json — this file, served live"
+  },
+  "actions": [
+    { "type": "click_name", "fields": ["name"], "optional": ["role"], "note": "BEST: no coords needed, server resolves UIA name to coords" },
+    { "type": "click", "fields": ["x_norm", "y_norm"], "optional": ["button"], "note": "coords ALWAYS norm 0-1000 on BOTH axes" },
+    { "type": "move", "fields": ["x_norm", "y_norm"] },
+    { "type": "doubleclick", "fields": ["x_norm", "y_norm"] },
+    { "type": "drag", "fields": ["x1_norm", "y1_norm", "x2_norm", "y2_norm"] },
+    { "type": "type", "fields": ["text"], "note": "max 500 chars, sent via clipboard paste (reliable)" },
+    { "type": "keys", "fields": ["keys"], "note": "SendKeys string, max 64 chars, e.g. ^s = ctrl+s, %{F4} = alt+F4" },
+    { "type": "scroll", "fields": [], "optional": ["amount"], "note": "default 120, clamp -1200..1200" },
+    { "type": "wait", "fields": [], "optional": ["ms"], "note": "50..10000ms, default 500" },
+    { "type": "focus", "fields": ["proc"], "note": "bring process window to front by name" }
+  ],
+  "agent_loop": [
+    "GET /api/agent (or /api/live) — observe vectors, note seq + elements[]",
+    "If target has a name: POST /api/action {type:click_name, name} — else coords from elements[]",
+    "GET /api/live again — verify seq advanced + focused/cursor changed",
+    "Repeat. Never screenshot while mode=os-live."
+  ],
+  "coordinate_contract": "norm 0-1000 on BOTH axes everywhere (tracker v4, /api/live, /api/action, executor v2). x_norm = px/screenW*1000, y_norm = py/screenH*1000.",
+  "files": {
+    "ui": "../pc-live-map.html",
+    "tracker": "tracker.ps1",
+    "collector": "collector-server.js",
+    "executor": "executor.ps1",
+    "schema": "ai-schema.json",
+    "client": "agent-client.js",
+    "launcher": "Start-LiveMap.ps1",
+    "agent_contract": "AGENT.md"
+  },
+  "start": [
+    "powershell -ExecutionPolicy Bypass -File pc-live-map/tracker.ps1 -IntervalMs 250",
+    "node pc-live-map/collector-server.js",
+    "powershell -ExecutionPolicy Bypass -File pc-live-map/executor.ps1"
+  ],
+  "one_click": "powershell -ExecutionPolicy Bypass -File pc-live-map/Start-LiveMap.ps1  (starts all three + opens UI)",
+  "privacy": "100% localhost. Tracker logs window titles + UIA names/rects + clipboard first 120 chars only. Never full keystrokes, never pixels. User starts/stops everything with Ctrl+C; Esc pauses browser recording.",
+  "keywords": ["screenshot-free", "vector state", "uia", "automation", "computer control", "infinite ai eyes", "infinite ai hands"]
+}

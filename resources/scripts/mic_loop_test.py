@@ -10,7 +10,9 @@ Prints JSON diagnostics + per-utterance transcripts on stdout.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import time
 
 import numpy as np
@@ -85,7 +87,7 @@ def main() -> int:
     model = WhisperModel(model_name, device="cpu", compute_type="int8",
                          cpu_threads=max(2, (os_cpu_count() or 4)))
     for index, utterance in enumerate(utterances):
-        out = rf"C:\Users\user\AppData\Local\Temp\mic-utt-{index}.wav"
+        out = os.path.join(tempfile.gettempdir(), f"mic-utt-{index}.wav")
         write_wav(out, utterance)
         started = time.monotonic()
         segments, info = model.transcribe(utterance, beam_size=1, language="en",

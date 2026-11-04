@@ -1,0 +1,6 @@
+{
+  "name": "pc-live-map",
+  "version": "6.1.0",
+  "type": "module",
+  "description": "PC Live Map collector + agent client (Infinite OS tool v6.1 future-grade). Zero dependencies, Node 20+."
+}

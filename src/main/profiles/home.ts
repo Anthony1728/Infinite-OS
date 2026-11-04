@@ -68,6 +68,7 @@ export const ADOPT_DIRS = [
   'checkpoints',
   'projects',
   'project',
+  'pages',
   'business',
   'multi-agent',
   'workspaces',

@@ -195,6 +195,16 @@
     return chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
   }
 
+  export interface BridgeConnectionInfo {
+    id: string;
+    extensionId: string;
+    extensionVersion: string;
+    browser: string;
+    name: string;
+    connectedAt: number;
+    active: boolean;
+  }
+
   export interface BridgeStatus {
     connected: boolean;
     port: number;
@@ -206,6 +216,9 @@
     lastError: string;
     connectedAt: number | null;
     commandsServed: number;
+    /** Every extension currently attached. More than one is normal when the
+     *  dedicated Infinite OS browser and the user's own Chrome are both open. */
+    connections: BridgeConnectionInfo[];
   }
 
   type ExecResult = { ok: true; data: unknown } | { ok: false; error: string };
@@ -221,6 +234,7 @@
     private messageOpcode = 0;
     private fragmented = false;
     private closed = false;
+    private closeNotified = false;
     private useBinary = false;
 
     onMessage: ((data: string) => void) | null = null;
@@ -229,14 +243,27 @@
     constructor(socket: Socket) {
       this.socket = socket;
       socket.on('data', (chunk) => this.handleData(chunk));
-      socket.on('close', () => {
-        this.closed = true;
-        this.onClose?.();
+      // A socket handed over by the HTTP server's 'upgrade' event can stay
+      // half-open: the peer's FIN arrives as 'end', but 'close' may never fire.
+      // Treating only 'close' as a disconnect left dead extensions reported as
+      // connected for as long as the TCP socket lingered.
+      socket.on('end', () => {
+        this.notifyClosed();
+        try {
+          socket.destroy();
+        } catch {
+          /* already gone */
+        }
       });
-      socket.on('error', () => {
-        this.closed = true;
-        this.onClose?.();
-      });
+      socket.on('close', () => this.notifyClosed());
+      socket.on('error', () => this.notifyClosed());
+    }
+
+    private notifyClosed(): void {
+      if (this.closeNotified) return;
+      this.closeNotified = true;
+      this.closed = true;
+      this.onClose?.();
     }
 
     private handleData(chunk: Buffer): void {
@@ -396,16 +423,28 @@
 
     private closeWithCode(code: number, reason: string): void {
       if (this.closed) return;
-      this.closed = true;
       const payload = Buffer.alloc(2 + Buffer.byteLength(reason, 'utf8'));
       payload.writeUInt16BE(code, 0);
       payload.write(reason, 2, 'utf8');
+      // Send before flipping `closed`, otherwise sendFrame refuses the frame and
+      // the peer never receives the close handshake.
+      this.sendFrame(0x8, payload);
+      this.closed = true;
       try {
-        this.sendFrame(0x8, payload);
+        this.socket.end();
       } catch {
         /* ignore */
       }
-      this.socket.end();
+      // A peer that never answers the close handshake must not keep the socket
+      // (and a phantom "connected" status) alive.
+      const timer = setTimeout(() => {
+        try {
+          this.socket.destroy();
+        } catch {
+          /* ignore */
+        }
+      }, 2_000);
+      timer.unref?.();
     }
 
     close(): void {
@@ -417,17 +456,43 @@
 // Bridge server
 // ---------------------------------------------------------------------------
 
+interface ConnectionState {
+  id: string;
+  ws: WsConnection;
+  extensionId: string;
+  version: string;
+  browser: string;
+  name: string;
+  /** 0 until the extension says hello. */
+  connectedAt: number;
+  lastActivityAt: number;
+  helloTimer: NodeJS.Timeout | null;
+  pending: Set<string>;
+}
+
+interface PendingCommand {
+  resolve: (r: ExecResult) => void;
+  timer: NodeJS.Timeout;
+  conn: ConnectionState;
+}
+
 class BridgeServer {
   private server: Server | null = null;
-  private ws: WsConnection | null = null;
   private token = '';
-  private pending = new Map<string, { resolve: (r: ExecResult) => void; timer: NodeJS.Timeout }>();
+  private pending = new Map<string, PendingCommand>();
   private nextId = 1;
   private commandsServed = 0;
   private inFlight = new Map<string, { promise: Promise<ExecResult>; expires: number }>();
   private readonly COALESCE_WINDOW_MS = 16;
-  /** Timestamp of the last app-level frame from the extension (hello, ping-server, any reply). */
-  private lastAppActivityAt = 0;
+  /**
+   * Every attached extension. A second connection used to close the first, so
+   * the dedicated Infinite OS browser and the user's own Chrome kept kicking
+   * each other off. The newest hello becomes active; the rest stay warm as
+   * standbys and are promoted if the active one dies.
+   */
+  private connections = new Set<ConnectionState>();
+  private active: ConnectionState | null = null;
+  private connectionSeq = 0;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   /** Fired when the extension reports an abort (popup Emergency Stop / "stop"). */
   onAbort: ((reason: string) => void) | null = null;
@@ -444,6 +509,7 @@ class BridgeServer {
     lastError: '',
     connectedAt: null,
     commandsServed: 0,
+    connections: [],
   };
 
   constructor(port = BRIDGE_DEFAULT_PORT) {
@@ -511,37 +577,85 @@ class BridgeServer {
     res.end(data);
   }
 
-  private setConnected(ws: WsConnection, info: { extensionId?: string; version?: string; browser?: string; name?: string }): void {
-    if (this.ws && this.ws !== ws) {
-      try {
-        this.ws.close();
-      } catch {
-        /* ignore */
-      }
+  private setConnected(conn: ConnectionState, info: { extensionId?: string; version?: string; browser?: string; name?: string }): void {
+    if (conn.helloTimer) {
+      clearTimeout(conn.helloTimer);
+      conn.helloTimer = null;
     }
-    this.ws = ws;
-    this.status.connected = true;
-    this.status.extensionId = info.extensionId || '';
-    this.status.extensionVersion = info.version || '';
-    this.status.browser = info.browser || '';
-    this.status.name = info.name || '';
+    conn.extensionId = info.extensionId || '';
+    conn.version = info.version || '';
+    conn.browser = info.browser || '';
+    conn.name = info.name || '';
+    conn.connectedAt = Date.now();
+    conn.lastActivityAt = Date.now();
+    this.connections.add(conn);
+    // Newest hello wins. Older connections stay attached as standbys instead
+    // of being closed — that is what lets the dedicated browser and the user's
+    // own Chrome coexist without a reconnect storm.
+    this.active = conn;
     this.status.lastError = '';
-    this.status.connectedAt = Date.now();
-    this.lastAppActivityAt = Date.now();
-    this.log(`Extension connected (${this.status.extensionId || 'unknown id'})`);
-    ws.onMessage = (data) => this.handleExtensionMessage(data);
-    ws.onClose = () => {
-      if (this.ws === ws) {
-        this.ws = null;
-        this.status.connected = false;
-        this.status.lastError = 'extension disconnected';
-        this.log('Extension disconnected');
-        this.rejectAllPending(new Error('Browser bridge disconnected while a command was running'));
-      }
-    };
+    this.refreshStatus();
+    this.log(`Extension connected (${conn.extensionId || 'unknown id'}${this.connections.size > 1 ? `, ${this.connections.size} attached` : ''})`);
   }
 
-  private handleExtensionMessage(data: string): void {
+  private refreshStatus(): void {
+    const active = this.active;
+    this.status.connections = [...this.connections]
+      .filter((conn) => conn.connectedAt > 0)
+      .sort((a, b) => b.connectedAt - a.connectedAt)
+      .map((conn) => ({
+        id: conn.id,
+        extensionId: conn.extensionId,
+        extensionVersion: conn.version,
+        browser: conn.browser,
+        name: conn.name,
+        connectedAt: conn.connectedAt,
+        active: conn === active,
+      }));
+    this.status.connected = Boolean(active);
+    if (active) {
+      this.status.extensionId = active.extensionId;
+      this.status.extensionVersion = active.version;
+      this.status.browser = active.browser;
+      this.status.name = active.name;
+      this.status.connectedAt = active.connectedAt;
+    } else {
+      this.status.extensionId = '';
+      this.status.extensionVersion = '';
+      this.status.browser = '';
+      this.status.name = '';
+      this.status.connectedAt = null;
+    }
+    this.status.commandsServed = this.commandsServed;
+  }
+
+  private promoteActive(): void {
+    const next = [...this.connections]
+      .filter((conn) => conn.connectedAt > 0)
+      .sort((a, b) => b.connectedAt - a.connectedAt)[0];
+    this.active = next || null;
+    this.refreshStatus();
+    if (next) this.log(`Promoted standby extension (${next.extensionId || 'unknown id'})`);
+  }
+
+  private handleConnectionClosed(conn: ConnectionState): void {
+    if (conn.helloTimer) {
+      clearTimeout(conn.helloTimer);
+      conn.helloTimer = null;
+    }
+    const known = this.connections.delete(conn);
+    this.rejectPendingFor(conn, new Error('Browser bridge disconnected while a command was running'));
+    if (this.active === conn) {
+      this.active = null;
+      this.status.lastError = 'extension disconnected';
+      this.promoteActive();
+      if (!this.active) this.log('Extension disconnected');
+    } else if (known) {
+      this.refreshStatus();
+    }
+  }
+
+  private handleExtensionMessage(conn: ConnectionState, data: string): void {
     let msg: unknown;
     try {
       msg = JSON.parse(data);
@@ -549,10 +663,9 @@ class BridgeServer {
       return;
     }
     if (!msg || typeof msg !== 'object') return;
-    this.lastAppActivityAt = Date.now();
     const m = msg as { type?: string; id?: string | number; ok?: boolean; data?: unknown; error?: string; time?: number };
     if (m.type === 'hello') {
-      this.setConnected(this.ws as WsConnection, {
+      this.setConnected(conn, {
         extensionId: (msg as { extensionId?: string }).extensionId,
         version: (msg as { version?: string }).version,
         browser: (msg as { browser?: string }).browser,
@@ -560,9 +673,12 @@ class BridgeServer {
       });
       return;
     }
+    // Ignore application frames until this socket has identified itself.
+    if (conn.connectedAt === 0) return;
+    conn.lastActivityAt = Date.now();
     if (m.type === 'pong-server') return;
     if (m.type === 'ping-server') {
-      this.ws?.sendText(JSON.stringify({ type: 'pong-server', time: Date.now() }));
+      conn.ws.sendText(JSON.stringify({ type: 'pong-server', time: Date.now() }));
       return;
     }
     if (m.type === 'agent:abort') {
@@ -578,10 +694,12 @@ class BridgeServer {
       return;
     }
     if (m.id != null) {
-      const pending = this.pending.get(String(m.id));
+      const id = String(m.id);
+      const pending = this.pending.get(id);
       if (pending) {
         clearTimeout(pending.timer);
-        this.pending.delete(String(m.id));
+        this.pending.delete(id);
+        pending.conn.pending.delete(id);
         if (m.ok === true) pending.resolve({ ok: true, data: m.data });
         else pending.resolve({ ok: false, error: String(m.error || 'Unknown bridge error') });
       }
@@ -594,10 +712,23 @@ class BridgeServer {
       p.resolve({ ok: false, error: err.message });
     }
     this.pending.clear();
+    for (const conn of this.connections) conn.pending.clear();
+  }
+
+  private rejectPendingFor(conn: ConnectionState, err: Error): void {
+    for (const id of [...conn.pending]) {
+      const pending = this.pending.get(id);
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.resolve({ ok: false, error: err.message });
+    }
+    conn.pending.clear();
   }
 
   exec(command: string, params?: Record<string, unknown>, timeoutMs = DEFAULT_EXEC_TIMEOUT): Promise<ExecResult> {
-    if (!this.ws || !this.status.connected) {
+    const active = this.active;
+    if (!active || !this.status.connected) {
       return Promise.resolve({
         ok: false,
         error:
@@ -618,18 +749,21 @@ class BridgeServer {
     const promise = new Promise<ExecResult>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        active.pending.delete(id);
         this.inFlight.delete(coalesceKey);
         resolve({ ok: false, error: `Bridge command "${command}" timed out after ${timeoutMs}ms` });
       }, timeoutMs);
-      this.pending.set(id, { resolve, timer });
+      this.pending.set(id, { resolve, timer, conn: active });
+      active.pending.add(id);
     });
 
     this.inFlight.set(coalesceKey, { promise, expires: now + this.COALESCE_WINDOW_MS });
 
     try {
-      this.ws.sendText(JSON.stringify(payload));
+      active.ws.sendText(JSON.stringify(payload));
     } catch (err) {
       this.pending.delete(id);
+      active.pending.delete(id);
       this.inFlight.delete(coalesceKey);
       return Promise.resolve({ ok: false, error: String((err as Error).message || err) });
     }
@@ -642,7 +776,7 @@ class BridgeServer {
   }
 
   getStatus(): BridgeStatus {
-    return { ...this.status };
+    return { ...this.status, connections: this.status.connections.map((conn) => ({ ...conn })) };
   }
 
   /**
@@ -662,14 +796,14 @@ class BridgeServer {
     for (const dir of [
       join(process.cwd(), 'extensions', 'infinite-os-bridge'),
       join(homedir(), '.infinite-ai', 'extensions', 'infinite-os-bridge'),
-      join(process.env.LOCALAPPDATA ?? '', 'InfiniteOS', 'bridge-extension'),
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'InfiniteOS', 'bridge-extension') : '',
     ]) {
+      if (!dir || !existsSync(dir)) continue;
       try {
         const configPath = join(dir, 'config.js');
-        mkdirSync(dir, { recursive: true });
         writeFileSync(configPath, configContent, { encoding: 'utf8', flag: 'w' });
       } catch {
-        // Non-fatal: extension may not be installed yet
+        // Non-fatal: extension may be loaded and holding the file open.
       }
     }
   }
@@ -696,6 +830,19 @@ class BridgeServer {
     );
     if (head && head.length) socket.unshift(head);
     const conn = new WsConnection(socket);
+    const state: ConnectionState = {
+      id: `conn-${++this.connectionSeq}`,
+      ws: conn,
+      extensionId: '',
+      version: '',
+      browser: '',
+      name: '',
+      connectedAt: 0,
+      lastActivityAt: Date.now(),
+      helloTimer: null,
+      pending: new Set<string>(),
+    };
+    this.connections.add(state);
 
     // Do NOT mark the bridge connected at TCP-upgrade time. If the extension's
     // MV3 service worker dies right after opening the socket (or the peer is
@@ -703,9 +850,9 @@ class BridgeServer {
     // behaviour then reported connected:true with empty extension metadata and
     // every /exec command timed out after 45s into a half-open "zombie" socket.
     // connected:true now strictly means "the extension said hello".
-    let helloTimer: NodeJS.Timeout | null = setTimeout(() => {
-      helloTimer = null;
-      this.log('No extension hello within 5s — dropping half-open socket');
+    state.helloTimer = setTimeout(() => {
+      state.helloTimer = null;
+      this.log('No extension hello within 5s - dropping half-open socket');
       try {
         conn.close();
       } catch {
@@ -713,32 +860,8 @@ class BridgeServer {
       }
     }, HELLO_TIMEOUT_MS);
 
-    conn.onClose = () => {
-      if (helloTimer) {
-        clearTimeout(helloTimer);
-        helloTimer = null;
-      }
-    };
-
-    conn.onMessage = (data) => {
-      let msg: { type?: string; extensionId?: string; version?: string; browser?: string; name?: string } | null = null;
-      try {
-        msg = JSON.parse(data);
-      } catch {
-        return;
-      }
-      if (msg?.type !== 'hello') return; // ignore anything else before hello
-      if (helloTimer) {
-        clearTimeout(helloTimer);
-        helloTimer = null;
-      }
-      this.setConnected(conn, {
-        extensionId: msg.extensionId,
-        version: msg.version,
-        browser: msg.browser,
-        name: msg.name,
-      });
-    };
+    conn.onClose = () => this.handleConnectionClosed(state);
+    conn.onMessage = (data) => this.handleExtensionMessage(state, data);
   }
 
   start(port?: number): Promise<void> {
@@ -793,21 +916,22 @@ class BridgeServer {
   }
 
   private checkConnectionLiveness(): void {
-    if (!this.ws || !this.status.connected) return;
-    const silenceMs = Date.now() - this.lastAppActivityAt;
-    if (silenceMs > APP_SILENCE_TIMEOUT_MS) {
-      this.log(`Extension silent for ${Math.round(silenceMs / 1000)}s — tearing down half-open socket`);
-      try {
-        this.ws.close();
-      } catch {
-        /* ignore */
+    for (const conn of [...this.connections]) {
+      if (conn.connectedAt === 0) continue;
+      const silenceMs = Date.now() - conn.lastActivityAt;
+      if (silenceMs > APP_SILENCE_TIMEOUT_MS) {
+        this.log(`Extension silent for ${Math.round(silenceMs / 1000)}s - tearing down half-open socket`);
+        try {
+          conn.ws.close();
+        } catch {
+          /* ignore */
+        }
+        continue;
       }
-      // onClose clears this.ws / connected and rejects pending commands.
-      return;
+      // Protocol-level ping: keeps every attached connection warm and surfaces
+      // hard TCP death through the socket's error/close events.
+      conn.ws.sendPing();
     }
-    // Protocol-level ping: keeps the connection warm through idle timeouts and
-    // surfaces hard TCP death via the socket's error/close events.
-    this.ws.sendPing();
   }
 
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -864,15 +988,17 @@ class BridgeServer {
       this.heartbeatTimer = null;
     }
     this.rejectAllPending(new Error('Bridge server stopped'));
-    if (this.ws) {
+    for (const conn of [...this.connections]) {
       try {
-        this.ws.close();
+        conn.ws.close();
       } catch {
         /* ignore */
       }
-      this.ws = null;
     }
+    this.connections.clear();
+    this.active = null;
     this.status.connected = false;
+    this.refreshStatus();
     if (this.server) {
       this.server.close();
       this.server = null;

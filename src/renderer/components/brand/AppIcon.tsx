@@ -50,6 +50,7 @@ const CUSTOM: Record<string, InfinityIconName> = {
   'nav.spell': 'inf.spell',
   'nav.studio': 'inf.writer',
   'nav.planner': 'inf.tasks',
+  'nav.pages': 'inf.note',
 
   // ── Top bar ─────────────────────────────────────────────────────
   'topbar.menu': 'inf.menu',

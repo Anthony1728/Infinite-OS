@@ -1,9 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
-import { useMultiAgentStore } from '../../../renderer/stores/multiAgent';
+import { useMultiAgentStore, type OrgRole } from '../../../renderer/stores/multiAgent';
 import { useAgentsStore } from '../../../renderer/stores/agents';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 
 type Tab = 'orchestrator' | 'teams' | 'tasks';
+
+const ORG_ROLE_META: Record<OrgRole, { label: string; className: string; next: OrgRole }> = {
+  ceo:      { label: 'CEO',      className: 'bg-amber-500/15 text-amber-300 border-amber-500/25',   next: 'manager' },
+  manager:  { label: 'Manager',  className: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/25', next: 'employee' },
+  employee: { label: 'Employee', className: 'bg-white/5 text-textMuted border-white/10',             next: 'ceo' },
+};
 
 function AgentAvatar({ color, icon }: { color?: string; icon?: string }) {
   return (
@@ -18,27 +24,34 @@ function AgentAvatar({ color, icon }: { color?: string; icon?: string }) {
 export function MultiAgentView() {
   const {
     teams, tasks, stats,
-    loadTeams, loadTasks, loadStats,
+    loadTeams, loadTasks, loadStats, loadOrg,
     createTeam, createTask, startTask, completeTask,
+    addMember, removeMember, setRole, setLeader, runOrgMission,
   } = useMultiAgentStore();
-  const { types: agentTypes, runs: agentRuns, spawn } = useAgentsStore();
+  const { types: agentTypes, runs: agentRuns, spawn, init: initAgents } = useAgentsStore();
   const addToast = useNotificationStore((s) => s.addToast);
 
   const [tab, setTab] = useState<Tab>('orchestrator');
   const [showCreate, setShowCreate] = useState(false);
   const [createType, setCreateType] = useState<'team' | 'task'>('team');
-  const [formData, setFormData] = useState({ name: '', description: '', assignTo: '' });
+  const [formData, setFormData] = useState({ name: '', description: '', mission: '' });
   const [orchestratorPrompt, setOrchestratorPrompt] = useState('');
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [dispatching, setDispatching] = useState(false);
   const [dispatchLog, setDispatchLog] = useState<{ agentId: string; task: string; status: 'pending' | 'running' | 'done' | 'failed' }[]>([]);
+  const [missionDrafts, setMissionDrafts] = useState<Record<string, string>>({});
+  const [memberPicks, setMemberPicks] = useState<Record<string, string>>({});
+  const [runningTeam, setRunningTeam] = useState<string | null>(null);
+  const [orgReport, setOrgReport] = useState<{ teamId: string; mission: string; plan: string; taskCount: number } | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    void initAgents();
     void loadTeams();
     void loadTasks();
     void loadStats();
-  }, [loadStats, loadTasks, loadTeams]);
+    void loadOrg();
+  }, [initAgents, loadOrg, loadStats, loadTasks, loadTeams]);
 
   // Refresh stats every 5s
   useEffect(() => {
@@ -49,13 +62,48 @@ export function MultiAgentView() {
   const handleCreate = async () => {
     if (!formData.name.trim()) return;
     if (createType === 'team') {
-      await createTeam({ name: formData.name, description: formData.description });
+      await createTeam({
+        name: formData.name,
+        description: formData.description,
+        mission: formData.mission || undefined,
+        members: agentTypes.slice(0, 3).map((a) => a.id),
+      });
     } else {
       await createTask({ title: formData.name, description: formData.description });
     }
-    setFormData({ name: '', description: '', assignTo: '' });
+    setFormData({ name: '', description: '', mission: '' });
     setShowCreate(false);
     addToast({ type: 'success', title: `${createType === 'team' ? 'Team' : 'Task'} created` });
+  };
+
+  const handleRunOrgMission = async (teamId: string, teamName: string) => {
+    const mission = (missionDrafts[teamId] ?? '').trim();
+    if (!mission || runningTeam) return;
+    setRunningTeam(teamId);
+    setOrgReport(null);
+    try {
+      const result = await runOrgMission(teamId, mission);
+      if (result) {
+        setOrgReport({ teamId, mission, plan: result.plan || '', taskCount: result.tasks?.length ?? 0 });
+        setMissionDrafts((prev) => ({ ...prev, [teamId]: '' }));
+        addToast({
+          type: 'success',
+          title: `${teamName}: mission dispatched`,
+          message: result.tasks?.length ? `${result.tasks.length} role briefs sent through the chain of command.` : undefined,
+        });
+      }
+    } catch (e: unknown) {
+      addToast({ type: 'error', title: 'Mission failed to dispatch', message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRunningTeam(null);
+    }
+  };
+
+  const agentName = (id: string) => agentTypes.find((a) => a.id === id)?.name ?? id;
+
+  const cycleRole = async (teamId: string, agentId: string, role: OrgRole) => {
+    const next = ORG_ROLE_META[role]?.next ?? 'employee';
+    await setRole(teamId, agentId, next);
   };
 
   const handleDispatchOrchestration = async () => {
@@ -128,13 +176,13 @@ export function MultiAgentView() {
   const STAT_CARDS = [
     {
       label: 'Agent Teams',
-      value: stats?.teams ?? teams.length,
+      value: stats?.teams ?? stats?.totalTeams ?? teams.length,
       icon: 'M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.969-1.584A6.005 6.005 0 0 1 12 15a15 15 0 0 1 4.682 2.72M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
       color: 'from-rose-500 to-pink-600',
     },
     {
       label: 'Total Tasks',
-      value: stats?.tasks ?? tasks.length,
+      value: stats?.tasks ?? stats?.totalTasks ?? tasks.length,
       icon: 'M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0z',
       color: 'from-amber-500 to-orange-500',
     },
@@ -368,7 +416,7 @@ export function MultiAgentView() {
         </div>
       )}
 
-      {/* ── TEAMS TAB ── */}
+      {/* ── TEAMS TAB (ORG CHART) ── */}
       {tab === 'teams' && (
         <div className="space-y-3 animate-fade-in">
           {teams.length === 0 ? (
@@ -376,27 +424,130 @@ export function MultiAgentView() {
               <svg className="w-10 h-10 mx-auto mb-3 opacity-20 text-textMuted" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.969-1.584A6.005 6.005 0 0 1 12 15a15 15 0 0 1 4.682 2.72M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
               </svg>
-              <p className="text-sm text-textMuted">No teams yet. Create one to group agents.</p>
+              <p className="text-sm text-textMuted">No teams yet. Build a squad with a manager and employees.</p>
               <button onClick={() => { setCreateType('team'); setShowCreate(true); }} className="btn-premium mt-4 text-sm">
                 Create First Team
               </button>
             </div>
-          ) : teams.map((t, i) => (
-            <div key={t.id} className="card-premium animate-slide-up" style={{ animationDelay: `${i * 30}ms` }}>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.969-1.584A6.005 6.005 0 0 1 12 15a15 15 0 0 1 4.682 2.72M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-                  </svg>
+          ) : teams.map((t, i) => {
+            const members = t.agents ?? t.members ?? [];
+            const available = agentTypes.filter((a) => !members.includes(a.id));
+            const pick = memberPicks[t.id] ?? available[0]?.id ?? '';
+            return (
+              <div key={t.id} className="card-premium animate-slide-up" style={{ animationDelay: `${i * 30}ms` }}>
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 flex items-center justify-center shadow-lg flex-shrink-0">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.969-1.584A6.005 6.005 0 0 1 12 15a15 15 0 0 1 4.682 2.72M12 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-textMain">{t.name}</span>
+                      {t.status === 'active' && <span className="badge-running">Working</span>}
+                      {t.leader && (
+                        <span className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                          Lead · {agentName(t.leader)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-textMuted mt-0.5">
+                      {t.mission || t.description || 'No mission set'} · {members.length} {members.length === 1 ? 'member' : 'members'}
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-textMuted bg-white/5 px-2 py-1 rounded-lg flex-shrink-0">{new Date(t.createdAt).toLocaleDateString()}</span>
                 </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-textMain">{t.name}</div>
-                  <div className="text-xs text-textMuted mt-0.5">{t.description || 'No description'} · {t.members?.length ?? 0} members</div>
+
+                {/* Org chart: CEO / managers / employees */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {members.length === 0 && (
+                    <span className="text-xs text-textMuted italic">No agents assigned — add one below to staff this team.</span>
+                  )}
+                  {members.map((agentId) => {
+                    const role = t.roles?.[agentId] ?? 'employee';
+                    const meta = ORG_ROLE_META[role];
+                    return (
+                      <span key={agentId} className="inline-flex items-center gap-1 rounded-lg border border-borderSubtle bg-bgCard pl-2 pr-1 py-1">
+                        <button
+                          onClick={() => { void cycleRole(t.id, agentId, role); }}
+                          className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${meta.className}`}
+                          title="Click to change role (CEO → Manager → Employee)"
+                        >
+                          {meta.label}
+                        </button>
+                        <span className="text-xs text-textMain">{agentName(agentId)}</span>
+                        <button
+                          onClick={() => { void setLeader(t.id, agentId); }}
+                          className={`px-1 text-[11px] rounded ${t.leader === agentId ? 'text-amber-300' : 'text-textMuted hover:text-amber-300'}`}
+                          title="Make team lead"
+                        >★</button>
+                        <button
+                          onClick={() => { void removeMember(t.id, agentId); }}
+                          className="px-1 text-[11px] text-textMuted hover:text-rose-400"
+                          title="Remove from team"
+                        >✕</button>
+                      </span>
+                    );
+                  })}
                 </div>
-                <span className="text-[10px] text-textMuted bg-white/5 px-2 py-1 rounded-lg">{new Date(t.createdAt).toLocaleDateString()}</span>
+
+                {/* Staffing + mission runner */}
+                <div className="mt-4 pt-4 border-t border-borderSubtle space-y-3">
+                  {available.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={pick}
+                        onChange={(e) => setMemberPicks((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                        className="input-premium text-xs py-1.5 flex-1 min-w-0"
+                      >
+                        {available.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                      <button
+                        onClick={() => { if (pick) void addMember(t.id, pick, 'employee'); }}
+                        className="px-3 py-1.5 rounded-lg bg-white/5 text-textMuted hover:text-textMain text-xs border border-borderSubtle transition-all"
+                      >
+                        + Add employee
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={missionDrafts[t.id] ?? ''}
+                      onChange={(e) => setMissionDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                      placeholder={`Give ${t.name} a mission… (CEO plans, managers refine, employees execute)`}
+                      className="input-premium text-xs py-2 flex-1 min-w-0"
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleRunOrgMission(t.id, t.name); }}
+                    />
+                    <button
+                      onClick={() => { void handleRunOrgMission(t.id, t.name); }}
+                      disabled={!((missionDrafts[t.id] ?? '').trim()) || runningTeam !== null || members.length === 0}
+                      className="btn-premium text-xs px-3 py-2 disabled:opacity-40 flex items-center gap-1.5"
+                    >
+                      {runningTeam === t.id ? (
+                        <>
+                          <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Running org…
+                        </>
+                      ) : 'Run mission'}
+                    </button>
+                  </div>
+                  {orgReport?.teamId === t.id && (
+                    <div className="rounded-xl bg-bgCard border border-indigo-500/20 p-3">
+                      <div className="text-[10px] uppercase tracking-wide text-indigo-300 mb-1">
+                        Leadership plan · {orgReport.taskCount} role briefs
+                      </div>
+                      <div className="text-xs text-textMuted whitespace-pre-wrap max-h-40 overflow-y-auto custom-scrollbar">
+                        {orgReport.plan || 'Mission dispatched. Open Tasks to follow each role’s output.'}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -417,7 +568,15 @@ export function MultiAgentView() {
             <div key={t.id} className="card-premium animate-slide-up" style={{ animationDelay: `${i * 30}ms` }}>
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0 mr-4">
-                  <div className="font-semibold text-textMain truncate">{t.title}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-textMain truncate">{t.title}</span>
+                    {t.role && (
+                      <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${ORG_ROLE_META[t.role].className}`}>
+                        {ORG_ROLE_META[t.role].label}
+                      </span>
+                    )}
+                    {t.assignedTo && <span className="text-[10px] text-textMuted">{agentName(t.assignedTo)}</span>}
+                  </div>
                   <div className="text-xs text-textMuted mt-0.5 truncate">{t.description || 'No description'}</div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
@@ -470,6 +629,20 @@ export function MultiAgentView() {
                 placeholder="Description (optional)"
                 className="input-premium w-full"
               />
+              {createType === 'team' && (
+                <input
+                  value={formData.mission}
+                  onChange={(e) => setFormData((p) => ({ ...p, mission: e.target.value }))}
+                  placeholder="Standing mission (optional) — e.g. 'Ship the weekly product report'"
+                  className="input-premium w-full"
+                />
+              )}
+              {createType === 'team' && (
+                <p className="text-[11px] text-textMuted leading-relaxed">
+                  Starts with the first three agents: the first becomes manager, the rest employees.
+                  Click any role badge afterwards to promote to CEO, manager, or employee.
+                </p>
+              )}
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-textMuted hover:text-textMain text-sm transition-all">Cancel</button>
