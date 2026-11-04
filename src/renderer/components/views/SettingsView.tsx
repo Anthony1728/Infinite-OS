@@ -63,15 +63,26 @@ function saveCurrent(patch: Partial<CurrentSettings>) {
   }
 }
 
+interface PhoneInfoShape {
+  running?: boolean;
+  url: string;
+  qrDataUrl?: string;
+  lanIp?: string;
+  addresses?: string[];
+  port?: number;
+  connections?: number;
+  error?: string;
+}
+
 function PhoneConnectCard() {
-  const [info, setInfo] = useState<{ url: string; qrDataUrl?: string; lanIp?: string; port?: number } | null>(null);
+  const [info, setInfo] = useState<PhoneInfoShape | null>(null);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const res = await (window as unknown as { api?: { remotePhoneInfo?: () => Promise<unknown> } }).api?.remotePhoneInfo?.() as { url?: string; qrDataUrl?: string; lanIp?: string; port?: number } | undefined;
-        if (alive && res?.url) setInfo(res as never);
+        const res = await (window as unknown as { api?: { remotePhoneInfo?: () => Promise<unknown> } }).api?.remotePhoneInfo?.() as PhoneInfoShape | undefined;
+        if (alive && res) setInfo(res);
       } catch { /* offline */ }
     };
     void load();
@@ -79,6 +90,8 @@ function PhoneConnectCard() {
     return () => { alive = false; window.clearInterval(id); };
   }, []);
   const url = info?.url ?? '';
+  const healthy = info?.running === true;
+  const alternates = (info?.addresses ?? []).filter((a) => a !== info?.lanIp && a !== '127.0.0.1');
   return (
     <div className="card-premium border-cyan-500/15">
       <div className="flex items-start justify-between gap-3">
@@ -89,9 +102,9 @@ function PhoneConnectCard() {
           </h3>
           <p className="text-xs text-textMuted mt-1 max-w-[560px]">Chat with your AI from anywhere on your network. Scan the QR or open the link on your phone — same Wi-Fi / LAN. Token-secured, no cloud.</p>
         </div>
-        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/5 border border-white/10 px-2.5 py-1 text-[10px] text-textMuted">LAN only · 8766</span>
+        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-white/5 border border-white/10 px-2.5 py-1 text-[10px] text-textMuted">LAN only · {info?.port ?? 8766}</span>
       </div>
-      {url ? (
+      {url && healthy ? (
         <div className="mt-3 flex flex-wrap items-center gap-4">
           {info?.qrDataUrl ? <img src={info.qrDataUrl} alt="Phone QR" className="h-28 w-28 rounded-lg border border-white/10 bg-white p-1" /> : null}
           <div className="min-w-0 flex-1">
@@ -102,10 +115,19 @@ function PhoneConnectCard() {
               <button onClick={() => window.open(url, '_blank')} className="rounded-lg bg-white text-black px-3 py-1.5 text-xs font-medium hover:bg-zinc-100">Open preview</button>
             </div>
 
-            <p className="text-[10px] text-textMuted mt-2">Phone &amp; PC must be on the same Wi-Fi/network (or VPN). If the page doesn&apos;t load, allow Infinite OS through Windows Firewall for port 8766.</p>          </div>
+            <p className="text-[10px] text-textMuted mt-2">Phone &amp; PC must be on the same Wi-Fi/network (or VPN). If the page doesn&apos;t load, allow Infinite OS through Windows Firewall for port {info?.port ?? 8766}.</p>
+            {alternates.length > 0 && (
+              <div className="mt-2 text-[10px] text-textMuted">
+                <div className="uppercase tracking-wider text-textMuted/60 text-[9px]">Other network addresses</div>
+                {alternates.map((a) => (
+                  <div key={a} className="font-mono mt-0.5 text-textMain/80">http://{a}:{info?.port}/?token={url.split('token=')[1]}</div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        <p className="text-xs text-textMuted mt-3">Starting phone server… If this persists, check that Infinite OS is running and port 8766 is free.</p>
+        <p className="text-xs text-textMuted mt-3">{info?.error ? `Phone server failed to start: ${info.error}` : 'Starting phone server… If this persists, check that Infinite OS is running and port 8766 is free.'}</p>
       )}
     </div>
   );

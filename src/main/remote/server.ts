@@ -15,15 +15,13 @@ import { join } from 'node:path';
 import QRCode from 'qrcode';
 import { runAgent } from '../agent/loop.js';
 import { appendMessage, loadMessages } from '../session/store.js';
+import { resolveActiveModel, NoActiveModelError, type SettingsGetter } from '../agent/active-model.js';
+import { settings } from '../settings/store.js';
 import type { ContentBlock, Message } from '../../shared/types.js';
 
 const PORT = Number(process.env.INFINITE_REMOTE_PORT ?? 8766);
 const REMOTE_SESSION_ID = 'phone-remote';
 const MAX_BODY_BYTES = 64 * 1024;
-// Same fallback pair the multi-agent orchestrator uses when no explicit
-// provider/model is supplied. Must match the OpenRouter registry entry.
-const DEFAULT_PROVIDER = 'openrouter';
-const DEFAULT_MODEL = 'google/gemma-4-31b-it:free';
 
 interface RemoteClient {
   res: http.ServerResponse;
@@ -36,16 +34,43 @@ class PhoneRemoteServer {
   private busy = false;
   private abortController: AbortController | null = null;
   private startedAt = 0;
+  private port = PORT;
+  private listening = false;
+  private listenError = '';
 
   start(): void {
     if (this.server) return;
     this.token = this.loadToken();
-    this.server = http.createServer((req, res) => void this.handle(req, res));
-    this.server.on('error', (err) => console.error('[remote] server error:', err.message));
-    this.server.listen(PORT, '0.0.0.0', () => {
-      this.startedAt = Date.now();
-      console.log(`[remote] phone companion listening on 0.0.0.0:${PORT}`);
+    this.createServer(PORT);
+  }
+
+  private createServer(port: number): void {
+    const server = http.createServer((req, res) => void this.handle(req, res));
+    this.server = server;
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      this.listening = false;
+      // Prefer the configured port, but never leave the phone feature dead just
+      // because 8766 is taken — fall back to an ephemeral port and report the
+      // actual one through getInfo() so the QR/link stay correct.
+      if (err.code === 'EADDRINUSE' && port === PORT) {
+        console.warn(`[remote] port ${PORT} in use — using an ephemeral port instead`);
+        try { server.close(); } catch { /* not listening yet */ }
+        this.server = null;
+        this.createServer(0);
+        return;
+      }
+      this.listenError = err.message || String(err);
+      console.error('[remote] server error:', this.listenError);
     });
+    server.on('listening', () => {
+      this.listening = true;
+      this.listenError = '';
+      const addr = server.address();
+      this.port = typeof addr === 'object' && addr ? addr.port : port;
+      this.startedAt = Date.now();
+      console.log(`[remote] phone companion listening on 0.0.0.0:${this.port}`);
+    });
+    server.listen(port, '0.0.0.0');
   }
 
   stop(): void {
@@ -55,6 +80,7 @@ class PhoneRemoteServer {
     if (this.server) {
       this.server.close();
       this.server = null;
+      this.listening = false;
     }
   }
 
@@ -63,12 +89,15 @@ class PhoneRemoteServer {
     url: string;
     qrDataUrl: string;
     lanIp: string;
+    addresses: string[];
     port: number;
     connections: number;
     busy: boolean;
+    error: string;
   }> {
-    const lanIp = this.lanAddress();
-    const url = `http://${lanIp}:${PORT}/?token=${this.token}`;
+    const addresses = this.lanAddresses();
+    const lanIp = addresses[0] ?? '127.0.0.1';
+    const url = `http://${lanIp}:${this.port}/?token=${this.token}`;
     let qrDataUrl = '';
     try {
       qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 320, color: { dark: '#18181b', light: '#fafafa' } });
@@ -76,13 +105,15 @@ class PhoneRemoteServer {
       console.error('[remote] QR generation failed:', err);
     }
     return {
-      running: this.server !== null,
+      running: this.listening,
       url,
       qrDataUrl,
       lanIp,
-      port: PORT,
+      addresses,
+      port: this.port,
       connections: this.clients.size,
       busy: this.busy,
+      error: this.listenError,
     };
   }
 
@@ -104,13 +135,39 @@ class PhoneRemoteServer {
     }
   }
 
-  private lanAddress(): string {
-    for (const list of Object.values(networkInterfaces())) {
+  // Rank every usable IPv4 candidate so the QR points at an adapter the phone
+  // can actually reach. Virtual/VPN adapters (vEthernet, WSL, Tailscale, …)
+  // usually come first from os.networkInterfaces() but are unreachable from the
+  // LAN, which is why "same Wi-Fi" phones sometimes cannot connect.
+  private lanAddresses(): string[] {
+    const candidates: { name: string; address: string }[] = [];
+    const ifaces = networkInterfaces() as unknown as Record<string, { family: string | number; internal: boolean; address: string }[] | undefined>;
+    for (const [name, list] of Object.entries(ifaces)) {
       for (const ni of list ?? []) {
-        if (ni.family === 'IPv4' && !ni.internal) return ni.address;
+        const family = String(ni.family);
+        if ((family === 'IPv4' || family === '4') && !ni.internal) {
+          candidates.push({ name: name.toLowerCase(), address: ni.address });
+        }
       }
     }
-    return '127.0.0.1';
+    const score = ({ name, address }: { name: string; address: string }): number => {
+      let s = 0;
+      if (/(wi-?fi|wlan|wireless|ethernet|eth\d|lan)/.test(name)) s += 50;
+      if (/(vethernet|virtual|vmware|vbox|hyper-v|docker|wsl|tailscale|zerotier|vpn|tap|tun|hamachi|radmin|loopback|bluetooth)/.test(name)) s -= 100;
+      if (address.startsWith('192.168.')) s += 30;
+      else if (address.startsWith('10.')) s += 20;
+      else if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) s += 5;
+      return s;
+    };
+    candidates.sort((a, b) => score(b) - score(a));
+    const seen = new Set<string>();
+    const ranked: string[] = [];
+    for (const c of candidates) {
+      if (seen.has(c.address)) continue;
+      seen.add(c.address);
+      ranked.push(c.address);
+    }
+    return ranked.length ? ranked : ['127.0.0.1'];
   }
 
   private tokenOk(url: URL): boolean {
@@ -137,7 +194,13 @@ class PhoneRemoteServer {
 
   private broadcast(event: Record<string, unknown>): void {
     const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const client of this.clients) client.res.write(payload);
+    for (const client of this.clients) {
+      try {
+        client.res.write(payload);
+      } catch {
+        this.clients.delete(client);
+      }
+    }
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -154,6 +217,10 @@ class PhoneRemoteServer {
       } else if (req.method === 'GET' && url.pathname === '/api/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, app: 'Infinite OS', busy: this.busy, uptimeMs: Date.now() - this.startedAt }));
+      } else if (req.method === 'GET' && url.pathname === '/api/history') {
+        const messages = await loadMessages(REMOTE_SESSION_ID);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ messages: historyForClient(messages) }));
       } else if (req.method === 'GET' && url.pathname === '/api/stream') {
         this.sse(res);
       } else if (req.method === 'POST' && url.pathname === '/api/chat') {
@@ -191,11 +258,13 @@ class PhoneRemoteServer {
           return resolve();
         }
         let text = '';
+        let providerOverride = '';
+        let modelOverride = '';
         try {
           const parsed = JSON.parse(body || '{}') as { message?: unknown; provider?: unknown; model?: unknown };
           text = typeof parsed.message === 'string' ? parsed.message.trim() : '';
-          var provider = typeof parsed.provider === 'string' ? parsed.provider : DEFAULT_PROVIDER; // eslint-disable-line no-var
-          var model = typeof parsed.model === 'string' ? parsed.model : DEFAULT_MODEL; // eslint-disable-line no-var
+          if (typeof parsed.provider === 'string') providerOverride = parsed.provider.trim();
+          if (typeof parsed.model === 'string') modelOverride = parsed.model.trim();
         } catch {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Invalid JSON body' }));
@@ -215,7 +284,7 @@ class PhoneRemoteServer {
         res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
         resolve();
-        await this.runTurn(text, provider, model); // eslint-disable-line @typescript-eslint/no-use-before-define
+        await this.runTurn(text, providerOverride, modelOverride);
       });
       req.on('error', () => {
         if (!res.headersSent) {
@@ -227,7 +296,7 @@ class PhoneRemoteServer {
     });
   }
 
-  private async runTurn(text: string, provider: string, model: string): Promise<void> {
+  private async runTurn(text: string, providerOverride: string, modelOverride: string): Promise<void> {
     this.busy = true;
     this.abortController = new AbortController();
     const userMessage: Message = {
@@ -237,6 +306,27 @@ class PhoneRemoteServer {
       timestamp: Date.now(),
     };
 
+    // The phone must answer with the same model Infinite OS is set to use,
+    // not a hardcoded fallback — it is the same assistant.
+    let active: { provider: string; model: string; cwd: string };
+    try {
+      if (providerOverride && modelOverride) {
+        active = { provider: providerOverride, model: modelOverride, cwd: process.cwd() };
+      } else {
+        const getSetting: SettingsGetter = ((key: string) => settings.get(key)) as SettingsGetter;
+        active = resolveActiveModel(getSetting);
+      }
+    } catch (err) {
+      this.busy = false;
+      this.abortController = null;
+      const message = err instanceof NoActiveModelError
+        ? err.message
+        : 'Could not resolve the AI provider selected in Infinite OS. Open Settings → AI Provider and pick one.';
+      this.broadcast({ type: 'error', message });
+      return;
+    }
+    const { provider, model, cwd } = active;
+
     try {
       const history = await loadMessages(REMOTE_SESSION_ID);
       await appendMessage(REMOTE_SESSION_ID, userMessage);
@@ -244,30 +334,65 @@ class PhoneRemoteServer {
 
       const completed = await runAgent(history, userMessage, {
         sessionId: REMOTE_SESSION_ID,
-        cwd: process.cwd(),
+        cwd,
         provider,
         model,
         signal: this.abortController.signal,
         onEvent: (ev) => {
           switch (ev.type) {
             case 'message_start':
-              this.broadcast({ type: 'assistant_start' });
+              this.broadcast({ type: 'assistant_start', message_id: ev.message_id });
+              break;
+            case 'message_discard':
+              this.broadcast({ type: 'message_discard', message_id: ev.message_id });
+              break;
+            case 'provider_start':
+              this.broadcast({
+                type: 'provider_start',
+                message_id: ev.message_id,
+                provider: ev.provider,
+                model: ev.model,
+                turn: typeof ev.turn === 'number' ? ev.turn : 0,
+              });
+              break;
+            case 'provider_status':
+              this.broadcast({
+                type: 'provider_status',
+                status: ev.status,
+                provider: ev.provider,
+                model: ev.model,
+                from: ev.from,
+                to: ev.to,
+                reason: ev.reason,
+              });
+              break;
+            case 'thinking_delta':
+              if (typeof ev.text === 'string' && ev.text) {
+                this.broadcast({ type: 'thinking_delta', message_id: ev.message_id, text: ev.text });
+              }
               break;
             case 'text_delta':
-              this.broadcast({ type: 'text_delta', text: ev.text });
+              this.broadcast({ type: 'text_delta', message_id: ev.message_id, text: ev.text });
               break;
             case 'tool_use_start':
-              this.broadcast({ type: 'tool_start', name: ev.name });
+              this.broadcast({ type: 'tool_start', message_id: ev.message_id, tool_use_id: ev.tool_use_id, name: ev.name });
+              break;
+            case 'tool_use_end':
+              this.broadcast({ type: 'tool_end', message_id: ev.message_id, tool_use_id: ev.tool_use_id, name: ev.name, input: ev.input });
               break;
             case 'tool_result':
               this.broadcast({
                 type: 'tool_result',
+                tool_use_id: ev.tool_use_id,
                 isError: ev.is_error === true,
                 preview: typeof ev.content === 'string' ? ev.content.slice(0, 300) : '',
               });
               break;
+            case 'message_end':
+              this.broadcast({ type: 'message_end', message_id: ev.message_id, stop_reason: ev.stop_reason });
+              break;
             case 'done':
-              this.broadcast({ type: 'done', success: ev.success !== false });
+              this.broadcast({ type: 'done', success: ev.success !== false, reason: typeof ev.reason === 'string' ? ev.reason : undefined });
               break;
             case 'error':
               this.broadcast({ type: 'error', message: String(ev.error ?? 'Unknown error') });
@@ -297,6 +422,39 @@ class PhoneRemoteServer {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(mobilePage());
   }
+}
+
+/**
+ * Flatten a transcript for the phone page: the client renders text, an
+ * optional collapsed thinking panel, and one chip per tool call.
+ */
+function historyForClient(messages: Message[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const m of messages) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    const textParts: string[] = [];
+    const thinkingParts: string[] = [];
+    const tools: Array<Record<string, unknown>> = [];
+    for (const block of m.content ?? []) {
+      if (block.type === 'text') textParts.push(block.text);
+      else if (block.type === 'thinking') thinkingParts.push(block.text);
+      else if (block.type === 'tool_use') tools.push({ id: block.id, name: block.name });
+    }
+    const text = textParts.join('').trim();
+    const thinking = thinkingParts.join('').trim();
+    if (!text && !thinking && tools.length === 0) continue;
+    out.push({
+      id: m.id,
+      role: m.role,
+      text,
+      thinking,
+      tools,
+      provider: m.provider,
+      model: m.model,
+      timestamp: m.timestamp,
+    });
+  }
+  return out;
 }
 
 function mobilePage(): string {
@@ -420,6 +578,52 @@ function mobilePage(): string {
     opacity: .04; pointer-events: none; user-select: none;
   }
   .corner-watermark svg { width: 140px; height: 70px; }
+  .bubble-text { white-space: pre-wrap; word-break: break-word; }
+  .bubble-text + .bubble-text { margin-top: 8px; }
+  .thinking {
+    margin: 0 0 8px; border: 1px solid rgba(255,255,255,.07); border-radius: 10px;
+    background: rgba(255,255,255,.03); overflow: hidden;
+  }
+  .thinking summary {
+    list-style: none; cursor: pointer; padding: 7px 10px;
+    font-size: 11px; font-weight: 600; letter-spacing: .03em; color: #a5b4fc;
+    display: flex; align-items: center; gap: 8px; user-select: none;
+  }
+  .thinking summary::-webkit-details-marker { display: none; }
+  .thinking summary .think-dot { width: 6px; height: 6px; border-radius: 50%; background: #818cf8; animation: pulse 1.2s ease-in-out infinite; }
+  .thinking[open] summary .think-dot { animation: none; opacity: .4; }
+  .thinking-body {
+    padding: 0 10px 10px; font-size: 11.5px; line-height: 1.55; color: #8b8bd0;
+    max-height: 220px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+    border-top: 1px solid rgba(255,255,255,.05); padding-top: 8px;
+  }
+  @keyframes pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin: 6px 6px 0 0; padding: 4px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; color: #cbd5e1;
+    background: rgba(139,92,246,.10); border: 1px solid rgba(139,92,246,.22);
+    max-width: 100%;
+  }
+  .chip .chip-spinner { width: 8px; height: 8px; border: 1.5px solid rgba(203,213,225,.35); border-top-color: #cbd5e1; border-radius: 50%; animation: spin .8s linear infinite; flex: 0 0 auto; }
+  .chip.done { background: rgba(34,197,94,.08); border-color: rgba(34,197,94,.22); color: #a7f3d0; }
+  .chip.done .chip-spinner { display: none; }
+  .chip.done::before { content: '✓'; font-size: 10px; color: #34d399; }
+  .chip.error { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.25); color: #fecaca; }
+  .chip.error .chip-spinner { display: none; }
+  .chip.error::before { content: '✕'; font-size: 10px; color: #f87171; }
+  .chip .chip-detail { font-weight: 400; color: #94a3b8; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stop {
+    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 11px;
+    border: 1px solid rgba(248,113,113,.35);
+    background: rgba(248,113,113,.12); color: #fca5a5;
+    font-size: 15px; line-height: 1; cursor: pointer;
+    display: grid; place-items: center;
+    transition: transform .08s, opacity .15s;
+  }
+  .stop:active { transform: scale(.98); }
+  .stop::before { content: ''; width: 12px; height: 12px; border-radius: 2px; background: #fca5a5; }
+  .stop[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -471,20 +675,56 @@ function mobilePage(): string {
   <label class="input-wrap" for="input">
     <input id="input" type="text" placeholder="Message your AI — control your PC..." autocomplete="off" enterkeyhint="send">
   </label>
+  <button id="stop" class="stop" aria-label="Stop the agent" hidden></button>
   <button id="send" class="send" aria-label="Send">↑</button>
 </footer>
 <script>
 (function () {
+  var token = new URLSearchParams(location.search).get('token') || '';
   var log = document.getElementById('log');
   var input = document.getElementById('input');
   var send = document.getElementById('send');
+  var stop = document.getElementById('stop');
   var dot = document.getElementById('dot');
   var conn = document.getElementById('conn');
   var busy = false;
-  var assistantEl = null;
+  var pendingEcho = null;
+  var stickToBottom = true;
+  var turnHadVisibleContent = false;
+  var currentTurnId = null;
+  var turns = {};
+  var toolChips = {};
 
-  function scroll() { window.scrollTo(0, document.body.scrollHeight); }
+  function api(path) { return path + '?token=' + encodeURIComponent(token); }
+  function scroll() {
+    if (stickToBottom) log.scrollTop = log.scrollHeight;
+  }
+  log.addEventListener('scroll', function () {
+    stickToBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  });
   function clearEmpty() { var e = log.querySelector('.empty'); if (e) e.remove(); }
+
+  function shortModel(provider, model) {
+    var m = typeof model === 'string' && model ? model : '';
+    var p = typeof provider === 'string' ? provider : '';
+    if (p && m.indexOf(p + '/') === 0) m = m.slice(p.length + 1);
+    var label = p ? p + ':' + m : m;
+    return label.length > 42 ? label.slice(0, 41) + '…' : label;
+  }
+
+  function toolDetail(input) {
+    if (!input || typeof input !== 'object') return '';
+    var keys = ['command', 'cmd', 'file_path', 'path', 'file', 'url', 'query', 'pattern', 'script'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = input[keys[i]];
+      if (typeof v === 'string' && v.trim()) {
+        var one = v.replace(/\s+/g, ' ').trim();
+        return one.length > 48 ? one.slice(0, 47) + '…' : one;
+      }
+    }
+    return '';
+  }
+
   function addMsg(cls, text) {
     clearEmpty();
     var el = document.createElement('div');
@@ -494,6 +734,13 @@ function mobilePage(): string {
     scroll();
     return el;
   }
+
+  function setBusy(value) {
+    busy = !!value;
+    send.disabled = busy;
+    if (stop) stop.hidden = !busy;
+  }
+
   function setActivity(text) {
     var existing = document.getElementById('act');
     if (!text) { if (existing) existing.remove(); return; }
@@ -508,43 +755,275 @@ function mobilePage(): string {
     scroll();
   }
 
-  fetch('/api/status?token=' + location.search.slice(1)).catch(function(){});
+  function setConn(state) {
+    if (state === 'live') { dot.className = 'dot live'; conn.textContent = 'live'; }
+    else if (state === 'reconnecting') { dot.className = 'dot'; conn.textContent = 'reconnecting…'; }
+    else { dot.className = 'dot'; conn.textContent = 'offline'; }
+  }
 
-  new EventSource('/api/stream?token=' + location.search.slice(1)).onmessage = function (ev) {
+  function showFatal(message) {
+    clearEmpty();
+    var el = document.createElement('div');
+    el.className = 'empty';
+    el.innerHTML = '<h2>Can&#39;t connect</h2><p></p>';
+    el.querySelector('p').textContent = message;
+    log.appendChild(el);
+    input.disabled = true;
+    setBusy(false);
+    setConn('offline');
+  }
+
+  function getTurn(id) {
+    var key = id || currentTurnId || 'pending';
+    if (!turns[key]) {
+      turns[key] = { id: key, bubble: null, contentHost: null, currentTextDiv: null, thinkingEl: null, thinkingTextEl: null, sawContent: false };
+    }
+    currentTurnId = key;
+    return turns[key];
+  }
+
+  function ensureBubble(t) {
+    if (!t.bubble) {
+      clearEmpty();
+      var el = document.createElement('div');
+      el.className = 'msg assistant';
+      var host = document.createElement('div');
+      host.className = 'bubble-host';
+      el.appendChild(host);
+      log.appendChild(el);
+      t.bubble = el;
+      t.contentHost = host;
+    }
+    return t;
+  }
+
+  function ensureTextDiv(t) {
+    if (!t.currentTextDiv) {
+      var d = document.createElement('div');
+      d.className = 'bubble-text';
+      t.contentHost.appendChild(d);
+      t.currentTextDiv = d;
+    }
+    return t.currentTextDiv;
+  }
+
+  function ensureThinking(t) {
+    if (!t.thinkingEl) {
+      ensureBubble(t);
+      var d = document.createElement('details');
+      d.className = 'thinking';
+      d.open = true;
+      d.innerHTML = '<summary><span class="think-dot"></span>Reasoning…</summary>';
+      var body = document.createElement('div');
+      body.className = 'thinking-body';
+      d.appendChild(body);
+      t.contentHost.appendChild(d);
+      t.contentHost.insertBefore(d, t.contentHost.firstChild);
+      t.thinkingEl = d;
+      t.thinkingTextEl = body;
+      t.currentTextDiv = null;
+    }
+    return t.thinkingEl;
+  }
+
+  function renderToolChip(t, ev, done) {
+    var container = t.contentHost || ensureBubble(t).contentHost;
+    var key = ev.tool_use_id || ev.name;
+    var chip = toolChips[key];
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.innerHTML = '<span class="chip-spinner"></span><span class="chip-name"></span><span class="chip-detail"></span>';
+      chip.querySelector('.chip-name').textContent = ev.name || 'tool';
+      container.appendChild(chip);
+      toolChips[key] = chip;
+    }
+    return chip;
+  }
+
+  function renderHistoryMessage(m) {
+    if (m.role === 'user') { addMsg('user', m.text || ''); return; }
+    if (m.role !== 'assistant') return;
+    clearEmpty();
+    var el = document.createElement('div');
+    el.className = 'msg assistant';
+    var host = document.createElement('div');
+    host.className = 'bubble-host';
+    el.appendChild(host);
+    if (m.thinking) {
+      var d = document.createElement('details');
+      d.className = 'thinking';
+      d.innerHTML = '<summary><span class="think-dot" style="opacity:.4;animation:none"></span>Reasoning</summary>';
+      var body = document.createElement('div');
+      body.className = 'thinking-body';
+      body.textContent = m.thinking;
+      d.appendChild(body);
+      host.appendChild(d);
+    }
+    if (Array.isArray(m.tools)) {
+      for (var i = 0; i < m.tools.length; i++) {
+        var t = document.createElement('span');
+        t.className = 'chip done';
+        t.textContent = m.tools[i].name || 'tool';
+        host.appendChild(t);
+      }
+    }
+    if (m.text) {
+      var td = document.createElement('div');
+      td.className = 'bubble-text';
+      td.textContent = m.text;
+      host.appendChild(td);
+    }
+    log.appendChild(el);
+    scroll();
+  }
+
+  function loadHistory() {
+    return fetch(api('/api/history')).then(function (res) {
+      if (!res.ok) return null;
+      return res.json();
+    }).then(function (data) {
+      if (!data || !Array.isArray(data.messages)) return;
+      if (data.messages.length === 0) return;
+      clearEmpty();
+      for (var i = 0; i < data.messages.length; i++) renderHistoryMessage(data.messages[i]);
+    }).catch(function () { /* offline history is fine */ });
+  }
+
+  fetch(api('/api/status')).then(function (res) {
+    if (res.status === 401) {
+      showFatal('This link is invalid or expired. Open Infinite OS on the PC → Settings → Connect Your Phone and scan the new code.');
+      return;
+    }
+    return loadHistory();
+  }).catch(function () { setConn('offline'); });
+
+  var source = new EventSource(api('/api/stream'));
+  source.onopen = function () { setConn('live'); };
+  source.onerror = function () { setConn('reconnecting'); };
+  source.onmessage = function (ev) {
     try { handle(JSON.parse(ev.data)); } catch (e) {}
   };
 
-  function workingLabel() {
-    return busy ? 'Working...' : 'Live';
+  function markTurnVisible() {
+    turnHadVisibleContent = true;
   }
 
   function handle(ev) {
     if (ev.type === 'user_message') {
-      busy = true; send.disabled = true;
+      setBusy(true);
+      turnHadVisibleContent = false;
+      if (pendingEcho === ev.text) { pendingEcho = null; setActivity('Thinking…'); return; }
       addMsg('user', ev.text);
-      setActivity('Thinking...');
-    } else if (ev.type === 'assistant_start') {
-      assistantEl = addMsg('assistant', '');
-      setActivity('Responding...');
-    } else if (ev.type === 'text_delta') {
-      if (!assistantEl) assistantEl = addMsg('assistant', '');
-      assistantEl.textContent += ev.text;
+      setActivity('Thinking…');
+      return;
+    }
+    if (ev.type === 'assistant_start') {
+      var t = getTurn(ev.message_id);
+      t.sawContent = false;
+      setActivity('Preparing…');
+      return;
+    }
+    if (ev.type === 'provider_start') {
+      var label = shortModel(ev.provider, ev.model);
+      setActivity('Calling ' + label + (ev.turn > 0 ? ' · attempt ' + (ev.turn + 1) : '') + '…');
+      return;
+    }
+    if (ev.type === 'provider_status') {
+      var s = ev.status;
+      var label2 = shortModel(ev.provider, ev.model || ev.to || ev.from);
+      if (s === 'connecting' || s === 'cold_start') setActivity('Connecting to ' + label2 + '…');
+      else if (s === 'streaming') setActivity('Responding…');
+      else if (s === 'failover' || s === 'retrying') setActivity('Switching to ' + label2 + '…');
+      else if (s === 'rate_limited') setActivity('Rate limited, switching…');
+      return;
+    }
+    if (ev.type === 'thinking_delta') {
+      var tt = getTurn(ev.message_id);
+      ensureThinking(tt);
+      markTurnVisible();
+      if (tt.thinkingTextEl) tt.thinkingTextEl.textContent += ev.text || '';
+      setActivity('Reasoning…');
       scroll();
-    } else if (ev.type === 'tool_start') {
-      if (!assistantEl) assistantEl = addMsg('assistant', '');
-      setActivity('Using tool: ' + ev.name);
-    } else if (ev.type === 'tool_result') {
-      setActivity(busy ? 'Continuing...' : null);
-    } else if (ev.type === 'done' || ev.type === 'final') {
-      busy = false; send.disabled = false;
+      return;
+    }
+    if (ev.type === 'text_delta') {
+      var t2 = getTurn(ev.message_id);
+      var chunk = String(ev.text == null ? '' : ev.text);
+      if (!t2.sawContent) chunk = chunk.replace(/^\s+/, '');
+      if (!chunk) return;
+      ensureBubble(t2);
+      markTurnVisible();
+      t2.sawContent = true;
+      ensureTextDiv(t2).textContent += chunk;
+      setActivity('Responding…');
+      scroll();
+      return;
+    }
+    if (ev.type === 'tool_start') {
+      var t3 = getTurn(ev.message_id);
+      ensureBubble(t3);
+      markTurnVisible();
+      t3.currentTextDiv = null;
+      var chip = renderToolChip(t3, ev, false);
+      chip.title = ev.name || 'tool';
+      setActivity('Using tool: ' + (ev.name || 'tool'));
+      scroll();
+      return;
+    }
+    if (ev.type === 'tool_end') {
+      var key = ev.tool_use_id || ev.name;
+      var chip2 = toolChips[key];
+      if (chip2) {
+        chip2.classList.add('done');
+        var detail = toolDetail(ev.input);
+        if (detail) chip2.querySelector('.chip-detail').textContent = detail;
+      }
+      setActivity('Continuing…');
+      scroll();
+      return;
+    }
+    if (ev.type === 'tool_result') {
+      var key2 = ev.tool_use_id;
+      var chip3 = key2 ? toolChips[key2] : null;
+      if (chip3) {
+        if (ev.isError) { chip3.classList.remove('done'); chip3.classList.add('error'); chip3.title = ev.preview || 'Tool failed'; }
+        else chip3.classList.add('done');
+      }
+      setActivity(busy ? 'Continuing…' : null);
+      scroll();
+      return;
+    }
+    if (ev.type === 'message_end') {
+      var t4 = getTurn(ev.message_id);
+      if (t4.thinkingEl) {
+        t4.thinkingEl.open = false;
+        var sum = t4.thinkingEl.querySelector('summary');
+        if (sum) sum.innerHTML = '<span class="think-dot" style="opacity:.4;animation:none"></span>Reasoning';
+      }
+      return;
+    }
+    if (ev.type === 'message_discard') {
+      var t5 = getTurn(ev.message_id);
+      if (t5.bubble && t5.bubble.parentNode === log) log.removeChild(t5.bubble);
+      delete turns[t5.id];
+      if (currentTurnId === t5.id) currentTurnId = null;
+      scroll();
+      return;
+    }
+    if (ev.type === 'done' || ev.type === 'final') {
+      setBusy(false);
+      pendingEcho = null;
       setActivity(null);
-      if (ev.type === 'final' && ev.text && !assistantEl) addMsg('assistant', ev.text);
-      assistantEl = null;
-    } else if (ev.type === 'error') {
-      busy = false; send.disabled = false;
+      if (ev.type === 'final' && ev.text && !turnHadVisibleContent) addMsg('assistant', ev.text);
+      return;
+    }
+    if (ev.type === 'error') {
+      setBusy(false);
+      pendingEcho = null;
       setActivity(null);
       addMsg('assistant', 'Error: ' + (ev.message || 'something went wrong'));
-      assistantEl = null;
+      return;
     }
   }
 
@@ -552,25 +1031,37 @@ function mobilePage(): string {
     var text = input.value.trim();
     if (!text || busy) return;
     input.value = '';
-    busy = true; send.disabled = true;
+    setBusy(true);
+    pendingEcho = text;
+    turnHadVisibleContent = false;
     addMsg('user', text);
-    setActivity('Sending...');
-    fetch('/api/chat?token=' + location.search.slice(1), {
+    setActivity('Sending…');
+    fetch(api('/api/chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: text })
     }).then(function (res) {
+      if (res.status === 401) {
+        showFatal('This link is invalid or expired. Open Infinite OS on the PC → Settings → Connect Your Phone and scan the new code.');
+        return null;
+      }
       if (res.status === 409) { return res.json().then(function (j) { throw new Error(j.error || 'busy'); }); }
       if (!res.ok) throw new Error('Request failed (' + res.status + ')');
-      setActivity('Thinking...');
+      setActivity('Thinking…');
+      return null;
     }).catch(function (err) {
-      busy = false; send.disabled = false;
+      setBusy(false);
+      pendingEcho = null;
       setActivity(null);
       addMsg('assistant', 'Could not send: ' + err.message);
     });
   }
 
   send.addEventListener('click', submit);
+  if (stop) stop.addEventListener('click', function () {
+    setActivity('Stopping…');
+    fetch(api('/api/stop'), { method: 'POST' }).catch(function () {});
+  });
   input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
 })();
 </script>

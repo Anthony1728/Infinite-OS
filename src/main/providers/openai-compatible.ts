@@ -259,14 +259,14 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
               // `reasoning`). Without this, a reasoning model streams its
               // thinking into the answer and the user sees a wall of working-out
               // where the response should be.
-              const reasoning =
-                delta.reasoning_content ?? delta.reasoning ?? undefined;
-              if (typeof reasoning === 'string' && reasoning) {
-                yield { type: 'thinking_delta', text: reasoning };
-              }
-              if (delta.content) {
-                yield { type: 'text_delta', text: delta.content };
-              }
+               const reasoning =
+                 delta.reasoning_content ?? delta.reasoning ?? undefined;
+               if (typeof reasoning === 'string' && reasoning.trim()) {
+                 yield { type: 'thinking_delta', text: reasoning };
+               }
+               if (typeof delta.content === 'string' && delta.content.trim()) {
+                 yield { type: 'text_delta', text: delta.content };
+               }
               if (delta.tool_calls) {
                 for (const tc of delta.tool_calls) {
                   const toolCallId = callKeyFor(tc);

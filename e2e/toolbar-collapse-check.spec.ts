@@ -74,7 +74,7 @@ test('intensity and until done collapse with the activity panel', async () => {
       const intensity = all.find((el) => /Intensity/.test(el.textContent ?? ''));
       const until = all.find((el) => /Until done/.test(el.textContent ?? ''));
       const wrap = intensity?.closest('.os-toolbar-collapse') as HTMLElement | null;
-      const measure = (el: HTMLElement | null) => el ? ({
+      const measure = (el: HTMLElement | undefined | null) => el ? ({
         width: Math.round(el.getBoundingClientRect().width),
         opacity: getComputedStyle(el).opacity,
         pointerEvents: getComputedStyle(el).pointerEvents,

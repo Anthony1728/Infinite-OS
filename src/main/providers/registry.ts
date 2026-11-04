@@ -397,9 +397,9 @@ const ollamaAdapter: ProviderAdapter = {
             yield { type: 'thinking_delta', text: parsed.message.thinking };
           }
 
-          if (parsed.message?.content) {
-            const clean = inlineThink.push(parsed.message.content);
-            if (clean) {
+            if (parsed.message?.content) {
+              const clean = inlineThink.push(parsed.message.content);
+              if (clean && clean.trim()) {
               sawAnswer = true;
               lastHeartbeat = Date.now();
               yield { type: 'text_delta', text: clean };
@@ -439,7 +439,7 @@ const ollamaAdapter: ProviderAdapter = {
         }
       }
       const tail = inlineThink.flush();
-      if (tail) yield { type: 'text_delta', text: tail };
+      if (tail && tail.trim()) yield { type: 'text_delta', text: tail.trimStart() };
       // A stream that ended without a `done` frame still has to close the turn,
       // or the UI waits forever for a message_end that never arrives.
       if (!stopped) {

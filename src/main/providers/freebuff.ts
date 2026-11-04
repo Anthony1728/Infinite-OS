@@ -333,7 +333,7 @@ async function* runFreebuffTurn(
           maxAgentSteps: 25,
           signal: req.signal,
           handleStreamChunk: (chunk: unknown) => {
-            if (typeof chunk === 'string' && chunk) {
+            if (typeof chunk === 'string' && chunk.trim()) {
               liveTextStreamed = true;
               queue.push({ type: 'text_delta', text: chunk });
               notify();
@@ -375,7 +375,7 @@ async function* runFreebuffTurn(
     // When live text already streamed, the final output would duplicate it.
     if (!liveTextStreamed) {
       const text = extractRunText(result.output);
-      if (text) yield { type: 'text_delta', text };
+      if (text && text.trim()) yield { type: 'text_delta', text: text.trimStart() };
     }
     const tail = extractRunText(result.output);
     if (!liveTextStreamed && !tail) {

@@ -5,9 +5,11 @@ interface PhoneInfo {
   url: string;
   qrDataUrl: string;
   lanIp: string;
+  addresses?: string[];
   port: number;
   connections: number;
   busy: boolean;
+  error?: string;
 }
 
 interface PhoneConnectModalProps {
@@ -61,6 +63,9 @@ export function PhoneConnectModal({ open, onClose }: PhoneConnectModalProps) {
     }
   };
 
+  const healthy = info?.running === true;
+  const alternates = (info?.addresses ?? []).filter((a) => a !== info?.lanIp && a !== '127.0.0.1');
+
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
@@ -98,7 +103,12 @@ export function PhoneConnectModal({ open, onClose }: PhoneConnectModalProps) {
         <div className="px-5 py-5 flex flex-col items-center">
           {error && <p className="text-xs text-red-400">{error}</p>}
           {!error && !info && <div className="text-xs text-zinc-600 py-8">Starting phone server…</div>}
-          {!error && info && (
+          {!error && info && !healthy && (
+            <p className="text-xs text-red-400 py-6 text-center">
+              {info.error ? `Phone server failed to start: ${info.error}` : 'Phone server is not listening.'}
+            </p>
+          )}
+          {!error && info && healthy && (
             <>
               <div className="rounded-xl bg-[#fafafa] p-3 border border-white/10">
                 {info.qrDataUrl ? (
@@ -122,16 +132,25 @@ export function PhoneConnectModal({ open, onClose }: PhoneConnectModalProps) {
                 {copied ? 'Copied to clipboard' : info.url}
               </button>
 
+              {alternates.length > 0 && (
+                <div className="mt-2 w-full text-[9.5px] text-zinc-500">
+                  <div className="uppercase tracking-wider text-zinc-600 text-[9px]">Other network addresses</div>
+                  {alternates.map((a) => (
+                    <div key={a} className="font-mono mt-0.5 text-zinc-400 break-all">http://{a}:{info.port}/?token={info.url.split('token=')[1]}</div>
+                  ))}
+                </div>
+              )}
+
               <div className="mt-4 w-full flex items-center justify-between text-[10px] text-zinc-500">
                 <span className="flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full ${info.running ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
-                  Server {info.running ? `running · ${info.lanIp}:${info.port}` : 'offline'}
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Server running · {info.lanIp}:{info.port}
                 </span>
                 <span>{info.connections} device{info.connections !== 1 ? 's' : ''} connected</span>
               </div>
 
               <p className="mt-3 text-[9.5px] leading-relaxed text-zinc-600 self-start">
-                Your phone and this computer must share the same Wi-Fi network. The link contains a private key — only share it with your own devices.
+                Your phone and this computer must share the same Wi-Fi network. If the page doesn&apos;t load, allow Infinite OS through Windows Firewall for port {info.port}. The link contains a private key — only share it with your own devices.
               </p>
             </>
           )}

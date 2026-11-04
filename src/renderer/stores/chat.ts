@@ -3130,14 +3130,20 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       break;
     }
     case 'text_delta': {
+      const incoming = typeof ev.text === 'string' ? ev.text : '';
+      if (!incoming) break;
       setState((s) => ({
         messages: s.messages.map((m) => {
           if (m.id !== ev.message_id) return m;
+          const hasVisibleText = m.content.some((b) => b.type === 'text' && typeof b.text === 'string' && b.text.trim().length > 0);
+          let delta = incoming;
+          if (!hasVisibleText) delta = delta.replace(/^\\s+/, '');
+          if (!delta) return m;
           const last = m.content[m.content.length - 1];
           if (last && last.type === 'text') {
-            return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + ev.text }] };
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'text', text: last.text + delta }] };
           }
-          return { ...m, content: [...m.content, { type: 'text', text: ev.text }] };
+          return { ...m, content: [...m.content, { type: 'text', text: delta }] };
         }),
       }));
       break;
@@ -3146,15 +3152,20 @@ async function handleStreamEvent(ev: { sessionId: string } & StreamEvent, ctx?: 
       // Reasoning streams into its own block on the live assistant message.
       // Keep it separate from the answer so the UI can show it in the
       // ThinkingPanel and persist it with the turn.
-      if (!ev.message_id || typeof ev.text !== 'string' || !ev.text) break;
+      const incomingThinking = typeof ev.text === 'string' ? ev.text : '';
+      if (!ev.message_id || !incomingThinking) break;
       setState((s) => ({
         messages: s.messages.map((m) => {
           if (m.id !== ev.message_id) return m;
+          const hasVisibleThinking = m.content.some((b) => b.type === 'thinking' && typeof b.text === 'string' && b.text.trim().length > 0);
+          let delta = incomingThinking;
+          if (!hasVisibleThinking) delta = delta.replace(/^\\s+/, '');
+          if (!delta) return m;
           const last = m.content[m.content.length - 1];
           if (last && last.type === 'thinking') {
-            return { ...m, content: [...m.content.slice(0, -1), { type: 'thinking', text: last.text + ev.text }] };
+            return { ...m, content: [...m.content.slice(0, -1), { type: 'thinking', text: last.text + delta }] };
           }
-          return { ...m, content: [...m.content, { type: 'thinking', text: ev.text }] };
+          return { ...m, content: [...m.content, { type: 'thinking', text: delta }] };
         }),
       }));
       break;

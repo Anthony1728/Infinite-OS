@@ -51,7 +51,7 @@ export const gemini: ProviderAdapter = {
       for await (const chunk of result.stream) {
         const parts = chunk.candidates?.[0]?.content?.parts ?? [];
         for (const part of parts) {
-          if ('text' in part && part.text) yield { type: 'text_delta', text: part.text };
+          if ('text' in part && typeof part.text === 'string' && part.text.trim()) yield { type: 'text_delta', text: part.text };
           if ('functionCall' in part && part.functionCall) {
             const id = crypto.randomUUID();
             const name = part.functionCall.name;

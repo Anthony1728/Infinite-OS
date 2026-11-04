@@ -264,11 +264,16 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   const sessions = useChatStore((s) => s.sessions);
   const selectSession = useChatStore((s) => s.selectSession);
   const createSession = useChatStore((s) => s.createSession);
+  const pendingPermission = useChatStore((s) => s.pendingPermission);
+  const respondPermission = useChatStore((s) => s.respondPermission);
   const runs = useAgentsStore((s) => s.runs);
   const enginePhase = useBrainStore((s) => s.enginePhase);
   const engineProgress = useBrainStore((s) => s.engineProgress);
   const workflows = useAutomationStore((s) => s.workflows);
   const loadWorkflows = useAutomationStore((s) => s.loadWorkflows);
+  const lastRun = useAutomationStore((s) => s.lastRun);
+  const clearRunResult = useAutomationStore((s) => s.clearRunResult);
+  const runWorkflow = useAutomationStore((s) => s.runWorkflow);
   const tabs = useAiTabsStore((s) => s.tabs);
   const now = useClock();
 
@@ -600,7 +605,59 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
 
       <div className="relative mx-auto max-w-[1200px] px-6 pb-12 lg:px-8">
 
-        {/* RECENTS · CAPTURE · PULSE */}
+        {/* NEEDS YOU — surfaces what the OS cannot finish without a person. */}
+        {(pendingPermission || lastRun?.status === 'failed') && (
+          <section className="mt-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-[0.18em] text-amber-300/90">Needs you</span>
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-200">
+                  {(pendingPermission ? 1 : 0) + (lastRun?.status === 'failed' ? 1 : 0)}
+                </span>
+              </div>
+              {lastRun?.status === 'failed' && (
+                <button onClick={() => clearRunResult()} className="text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">Dismiss</button>
+              )}
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {pendingPermission && (
+                <div className="relative rounded-2xl border border-white/[0.07] bg-[#12131a]/90 p-4">
+                  <div className="absolute inset-y-4 left-0 w-0.5 rounded-full bg-amber-400/80" />
+                  <div className="pl-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-wide text-zinc-500">Permission</div>
+                      <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[9px] font-medium text-amber-200">Needs your OK</span>
+                    </div>
+                    <div className="mt-1 text-[14px] font-semibold text-white">Allow {pendingPermission.tool}?</div>
+                    <pre className="mt-2 max-h-24 overflow-auto rounded-lg bg-black/30 p-2 font-mono text-[10px] text-zinc-400">{JSON.stringify(pendingPermission.input, null, 2)}</pre>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => void respondPermission(true)} className="rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100">Allow</button>
+                      <button onClick={() => void respondPermission(false)} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]">Deny</button>
+                      <button onClick={() => onViewChange('chats')} className="ml-auto text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">Open chat</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {lastRun?.status === 'failed' && (
+                <div className="relative rounded-2xl border border-white/[0.07] bg-[#12131a]/90 p-4">
+                  <div className="absolute inset-y-4 left-0 w-0.5 rounded-full bg-rose-400/80" />
+                  <div className="pl-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-wide text-zinc-500">Automation</div>
+                      <span className="rounded-full border border-rose-400/20 bg-rose-400/10 px-2 py-0.5 text-[9px] font-medium text-rose-200">Failed</span>
+                    </div>
+                    <div className="mt-1 text-[14px] font-semibold text-white">{lastRun.workflowName}</div>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-400">{lastRun.error || 'The run did not complete.'}</p>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={() => void runWorkflow(lastRun.workflowId).catch(() => undefined)} className="rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100">Rerun</button>
+                      <button onClick={() => onViewChange('automations')} className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11px] text-zinc-300 transition-colors hover:bg-white/[0.08]">Open automations</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
         <section className="mt-8 grid items-start gap-4 lg:grid-cols-[1.35fr_0.9fr]">
           <div className="rounded-2xl border border-white/[0.07] bg-[#12131a] p-4">
             <div className="flex items-center justify-between">

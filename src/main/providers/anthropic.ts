@@ -68,7 +68,7 @@ export const anthropic: ProviderAdapter = {
           toolCalls.set(event.index.toString(), { id: event.content_block.id, name: event.content_block.name, json: '' });
           yield { type: 'tool_use_start', id: event.content_block.id, name: event.content_block.name };
         }
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta' && typeof event.delta.text === 'string' && event.delta.text.trim()) {
           yield { type: 'text_delta', text: event.delta.text };
         }
         if (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta') {

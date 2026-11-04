@@ -936,7 +936,7 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
     const raw = typeof part.text === 'string' && part.text
       ? part.text
       : typeof state.text === 'string' ? state.text : '';
-    if (!raw) return null;
+    if (!raw || !raw.trim()) return null;
     // Parts may arrive as full snapshots (emit the unseen suffix) or true
     // deltas (emit whole); identical re-publishes emit nothing.
     const key = String(part.id ?? part.messageID ?? part.sessionID ?? '');
@@ -944,11 +944,14 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
     if (raw === seen) return null;
     let delta = raw;
     if (key && seen && raw.startsWith(seen)) delta = raw.slice(seen.length);
+    // Drop leading whitespace on the first chunk so the answer does not open
+    // with empty spaces before the first real character.
+    if (!seen) delta = delta.replace(/^\\s+/, '');
     if (key) {
       if (textSeen.size > 500) textSeen.clear();
       textSeen.set(key, raw);
     }
-    if (delta) return { type: 'text_delta', text: delta };
+    if (delta && delta.trim()) return { type: 'text_delta', text: delta };
     return null;
   }
 
@@ -959,17 +962,18 @@ export function openCodeProgressChunk(event: OpenCodeBusEvent, sessionID: string
     const raw = typeof part.text === 'string' && part.text
       ? part.text
       : typeof state.text === 'string' ? state.text : '';
-    if (!raw) return null;
+    if (!raw || !raw.trim()) return null;
     const key = String(part.id ?? part.messageID ?? part.sessionID ?? '');
     const seen = key ? reasoningSeen.get(key) ?? '' : '';
     if (raw === seen) return null;
     let delta = raw;
     if (key && seen && raw.startsWith(seen)) delta = raw.slice(seen.length);
+    if (!seen) delta = delta.replace(/^\\s+/, '');
     if (key) {
       if (reasoningSeen.size > 500) reasoningSeen.clear();
       reasoningSeen.set(key, raw);
     }
-    if (delta) return { type: 'thinking_delta', text: delta };
+    if (delta && delta.trim()) return { type: 'thinking_delta', text: delta };
     return null;
   }
 
@@ -1276,13 +1280,15 @@ async function* streamSessionMessage(args: {
     const text = (result.parts ?? [])
       .filter((part) => part.type === 'text' && part.text)
       .map((part) => part.text)
-      .join('\n');
-    if (text && !liveTextStreamed) yield { type: 'text_delta', text };
+      .join('\\n')
+      .trimStart();
+    if (text && text.trim() && !liveTextStreamed) yield { type: 'text_delta', text };
     const reasoning = (result.parts ?? [])
       .filter((part) => (part.type === 'reasoning' || part.type === 'thinking') && part.text)
       .map((part) => part.text)
-      .join('\n');
-    if (reasoning && !liveReasoningStreamed) yield { type: 'thinking_delta', text: reasoning };
+      .join('\\n')
+      .trimStart();
+    if (reasoning && reasoning.trim() && !liveReasoningStreamed) yield { type: 'thinking_delta', text: reasoning };
     yield {
       type: 'message_end',
       stop_reason: 'end_turn',
