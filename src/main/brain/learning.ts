@@ -64,6 +64,19 @@ function firstUrl(...values: string[]): string | undefined {
   return undefined;
 }
 
+const PREFERENCE_PATTERNS = [
+  /\b(?:i prefer|i like|i always|i never|please always|please never|remember that|my preference is|from now on)\b/i,
+];
+
+/** Extract durable, first-person preference statements from a user request. */
+function extractPreferenceStatements(request: string): string[] {
+  const statements = request
+    .split(/[\n.!?;]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 12 && PREFERENCE_PATTERNS.some((pattern) => pattern.test(part)));
+  return [...new Set(statements)].slice(0, 5);
+}
+
 /** Adapter target for completed provider turns. */
 export function ingestResponse(record: CompletedResponseLearning): MemoryRecord | null {
   const context = record.taskContext.trim();
@@ -78,6 +91,22 @@ export function ingestResponse(record: CompletedResponseLearning): MemoryRecord 
     tags: ['api-response', ...record.successfulTools.map((tool) => `tool:${tool}`)],
     confidence: record.successfulTools.length ? 0.8 : 0.7,
   });
+
+  // Durable preferences make Infinite AI feel personal and useful across
+  // sessions: "I prefer pnpm", "never open Chrome", "remember I work on X".
+  for (const statement of extractPreferenceStatements(record.request)) {
+    store.ingest({
+      type: 'api_conversation',
+      user: statement,
+      assistant: 'Recorded as a durable user preference.',
+      provider: record.provider,
+      model: record.model,
+      success: true,
+      kind: 'preference',
+      tags: ['preference', 'user-stated'],
+      confidence: 0.92,
+    });
+  }
   if (record.successfulTools.length) {
     store.ingest({
       type: 'action_trace',

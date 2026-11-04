@@ -292,7 +292,7 @@ export function SlidesEditor({ item }: SlidesEditorProps) {
             >
               <StudioIcon name="chevron-right" size={18} />
             </button>
-            <span className="ml-4 text-zinc-700">Esc to exit · ← → to move</span>
+            <span className="ml-4 text-zinc-700">Esc to exit; Left/Right arrows to move</span>
           </div>
           <button
             type="button"

@@ -76,7 +76,7 @@ const NODE_TYPES: NodeTypeConfig[] = [
     selectedBorderClass: 'border-indigo-400',
     icon: <Brain size={16} />,
     configFields: [
-      { key: 'model', label: 'Model', type: 'select', options: ['gpt-4', 'claude-3', 'gemini-pro', 'llama-3'] },
+      { key: 'model', label: 'Model', type: 'text', placeholder: 'Leave blank to use the active model (e.g. gpt-4o, claude-3-5-sonnet, llama3.1:8b)' },
       { key: 'prompt', label: 'Prompt', type: 'textarea', placeholder: 'Enter prompt template...' },
       { key: 'temperature', label: 'Temperature', type: 'text', placeholder: '0.7' },
     ],
@@ -512,7 +512,20 @@ export function InfiniteCanvas() {
           case 'ai': {
             const prompt = node.config.prompt?.trim();
             if (!prompt) throw new Error('AI Task requires a prompt.');
-            await useChatStore.getState().sendMessage(prompt);
+            const modelOverride = node.config.model?.trim();
+            if (modelOverride) {
+              const current = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+              const previous = { model: current.model, provider: current.provider };
+              localStorage.setItem('infinite:current', JSON.stringify({ ...current, model: modelOverride }));
+              try {
+                await useChatStore.getState().sendMessage(prompt);
+              } finally {
+                const restored = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
+                localStorage.setItem('infinite:current', JSON.stringify({ ...restored, model: previous.model, provider: previous.provider ?? restored.provider }));
+              }
+            } else {
+              await useChatStore.getState().sendMessage(prompt);
+            }
             break;
           }
           case 'code': {
