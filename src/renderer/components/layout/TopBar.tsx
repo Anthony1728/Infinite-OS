@@ -66,7 +66,7 @@ export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, rig
   useEffect(() => setTaskHistory((history) => [...history.slice(-7), activeTasks]), [activeTasks]);
 
   return (
-    <header className="os-topbar flex h-14 flex-shrink-0 items-center gap-3 overflow-visible border-b border-white/[0.025] bg-[#090c13]/95 px-4 backdrop-blur-xl">
+    <header className="os-topbar relative z-[300] flex h-14 flex-shrink-0 items-center gap-3 overflow-visible border-b border-white/[0.025] bg-[#090c13]/95 px-4 backdrop-blur-xl">
       <div className="flex flex-shrink-0 items-center">
         <button onClick={onToggleSidebar} className="icon-button w-8 h-8 xl:hidden" aria-label="Toggle sidebar">
           <AppIcon name="topbar.menu" className="w-4 h-4" strokeWidth={1.6} />
