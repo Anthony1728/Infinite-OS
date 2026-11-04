@@ -9,7 +9,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Anthony5109/Infinite-OS/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Anthony5109/Infinite-OS/actions/workflows/ci.yml/badge.svg" /></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0078d6" />
   <img alt="Electron" src="https://img.shields.io/badge/Electron-39-47848f" />
   <img alt="License" src="https://img.shields.io/badge/license-source--available-blue" />
