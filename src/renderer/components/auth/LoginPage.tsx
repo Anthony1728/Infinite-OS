@@ -21,7 +21,7 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
   const [profileError, setProfileError] = useState('');
   const { login, loginAs, isLoading } = useAuthStore();
 
-  // Netflix-style picker: who's using Infinite OS on this machine?
+  // Profile picker: who's using Infinite OS on this machine?
   // Passwords never leave main — the roster carries names only.
   useEffect(() => {
     let alive = true;
@@ -38,11 +38,18 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     };
   }, []);
 
-  // One click on a face = signed in. No password typing (Netflix-style).
+  // Clicking a face selects the profile, then requires its password.
   const handleProfileClick = async (profileEmail: string) => {
     setProfileError('');
     setEmail(profileEmail);
-    const result = await loginAs(profileEmail);
+    // Passwords never leave main -- the roster carries names only.
+    // A profile picker is convenience, not authentication: require the
+    // account password before opening any account.
+    if (!password || password.trim() === '') {
+      setProfileError('Enter your password to open this profile');
+      return;
+    }
+    const result = await loginAs(profileEmail, password);
     if (!result.success) {
       setProfileError(result.error ?? 'Could not open profile');
     }
@@ -87,7 +94,7 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 key={p.email}
                 onClick={() => void handleProfileClick(p.email)}
                 disabled={isLoading}
-                title={`${p.email} — click to enter`}
+                title={`${p.email} — click to enter, then type the password`}
                 className={`flex flex-col items-center gap-1.5 rounded-xl p-2 transition-colors disabled:opacity-60 ${
                   email === p.email ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]'
                 }`}

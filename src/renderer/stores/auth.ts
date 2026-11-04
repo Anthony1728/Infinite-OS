@@ -49,8 +49,8 @@ interface AuthState {
 
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  /** Netflix-style entry: pick a profile face, go straight in — no password typing. */
-  loginAs: (email: string) => Promise<{ success: boolean; error?: string }>;
+  /** Profile entry: pick a face, then confirm the account password. */
+  loginAs: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   completeOnboarding: () => void;
   updateAccount: (updates: Partial<Pick<User, 'name' | 'avatar'>>) => void;
@@ -88,7 +88,18 @@ const saveSession = async (user: User | null) => {
 
 const loadSession = async (): Promise<{ user: User; isAuthenticated: boolean } | null> => {
   try {
-    return await window.api.authGetSession();
+    const session = await window.api.authGetSession();
+    // Fail open: a session file is not proof of identity. If the account it
+    // represents no longer exists in auth.json (deleted, or a stale session
+    // copied over from another machine), refuse the login instead of
+    // auto-opening someone else's account.
+    if (session?.user?.email) {
+      const users = await window.api.authGetUsers();
+      if (!users[session.user.email.toLowerCase()]) {
+        return null;
+      }
+    }
+    return session;
   } catch {
     return null;
   }
@@ -163,7 +174,7 @@ export const useAuthStore = create<AuthState>()(
         return { success: true };
       },
 
-      loginAs: async (email: string) => {
+      loginAs: async (email: string, password: string | undefined) => {
         set({ isLoading: true });
         try {
           const users = await getUsers();
@@ -171,6 +182,16 @@ export const useAuthStore = create<AuthState>()(
           if (!entry) {
             set({ isLoading: false });
             return { success: false, error: 'Profile not found on this machine' };
+          }
+          // A profile picker is convenience, not authentication. Require the
+          // account password before opening any account.
+          if (!password || password.trim() === '') {
+            set({ isLoading: false });
+            return { success: false, error: 'Password required to open this profile' };
+          }
+          if (entry.password !== password) {
+            set({ isLoading: false });
+            return { success: false, error: 'Incorrect password' };
           }
           const updatedUser = { ...entry.user, lastLoginAt: Date.now() };
           entry.user = updatedUser;

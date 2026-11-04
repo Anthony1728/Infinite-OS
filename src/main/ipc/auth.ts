@@ -72,7 +72,7 @@ export function registerAuthIpc(): void {
   ipcMain.handle(IPC.AUTH_SET_SESSION, async (_event, session: unknown) => {
     await writeJson(sessionPath, session);
     syncLocalOwner(session);
-    // Netflix-style switch: a different account (or logout) re-homes all
+    // Profile switch: a different account (or logout) re-homes all
     // user data. Main caches the home + holds open DBs, so relaunch —
     // every store then re-resolves under the new profile from boot.
     // NOTE: compare SANITIZED uids — the session carries the raw email while
@@ -105,7 +105,9 @@ export function registerAuthIpc(): void {
     }
     return { ok: true };
   });
-  // Password-free roster for the "Who's using Infinite OS?" picker.
+  // Password-free roster for the "Who's using Infinite OS?" picker. The roster
+  // carries only public profile data; opening a profile still requires the
+  // account password (enforced in the renderer auth store).
   ipcMain.handle(IPC.AUTH_LIST_PROFILES, async () => {
     const users = await readJson<Record<string, { user?: { name?: string; email?: string; avatar?: string; lastLoginAt?: number } }>>(authPath, {});
     return Object.values(users)
