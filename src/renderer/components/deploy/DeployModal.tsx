@@ -56,7 +56,7 @@ export function DeployModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-[500] flex items-center justify-center" onClick={onClose}>
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}

@@ -142,12 +142,16 @@ export function TopBar({ onOpenCommand, onToggleSidebar, onToggleRightPanel, rig
             <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full border-2 border-[#090c13] bg-emerald-400" />
           </button>
           {profileOpen && (
-            <div className="absolute right-0 top-10 z-50 w-44 rounded-xl border border-white/[0.09] bg-[#10141e] p-1.5 shadow-2xl">
+            <div
+              className="absolute right-0 top-10 z-[400] w-44 rounded-xl border border-white/[0.09] bg-[#10141e] p-1.5 shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="border-b border-white/[0.06] px-2 py-2">
                 <div className="truncate text-[11px] font-medium text-zinc-200">{user?.name || 'User'}</div>
                 <div className="truncate text-[9px] text-zinc-600">{user?.email || 'Infinite OS account'}</div>
               </div>
-              <button onClick={onOpenDeploy} className="mt-1 w-full rounded-lg px-2 py-2 text-left text-[10px] text-zinc-400 hover:bg-white/[0.05] hover:text-white">Deploy</button>
+              <button onClick={() => { setProfileOpen(false); onOpenDeploy?.(); }} className="mt-1 w-full rounded-lg px-2 py-2 text-left text-[10px] text-zinc-400 hover:bg-white/[0.05] hover:text-white">Deploy</button>
               <button onClick={() => { setProfileOpen(false); window.dispatchEvent(new Event('infinite:open-personalization')); }} className="w-full rounded-lg px-2 py-2 text-left text-[10px] text-zinc-400 hover:bg-white/[0.05] hover:text-white">Profile & appearance</button>
               <button onClick={() => { setProfileOpen(false); window.dispatchEvent(new Event('infinite:open-settings')); }} className="w-full rounded-lg px-2 py-2 text-left text-[10px] text-zinc-400 hover:bg-white/[0.05] hover:text-white">AI & system settings</button>
               <button onClick={() => void logout()} className="w-full rounded-lg px-2 py-2 text-left text-[10px] text-red-400/80 hover:bg-red-500/[0.08] hover:text-red-300">Sign out</button>
