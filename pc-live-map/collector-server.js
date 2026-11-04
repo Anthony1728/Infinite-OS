@@ -251,7 +251,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/api/os') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
-    res.end(JSON.stringify(latestOS || { waiting: true, hint: 'start tracker.ps1 v6: powershell -ExecutionPolicy Bypass -File Infinite OS/pc-live-map/tracker.ps1' }));
+    res.end(JSON.stringify(latestOS || { waiting: true, hint: 'start tracker.ps1 v6 from the repo root: powershell -ExecutionPolicy Bypass -File pc-live-map/tracker.ps1' }));
     return;
   }
   if (url.pathname === '/api/live') {
