@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
-import { inferExecutionMode, useChatStore, INTENSITY_LABEL, inferIntensity, type ActivityItem, type ChatExecutionMode, type Intensity } from '../../stores/chat';
+import { inferExecutionMode, useChatStore, INTENSITY_LABEL, type ActivityItem, type ChatExecutionMode, type Intensity } from '../../stores/chat';
 import { ThinkingPanel } from './ThinkingPanel';
 import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
@@ -1938,26 +1938,27 @@ function InputBar({
           </div>
 
           <div className="flex-1" />
-          <div className="relative" ref={intensityMenuRef}>
+          <div className={`os-toolbar-collapse relative ${activityPanelOpen ? 'is-collapsed' : ''}`} ref={intensityMenuRef}>
             <button
               type="button"
               onClick={() => setIntensityMenuOpen((open) => !open)}
               aria-expanded={intensityMenuOpen}
               title="Intensity — how hard the agent works. Auto infers it from the request; force Low/Medium/High/Max if you want."
-              className={`flex h-8 items-center gap-1 rounded-lg px-2 text-[10px] transition-colors ${
+              className={`flex h-8 items-center gap-2 rounded-lg px-2.5 text-[10px] font-medium transition-colors ${
                 intensity !== 'auto'
-                  ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/40'
+                  ? 'text-violet-300 bg-violet-500/15 ring-1 ring-violet-400/30'
                   : 'text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-300'
               }`}
             >
-              <span className="text-[11px] leading-none" aria-hidden="true">⚡</span>
-              {INTENSITY_LABEL[intensity]}
+              <span>Intensity</span>
+              <span className="text-zinc-400">{INTENSITY_LABEL[intensity]}</span>
               <svg className={`h-3 w-3 text-zinc-600 transition-transform ${intensityMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
               </svg>
             </button>
             {intensityMenuOpen && (
-              <div className="absolute bottom-10 right-0 z-50 w-48 overflow-hidden rounded-lg bg-[#101521] p-1 shadow-2xl">
+              <div className="absolute bottom-10 right-0 z-50 w-56 overflow-hidden rounded-xl border border-white/[0.08] bg-[#10141e] p-1 shadow-2xl">
+                <div className="px-2 pt-1.5 text-[8px] uppercase tracking-[0.18em] text-zinc-600">Intensity</div>
                 {(['auto', 'low', 'medium', 'high', 'max'] as Intensity[]).map((level) => (
                   <button
                     key={level}
@@ -1966,15 +1967,15 @@ function InputBar({
                       setIntensity(level);
                       setIntensityMenuOpen(false);
                     }}
-                    className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-                      intensity === level ? 'bg-amber-500/15 text-amber-200' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+                    className={`flex w-full items-center justify-between gap-4 rounded-md px-2 py-2 text-left text-[11px] transition-colors ${
+                      intensity === level ? 'bg-violet-500/15 text-violet-200' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-100'
                     }`}
                   >
                     <span>{INTENSITY_LABEL[level]}</span>
-                    <span className="text-[9px] text-zinc-600">{level === 'auto' ? inferIntensity(input || 'the next request') === 'max' ? '→ max' : '→ auto' : level === 'max' ? 'deep' : level === 'high' ? 'thorough' : level === 'low' ? 'quick' : 'balanced'}</span>
+                    <span className="text-[8.5px] text-zinc-600">{level === 'auto' ? 'recommended' : level === 'max' ? 'deep work' : level === 'high' ? 'thorough' : level === 'medium' ? 'balanced' : 'quick'}</span>
                   </button>
                 ))}
-                <div className="border-t border-white/5 px-2 py-1 text-[8.5px] text-zinc-600">Auto chooses Low/Medium/High/Max from your request.</div>
+                <div className="border-t border-white/[0.06] px-2 py-1.5 text-[8.5px] leading-snug text-zinc-600">Auto ranges Low–Max and is chosen from your request.</div>
               </div>
             )}
           </div>
@@ -1983,15 +1984,12 @@ function InputBar({
             onClick={() => setUntilDone(!untilDone)}
             aria-pressed={untilDone}
             title="Keep working until done — raises this run's turn budget and instructs the agent to finish and verify every item before replying. Quality over speed."
-            className={`flex h-8 items-center gap-1.5 rounded-lg px-2 text-[10px] transition-colors ${
+            className={`os-toolbar-collapse flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-medium transition-colors ${
               untilDone
-                ? 'bg-violet-500/20 text-violet-200 ring-1 ring-violet-400/40'
+                ? 'text-violet-300 bg-violet-500/15 ring-1 ring-violet-400/30'
                 : 'text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-300'
-            }`}
+            } ${activityPanelOpen ? 'is-collapsed' : ''}`}
           >
-            <span className={`text-sm leading-none ${untilDone ? 'text-violet-300' : 'text-zinc-600'}`} aria-hidden="true">
-              ∞
-            </span>
             Until done
           </button>
           <div className="relative flex items-center gap-1.5">
