@@ -34,6 +34,7 @@ import { ShortcutsModal } from './components/modals/ShortcutsModal';
 import { QuickCaptureModal } from './components/modals/QuickCaptureModal';
 import { syncActiveModelToMain } from './utils/active-model-sync';
 import { useVoiceSessionStore } from './stores/voice-session';
+import { attachWatchdog } from './stores/watchdog';
 import { VoiceHud } from './components/voice/VoiceHud';
 import { QuestionOverlay } from './components/chat/QuestionOverlay';
 import { ResumeBanner } from './components/chat/ResumeBanner';
@@ -212,6 +213,10 @@ export function App() {
     const dispose = useVoiceSessionStore.getState().attach();
     return () => dispose();
   }, []);
+
+  // Agent watchdog: once a minute it checks for stuck/looping agents and
+  // long-waiting approvals, and the Power Center surfaces what it finds.
+  useEffect(() => attachWatchdog(), []);
 
   // Tabs. Main emits over a real channel now, and the tab it creates is opened
   // here — which is what lets the agent show the user a page from any view,

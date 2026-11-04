@@ -18,6 +18,7 @@ import { useBrainStore } from '../../stores/brain';
 import { useAutomationStore } from '../../stores/automation';
 import { useAiTabsStore } from '../../stores/aiTabs';
 import { usePlannerStore, plannerSnapshot } from '../../stores/planner';
+import { useWatchdogStore, type WatchdogFinding } from '../../stores/watchdog';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
@@ -267,6 +268,9 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   const createSession = useChatStore((s) => s.createSession);
   const pendingPermission = useChatStore((s) => s.pendingPermission);
   const respondPermission = useChatStore((s) => s.respondPermission);
+  const watchdogFindings = useWatchdogStore((s) => s.findings);
+  const dismissFinding = useWatchdogStore((s) => s.dismiss);
+  const abortRun = useAgentsStore((s) => s.abort);
   const runs = useAgentsStore((s) => s.runs);
   const enginePhase = useBrainStore((s) => s.enginePhase);
   const engineProgress = useBrainStore((s) => s.engineProgress);
@@ -638,14 +642,17 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
 
       <div className="relative mx-auto max-w-[1200px] px-6 pb-12 lg:px-8">
 
-        {/* NEEDS YOU — surfaces what the OS cannot finish without a person. */}
-        {(pendingPermission || lastRun?.status === 'failed') && (
+        {/* NEEDS YOU — surfaces what the OS cannot finish without a person:
+            blocked approvals, failed automations, and watchdog findings
+            (agents that look stuck, loop, or have waited on you too long).
+            The watchdog never stops anything — the person decides. */}
+        {(pendingPermission || lastRun?.status === 'failed' || watchdogFindings.length > 0) && (
           <section className="mt-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-[0.18em] text-amber-300/90">Needs you</span>
                 <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-200">
-                  {(pendingPermission ? 1 : 0) + (lastRun?.status === 'failed' ? 1 : 0)}
+                  {(pendingPermission ? 1 : 0) + (lastRun?.status === 'failed' ? 1 : 0) + watchdogFindings.length}
                 </span>
               </div>
               {lastRun?.status === 'failed' && (
@@ -688,6 +695,20 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
                   </div>
                 </div>
               )}
+              {watchdogFindings.map((finding) => (
+                <WatchdogCard
+                  key={`${finding.runId}:${finding.kind}`}
+                  finding={finding}
+                  onOpenChat={() => onViewChange('chats')}
+                  onStop={() => {
+                    if (!finding.runId.startsWith('perm:') && finding.runId !== 'question' && finding.runId !== 'plan') {
+                      void abortRun(finding.runId).catch(() => undefined);
+                    }
+                    dismissFinding(finding);
+                  }}
+                  onDismiss={() => dismissFinding(finding)}
+                />
+              ))}
             </div>
           </section>
         )}
@@ -1176,6 +1197,43 @@ function EmptyRow({ label, actionLabel, onAction }: { label: string; actionLabel
     <div className="flex items-center justify-between rounded-xl border border-dashed border-white/[0.08] bg-white/[0.015] px-3 py-3">
       <span className="text-[12px] text-zinc-500">{label}</span>
       <button onClick={onAction} className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-900 transition-colors hover:bg-zinc-100">{actionLabel}</button>
+    </div>
+  );
+}
+
+/**
+ * One watchdog finding, with its actions in place: open the chat it belongs
+ * to, stop the agent (the person decides — the watchdog never does), or
+ * dismiss the nudge for now.
+ */
+function WatchdogCard({ finding, onOpenChat, onStop, onDismiss }: {
+  finding: WatchdogFinding;
+  onOpenChat: () => void;
+  onStop: () => void;
+  onDismiss: () => void;
+}) {
+  const tone =
+    finding.kind === 'waiting-on-person' ? { bar: 'bg-amber-400/80', chip: 'border-amber-400/20 bg-amber-400/10 text-amber-200', label: 'Waiting on you' }
+    : finding.kind === 'looping' ? { bar: 'bg-cyan-400/80', chip: 'border-cyan-400/20 bg-cyan-400/10 text-cyan-200', label: 'Going in circles' }
+    : { bar: 'bg-orange-400/80', chip: 'border-orange-400/20 bg-orange-400/10 text-orange-200', label: 'Looks stuck' };
+  const isBlocker = finding.runId.startsWith('perm:') || finding.runId === 'question' || finding.runId === 'plan';
+  return (
+    <div className="relative rounded-2xl border border-white/[0.07] bg-[#12131a]/90 p-4">
+      <div className={`absolute inset-y-4 left-0 w-0.5 rounded-full ${tone.bar}`} />
+      <div className="pl-3">
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">Watchdog</div>
+          <span className={`rounded-full border px-2 py-0.5 text-[9px] font-medium ${tone.chip}`}>{tone.label}</span>
+        </div>
+        <div className="mt-1 text-[13.5px] font-medium leading-5 text-white">{finding.detail}</div>
+        <div className="mt-3 flex items-center gap-2">
+          <button onClick={onOpenChat} className="rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100">Open chat</button>
+          {!isBlocker && (
+            <button onClick={onStop} className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 transition-colors hover:bg-red-500/20">Stop it</button>
+          )}
+          <button onClick={onDismiss} className="ml-auto text-[11px] text-zinc-500 transition-colors hover:text-zinc-300">Dismiss</button>
+        </div>
+      </div>
     </div>
   );
 }

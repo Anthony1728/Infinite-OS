@@ -25,6 +25,7 @@ import { BrainLearningPanel } from './BrainLearningPanel';
 import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { appearanceFromPrompt, useUIStore } from '../../stores/ui';
 import { estimateCost, formatCost } from '../../../main/providers/pricing';
+import { composerDraft, saveComposerDraft } from '../../lib/composerDrafts';
 import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
 import { useLayoutStore } from '../../stores/layout';
 import { useNotificationStore } from '../../stores/notifications';
@@ -416,6 +417,30 @@ function formatTokenCount(n: number): string {
   return `${Math.round(n / 1000)}k`;
 }
 
+/**
+ * Turn duration for an assistant reply: elapsed from the most recent user
+ * message before it. Compaction notes and system inserts do not reset the
+ * clock — only a real user turn does.
+ */
+function turnDurationFor(messages: Message[], index: number): number | undefined {
+  const reply = messages[index];
+  if (reply.role !== 'assistant') return undefined;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== 'user') continue;
+    const delta = reply.timestamp - msg.timestamp;
+    return delta > 0 ? delta : undefined;
+  }
+  return undefined;
+}
+
+/** 42s, 3m 20s — the duration half of the turn-stats pill. */
+function formatTurnDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function initialChatAgent(): string {
   const stored = localStorage.getItem(CHAT_AGENT_STORAGE_KEY);
   // General is the default operator; migrate the legacy 'auto' default once.
@@ -495,6 +520,18 @@ export function ChatView({
   const createAiTab = useAiTabsStore((s) => s.createTab);
   const [input, setInput] = useState('');
   const [chatMode, setChatMode] = useState<ChatExecutionMode>(initialChatMode);
+  // Composer drafts: per-session unsent text that survives navigation and
+  // relaunch. Restored when the session changes, saved as you type, cleared
+  // when the message actually goes out.
+  const draftSessionRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (draftSessionRef.current === currentSessionId) return;
+    draftSessionRef.current = currentSessionId;
+    setInput(composerDraft(currentSessionId));
+  }, [currentSessionId]);
+  useEffect(() => {
+    if (draftSessionRef.current !== undefined) saveComposerDraft(draftSessionRef.current, input);
+  }, [input]);
   const [selectedAgentId, setSelectedAgentId] = useState(initialChatAgent);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2313,8 +2350,17 @@ function RealChat({
               </span>
               <span className="ml-3 text-sm text-zinc-400">Loading conversation…</span>
             </div>
-          ) : messages.map((m) => (
-            <MessageBubble key={m.id} message={m} runningToolIds={runningToolIds} activityByToolId={activityByToolId} />
+          ) : messages.map((m, index) => (
+            <MessageBubble
+              key={m.id}
+              message={m}
+              // Turn duration: how long the assistant took from the question
+              // it is answering (Otto's turn stats, approximated from
+              // timestamps — good to the second, which is all it claims).
+              turnDurationMs={m.role === 'assistant' ? turnDurationFor(messages, index) : undefined}
+              runningToolIds={runningToolIds}
+              activityByToolId={activityByToolId}
+            />
           ))}
           {showThinking && <ThinkingBubble />}
           {/* A pending AskUserQuestion is rendered by the global QuestionOverlay
@@ -2381,10 +2427,12 @@ function RealChat({
 
 function MessageBubble({
   message,
+  turnDurationMs,
   runningToolIds,
   activityByToolId,
 }: {
   message: Message;
+  turnDurationMs?: number;
   runningToolIds?: Set<string>;
   activityByToolId?: Map<string, ActivityItem>;
 }) {
@@ -2555,14 +2603,18 @@ function MessageBubble({
               <span className="truncate">{provenance}</span>
             </span>
           )}
-          {/* Turn stats — Otto-style: hover a reply to see what it cost in
-              tokens. Hidden while not hovering so the header stays calm. */}
-          {!isUser && message.usage && (
+          {/* Turn stats — Otto-style: hover a reply to see how long it took
+              and what it cost in tokens. Hidden while not hovering so the
+              header stays calm. */}
+          {!isUser && (message.usage || turnDurationMs !== undefined) && (
             <span
               className="hidden sm:inline-flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] tabular-nums text-zinc-500 opacity-0 group-hover/message:opacity-100 transition-opacity"
-              title={`Turn tokens — ${message.usage.input ?? 0} in · ${message.usage.output ?? 0} out${message.usage.cache_read ? ` · ${message.usage.cache_read} cached` : ''}`}
+              title={`Turn stats${turnDurationMs !== undefined ? ` — took ${formatTurnDuration(turnDurationMs)}` : ''}${message.usage ? ` — ${message.usage.input ?? 0} in · ${message.usage.output ?? 0} out${message.usage.cache_read ? ` · ${message.usage.cache_read} cached` : ''} tokens` : ''}`}
             >
-              {formatTokenCount(message.usage.input ?? 0)}→{formatTokenCount(message.usage.output ?? 0)} tok
+              {turnDurationMs !== undefined && <span>{formatTurnDuration(turnDurationMs)}</span>}
+              {message.usage && (
+                <>{turnDurationMs !== undefined && <span aria-hidden="true">·</span>}{formatTokenCount(message.usage.input ?? 0)}→{formatTokenCount(message.usage.output ?? 0)} tok</>
+              )}
             </span>
           )}
           <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/message:opacity-100 focus-within:opacity-100 transition-opacity">
