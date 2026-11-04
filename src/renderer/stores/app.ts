@@ -127,6 +127,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const result = await window.api.appBuild({ projectId: id }) as { success?: boolean; error?: string };
     if (!result?.success) throw new Error(result?.error || 'Project build failed.');
     await get().loadProjects();
+    await get().loadStats();
   },
 
   renameProject: async (id, name) => {
