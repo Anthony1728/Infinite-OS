@@ -674,10 +674,24 @@ async function handleCommand(rawCommand, params) {
 
     case 'click':
     case 'click_text': {
-      result = await contentScriptOp('click', {
-        selector: params.selector,
-        text: params.text || (command === 'click_text' ? params.value : undefined),
-      });
+      // A click that submits a form or follows a link tears down the content
+      // script mid-command: sendMessage rejects, the injection fallback runs
+      // against the NEW document (button gone) and throws, so the bridge used
+      // to answer 502 even though the click actually succeeded. Snapshot the
+      // URL and, if the navigation is what killed the response, report success.
+      const beforeTab = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((t) => t[0]);
+      const beforeUrl = beforeTab?.url || '';
+      try {
+        result = await contentScriptOp('click', {
+          selector: params.selector,
+          text: params.text || (command === 'click_text' ? params.value : undefined),
+        });
+      } catch (err) {
+        const afterTab = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((t) => t[0]);
+        const navigated = Boolean(afterTab) && afterTab.id === beforeTab?.id && afterTab.url !== beforeUrl;
+        if (!navigated) throw err;
+        result = { clicked: true, navigated: true, url: afterTab.url, title: afterTab.title || '' };
+      }
       break;
     }
 
@@ -700,8 +714,14 @@ async function handleCommand(rawCommand, params) {
       break;
 
     case 'fill': {
-      const fields = params.fields || params.data || {};
-      if (!Object.keys(fields).length) throw new Error('fill requires fields map');
+      // Accept both shapes: the agent's documented `fields` map, and the
+      // `{selector, value}` shape every other command uses. Previously a lone
+      // selector+value silently threw "fill requires fields map".
+      const fields = { ...(params.fields || params.data || {}) };
+      if (!Object.keys(fields).length && params.selector != null && params.value != null) {
+        fields[params.selector] = params.value;
+      }
+      if (!Object.keys(fields).length) throw new Error('fill requires fields map or selector+value');
       result = await contentScriptOp('fill', { fields });
       break;
     }
@@ -1081,6 +1101,19 @@ async function handleCommand(rawCommand, params) {
           description: ext.description,
         })),
       };
+      break;
+    }
+
+    case 'reload_extension': {
+      // Let Infinite AI push updates to its own bridge without asking the user
+      // to open chrome://extensions. `chrome.runtime.reload()` re-reads the
+      // unpacked folder, so after syncing a patched background.js this brings
+      // the new code live. Reply first so the caller gets an ack before the
+      // worker is torn down; the reconnect loop re-establishes the socket.
+      result = { reloading: true, note: 'extension reloading; bridge will reconnect shortly' };
+      setTimeout(() => {
+        try { chrome.runtime.reload(); } catch { /* worker already gone */ }
+      }, 150);
       break;
     }
 

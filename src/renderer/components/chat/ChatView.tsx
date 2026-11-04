@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import type { ContentBlock, Message, ProviderInfo } from '../../../shared/types';
-import { inferExecutionMode, useChatStore, type ActivityItem, type ChatExecutionMode } from '../../stores/chat';
+import { inferExecutionMode, useChatStore, INTENSITY_LABEL, inferIntensity, type ActivityItem, type ChatExecutionMode, type Intensity } from '../../stores/chat';
 import { ThinkingPanel } from './ThinkingPanel';
 import { useAgentsStore } from '../../stores/agents';
 import { useEditorStore } from '../../stores/editor';
@@ -881,6 +881,8 @@ function InputBar({
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [model2MenuOpen, setModel2MenuOpen] = useState(false);
+  const [intensityMenuOpen, setIntensityMenuOpen] = useState(false);
+  const intensityMenuRef = useRef<HTMLDivElement | null>(null);
   const [model2Enabled, setModel2Enabled] = useState(false);
   const [model2, setModel2] = useState('');
   const [model2Label, setModel2Label] = useState('');
@@ -1215,6 +1217,8 @@ function InputBar({
   const announceUncensoredMode = useChatStore((state) => state.announceUncensoredMode);
   const untilDone = useChatStore((state) => state.untilDone);
   const setUntilDone = useChatStore((state) => state.setUntilDone);
+  const intensity = useChatStore((state) => state.intensity);
+  const setIntensity = useChatStore((state) => state.setIntensity);
   const activeMode = CHAT_MODE_OPTIONS.find((option) => option.id === mode) ?? CHAT_MODE_OPTIONS[1];
   const selectedAgent = agentTypes.find((agent) => agent.id === selectedAgentId);
 
@@ -1429,6 +1433,9 @@ function InputBar({
       }
       if (atMenuRef.current && !atMenuRef.current.contains(e.target as Node)) {
         setShowAtMenu(false);
+      }
+      if (intensityMenuRef.current && !intensityMenuRef.current.contains(e.target as Node)) {
+        setIntensityMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -1931,6 +1938,46 @@ function InputBar({
           </div>
 
           <div className="flex-1" />
+          <div className="relative" ref={intensityMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIntensityMenuOpen((open) => !open)}
+              aria-expanded={intensityMenuOpen}
+              title="Intensity — how hard the agent works. Auto infers it from the request; force Low/Medium/High/Max if you want."
+              className={`flex h-8 items-center gap-1 rounded-lg px-2 text-[10px] transition-colors ${
+                intensity !== 'auto'
+                  ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/40'
+                  : 'text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-300'
+              }`}
+            >
+              <span className="text-[11px] leading-none" aria-hidden="true">⚡</span>
+              {INTENSITY_LABEL[intensity]}
+              <svg className={`h-3 w-3 text-zinc-600 transition-transform ${intensityMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            {intensityMenuOpen && (
+              <div className="absolute bottom-10 right-0 z-50 w-48 overflow-hidden rounded-lg bg-[#101521] p-1 shadow-2xl">
+                {(['auto', 'low', 'medium', 'high', 'max'] as Intensity[]).map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => {
+                      setIntensity(level);
+                      setIntensityMenuOpen(false);
+                    }}
+                    className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                      intensity === level ? 'bg-amber-500/15 text-amber-200' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
+                    }`}
+                  >
+                    <span>{INTENSITY_LABEL[level]}</span>
+                    <span className="text-[9px] text-zinc-600">{level === 'auto' ? inferIntensity(input || 'the next request') === 'max' ? '→ max' : '→ auto' : level === 'max' ? 'deep' : level === 'high' ? 'thorough' : level === 'low' ? 'quick' : 'balanced'}</span>
+                  </button>
+                ))}
+                <div className="border-t border-white/5 px-2 py-1 text-[8.5px] text-zinc-600">Auto chooses Low/Medium/High/Max from your request.</div>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => setUntilDone(!untilDone)}

@@ -297,6 +297,46 @@ export interface BrainTeachingLiveState extends BrainTeachingStatus {
 
 export type ChatExecutionMode = 'chat' | 'agent' | 'research' | 'code' | 'build' | 'plan';
 
+/**
+ * Intensity — how hard the agent should work a request.
+ * Auto is derived from the request; the user can override manually.
+ */
+export type Intensity = 'auto' | 'low' | 'medium' | 'high' | 'max';
+export type ResolvedIntensity = 'low' | 'medium' | 'high' | 'max';
+
+export const INTENSITY_LABEL: Record<Intensity, string> = {
+  auto: 'Auto',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  max: 'Max',
+};
+
+/** Full Auto → resolved intensity only. 'auto' itself tells the agent to pick. */
+export function inferIntensity(text: string): ResolvedIntensity {
+  const request = text.trim().toLowerCase();
+  if (!request) return 'low';
+  const long = request.length > 300;
+  const complex =
+    /\b(research|investigate|compare sources|market research|deep dive|literature review|architect|design|strategy|plan|complete|entire|whole|full|production|multi-step|multi phase|deploy|build|create|develop|implement|refactor|migrate)\b/.test(request) ||
+    (long && /\b(build|create|make|develop|implement|and|then|and then)\b/.test(request));
+  if (complex || long) return 'max';
+  if (/\b(bug|debug|fix|edit|change|add|remove|write|send|open|launch|browse|search|test|run|automate|control|install|code|function|api|database|website|app|dashboard|portfolio|presentation|document|video|image|email|deploy|publish)\b/.test(request)) return 'high';
+  if (/\b(please|quickly|briefly|simple|short|summary|summarize|explain|help|what|how|why|when|who)\b/.test(request)) return 'medium';
+  return 'low';
+}
+
+/** Display hint shown to the user when they force an intensity. */
+export function intensityHint(level: Intensity): string {
+  switch (level) {
+    case 'auto': return 'Auto — intensity chosen from the request.';
+    case 'low': return 'Low — quick, brief answer.';
+    case 'medium': return 'Medium — balanced effort.';
+    case 'high': return 'High — thorough, tool-heavy.';
+    case 'max': return 'Max — exhaustive, multi-step.';
+  }
+}
+
 /** Live ExitPlan approval request for the current session (plan mode). */
 export interface PlanApprovalState {
   plan: string;
@@ -582,6 +622,9 @@ interface ChatState {
   /** Keep-working-until-done quality toggle for huge prompts (persisted). */
   untilDone: boolean;
   setUntilDone: (untilDone: boolean) => void;
+  /** Intensity is user-chosen; 'auto' lets the agent infer it per request. */
+  intensity: Intensity;
+  setIntensity: (intensity: Intensity) => void;
   sendMessage: (text: string, images?: ContentBlock[], mode?: ChatExecutionMode, agentId?: string, background?: boolean) => Promise<void>;
   abort: () => Promise<void>;
   respondPermission: (allowed: boolean) => Promise<void>;
@@ -595,6 +638,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streaming: false,
   untilDone: typeof localStorage !== 'undefined' && localStorage.getItem(UNTIL_DONE_STORAGE_KEY) === '1',
+  intensity: (typeof localStorage !== 'undefined' && (['auto','low','medium','high','max'] as Intensity[]).includes(localStorage.getItem(UNTIL_DONE_STORAGE_KEY + ':intensity') as Intensity)
+    ? localStorage.getItem(UNTIL_DONE_STORAGE_KEY + ':intensity') as Intensity
+    : 'auto') as Intensity,
   loadingSession: false,
   activity: [],
   pendingPermission: null,
@@ -1471,6 +1517,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ untilDone });
   },
 
+  setIntensity: (intensity) => {
+    try {
+      localStorage.setItem(UNTIL_DONE_STORAGE_KEY + ':intensity', intensity);
+    } catch { /* storage may be unavailable */ }
+    set({ intensity });
+  },
+
   sendMessage: async (visibleText, images, mode = 'chat', agentId, background = false) => {
     // Show thinking indicator IMMEDIATELY — before any async work.
     // This makes the UI feel instant when the user presses Enter.
@@ -1489,7 +1542,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // model sees the completion contract, and main raises this run's budget
     // (the untilDone flag → run-budget overrides in CHAT_SEND).
     const untilDone = get().untilDone;
-    const outgoing = untilDone ? wrapUntilDone(text) : text;
+    const userIntensity = get().intensity;
+    const resolvedIntensity = userIntensity === 'auto' ? inferIntensity(text) : userIntensity;
+    const intensityBlock = `\n\nIntensity guidance: ${intensityHint(userIntensity)} (resolved: ${resolvedIntensity}). ${resolvedIntensity === 'max' ? 'This is a deep task — plan multi-step work, use tools thoroughly, verify every item.' : resolvedIntensity === 'high' ? 'Thorough effort expected.' : resolvedIntensity === 'low' ? 'Answer briefly; avoid unnecessary tool calls.' : ''}`;
+    const outgoing = (untilDone ? wrapUntilDone(text) : text) + intensityBlock;
     const { currentSessionId } = get();
     const settings = JSON.parse(localStorage.getItem('infinite:current') ?? '{}');
     const provider = settings.provider === 'local' ? 'ollama' : (settings.provider ?? 'openrouter');
