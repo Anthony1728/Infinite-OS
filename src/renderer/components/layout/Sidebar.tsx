@@ -7,6 +7,7 @@ import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { useNotificationStore } from '../../stores/notifications';
 import { PhoneConnectModal } from '../phone/PhoneConnectModal';
+import { InputModal } from '../modals/InputModal';
 import type { Session } from '../../../shared/types';
 
 // Flat, monochrome nav — icons inherit their color from the row state so the
@@ -34,16 +35,14 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
 
 const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'bots', label: 'Bots', icon: 'nav.agents' },
-  { id: 'voice', label: 'Voice Assistant', icon: 'nav.voice' },
-  { id: 'memory', label: 'Memory', icon: 'nav.memory' },
-  { id: 'automations', label: 'Scheduled Jobs', icon: 'nav.automations' },
   // One worker per recurring task: Teaching mode, per-worker vault, app installs.
   { id: 'workers', label: 'Workers', icon: 'automation.pulse' },
+  { id: 'memory', label: 'Memory', icon: 'nav.memory' },
+  { id: 'active-memory', label: 'Active Memory', icon: 'home.memory' },
+  { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
   { id: 'messaging', label: 'Messaging', icon: 'home.chat' },
   { id: 'artifacts', label: 'Artifacts', icon: 'tab.document' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
-  { id: 'active-memory', label: 'Active Memory', icon: 'home.memory' },
-  { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
   { id: 'guide', label: 'Guide', icon: 'home.learn' },
@@ -137,6 +136,8 @@ export function Sidebar({
   const [clearHistoryError, setClearHistoryError] = useState('');
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [tabsExpanded, setTabsExpanded] = useState(true);
+  // Inline rename target — replaces the old native window.prompt.
+  const [renaming, setRenaming] = useState<Session | null>(null);
 
   const activeAgents = runs.filter((r) => r.status === 'running').length;
 
@@ -433,6 +434,37 @@ export function Sidebar({
           )}
         </div>
 
+        {/* Insights — Otto-style: how the OS is doing, what it is connected to.
+            Also gives Activity a real sidebar home (it was palette-only). */}
+        {!collapsed && (
+          <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
+            Insights
+          </div>
+        )}
+        <div className="space-y-0.5">
+          {renderActionRow(
+            'dashboards',
+            'Dashboards',
+            null,
+            () => onNavChange('dashboards'),
+            <AppIcon name="tab.chart" className="w-4 h-4 flex-shrink-0 opacity-70" strokeWidth={1.7} gradient={BRAND_GRADIENT} />,
+          )}
+          {renderActionRow(
+            'connectors',
+            'Connectors',
+            null,
+            () => onNavChange('connectors'),
+            <AppIcon name="automation.link" className="w-4 h-4 flex-shrink-0 opacity-70" strokeWidth={1.7} gradient={BRAND_GRADIENT} />,
+          )}
+          {renderActionRow(
+            'activity',
+            'Activity',
+            null,
+            () => onNavChange('activity'),
+            <AppIcon name="automation.pulse" className="w-4 h-4 flex-shrink-0 opacity-70" strokeWidth={1.7} gradient={BRAND_GRADIENT} />,
+          )}
+        </div>
+
         {!collapsed && (
           <div className="pt-6 pb-1.5 px-2.5 text-[9px] font-semibold text-zinc-600 uppercase tracking-[0.13em]">
             System
@@ -707,10 +739,7 @@ export function Sidebar({
                             { label: s.pinned ? 'Unpin' : 'Pin', action: () => pinSession(s.id, !s.pinned) },
                             {
                               label: 'Rename',
-                              action: () => {
-                                const title = window.prompt('Rename conversation', s.title);
-                                if (title) void renameSession(s.id, title);
-                              },
+                              action: () => setRenaming(s),
                             },
                             { label: 'Branch', action: () => branchSession(s.id) },
                             {
@@ -846,6 +875,19 @@ export function Sidebar({
       )}
 
       <PhoneConnectModal open={phoneOpen} onClose={() => setPhoneOpen(false)} />
+      {renaming && (
+        <InputModal
+          title="Rename conversation"
+          subtitle="The bot, its history and your other sessions stay as they are."
+          fields={[{ key: 'title', label: 'Name', initial: renaming.title, placeholder: 'What is this chat about?', required: true }]}
+          submitLabel="Rename"
+          onSubmit={async (values) => {
+            const title = values.title?.trim();
+            if (title) await renameSession(renaming.id, title);
+          }}
+          onClose={() => setRenaming(null)}
+        />
+      )}
     </aside>
   );
 }

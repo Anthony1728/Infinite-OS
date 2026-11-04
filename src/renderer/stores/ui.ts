@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { WallpaperId } from '../lib/wallpapers';
 
 export type UITheme = 'dark' | 'light' | 'system';
-export type UITemplate = 'infinite' | 'aurora' | 'onyx' | 'cloud' | 'chatgpt' | 'zcode' | 'matrix';
+export type UITemplate = 'infinite' | 'aurora' | 'onyx' | 'cloud' | 'chatgpt' | 'zcode' | 'matrix' | 'shorelight' | 'ringfall' | 'velvet' | 'graphite';
 export type LogoStyle = 'spectrum' | 'luminous' | 'ice';
 
 export interface AppearancePreferences {
@@ -49,6 +49,11 @@ export const TEMPLATE_PRESETS: Record<UITemplate, Partial<AppearancePreferences>
   chatgpt: { template: 'chatgpt', accent: '#10a37f', radius: 16, glass: 58, glow: 22, density: 'spacious', shinyBars: false },
   zcode: { template: 'zcode', accent: '#38bdf8', radius: 10, glass: 48, glow: 30, density: 'compact', shinyBars: false },
   matrix: { template: 'matrix', accent: '#00e676', radius: 8, glass: 40, glow: 34, density: 'comfortable', shinyBars: false },
+  // Otto-inspired skins — nine-slot ink/signal thinking mapped to Infinite OS.
+  shorelight: { template: 'shorelight', accent: '#fac24c', radius: 12, glass: 66, glow: 55, density: 'comfortable', shinyBars: true },
+  ringfall: { template: 'ringfall', accent: '#4cdbeb', radius: 14, glass: 78, glow: 80, density: 'comfortable', shinyBars: true },
+  velvet: { template: 'velvet', accent: '#ed99a8', radius: 18, glass: 80, glow: 70, density: 'spacious', shinyBars: true },
+  graphite: { template: 'graphite', accent: '#85bdfa', radius: 8, glass: 40, glow: 24, density: 'compact', shinyBars: false },
 };
 
 export function applyAppearance(prefs: AppearancePreferences, theme: UITheme = 'dark') {
@@ -82,6 +87,10 @@ export function appearanceFromPrompt(prompt: string): Partial<AppearancePreferen
   if (/\b(chatgpt|mint|warm graphite)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.chatgpt);
   if (/\b(zcode|z code|cobalt|terminal blue)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.zcode);
   if (/\b(matrix|phosphor|scanline)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.matrix);
+  if (/\b(shorelight|lagoon|teal gold|harbor)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.shorelight);
+  if (/\b(ringfall|storm|midnight cyan|navy)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.ringfall);
+  if (/\b(velvet|plum|rose|dusk pink)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.velvet);
+  if (/\b(graphite|focus|quiet|neutral)\b/.test(text)) Object.assign(patch, TEMPLATE_PRESETS.graphite);
   if (/\b(no wallpaper|plain background|remove wallpaper|solid background)\b/.test(text)) patch.wallpaper = 'none';
   else {
     const wallpapers: Array<[WallpaperId, RegExp]> = [

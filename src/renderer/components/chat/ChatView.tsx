@@ -409,6 +409,13 @@ function initialChatMode(): ChatExecutionMode {
   return CHAT_MODE_OPTIONS.some((option) => option.id === stored) ? (stored as ChatExecutionMode) : 'chat';
 }
 
+/** Compact token count for the hover turn-stats pill: 940, 1.2k, 18.4k. */
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 100_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${Math.round(n / 1000)}k`;
+}
+
 function initialChatAgent(): string {
   const stored = localStorage.getItem(CHAT_AGENT_STORAGE_KEY);
   // General is the default operator; migrate the legacy 'auto' default once.
@@ -1568,7 +1575,8 @@ function InputBar({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] rounded-xl overflow-visible transition-all duration-300 ${dragActive ? 'ring-2 ring-indigo-400/30' : ''}`}
+        className={`os-chat-composer relative flex min-h-[104px] flex-col bg-[#0b101a] rounded-xl overflow-visible transition-all duration-300 ${dragActive ? 'ring-2 ring-indigo-400/30' : ''} ${streaming ? 'agent-aura' : ''}`}
+        style={streaming ? ({ '--aura-tone': 'rgba(34, 211, 238, 0.75)' } as React.CSSProperties) : undefined}
       >
         {dragActive && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-indigo-500/10">
@@ -2507,7 +2515,7 @@ function MessageBubble({
   return (
     <>
     <div
-      className={`group/message flex gap-5 rounded-xl px-5 py-4 ${isUser ? 'bg-blue-500/[0.04]' : 'bg-white/[0.02]'}`}
+      className={`group/message flex gap-5 rounded-xl px-5 py-4 animate-rise-in ${isUser ? 'bg-blue-500/[0.04]' : 'bg-white/[0.02]'}`}
       onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
     >
       {isAssistant ? (
@@ -2545,6 +2553,16 @@ function MessageBubble({
               <span className="flex-shrink-0">{usedFallback ? 'Fallback' : 'Answered'}</span>
               <span aria-hidden="true">·</span>
               <span className="truncate">{provenance}</span>
+            </span>
+          )}
+          {/* Turn stats — Otto-style: hover a reply to see what it cost in
+              tokens. Hidden while not hovering so the header stays calm. */}
+          {!isUser && message.usage && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1 rounded-full border border-white/[0.07] bg-white/[0.03] px-2 py-0.5 font-mono text-[9px] tabular-nums text-zinc-500 opacity-0 group-hover/message:opacity-100 transition-opacity"
+              title={`Turn tokens — ${message.usage.input ?? 0} in · ${message.usage.output ?? 0} out${message.usage.cache_read ? ` · ${message.usage.cache_read} cached` : ''}`}
+            >
+              {formatTokenCount(message.usage.input ?? 0)}→{formatTokenCount(message.usage.output ?? 0)} tok
             </span>
           )}
           <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/message:opacity-100 focus-within:opacity-100 transition-opacity">

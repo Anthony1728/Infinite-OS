@@ -55,6 +55,9 @@ const JournalView = lazy(() => import('../views/JournalView').then(m => ({ defau
 const StudioView = lazy(() => import('../studio/StudioView').then(m => ({ default: m.StudioView })));
 const PlannerView = lazy(() => import('../planner/PlannerView').then(m => ({ default: m.PlannerView })));
 const PagesView = lazy(() => import('../pages/PagesView').then(m => ({ default: m.PagesView })));
+// Otto-grade insights + connections surfaces.
+const DashboardsView = lazy(() => import('../views/DashboardsView').then(m => ({ default: m.DashboardsView })));
+const ConnectorsView = lazy(() => import('../views/ConnectorsView').then(m => ({ default: m.ConnectorsView })));
 
 interface MainViewProps {
   activeView: string;
@@ -193,6 +196,10 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <PlannerView />;
       case 'pages':
         return <PagesView />;
+      case 'dashboards':
+        return <DashboardsView onViewChange={onViewChange} />;
+      case 'connectors':
+        return <ConnectorsView onViewChange={onViewChange} />;
       default:
         return <ChatView onViewChange={onViewChange} onOpenDeploy={onOpenDeploy} />;
     }

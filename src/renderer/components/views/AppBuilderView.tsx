@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../../renderer/stores/app';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
+import { InputModal } from '../modals/InputModal';
 
 export function AppBuilderView() {
   const { projects, templates, stats, loadProjects, loadTemplates, loadStats, createProject, buildProject, deleteProject, renameProject, moveProject, runProject, generateComponent, generatePage, generateApi } = useAppStore();
@@ -9,6 +10,8 @@ export function AppBuilderView() {
   const [newProject, setNewProject] = useState({ name: '', type: 'react' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // One shared prompted-input state replaces the old native window.prompt calls.
+  const [renaming, setRenaming] = useState<{ title: string; field: { key: string; label: string; initial?: string }; run: (values: Record<string, string>) => Promise<void> } | null>(null);
 
   useEffect(() => { loadProjects(); loadTemplates(); loadStats(); }, [loadProjects, loadTemplates, loadStats]);
 
@@ -144,13 +147,13 @@ export function AppBuilderView() {
               <div className="mt-4 border-t border-borderSubtle pt-4">
                 {proj.outputPath && <div className="mb-3 break-all rounded-lg bg-black/20 px-3 py-2 font-mono text-[10px] text-textMuted">{proj.outputPath}</div>}
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => { const name = window.prompt('Rename project', proj.name); if (name) void act('Project renamed', () => renameProject(proj.id, name)); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-cyan-500/30">Rename</button>
+                  <button onClick={() => setRenaming({ title: 'Rename project', field: { key: 'name', label: 'Project name', initial: proj.name }, run: (v) => act('Project renamed', () => renameProject(proj.id, v.name ?? '')) })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-cyan-500/30">Rename</button>
                   <button onClick={() => void (async () => { const destination = await window.api.pickDirectory(); if (destination) await act('Project moved', () => moveProject(proj.id, destination)); })()} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-cyan-500/30">Move</button>
                   <button disabled={!proj.outputPath} onClick={() => proj.outputPath && void window.api.fileOpen({ path: proj.outputPath })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs disabled:opacity-40 hover:border-cyan-500/30">Open Folder</button>
                   <button disabled={!proj.outputPath} onClick={() => void act('Project started', () => runProject(proj.id))} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs disabled:opacity-40 hover:border-green-500/30">Run</button>
-                  <button onClick={() => { const name = window.prompt('Component name', 'Dashboard'); if (name) void act('Component added', () => generateComponent({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Component</button>
-                  <button onClick={() => { const name = window.prompt('Page name', 'Home'); if (name) void act('Page added', () => generatePage({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Page</button>
-                  {(proj.type === 'express' || proj.type === 'fullstack') && <button onClick={() => { const name = window.prompt('API route name', 'items'); if (name) void act('API route added', () => generateApi({ projectId: proj.id, name, description: '' })); }} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ API</button>}
+                  <button onClick={() => setRenaming({ title: 'Add a component', field: { key: 'name', label: 'Component name', initial: 'Dashboard' }, run: (v) => act('Component added', () => generateComponent({ projectId: proj.id, name: v.name ?? '', description: '' })) })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Component</button>
+                  <button onClick={() => setRenaming({ title: 'Add a page', field: { key: 'name', label: 'Page name', initial: 'Home' }, run: (v) => act('Page added', () => generatePage({ projectId: proj.id, name: v.name ?? '', description: '' })) })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ Page</button>
+                  {(proj.type === 'express' || proj.type === 'fullstack') && <button onClick={() => setRenaming({ title: 'Add an API route', field: { key: 'name', label: 'Route name', initial: 'items' }, run: (v) => act('API route added', () => generateApi({ projectId: proj.id, name: v.name ?? '', description: '' })) })} className="px-3 py-1.5 rounded-lg border border-borderSubtle text-xs hover:border-violet-500/30">+ API</button>}
                 </div>
                 <div className="mt-3 text-[10px] text-textMuted">{proj.files.map((file) => file.path).join(' · ') || 'No files yet'}</div>
                 {proj.lastBuildLog && <pre className="mt-3 max-h-36 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-3 font-mono text-[10px] text-textMuted">{proj.lastBuildLog}</pre>}
@@ -159,6 +162,16 @@ export function AppBuilderView() {
           </div>
         ))}
       </div>
+
+      {renaming && (
+        <InputModal
+          title={renaming.title}
+          fields={[{ ...renaming.field, required: true }]}
+          submitLabel="Add"
+          onSubmit={async (values) => { await renaming.run(values); }}
+          onClose={() => setRenaming(null)}
+        />
+      )}
     </div>
   );
 }

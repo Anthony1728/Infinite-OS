@@ -31,6 +31,7 @@ import { ToastContainer } from './components/notifications/ToastContainer';
 import { StatusBar } from './components/layout/StatusBar';
 import { InfiniteLogo } from './components/brand/InfiniteLogo';
 import { ShortcutsModal } from './components/modals/ShortcutsModal';
+import { QuickCaptureModal } from './components/modals/QuickCaptureModal';
 import { syncActiveModelToMain } from './utils/active-model-sync';
 import { useVoiceSessionStore } from './stores/voice-session';
 import { VoiceHud } from './components/voice/VoiceHud';
@@ -43,19 +44,9 @@ type AuthView = 'login' | 'register';
 const LOCAL_PRIMARY_CANDIDATES = ['minicpm-v4.6:latest', 'qwen3:4b', 'qwen2.5:3b', 'llama3.1:8b', 'mistral:7b'];
 
 async function openQuickCapturePrompt(): Promise<void> {
-  // Native prompt() is the lowest-friction path that needs zero new UI.
-  // The intent is a "drop a thought here in 5 seconds" surface, not a modal.
-  const text = typeof window !== 'undefined' ? window.prompt('Quick Capture — what did you want to remember?') : null;
-  if (!text || !text.trim()) return;
-  const res = (await window.api.quickCaptureAppend({ text: text.trim() })) as
-    | { ok: true; path: string }
-    | { ok: false; error: string };
-  if (!res.ok) {
-    console.warn('[quick-capture] append failed:', res.error);
-    window.alert(`Quick Capture failed: ${res.error}`);
-  } else {
-    window.alert(`Saved to ${res.path}`);
-  }
+  // The on-brand capture sheet lives in QuickCaptureModal; this shim keeps the
+  // old "open capture from anywhere" call sites working (command palette).
+  window.dispatchEvent(new Event('infinite:quick-capture'));
 }
 const LOCAL_PRIMARY_MIGRATION = 'infinite:local-primary-minicpm-v46';
 
@@ -199,6 +190,7 @@ export function App() {
   const [deployOpen, setDeployOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
   const fullscreen = useFullscreenStore((s) => s.fullscreen);
   const [experienceSettingsOpen, setExperienceSettingsOpen] = useState(false);
   const [experienceSettingsSection, setExperienceSettingsSection] = useState<ExperienceSettingsSection>('profile');
@@ -386,9 +378,12 @@ export function App() {
     };
     window.addEventListener('infinite:open-settings', openSettings);
     window.addEventListener('infinite:open-personalization', openPersonalization);
+    const openQuickCapture = () => setQuickCaptureOpen(true);
+    window.addEventListener('infinite:quick-capture', openQuickCapture);
     return () => {
       window.removeEventListener('infinite:open-settings', openSettings);
       window.removeEventListener('infinite:open-personalization', openPersonalization);
+      window.removeEventListener('infinite:quick-capture', openQuickCapture);
     };
   }, []);
 
@@ -423,6 +418,13 @@ export function App() {
         case '/':
           e.preventDefault();
           setShortcutsOpen((o) => !o);
+          break;
+        case 'y':
+          // Quick Capture: the OS-level "remember this" surface.
+          if (e.shiftKey) {
+            e.preventDefault();
+            setQuickCaptureOpen(true);
+          }
           break;
       }
     };
@@ -587,6 +589,7 @@ export function App() {
         : <SettingsModal onClose={() => setSettingsOpen(false)} />)}
       {experienceSettingsOpen && <ExperienceSettingsModal key={experienceSettingsSection} initialSection={experienceSettingsSection} onClose={() => setExperienceSettingsOpen(false)} />}
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <QuickCaptureModal open={quickCaptureOpen} onClose={() => setQuickCaptureOpen(false)} />
       <PermissionDialog />
       <PlanApprovalDialog />
       <ToastContainer />

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BriefcaseBusiness, Code2, FolderOpen, Megaphone, MoreHorizontal, Plus, Search, X } from 'lucide-react';
 import { useNotificationStore } from '../../stores/notifications';
+import { InputModal } from '../modals/InputModal';
 
 type ProjectKind = 'business' | 'software' | 'research' | 'marketing' | 'operations' | 'personal' | 'general';
 type ProjectStatus = 'active' | 'closed';
@@ -206,15 +207,21 @@ export function ProjectsView({ onOpenWorkspace }: { onOpenWorkspace: () => void 
     onOpenWorkspace();
   };
 
-  const renameProject = async (project: ManagedProject) => {
-    const requested = window.prompt('Rename project', project.name)?.trim();
-    if (!requested || requested === project.name) return;
+  // Renaming asks through the shared InputModal (state-driven) instead of the
+  // native prompt — the modal is themed and Enter-to-submit like every other
+  // dialog in the OS.
+  const [renamingProject, setRenamingProject] = useState<ManagedProject | null>(null);
+  const commitRenameProject = async (requested: string) => {
+    const project = renamingProject;
+    if (!project) return;
+    const name = requested.trim();
+    if (!name || name === project.name) return;
     const parent = project.path.replace(/[\\/][^\\/]+[\\/]?$/, '');
-    const newPath = joinPath(parent, safeFolderName(requested));
+    const newPath = joinPath(parent, safeFolderName(name));
     try {
       const result = await window.api.fileRename({ oldPath: project.path, newPath }) as { ok?: boolean; error?: string };
       if (result?.error) throw new Error(result.error);
-      update(project.id, { name: requested, path: newPath });
+      update(project.id, { name, path: newPath });
     } catch (error) { notifyError('Could not rename project', error); }
   };
 
@@ -258,8 +265,19 @@ export function ProjectsView({ onOpenWorkspace }: { onOpenWorkspace: () => void 
         <div className="mb-4 flex items-start gap-3"><div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${kindStyles[project.kind]} shadow-lg`}>{project.kind === 'software' ? <Code2 className="h-5 w-5 text-white" /> : project.kind === 'marketing' ? <Megaphone className="h-5 w-5 text-white" /> : <BriefcaseBusiness className="h-5 w-5 text-white" />}</div><div className="min-w-0 flex-1"><h2 className="truncate font-medium text-white">{project.name}</h2><div className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-600">{kinds.find((kind) => kind.id === project.kind)?.label}</div></div><button onClick={() => setMenuId(menuId === project.id ? null : project.id)} className="rounded p-1 text-zinc-600 hover:bg-white/5 hover:text-zinc-200"><MoreHorizontal className="h-4 w-4" /></button></div>
         <p className="mb-4 line-clamp-2 min-h-10 text-xs leading-5 text-zinc-500">{project.description || 'No description yet.'}</p><div className="mb-4 truncate rounded-lg bg-black/20 px-2.5 py-2 font-mono text-[10px] text-zinc-600" title={project.path}>{project.path}</div>
         <div className="flex gap-2"><button onClick={() => openInWorkspace(project)} className="flex-1 rounded-lg bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300 hover:bg-cyan-500/15">Open in Workspace</button><button onClick={() => void window.api.fileOpen({ path: project.path })} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-zinc-400 hover:text-white">Folder</button></div>
-        {menuId === project.id && <div className="absolute right-4 top-12 z-20 min-w-36 rounded-lg border border-white/10 bg-[#17171d] py-1 shadow-xl"><button onClick={() => { setMenuId(null); void renameProject(project); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">Rename</button><button onClick={() => { setMenuId(null); void moveProject(project); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">Move</button><button onClick={() => { update(project.id, { status: project.status === 'active' ? 'closed' : 'active' }); setMenuId(null); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">{project.status === 'active' ? 'Close project' : 'Reopen project'}</button><div className="mx-2 border-t border-white/10" /><button onClick={() => { if (window.confirm(`Remove “${project.name}” from Projects? Its files will not be deleted.`)) setProjects((items) => items.filter((item) => item.id !== project.id)); }} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-white/5">Remove from list</button></div>}
+        {menuId === project.id && <div className="absolute right-4 top-12 z-20 min-w-36 rounded-lg border border-white/10 bg-[#17171d] py-1 shadow-xl"><button onClick={() => { setMenuId(null); setRenamingProject(project); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">Rename</button><button onClick={() => { setMenuId(null); void moveProject(project); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">Move</button><button onClick={() => { update(project.id, { status: project.status === 'active' ? 'closed' : 'active' }); setMenuId(null); }} className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5">{project.status === 'active' ? 'Close project' : 'Reopen project'}</button><div className="mx-2 border-t border-white/10" /><button onClick={() => { if (window.confirm(`Remove “${project.name}” from Projects? Its files will not be deleted.`)) setProjects((items) => items.filter((item) => item.id !== project.id)); }} className="w-full px-3 py-2 text-left text-xs text-red-400 hover:bg-white/5">Remove from list</button></div>}
       </article>)}</div>}
+
+      {renamingProject && (
+        <InputModal
+          title="Rename project"
+          subtitle="The folder on disk is renamed too — nothing is lost."
+          fields={[{ key: 'name', label: 'Project name', initial: renamingProject.name, required: true }]}
+          submitLabel="Rename"
+          onSubmit={async (values) => { await commitRenameProject(values.name ?? ''); }}
+          onClose={() => setRenamingProject(null)}
+        />
+      )}
     </div>
   );
 }

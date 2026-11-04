@@ -20,6 +20,11 @@ const TEMPLATES: Array<{ id: UITemplate; name: string; description: string; colo
   { id: 'chatgpt', name: 'ChatGPT', description: 'Warm graphite with mint pulse', colors: ['#1a1a1c', '#10a37f', '#212124'] },
   { id: 'zcode', name: 'ZCode', description: 'Cobalt terminal with electric blue', colors: ['#0a1020', '#38bdf8', '#0e1630'] },
   { id: 'matrix', name: 'Matrix', description: 'Phosphor green on near-black', colors: ['#050808', '#00e676', '#0a100e'] },
+  // Otto-inspired skins — ink + one warm/cool signal each.
+  { id: 'shorelight', name: 'Shorelight', description: 'Deep teal ink with a warm gold signal', colors: ['#081a1c', '#fac24c', '#61ccd1'] },
+  { id: 'ringfall', name: 'Ringfall', description: 'Storm-lit navy with electric cyan', colors: ['#06111f', '#4cdbeb', '#0b1a2b'] },
+  { id: 'velvet', name: 'Velvet', description: 'Plum dusk with rose-gold warmth', colors: ['#0e0b11', '#ed99a8', '#1a161d'] },
+  { id: 'graphite', name: 'Graphite', description: 'Quiet neutral for deep focus', colors: ['#0d0d0e', '#85bdfa', '#161617'] },
 ];
 
 const LOGO_STYLES: Array<{ id: LogoStyle; name: string; description: string }> = [

@@ -17,6 +17,7 @@ import { useAgentsStore } from '../../stores/agents';
 import { useBrainStore } from '../../stores/brain';
 import { useAutomationStore } from '../../stores/automation';
 import { useAiTabsStore } from '../../stores/aiTabs';
+import { usePlannerStore, plannerSnapshot } from '../../stores/planner';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
@@ -275,6 +276,8 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   const clearRunResult = useAutomationStore((s) => s.clearRunResult);
   const runWorkflow = useAutomationStore((s) => s.runWorkflow);
   const tabs = useAiTabsStore((s) => s.tabs);
+  const plannerData = usePlannerStore((s) => s.data);
+  const loadPlanner = usePlannerStore((s) => s.load);
   const now = useClock();
 
   const [focusOn, setFocusOn] = useState(() => {
@@ -297,7 +300,9 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   useEffect(() => {
     // Warm automations so recents are real — the Power Center never shows stale zeros.
     void loadWorkflows().catch(() => {});
-  }, [loadWorkflows]);
+    // Warm the planner too — the daily brief reads due/overdue from it.
+    void loadPlanner().catch(() => {});
+  }, [loadWorkflows, loadPlanner]);
 
   // Pointer parallax for the hero mesh + starfield.
   useEffect(() => {
@@ -339,6 +344,34 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   }, [workflows]);
 
   const tip = useMemo(() => TIPS[new Date().getDate() % TIPS.length], []);
+
+  // DAILY BRIEF — the honest "here is your day" snapshot. Everything comes
+  // from real local stores; zeroed rows stay quiet but visible.
+  const planner = useMemo(() => plannerSnapshot(plannerData), [plannerData]);
+  const brief = useMemo(() => ([
+    { id: 'due-today', label: 'Due today', value: planner.dueToday, tone: '#8b5cf6', view: 'planner', icon: 'nav.planner' as AppIconName },
+    { id: 'overdue', label: 'Overdue', value: planner.overdue, tone: '#f2524c', view: 'planner', icon: 'nav.planner' as AppIconName },
+    { id: 'running', label: 'Running now', value: activeRuns, tone: '#22d3ee', view: 'activity', icon: 'automation.pulse' as AppIconName },
+    { id: 'reminders', label: 'Reminders set', value: planner.pendingReminders, tone: '#34d399', view: 'planner', icon: 'home.standing-orders' as AppIconName },
+  ]), [planner.dueToday, planner.overdue, planner.pendingReminders, activeRuns]);
+
+  // GETTING STARTED — ticks itself off as you use the OS (localStorage-backed,
+  // Otto-style: it never nags, it just waits to be completed).
+  const [tourDone, setTourDone] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem('infinite:getting-started') ?? '{}'); } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('infinite:getting-started', JSON.stringify(tourDone)); } catch { /* ignore */ }
+  }, [tourDone]);
+  const tourItems = useMemo(() => ([
+    { id: 'chat', label: 'Send your first message', done: tourDone.chat || sessions.length > 0, view: 'chats', cta: 'Open chat' },
+    { id: 'capture', label: 'Capture a thought (⌘⇧Y)', done: tourDone.capture, event: 'infinite:quick-capture' as const, cta: 'Try it' },
+    { id: 'automate', label: 'Create an automation', done: tourDone.automate || workflows.length > 0, view: 'automations', cta: 'Open Automations' },
+    { id: 'memory', label: 'Meet your memory', done: tourDone.memory, view: 'memory', cta: 'Open Memory' },
+    { id: 'phone', label: 'Pair your phone', done: tourDone.phone, view: 'connectors', cta: 'Open Connectors' },
+  ]), [tourDone, sessions.length, workflows.length]);
+  const tourRemaining = tourItems.filter((t) => !t.done).length;
+  const markTourDone = (id: string) => setTourDone((prev) => ({ ...prev, [id]: true }));
 
   const hero = useMemo(() => creativeGreeting({
     firstName,
@@ -658,6 +691,87 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
             </div>
           </section>
         )}
+        {/* TODAY'S BRIEF — Otto-style: the day at a glance, every number real. */}
+        <section className="mt-4">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="micro-label">Today&apos;s brief</span>
+            <span className="text-[11px] text-zinc-600">{dateLabel}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {brief.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => open(b.view)}
+                className="group flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[#12131a] px-3.5 py-3 text-left transition-all hover:-translate-y-0.5 hover:border-white/[0.14]"
+              >
+                <span
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+                  style={{ background: `${b.tone}1a`, border: `1px solid ${b.tone}30`, color: b.tone }}
+                >
+                  <AppIcon name={b.icon} className="h-4 w-4" strokeWidth={1.8} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[18px] font-semibold leading-6 text-white tabular-nums">{b.value}</span>
+                  <span className="block truncate text-[10.5px] text-zinc-500">{b.label}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* GETTING STARTED — self-checking tour. Hides itself once complete. */}
+        {tourRemaining > 0 && (
+          <section className="mt-4">
+            <div className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-500/[0.08] via-cyan-500/[0.04] to-transparent p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="micro-label text-violet-300/90">Getting started</span>
+                  <span className="rounded-full border border-violet-400/25 bg-violet-500/15 px-2 py-0.5 text-[9px] font-semibold text-violet-200">
+                    {tourItems.length - tourRemaining}/{tourItems.length}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setTourDone(Object.fromEntries(tourItems.map((t) => [t.id, true])))}
+                  className="text-[10.5px] text-zinc-500 transition-colors hover:text-zinc-300"
+                >
+                  Dismiss
+                </button>
+              </div>
+              <div className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                {tourItems.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      if (item.event) {
+                        markTourDone(item.id);
+                        window.dispatchEvent(new Event(item.event));
+                      } else if (item.view) {
+                        markTourDone(item.id);
+                        open(item.view);
+                      }
+                    }}
+                    className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition-all ${
+                      item.done
+                        ? 'border-emerald-500/15 bg-emerald-500/[0.06]'
+                        : 'border-white/[0.07] bg-white/[0.03] hover:border-violet-400/30 hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border ${
+                      item.done ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-300' : 'border-white/15 text-transparent'
+                    }`}>
+                      <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                      </svg>
+                    </span>
+                    <span className={`flex-1 truncate text-[11.5px] ${item.done ? 'text-zinc-500 line-through' : 'text-zinc-200'}`}>{item.label}</span>
+                    {!item.done && <span className="shrink-0 text-[10px] text-violet-300/80">{item.cta} →</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="mt-8 grid items-start gap-4 lg:grid-cols-[1.35fr_0.9fr]">
           <div className="rounded-2xl border border-white/[0.07] bg-[#12131a] p-4">
             <div className="flex items-center justify-between">
