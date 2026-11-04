@@ -11,32 +11,33 @@ Thanks for taking the time to improve Infinite OS. This guide covers the local w
 ## Development setup
 
 ```bash
+corepack enable
 git clone https://github.com/Anthony5109/Infinite-OS.git
 cd Infinite-OS
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
-Node.js 20 or newer is required. The browser bridge is optional for most work; see the README for setup.
+Node.js 20.19 or newer is required. The browser bridge is optional for most work; see the README for setup.
 
 ## What to run before opening a pull request
 
 ```bash
-npm run typecheck   # main, renderer, and e2e TypeScript projects
-npm test            # Vitest unit and integration tests
-npm run build       # production bundle
+pnpm run typecheck   # main, renderer, and e2e TypeScript projects
+pnpm test            # Vitest unit and integration tests
+pnpm run build       # production bundle
 ```
 
 For changes that touch the browser bridge or desktop automation, also run the relevant Playwright suite:
 
 ```bash
-npm run test:e2e
+pnpm run test:e2e
 ```
 
 Live network tests are opt-in and should stay that way:
 
 ```bash
-INFINITE_LIVE=1 npm test -- src/main/bridge/live-web.test.ts
+INFINITE_LIVE=1 pnpm exec vitest run src/main/bridge/live-web.test.ts
 ```
 
 ## Code style
@@ -45,7 +46,7 @@ INFINITE_LIVE=1 npm test -- src/main/bridge/live-web.test.ts
 - Follow the existing structure: main-process code in `src/main`, renderer code in `src/renderer`, shared contracts in `src/shared`.
 - Keep privileged operations in the main process behind typed IPC handlers. Do not give the renderer direct Node.js access.
 - Use the existing tool registry and safety checks for new agent capabilities.
-- Run `npm run format` for touched files, and keep diffs focused.
+- Run `pnpm run format` for touched files, and keep diffs focused.
 
 ## Tests
 
