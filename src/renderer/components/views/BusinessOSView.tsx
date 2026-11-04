@@ -6,6 +6,7 @@ import {
   BarChart3, ArrowUpRight, Calendar,
   Trash2, StickyNote
 } from 'lucide-react';
+import { InputModal, type InputModalField } from '../modals/InputModal';
 
 type Tab = 'overview' | 'crm' | 'leads' | 'email' | 'analytics' | 'tasks' | 'invoices';
 
@@ -213,13 +214,30 @@ export function BusinessOSView() {
   }, []);
 
   /** Add a note to a record's history — the same action the agent has. */
-  const addNoteFor = async (entityId: string, entityName: string) => {
-    const text = window.prompt(`Add a note about ${entityName}`);
-    if (!text?.trim()) return;
-    await window.api.businessAddNote({ text: text.trim(), entityId, entityName });
-    loadContactDetail(entityId);
-    loadActivity();
+  const addNoteFor = (entityId: string, entityName: string) => {
+    setFormModal({
+      title: `Add a note about ${entityName}`,
+      fields: [{ key: 'text', label: 'Note', placeholder: 'What should be remembered about them?', multiline: true }],
+      submitLabel: 'Add note',
+      run: async (values) => {
+        const text = values.text?.trim();
+        if (!text) return;
+        await window.api.businessAddNote({ text, entityId, entityName });
+        loadContactDetail(entityId);
+        loadActivity();
+      },
+    });
   };
+
+  // The one shared prompted-form — replaces the chained window.prompt calls
+  // the old edit flows used (native prompts were unthemed and blocked paint).
+  const [formModal, setFormModal] = useState<{
+    title: string;
+    subtitle?: string;
+    fields: InputModalField[];
+    submitLabel?: string;
+    run: (values: Record<string, string>) => Promise<void>;
+  } | null>(null);
 
   const [dealDragId, setDealDragId] = useState<string | null>(null);
   const [showAddDeal, setShowAddDeal] = useState(false);
@@ -483,39 +501,40 @@ export function BusinessOSView() {
  * fact to the screen and to the agent. A save that changes nothing is not
  * written, which keeps the activity history free of no-op entries.
  */
-const editTask = async (id: string) => {
+const editTask = (id: string) => {
   const task = tasks.find(t => t.id === id);
   if (!task) return;
-  const title = window.prompt('Task title', task.title);
-  if (title === null) return;
-  const trimmed = title.trim();
-  if (!trimmed) {
-    setError('A task needs a title.');
-    return;
-  }
-  const due = window.prompt('Due date (YYYY-MM-DD, or blank for none)', task.dueDate?.slice(0, 10) ?? '');
-  if (due === null) return;
-  const assignee = window.prompt('Assigned to (or blank for unassigned)', task.assignee ?? '');
-  if (assignee === null) return;
-  const priority = window.prompt('Priority: low, normal or high', task.priority);
-  if (priority === null) return;
+  setFormModal({
+    title: 'Edit task',
+    subtitle: task.title,
+    fields: [
+      { key: 'title', label: 'Title', initial: task.title, required: true },
+      { key: 'due', label: 'Due date (YYYY-MM-DD, blank for none)', initial: task.dueDate?.slice(0, 10) ?? '' },
+      { key: 'assignee', label: 'Assigned to', initial: task.assignee ?? '' },
+      { key: 'priority', label: 'Priority — low, normal or high', initial: task.priority },
+    ],
+    submitLabel: 'Save task',
+    run: async (values) => {
+      const trimmed = values.title?.trim() ?? '';
+      if (!trimmed) { setError('A task needs a title.'); return; }
+      const priority = (['low', 'normal', 'high'] as const).find(p => p === (values.priority ?? '').trim().toLowerCase())
+        ?? task.priority;
+      const trimmedDue = (values.due ?? '').trim();
+      const updates: Record<string, unknown> = { title: trimmed, priority };
+      updates.assignee = (values.assignee ?? '').trim();
+      updates.dueDate = trimmedDue ? new Date(trimmedDue).toISOString() : undefined;
 
-  const nextPriority = (['low', 'normal', 'high'] as const).find(p => p === priority.trim().toLowerCase())
-    ?? task.priority;
-  const trimmedDue = due.trim();
-  const updates: Record<string, unknown> = { title: trimmed, priority: nextPriority };
-  updates.assignee = assignee.trim();
-  updates.dueDate = trimmedDue ? new Date(trimmedDue).toISOString() : undefined;
-
-  try {
-    const saved = await window.api.businessUpdateTask({ id, updates });
-    if (saved && typeof saved === 'object' && 'id' in saved) {
-      setTasks(prev => prev.map(t => (t.id === id ? (saved as Task) : t)));
-    }
-    addActivity(`Task updated: ${trimmed}`, 'task');
-  } catch {
-    setError('Could not save that change. Nothing was changed.');
-  }
+      try {
+        const saved = await window.api.businessUpdateTask({ id, updates });
+        if (saved && typeof saved === 'object' && 'id' in saved) {
+          setTasks(prev => prev.map(t => (t.id === id ? (saved as Task) : t)));
+        }
+        addActivity(`Task updated: ${trimmed}`, 'task');
+      } catch {
+        setError('Could not save that change. Nothing was changed.');
+      }
+    },
+  });
 };
 
 /** Delete a task, after asking — it cannot be undone from here. */
@@ -643,50 +662,53 @@ const toggleTask = (id: string) => {
       setLeads(prev => prev.filter(l => l.id !== id)));
 
   /**
-   * Edit a contact's details.
+   * Edit a contact's details in one themed form.
    *
-   * Asks for every field rather than opening a modal, matching how the rest of
-   * this screen edits in place. A cancelled prompt changes nothing, and the
-   * store's copy is what lands on screen, so the id is always the real one.
+   * Every field is prefilled and submitted together — a cancelled modal changes
+   * nothing, and the store's copy is what lands on screen, so the id is always
+   * the real one.
    */
-  const editContact = async (contact: Contact) => {
-    const name = window.prompt('Name', contact.name);
-    if (name === null) return;
-    if (!name.trim()) { setError('A contact needs a name.'); return; }
-    const email = window.prompt('Email', contact.email);
-    if (email === null) return;
-    const phone = window.prompt('Phone', contact.phone);
-    if (phone === null) return;
-    const company = window.prompt('Company', contact.company);
-    if (company === null) return;
-    const tags = window.prompt('Tags, comma separated', contact.tags.join(', '));
-    if (tags === null) return;
-    const notes = window.prompt('Notes', contact.notes);
-    if (notes === null) return;
-
-    try {
-      const updated = await api.updateContact(contact.id, {
-        name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        company: company.trim(),
-        // Split here rather than in the store, so the same string the tags were
-        // displayed as is what gets stored — "vip, wholesale" and
-        // ["vip","wholesale"] cannot disagree.
-        tags: tags.split(',').map(t => t.trim()).filter(Boolean),
-        notes: notes.trim(),
-      });
-      if (updated && typeof updated === 'object' && 'id' in updated) {
-        const saved = updated as Contact;
-        setContacts(prev => prev.map(c => (c.id === saved.id ? saved : c)));
-        setSelectedContact(saved);
-        loadContactDetail(saved.id);
-      }
-      setError('');
-      loadActivity();
-    } catch (e) {
-      setError(`Could not save that contact: ${e instanceof Error ? e.message : String(e)}. Nothing was changed.`);
-    }
+  const editContact = (contact: Contact) => {
+    setFormModal({
+      title: 'Edit contact',
+      subtitle: contact.name,
+      fields: [
+        { key: 'name', label: 'Name', initial: contact.name, required: true },
+        { key: 'email', label: 'Email', initial: contact.email },
+        { key: 'phone', label: 'Phone', initial: contact.phone },
+        { key: 'company', label: 'Company', initial: contact.company },
+        { key: 'tags', label: 'Tags, comma separated', initial: contact.tags.join(', ') },
+        { key: 'notes', label: 'Notes', initial: contact.notes, multiline: true },
+      ],
+      submitLabel: 'Save contact',
+      run: async (values) => {
+        const name = (values.name ?? '').trim();
+        if (!name) { setError('A contact needs a name.'); return; }
+        try {
+          const updated = await api.updateContact(contact.id, {
+            name,
+            email: (values.email ?? '').trim(),
+            phone: (values.phone ?? '').trim(),
+            company: (values.company ?? '').trim(),
+            // Split here rather than in the store, so the same string the tags
+            // were displayed as is what gets stored — "vip, wholesale" and
+            // ["vip","wholesale"] cannot disagree.
+            tags: (values.tags ?? '').split(',').map(t => t.trim()).filter(Boolean),
+            notes: (values.notes ?? '').trim(),
+          });
+          if (updated && typeof updated === 'object' && 'id' in updated) {
+            const saved = updated as Contact;
+            setContacts(prev => prev.map(c => (c.id === saved.id ? saved : c)));
+            setSelectedContact(saved);
+            loadContactDetail(saved.id);
+          }
+          setError('');
+          loadActivity();
+        } catch (e) {
+          setError(`Could not save that contact: ${e instanceof Error ? e.message : String(e)}. Nothing was changed.`);
+        }
+      },
+    });
   };
 
   /**
@@ -1828,6 +1850,17 @@ const toggleTask = (id: string) => {
             </div>
           </div>
         )}
+
+      {formModal && (
+        <InputModal
+          title={formModal.title}
+          subtitle={formModal.subtitle}
+          fields={formModal.fields}
+          submitLabel={formModal.submitLabel}
+          onSubmit={formModal.run}
+          onClose={() => setFormModal(null)}
+        />
+      )}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StudioItem } from '../../../shared/studio';
 import { useStudioStore } from '../../stores/studio';
 import { StudioIcon, type StudioIconName } from './Icons';
+import { InputModal } from '../modals/InputModal';
 import type { DocumentApplyDetail } from './studioUtils';
 import './studio.css';
 
@@ -227,23 +228,39 @@ export function DocumentEditor({ item }: DocumentEditorProps) {
     sync();
   };
 
-  const addLink = () => {
+  // Link insertion asks through the shared InputModal — the native prompt was
+  // unthemed and blocked the whole renderer.
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const pendingSelectionRef = useRef<{ text: string; collapsed: boolean } | null>(null);
+
+  const beginAddLink = () => {
     const editor = editorRef.current;
     if (!editor) return;
     const selection = window.getSelection();
-    const selected = selection?.toString() ?? '';
-    const url = window.prompt('Link URL', selected.startsWith('http') ? selected : 'https://');
-    if (!url) return;
+    pendingSelectionRef.current = {
+      text: selection?.toString() ?? '',
+      collapsed: !selection || selection.isCollapsed,
+    };
+    setLinkModalOpen(true);
+  };
+
+  const commitLink = (url: string) => {
+    const editor = editorRef.current;
+    const pending = pendingSelectionRef.current;
+    if (!editor || !pending) return;
     if (!/^https?:\/\//i.test(url)) {
-      window.alert('Links must start with http:// or https://');
+      setLinkError('Links must start with http:// or https://');
+      setLinkModalOpen(true);
       return;
     }
     editor.focus();
-    if (selection?.isCollapsed) {
+    if (pending.collapsed) {
       document.execCommand('insertHTML', false, `<a href="${url.replace(/"/g, '&quot;')}">${url}</a>`);
     } else {
       document.execCommand('createLink', false, url);
     }
+    pendingSelectionRef.current = null;
     sync();
   };
 
@@ -270,7 +287,7 @@ export function DocumentEditor({ item }: DocumentEditorProps) {
           type="button"
           title="Insert link"
           onMouseDown={(event) => event.preventDefault()}
-          onClick={addLink}
+          onClick={beginAddLink}
           className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
         >
           <StudioIcon name="link" />
@@ -330,6 +347,21 @@ export function DocumentEditor({ item }: DocumentEditorProps) {
           <div className="h-24" />
         </div>
       </div>
+      {linkModalOpen && (
+        <InputModal
+          title="Insert link"
+          subtitle={pendingSelectionRef.current?.text ? `Link text: “${pendingSelectionRef.current.text.slice(0, 60)}”` : 'The link is inserted as text.'}
+          fields={[{ key: 'url', label: 'URL', initial: 'https://', type: 'url', required: true }]}
+          submitLabel="Insert"
+          onSubmit={async (values) => { setLinkError(''); commitLink((values.url ?? '').trim()); }}
+          onClose={() => { setLinkError(''); setLinkModalOpen(false); }}
+        />
+      )}
+      {linkError && linkModalOpen === false && (
+        <div className="fixed bottom-14 left-1/2 z-[95] -translate-x-1/2 rounded-lg border border-red-400/25 bg-red-500/15 px-3 py-1.5 text-[11px] text-red-200 shadow-xl">
+          {linkError}
+        </div>
+      )}
     </div>
   );
 }
