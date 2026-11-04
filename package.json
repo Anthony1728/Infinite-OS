@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "main": "out/main/index.js",
-  "description": "A local-first AI operating workspace for chat, code, browser and PC automation, builders, and business tools.",
+  "description": "A local-first AI operating workspace for chat, code, browser and PC automation, builders, and everyday work.",
   "author": "Anthony Matthews",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -16,8 +16,9 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   },
+  "packageManager": "pnpm@11.5.2",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "npm run typecheck && electron-vite build",

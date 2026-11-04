@@ -65,12 +65,12 @@ jobs:
       run: pnpm install --frozen-lockfile
 
     - name: Install Playwright system dependencies
-      run: npx playwright install-deps chromium
+      run: pnpm exec playwright install-deps chromium
 
     # Electron has no headless mode on CI: run under a virtual display.
-    # `npm run test:e2e` builds first (pretest:e2e), so a broken build fails here.
+    # `pnpm run test:e2e` builds first (pretest:e2e), so a broken build fails here.
     - name: Boot smoke test
-      run: xvfb-run -a npm run test:e2e
+      run: xvfb-run -a pnpm run test:e2e
 
   windows-build:
     runs-on: windows-latest

@@ -41,8 +41,8 @@ The app is built with **Electron, React, TypeScript, and Vite**. A Manifest V3 b
 
 | Requirement | Details |
 | --- | --- |
-| Node.js | 20 or newer |
-| Package manager | npm, pnpm, or Bun |
+| Node.js | 20.19 or newer |
+| Package manager | pnpm 11 (enable with `corepack enable`) |
 | OS | Windows 10/11, macOS, or Linux |
 | Browser | Chrome or Edge for the optional browser bridge |
 | Local models | Optional. [Ollama](https://ollama.com) is detected automatically. |
@@ -50,24 +50,25 @@ The app is built with **Electron, React, TypeScript, and Vite**. A Manifest V3 b
 ## Quick start
 
 ```bash
+corepack enable
 git clone https://github.com/Anthony5109/Infinite-OS.git
 cd Infinite-OS
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
-`npm run dev` starts Electron with Vite hot reload.
+`pnpm run dev` starts Electron with Vite hot reload.
 
 ### Useful commands
 
 ```bash
-npm run typecheck     # TypeScript checks for main, renderer, and e2e
-npm test              # Vitest unit and integration suite
-npm run test:e2e      # Playwright end-to-end suite (builds first)
-npm run build         # Typecheck and production bundle
-npm run build:win     # Windows installer and portable build
-npm run build:mac     # macOS DMG
-npm run build:linux   # Linux AppImage
+pnpm run typecheck     # TypeScript checks for main, renderer, and e2e
+pnpm test              # Vitest unit and integration suite
+pnpm run test:e2e      # Playwright end-to-end suite (builds first)
+pnpm run build         # Typecheck and production bundle
+pnpm run build:win     # Windows installer and portable build
+pnpm run build:mac     # macOS DMG
+pnpm run build:linux   # Linux AppImage
 ```
 
 ## Browser bridge
@@ -115,7 +116,11 @@ The renderer never receives Node.js access directly. All privileged work goes th
 The project uses Vitest for unit and integration tests and Playwright for end-to-end tests. Live browser tests are opt-in and hit the real network:
 
 ```bash
-INFINITE_LIVE=1 npm test -- src/main/bridge/live-web.test.ts
+# macOS / Linux
+INFINITE_LIVE=1 pnpm exec vitest run src/main/bridge/live-web.test.ts
+
+# Windows PowerShell
+$env:INFINITE_LIVE='1'; pnpm exec vitest run src/main/bridge/live-web.test.ts
 ```
 
 Normal test runs use isolated temporary homes and stubs, so they do not read or modify your real `~/.infinite-ai` data.
@@ -125,9 +130,9 @@ Normal test runs use isolated temporary homes and stubs, so they do not read or 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request, and run the checks below first:
 
 ```bash
-npm run typecheck
-npm test
-npm run build
+pnpm run typecheck
+pnpm test
+pnpm run build
 ```
 
 By contributing you agree that your contribution is licensed to the project as described in the [LICENSE](LICENSE).
