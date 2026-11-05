@@ -21,6 +21,7 @@ import { usePlannerStore, plannerSnapshot } from '../../stores/planner';
 import { useWatchdogStore, type WatchdogFinding } from '../../stores/watchdog';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
+import { AutomationReviewCard } from '../automation/AutomationReviewCard';
 import { creativeGreeting, dayOfYearSeed } from '../../lib/greeting';
 
 interface PowerCenterViewProps {
@@ -279,6 +280,9 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   const lastRun = useAutomationStore((s) => s.lastRun);
   const clearRunResult = useAutomationStore((s) => s.clearRunResult);
   const runWorkflow = useAutomationStore((s) => s.runWorkflow);
+  const pendingApprovals = useAutomationStore((s) => s.pendingApprovals);
+  const loadPendingApprovals = useAutomationStore((s) => s.loadPendingApprovals);
+  const initRunListener = useAutomationStore((s) => s.initRunListener);
   const tabs = useAiTabsStore((s) => s.tabs);
   const plannerData = usePlannerStore((s) => s.data);
   const loadPlanner = usePlannerStore((s) => s.load);
@@ -304,9 +308,13 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   useEffect(() => {
     // Warm automations so recents are real — the Power Center never shows stale zeros.
     void loadWorkflows().catch(() => {});
+    // Approvals can arrive from the scheduler without this view ever mounting,
+    // so subscribe here too and reload anything already waiting.
+    initRunListener();
+    void loadPendingApprovals().catch(() => {});
     // Warm the planner too — the daily brief reads due/overdue from it.
     void loadPlanner().catch(() => {});
-  }, [loadWorkflows, loadPlanner]);
+  }, [loadWorkflows, loadPlanner, initRunListener, loadPendingApprovals]);
 
   // Pointer parallax for the hero mesh + starfield.
   useEffect(() => {
@@ -646,13 +654,13 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
             blocked approvals, failed automations, and watchdog findings
             (agents that look stuck, loop, or have waited on you too long).
             The watchdog never stops anything — the person decides. */}
-        {(pendingPermission || lastRun?.status === 'failed' || watchdogFindings.length > 0) && (
+        {(pendingApprovals.length > 0 || pendingPermission || lastRun?.status === 'failed' || watchdogFindings.length > 0) && (
           <section className="mt-4">
             <div className="mb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-[0.18em] text-amber-300/90">Needs you</span>
                 <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-200">
-                  {(pendingPermission ? 1 : 0) + (lastRun?.status === 'failed' ? 1 : 0) + watchdogFindings.length}
+                  {pendingApprovals.length + (pendingPermission ? 1 : 0) + (lastRun?.status === 'failed' ? 1 : 0) + watchdogFindings.length}
                 </span>
               </div>
               {lastRun?.status === 'failed' && (
@@ -660,6 +668,13 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
               )}
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
+              {pendingApprovals.map((approval) => (
+                <AutomationReviewCard
+                  key={approval.id}
+                  approval={approval}
+                  onOpenAutomations={() => onViewChange('automations')}
+                />
+              ))}
               {pendingPermission && (
                 <div className="relative rounded-2xl border border-white/[0.07] bg-[#12131a]/90 p-4">
                   <div className="absolute inset-y-4 left-0 w-0.5 rounded-full bg-amber-400/80" />

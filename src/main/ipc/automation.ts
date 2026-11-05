@@ -87,5 +87,18 @@ export function registerAutomationIpc(getMainWindow?: () => Electron.BrowserWind
     if (!trigger) return { error: `Could not parse schedule "${naturalLanguage}". Try "at 5am", "tomorrow at 4pm", or "every 2 hours".` };
     return automationBuilder.createWorkflow({ name, description, trigger, actions });
   });
+
+  // Blocking approvals: a gated step parks in main until a person answers.
+  ipcMain.handle(IPC.AUTOMATION_GET_PENDING_APPROVALS, async () => {
+    return automationBuilder.listPendingApprovals();
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_APPROVE_ACTION, async (_e, { approvalId, approve }) => {
+    return automationBuilder.approveAction(approvalId, approve === true);
+  });
+
+  ipcMain.handle(IPC.AUTOMATION_COMMENT_ACTION, async (_e, { approvalId, comment }) => {
+    return automationBuilder.commentAction(approvalId, String(comment ?? ''));
+  });
 }
 

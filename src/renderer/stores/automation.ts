@@ -6,10 +6,28 @@ export interface AutomationWorkflow {
   description: string;
   enabled: boolean;
   trigger: { type: string; config: unknown };
-  actions: { id?: string; type: string; config: unknown }[];
+  actions: { id?: string; type: string; config: unknown; approvalRequired?: boolean }[];
   runs: number;
   lastRun?: number;
   createdAt: number;
+}
+
+/** A step draft waiting on a person. Mirrors PendingApproval in the main process. */
+export interface AutomationApproval {
+  id: string;
+  runId: string;
+  workflowId: string;
+  workflowName: string;
+  actionId: string;
+  actionType: string;
+  actionIndex: number;
+  draft: string;
+  /** What runs after approval, shown as the card's "then" line. */
+  afterApproval?: string;
+  createdAt: number;
+  /** 'revising' while the agent reworks the draft from a comment. */
+  status?: 'pending' | 'revising';
+  comment?: string;
 }
 
 export interface AutomationTemplate {
@@ -39,7 +57,16 @@ export interface AutomationRunResult {
 }
 
 export interface AutomationRunEvent {
-  type: 'run_started' | 'action_started' | 'action_progress' | 'action_completed' | 'action_failed' | 'run_completed';
+  type:
+    | 'run_started'
+    | 'action_started'
+    | 'action_progress'
+    | 'action_completed'
+    | 'action_failed'
+    | 'approval_requested'
+    | 'approval_updated'
+    | 'approval_resolved'
+    | 'run_completed';
   runId: string;
   workflowId: string;
   workflowName: string;
@@ -50,6 +77,8 @@ export interface AutomationRunEvent {
   message: string;
   result?: string;
   status?: AutomationRunResult['status'];
+  approval?: AutomationApproval;
+  approvalId?: string;
   timestamp: number;
 }
 
@@ -88,6 +117,7 @@ interface AutomationState {
   stats: AutomationStats | null;
   activeRun: ActiveAutomationRun | null;
   lastRun: ActiveAutomationRun | null;
+  pendingApprovals: AutomationApproval[];
   loading: boolean;
   schedulerStatus: SchedulerStatus | null;
   nextRuns: Record<string, string>;
@@ -96,6 +126,11 @@ interface AutomationState {
   loadTemplates: () => Promise<void>;
   loadStats: () => Promise<void>;
   loadScheduler: () => Promise<void>;
+  /** Reload approvals left waiting in the main process (window reload, etc.). */
+  loadPendingApprovals: () => Promise<void>;
+  approveAutomation: (approvalId: string) => Promise<void>;
+  commentAutomation: (approvalId: string, comment: string) => Promise<void>;
+  rejectAutomation: (approvalId: string) => Promise<void>;
   setKeepAwake: (enabled: boolean) => Promise<void>;
   createWorkflow: (workflow: { name: string; description: string; trigger: unknown; actions: unknown[] }) => Promise<void>;
   runWorkflow: (id: string) => Promise<AutomationRunResult>;
@@ -111,6 +146,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
   stats: null,
   activeRun: null,
   lastRun: null,
+  pendingApprovals: [],
   loading: false,
   schedulerStatus: null,
   nextRuns: {},
@@ -122,6 +158,22 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     window.api.onAutomationRunEvent((payload: unknown) => {
       const event = payload as AutomationRunEvent;
       set((state) => {
+        // Approval events are the source of truth for the review cards. The
+        // builder emits them for manual and scheduled runs alike, so a card
+        // can appear on Home without the automations view being open.
+        let pendingApprovals = state.pendingApprovals;
+        if ((event.type === 'approval_requested' || event.type === 'approval_updated') && event.approval) {
+          const incoming = event.approval;
+          pendingApprovals = pendingApprovals.some((item) => item.id === incoming.id)
+            ? pendingApprovals.map((item) => (item.id === incoming.id ? incoming : item))
+            : [incoming, ...pendingApprovals];
+        } else if (event.type === 'approval_resolved' && event.approvalId) {
+          pendingApprovals = pendingApprovals.filter((item) => item.id !== event.approvalId);
+        }
+        if (event.type === 'run_completed') {
+          pendingApprovals = pendingApprovals.filter((item) => item.runId !== event.runId);
+        }
+
         const existing = state.activeRun?.workflowId === event.workflowId ? state.activeRun : null;
         const run: ActiveAutomationRun = existing ?? {
           runId: event.runId,
@@ -150,7 +202,9 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
           result: event.type === 'run_completed' && event.status === 'completed' ? event.message : run.result,
           error: event.type === 'run_completed' && event.status === 'failed' ? event.result : run.error,
         };
-        return event.type === 'run_completed' ? { activeRun: null, lastRun: next } : { activeRun: next };
+        return event.type === 'run_completed'
+          ? { activeRun: null, lastRun: next, pendingApprovals }
+          : { activeRun: next, pendingApprovals };
       });
     });
   },
@@ -185,6 +239,36 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
       ]);
       set({ schedulerStatus, nextRuns });
     } catch { /* silent */ }
+  },
+
+  loadPendingApprovals: async () => {
+    try {
+      const pendingApprovals = await window.api.automationGetPendingApprovals() as AutomationApproval[];
+      set({ pendingApprovals });
+    } catch { /* silent */ }
+  },
+
+  approveAutomation: async (approvalId) => {
+    const result = await window.api.automationApproveAction({ approvalId, approve: true }) as { ok: boolean; error?: string };
+    if (!result?.ok) throw new Error(result?.error ?? 'Could not approve this action.');
+    set((s) => ({ pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId) }));
+  },
+
+  commentAutomation: async (approvalId, comment) => {
+    const result = await window.api.automationCommentAction({ approvalId, comment }) as { ok: boolean; error?: string };
+    if (!result?.ok) throw new Error(result?.error ?? 'Could not send this comment.');
+    // The approval stays pending; the run is revising and will re-emit it.
+    set((s) => ({
+      pendingApprovals: s.pendingApprovals.map((a) => (
+        a.id === approvalId ? { ...a, status: 'revising', comment } : a
+      )),
+    }));
+  },
+
+  rejectAutomation: async (approvalId) => {
+    const result = await window.api.automationApproveAction({ approvalId, approve: false }) as { ok: boolean; error?: string };
+    if (!result?.ok) throw new Error(result?.error ?? 'Could not reject this action.');
+    set((s) => ({ pendingApprovals: s.pendingApprovals.filter((a) => a.id !== approvalId) }));
   },
 
   setKeepAwake: async (enabled) => {
@@ -252,4 +336,3 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     await get().loadScheduler();
   },
 }));
-

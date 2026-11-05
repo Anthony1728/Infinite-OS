@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import type { ProviderInfo } from '../../../shared/types';
 import { useAutomationStore } from '../../../renderer/stores/automation';
 import { useNotificationStore } from '../../../renderer/stores/notifications';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
+import { AutomationReviewCard } from '../automation/AutomationReviewCard';
 
 const ACTION_TYPES: { type: string; label: string; desc: string; icon: AppIconName }[] = [
   { type: 'agent_run', label: 'AI Task', desc: 'Send a task to the AI agent', icon: 'home.agents' },
@@ -9,6 +11,46 @@ const ACTION_TYPES: { type: string; label: string; desc: string; icon: AppIconNa
   { type: 'notify', label: 'Notification', desc: 'Send a notification', icon: 'automation.notify' },
   { type: 'script', label: 'Script', desc: 'Run a script', icon: 'automation.script' },
 ];
+
+interface DraftStep {
+  id: string;
+  type: string;
+  task: string;
+  provider: string;
+  model: string;
+  approvalRequired: boolean;
+  afterApproval: string;
+  onError: 'stop' | 'continue' | 'retry';
+}
+
+/** The model currently picked in Settings, used as each new step's default. */
+function activeModelDefaults(): { provider: string; model: string } {
+  try {
+    const raw = localStorage.getItem('infinite:current');
+    if (raw) {
+      const current = JSON.parse(raw) as { provider?: string; model?: string };
+      return {
+        provider: (current.provider === 'local' ? 'ollama' : current.provider) ?? '',
+        model: current.model ?? '',
+      };
+    }
+  } catch { /* fall through to an empty explicit choice */ }
+  return { provider: '', model: '' };
+}
+
+function makeStep(type = 'agent_run'): DraftStep {
+  const defaults = activeModelDefaults();
+  return {
+    id: crypto.randomUUID(),
+    type,
+    task: '',
+    provider: defaults.provider,
+    model: defaults.model,
+    approvalRequired: false,
+    afterApproval: '',
+    onError: 'stop',
+  };
+}
 
 const TRIGGER_TYPES: { type: string; label: string }[] = [
   { type: 'manual', label: 'Manual' },
@@ -37,24 +79,30 @@ function describeNextRun(iso?: string): string {
 
 export function AutomationView() {
   const { workflows, templates, stats, loading, activeRun, lastRun, schedulerStatus, nextRuns,
-    initRunListener, clearRunResult, loadWorkflows, loadTemplates, loadStats, loadScheduler, setKeepAwake,
-    createWorkflow, runWorkflow, enableWorkflow, disableWorkflow, deleteWorkflow } = useAutomationStore();
+    pendingApprovals, initRunListener, clearRunResult, loadWorkflows, loadTemplates, loadStats, loadScheduler,
+    loadPendingApprovals, setKeepAwake, createWorkflow, runWorkflow, enableWorkflow, disableWorkflow, deleteWorkflow } = useAutomationStore();
   const addToast = useNotificationStore((s) => s.addToast);
   const [showCreate, setShowCreate] = useState<null | 'schedule' | 'idle'>(null);
   const [keepAwakePending, setKeepAwakePending] = useState(false);
-  const [newWorkflow, setNewWorkflow] = useState({
-    name: '', description: '', triggerType: 'manual', actionType: 'agent_run',
-    task: '', cron: '', intervalHours: 6, onceTime: '', idleMinutes: 15,
-  });
+  const [newWorkflow, setNewWorkflow] = useState(() => ({
+    name: '', description: '', triggerType: 'manual',
+    cron: '', intervalHours: 6, onceTime: '', idleMinutes: 15,
+    steps: [makeStep('agent_run')] as DraftStep[],
+  }));
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     initRunListener();
-    loadWorkflows();
-    loadTemplates();
-    loadStats();
-    loadScheduler();
-  }, [initRunListener, loadWorkflows, loadTemplates, loadStats, loadScheduler]);
+    void loadWorkflows();
+    void loadTemplates();
+    void loadStats();
+    void loadScheduler();
+    void loadPendingApprovals();
+    void window.api.listProviders()
+      .then((list: unknown) => setProviders(list as ProviderInfo[]))
+      .catch(() => undefined);
+  }, [initRunListener, loadWorkflows, loadTemplates, loadStats, loadScheduler, loadPendingApprovals]);
 
   // Keep "next run" labels honest while the page is open.
   useEffect(() => {
@@ -83,23 +131,64 @@ export function AutomationView() {
 
   const closeCreate = () => {
     setShowCreate(null);
-    setNewWorkflow({ name: '', description: '', triggerType: 'manual', actionType: 'agent_run', task: '', cron: '', intervalHours: 6, onceTime: '', idleMinutes: 15 });
+    setNewWorkflow({ name: '', description: '', triggerType: 'manual', cron: '', intervalHours: 6, onceTime: '', idleMinutes: 15, steps: [makeStep('agent_run')] });
+  };
+
+  const updateStep = (id: string, patch: Partial<DraftStep>) => {
+    setNewWorkflow((previous) => ({
+      ...previous,
+      steps: previous.steps.map((step) => (step.id === id ? { ...step, ...patch } : step)),
+    }));
+  };
+
+  const addStep = () => {
+    setNewWorkflow((previous) => ({ ...previous, steps: [...previous.steps, makeStep('agent_run')] }));
+  };
+
+  const removeStep = (id: string) => {
+    setNewWorkflow((previous) => ({
+      ...previous,
+      steps: previous.steps.length === 1 ? previous.steps : previous.steps.filter((step) => step.id !== id),
+    }));
+  };
+
+  const stepIsReady = (step: DraftStep) => {
+    if (!step.task.trim()) return false;
+    if (step.type === 'agent_run' && (!step.provider.trim() || !step.model.trim())) return false;
+    return true;
   };
 
   const handleCreate = async (kind: 'schedule' | 'idle') => {
-    if (!newWorkflow.name.trim()) return;
-    const taskText = newWorkflow.task || newWorkflow.description || newWorkflow.name;
-    const actionConfig: Record<string, Record<string, unknown>> = {
-      agent_run: { agent: 'general', task: taskText },
-      tool_call: { tool: 'bash', command: taskText },
-      notify: { message: taskText },
-      script: { script: taskText },
-    };
+    if (!newWorkflow.name.trim() || !newWorkflow.steps.every(stepIsReady)) return;
+    const actions = newWorkflow.steps.map((step) => {
+      const taskText = step.task.trim();
+      const config: Record<string, unknown> = step.type === 'agent_run'
+        ? {
+            agent: 'general',
+            task: taskText,
+            provider: step.provider.trim(),
+            model: step.model.trim(),
+            approvalRequired: step.approvalRequired,
+            ...(step.afterApproval.trim() ? { afterApproval: step.afterApproval.trim() } : {}),
+          }
+        : step.type === 'tool_call'
+          ? { tool: 'bash', command: taskText }
+          : step.type === 'notify'
+            ? { message: taskText }
+            : { script: taskText };
+      return {
+        id: crypto.randomUUID(),
+        type: step.type,
+        config,
+        ...(step.approvalRequired ? { approvalRequired: true } : {}),
+        onError: step.onError,
+      };
+    });
     try {
       await createWorkflow({
         name: newWorkflow.name, description: newWorkflow.description,
         trigger: buildTrigger(kind),
-        actions: [{ id: crypto.randomUUID(), type: newWorkflow.actionType, config: actionConfig[newWorkflow.actionType] || {} }],
+        actions,
       });
       closeCreate();
       addToast({ type: 'success', title: kind === 'idle' ? 'Idle task created' : 'Scheduled task created' });
@@ -210,6 +299,24 @@ export function AutomationView() {
           </button>
         </div>
       </div>
+
+      {/* Review queue — a run parks here until a person clears each gated step. */}
+      {pendingApprovals.length > 0 && (
+        <section className="mb-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-[0.18em] text-amber-300/90">Needs you</span>
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-200">
+              {pendingApprovals.length}
+            </span>
+            <span className="text-[10.5px] text-zinc-600">Nothing after these steps runs until you decide.</span>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {pendingApprovals.map((approval) => (
+              <AutomationReviewCard key={approval.id} approval={approval} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Status strip: engine + keep awake */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-6 text-[11px] text-textMuted">
@@ -351,32 +458,147 @@ export function AutomationView() {
             </div>
           )}
 
-          <div className="mb-4">
-            <label className="text-xs text-textMuted mb-1.5 block">Action Type</label>
-            <div className="grid grid-cols-4 gap-1.5 max-w-xl">
-              {ACTION_TYPES.map((at) => (
-                <button key={at.type} onClick={() => setNewWorkflow((p) => ({ ...p, actionType: at.type }))}
-                  className={`px-2 py-1.5 rounded-lg text-[11px] font-medium transition-colors text-left flex items-center gap-1.5 ${
-                    newWorkflow.actionType === at.type ? 'bg-white/[0.09] text-white border border-white/[0.16]' : 'bg-white/[0.03] text-textMuted border border-borderSubtle hover:text-textMain'
-                  }`}>
-                  <AppIcon name={at.icon} className="w-3 h-3 flex-shrink-0" strokeWidth={1.9} />
-                  {at.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="mb-5">
-            <label className="text-xs text-textMuted mb-1.5 block">Task / Instructions</label>
-            <textarea value={newWorkflow.task} onChange={(e) => setNewWorkflow((p) => ({ ...p, task: e.target.value }))} placeholder="What should the agent do? Be specific." className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder-textMuted h-20 resize-none focus:outline-none focus:border-white/[0.25]" />
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs text-textMuted">Steps</label>
+              <span className="text-[10px] text-zinc-600">They run in order. Each AI step keeps its own model and approval gate.</span>
+            </div>
+            <div className="space-y-3">
+              {newWorkflow.steps.map((step, index) => {
+                const providerInfo = providers.find((provider) => provider.id === step.provider);
+                const modelOptions = providerInfo?.freeModels?.map((model) => model.id) ?? [];
+                const ready = stepIsReady(step);
+                return (
+                  <div key={step.id} className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">Step {index + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeStep(step.id)}
+                        disabled={newWorkflow.steps.length === 1}
+                        className="text-[10.5px] text-zinc-500 transition-colors hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="mt-2 grid grid-cols-4 gap-1.5">
+                      {ACTION_TYPES.map((at) => (
+                        <button
+                          key={at.type}
+                          type="button"
+                          onClick={() => updateStep(step.id, { type: at.type })}
+                          className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[11px] font-medium transition-colors ${
+                            step.type === at.type ? 'bg-white/[0.09] text-white border border-white/[0.16]' : 'bg-white/[0.03] text-textMuted border border-borderSubtle hover:text-textMain'
+                          }`}
+                        >
+                          <AppIcon name={at.icon} className="h-3 w-3 flex-shrink-0" strokeWidth={1.9} />
+                          {at.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <textarea
+                      value={step.task}
+                      onChange={(event) => updateStep(step.id, { task: event.target.value })}
+                      placeholder={step.type === 'agent_run' ? 'What should this step do? Be specific.' : step.type === 'notify' ? 'Message to send — use {{previous}} for the last step result.' : 'Command or script to run.'}
+                      className="mt-2 h-20 w-full resize-none rounded-lg border border-borderSubtle bg-bgInput px-3 py-2 text-sm text-textMain placeholder-textMuted focus:border-white/[0.25] focus:outline-none"
+                    />
+
+                    {step.type === 'agent_run' && (
+                      <>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <label className="block">
+                            <span className="mb-1 block text-[10.5px] text-textMuted">Account / provider</span>
+                            <select
+                              value={step.provider}
+                              onChange={(event) => updateStep(step.id, { provider: event.target.value, model: '' })}
+                              className="w-full rounded-lg border border-borderSubtle bg-bgInput px-2.5 py-1.5 text-[12px] text-textMain focus:border-white/[0.25] focus:outline-none"
+                            >
+                              <option value="">Pick an account…</option>
+                              {providers.map((provider) => (
+                                <option key={provider.id} value={provider.id}>{provider.label} ({provider.id})</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-[10.5px] text-textMuted">Model</span>
+                            <input
+                              value={step.model}
+                              onChange={(event) => updateStep(step.id, { model: event.target.value })}
+                              list={`automation-models-${step.id}`}
+                              placeholder="Exact model id"
+                              className="w-full rounded-lg border border-borderSubtle bg-bgInput px-2.5 py-1.5 font-mono text-[12px] text-textMain placeholder-textMuted focus:border-white/[0.25] focus:outline-none"
+                            />
+                            <datalist id={`automation-models-${step.id}`}>
+                              {modelOptions.map((model) => <option key={model} value={model} />)}
+                            </datalist>
+                          </label>
+                        </div>
+                        {(!step.provider.trim() || !step.model.trim()) && (
+                          <p className="mt-1 text-[10px] text-amber-300/80">Pick an account and model — scheduled runs never fall back silently.</p>
+                        )}
+
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-white/[0.06] bg-black/20 px-2.5 py-2">
+                          <input
+                            type="checkbox"
+                            checked={step.approvalRequired}
+                            onChange={(event) => updateStep(step.id, { approvalRequired: event.target.checked })}
+                            className="mt-0.5 h-3.5 w-3.5 accent-violet-500"
+                          />
+                          <span>
+                            <span className="block text-[11px] font-medium text-zinc-300">Review on Home before this step runs</span>
+                            <span className="block text-[10px] leading-4 text-zinc-600">The run parks with a draft. Nothing after it runs until you approve, comment, or reject.</span>
+                          </span>
+                        </label>
+
+                        {step.approvalRequired && (
+                          <label className="mt-2 block">
+                            <span className="mb-1 block text-[10.5px] text-textMuted">Then (shown on the review card)</span>
+                            <input
+                              value={step.afterApproval}
+                              onChange={(event) => updateStep(step.id, { afterApproval: event.target.value })}
+                              placeholder="e.g. Send the brief and update the Home card"
+                              className="w-full rounded-lg border border-borderSubtle bg-bgInput px-2.5 py-1.5 text-[12px] text-textMain placeholder-textMuted focus:border-white/[0.25] focus:outline-none"
+                            />
+                          </label>
+                        )}
+                      </>
+                    )}
+
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="text-[10.5px] text-textMuted">If this step fails</label>
+                      <select
+                        value={step.onError}
+                        onChange={(event) => updateStep(step.id, { onError: event.target.value as DraftStep['onError'] })}
+                        className="rounded-lg border border-borderSubtle bg-bgInput px-2 py-1 text-[11px] text-textMain focus:border-white/[0.25] focus:outline-none"
+                      >
+                        <option value="stop">Stop the run</option>
+                        <option value="continue">Continue to the next step</option>
+                        <option value="retry">Retry up to 3 times</option>
+                      </select>
+                      {!ready && <span className="ml-auto text-[10px] text-zinc-600">Needs a task{step.type === 'agent_run' ? ', account, and model' : ''}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={addStep}
+              className="mt-2 rounded-lg border border-dashed border-white/[0.12] px-3 py-1.5 text-[11px] text-zinc-400 transition-colors hover:border-white/[0.22] hover:text-white"
+            >
+              + Add step
+            </button>
           </div>
 
           <div className="flex gap-2 justify-end">
             <button onClick={closeCreate} className="px-4 py-2 text-textMuted hover:text-textMain text-sm rounded-lg transition-colors">Cancel</button>
             <button
               onClick={() => void handleCreate(showCreate)}
-              disabled={!newWorkflow.name.trim()}
+              disabled={!newWorkflow.name.trim() || !newWorkflow.steps.every(stepIsReady)}
               className="btn-premium px-5 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              title={newWorkflow.steps.every(stepIsReady) ? undefined : 'Every step needs a task; AI steps also need an account and model.'}
             >
               {showCreate === 'idle' ? 'Create Idle Task' : 'Create Automation'}
             </button>

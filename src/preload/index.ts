@@ -308,6 +308,9 @@ const api = {
   automationNextRuns: () => ipcRenderer.invoke(IPC.AUTOMATION_NEXT_RUNS),
   automationCancelRun: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CANCEL_RUN, args),
   automationCreateFromNL: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_CREATE_FROM_NL, args),
+  automationGetPendingApprovals: () => ipcRenderer.invoke(IPC.AUTOMATION_GET_PENDING_APPROVALS),
+  automationApproveAction: (args: { approvalId: string; approve: boolean }) => ipcRenderer.invoke(IPC.AUTOMATION_APPROVE_ACTION, args),
+  automationCommentAction: (args: { approvalId: string; comment: string }) => ipcRenderer.invoke(IPC.AUTOMATION_COMMENT_ACTION, args),
 
   // Workers
   workerList: () => ipcRenderer.invoke(IPC.WORKERS_LIST),

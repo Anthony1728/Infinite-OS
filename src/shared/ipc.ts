@@ -210,6 +210,9 @@ export const IPC = {
   AUTOMATION_SET_KEEP_AWAKE: 'automation:set-keep-awake',
   AUTOMATION_CANCEL_RUN: 'automation:cancel-run',
   AUTOMATION_CREATE_FROM_NL: 'automation:create-from-nl',
+  AUTOMATION_APPROVE_ACTION: 'automation:approve-action',
+  AUTOMATION_COMMENT_ACTION: 'automation:comment-action',
+  AUTOMATION_GET_PENDING_APPROVALS: 'automation:get-pending-approvals',
 
   // Heartbeat (Hermes-inspired idle consolidation) runs in the background and is
   // not exposed over IPC: no renderer ever asked it for status, so the handler
