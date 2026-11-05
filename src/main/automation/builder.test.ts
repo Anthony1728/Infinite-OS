@@ -154,3 +154,135 @@ describe('automation run progress', () => {
     expect(run.status).toBe('failed');
   });
 });
+
+/** Poll until the predicate holds, so tests never race the run loop. */
+async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 3000): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+describe('automation blocking approvals', () => {
+  it('parks a gated step until a person approves it, then carries on', async () => {
+    const delivered: string[] = [];
+    setNotificationDeliverer(async (req) => {
+      delivered.push(req.message);
+      return { delivered: true, channel: 'desktop', detail: `sent:${req.message}` };
+    });
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'Gated brief',
+      trigger: { type: 'manual', config: {} },
+      actions: [
+        { id: 'draft', type: 'notify', config: { message: 'Morning brief' }, approvalRequired: true },
+        { id: 'after', type: 'delay', config: { ms: 1 } },
+      ],
+    });
+    const events: AutomationRunProgress[] = [];
+    const running = builder.runWorkflow(workflow.id, (event) => events.push(event));
+
+    await waitUntil(() => builder.listPendingApprovals().length === 1, 'approval request');
+    const [pending] = builder.listPendingApprovals();
+    expect(pending.workflowName).toBe('Gated brief');
+    expect(pending.draft).toBe('Morning brief');
+    expect(pending.status).toBe('pending');
+    // Nothing has been sent and the second step has not started.
+    expect(delivered).toEqual([]);
+    expect(events.some((event) => event.type === 'action_started' && event.actionId === 'after')).toBe(false);
+
+    await expect(builder.approveAction(pending.id, true)).resolves.toMatchObject({ ok: true });
+    const run = await running;
+
+    expect(run.status).toBe('completed');
+    expect(delivered).toEqual(['Morning brief']);
+    expect(run.actionResults.map((result) => result.status)).toEqual(['completed', 'completed']);
+    expect(builder.listPendingApprovals()).toEqual([]);
+    expect(events.some((event) => event.type === 'approval_requested')).toBe(true);
+    expect(events.some((event) => event.type === 'approval_resolved')).toBe(true);
+  });
+
+  it('rejects a gated step and stops the run before later steps', async () => {
+    const delivered: string[] = [];
+    setNotificationDeliverer(async (req) => {
+      delivered.push(req.message);
+      return { delivered: true, channel: 'desktop', detail: `sent:${req.message}` };
+    });
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'Rejected brief',
+      trigger: { type: 'manual', config: {} },
+      actions: [
+        { id: 'draft', type: 'notify', config: { message: 'Do not send' }, approvalRequired: true },
+        { id: 'after', type: 'notify', config: { message: 'Never' } },
+      ],
+    });
+    const running = builder.runWorkflow(workflow.id, () => {});
+
+    await waitUntil(() => builder.listPendingApprovals().length === 1, 'approval request');
+    const [pending] = builder.listPendingApprovals();
+    await expect(builder.approveAction(pending.id, false)).resolves.toMatchObject({ ok: true });
+    const run = await running;
+
+    expect(run.status).toBe('cancelled');
+    expect(run.error).toBe('Rejected by reviewer.');
+    expect(delivered).toEqual([]);
+    expect(builder.listPendingApprovals()).toEqual([]);
+  });
+
+  it('keeps the approval pending when a comment asks for a revision', async () => {
+    const delivered: string[] = [];
+    setNotificationDeliverer(async (req) => {
+      delivered.push(req.message);
+      return { delivered: true, channel: 'desktop', detail: `sent:${req.message}` };
+    });
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'Revised brief',
+      trigger: { type: 'manual', config: {} },
+      actions: [
+        { id: 'draft', type: 'notify', config: { message: 'Draft {{comment}}' }, approvalRequired: true },
+      ],
+    });
+    const events: AutomationRunProgress[] = [];
+    const running = builder.runWorkflow(workflow.id, (event) => events.push(event));
+
+    await waitUntil(() => builder.listPendingApprovals().length === 1, 'approval request');
+    const [first] = builder.listPendingApprovals();
+    await expect(builder.commentAction(first.id, 'tighten')).resolves.toMatchObject({ ok: true });
+
+    await waitUntil(
+      () => events.some((event) => event.type === 'approval_updated' && event.approval?.status === 'pending'),
+      'revised draft',
+    );
+    const [revised] = builder.listPendingApprovals();
+    expect(revised.id).toBe(first.id);
+    expect(revised.draft).toBe('Draft tighten');
+    // A comment revises the draft; it never unblocks the run.
+    expect(delivered).toEqual([]);
+
+    await builder.approveAction(revised.id, true);
+    const run = await running;
+    expect(run.status).toBe('completed');
+    expect(delivered).toEqual(['Draft tighten']);
+  });
+
+  it('cancelling a run that is waiting on approval releases the gate', async () => {
+    const builder = await createBuilder();
+    const workflow = builder.createWorkflow({
+      name: 'Cancelled while waiting',
+      trigger: { type: 'manual', config: {} },
+      actions: [{ id: 'draft', type: 'notify', config: { message: 'Waiting' }, approvalRequired: true }],
+    });
+    const running = builder.runWorkflow(workflow.id, () => {});
+    await waitUntil(() => builder.listPendingApprovals().length === 1, 'approval request');
+    const [pending] = builder.listPendingApprovals();
+
+    expect(builder.cancelRun(pending.runId)).toBe(true);
+    const run = await running;
+    expect(run.status).toBe('cancelled');
+    expect(builder.listPendingApprovals()).toEqual([]);
+    await expect(builder.approveAction(pending.id, true)).resolves.toMatchObject({ ok: false });
+  });
+});
