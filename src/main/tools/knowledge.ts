@@ -64,7 +64,12 @@ export const knowledgeTool: Tool = {
       if (input.action === 'graph_stats') return json(graph.graphStats(input.dataset));
       if (input.action === 'datasets') return json(graph.listDatasets());
       if (input.action === 'search') return json(memory.searchMemories(input.query ?? '', input.dataset).slice(0, input.limit ?? 20));
-      if (input.action === 'recall') return json(memory.recallMemories(input.query ?? '', { tiers: input.tiers, limit: input.limit ?? 10, dataset: input.dataset }));
+      if (input.action === 'recall') {
+        const options = { tiers: input.tiers, limit: input.limit ?? 10, dataset: input.dataset };
+        const hits = await memory.recallMemoriesHybrid(input.query ?? '', options)
+          .catch(() => memory.recallMemories(input.query ?? '', options));
+        return json(hits);
+      }
       if (input.action === 'promote') {
         if (!input.id || !input.tier) return bad('promote requires id and tier.');
         return json(memory.promoteMemory(input.id, input.tier, input.importance));

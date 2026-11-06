@@ -99,6 +99,12 @@ export const IPC = {
   MEMORY_SEARCH: 'memory:search',
   MEMORY_STATS: 'memory:stats',
 
+  // Evaluation (read-only history + catalog; runs happen in the CLI process so
+  // approval bypass stays scoped to that process)
+  EVALUATION_LIST: 'evaluation:list',
+  EVALUATION_GET: 'evaluation:get',
+  EVALUATION_CATALOG: 'evaluation:catalog',
+
   // Skills
   SKILLS_LIST: 'skills:list',
   SKILLS_GET: 'skills:get',

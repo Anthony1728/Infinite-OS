@@ -40,6 +40,8 @@ import {
   deleteCustomAgent,
 } from '../agents/custom-store.js';
 import * as memoryStore from '../memory/store.js';
+import { getEvaluationReport, listEvaluationReports } from '../evaluation/harness.js';
+import { evalFixtures, listEvalSuites } from '../evaluation/fixtures.js';
 import { abortSubagent, listRunStates, spawnSubagent, clearCompletedRuns } from '../agent/runtime.js';
 import type { AgentId } from '../agents/types.js';
 import { v4 as uuid } from 'uuid';
@@ -752,6 +754,24 @@ registerOptimizeIpc();
   ipcMain.handle(IPC.MEMORY_DELETE, async (_e, { id }) => memoryStore.deleteMemory(id));
   ipcMain.handle(IPC.MEMORY_SEARCH, async (_e, { query }) => memoryStore.searchMemories(query));
   ipcMain.handle(IPC.MEMORY_STATS, async () => memoryStore.getMemoryStats());
+
+  // Evaluation — read-only history. Runs deliberately execute in the headless
+  // CLI process (`npm run eval`) so the approval-bypass env flag can never
+  // leak into a concurrent chat turn in this process.
+  ipcMain.handle(IPC.EVALUATION_LIST, async (_e, { limit }: { limit?: number } = {}) =>
+    listEvaluationReports({ limit }));
+  ipcMain.handle(IPC.EVALUATION_GET, async (_e, { id }: { id: string }) => getEvaluationReport(String(id ?? '')));
+  ipcMain.handle(IPC.EVALUATION_CATALOG, async () => ({
+    suites: listEvalSuites(),
+    tasks: evalFixtures.map((task) => ({
+      id: task.id,
+      name: task.name,
+      description: task.description,
+      checks: task.checks.length,
+      timeoutMs: task.timeoutMs ?? null,
+      maxTurns: task.maxTurns ?? null,
+    })),
+  }));
 
   // MCP
   ipcMain.handle(IPC.MCP_LIST_SERVERS, async () => listMcpServers());

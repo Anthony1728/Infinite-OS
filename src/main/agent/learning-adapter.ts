@@ -18,6 +18,17 @@ export interface ToolResultLearning {
   output: string | ContentBlock[];
 }
 
+export interface RunOutcomeLearning {
+  task: string;
+  provider: string;
+  model: string;
+  outcome: 'success' | 'failure';
+  verified: boolean;
+  tools: string[];
+  durationMs: number;
+  failure?: string;
+}
+
 interface CompactLearningApi {
   ingestResponse?: (record: CompletedResponseLearning) => void | Promise<void>;
   ingestToolResult?: (record: ToolResultLearning) => void | Promise<void>;
@@ -113,12 +124,30 @@ function getLearningApi(): Promise<CompactLearningApi | null> {
   return apiPromise;
 }
 
+/** Synthetic benchmark traffic must not teach the user's profile. */
+function isEvaluationRun(): boolean {
+  return process.env.INFINITE_EVAL === '1';
+}
+
 export function learnFromCompletedResponse(record: CompletedResponseLearning): void {
+  if (isEvaluationRun()) return;
   const safe = prepareCompletedResponse(record);
   void getLearningApi().then((api) => api?.ingestResponse?.(safe)).catch(() => undefined);
 }
 
 export function learnFromToolResult(record: ToolResultLearning): void {
+  if (isEvaluationRun()) return;
   const safe = prepareToolResult(record);
   void getLearningApi().then((api) => api?.ingestToolResult?.(safe)).catch(() => undefined);
+}
+
+/**
+ * Record the outcome of a real agent run for experience-derived instruction
+ * improvement. Kept out of the hot path: the store writes once, after the run.
+ */
+export function learnFromRunOutcome(record: RunOutcomeLearning): void {
+  if (isEvaluationRun()) return;
+  void import('../brain/experience.js')
+    .then((module) => module.recordRunExperience(record))
+    .catch(() => undefined);
 }

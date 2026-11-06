@@ -223,8 +223,11 @@ export async function recordAgentWork(agentType: string, role: string, objective
 /** Recall an agent type's own past work for its system prompt. */
 export async function recallAgentMemory(agentType: string, objective: string): Promise<string> {
   try {
-    const { recallMemories } = await import('../memory/store.js');
-    const hits = recallMemories(objective, { dataset: agentMemoryDataset(agentType), limit: 3 });
+    const store = await import('../memory/store.js');
+    const dataset = agentMemoryDataset(agentType);
+    const hits = typeof store.recallMemoriesHybrid === 'function'
+      ? await store.recallMemoriesHybrid(objective, { dataset, limit: 3 }).catch(() => store.recallMemories(objective, { dataset, limit: 3 }))
+      : store.recallMemories(objective, { dataset, limit: 3 });
     if (!hits.length) return '';
     return [
       `[Your past work as this specialist — recall from earlier sessions]`,

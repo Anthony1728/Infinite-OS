@@ -133,7 +133,7 @@ import { isExplicitActionFailure, isUnfulfilledActionPromise, requiresToolExecut
 import { selectLocalModelTools } from './local-tool-routing.js';
 import { buildRecoveryHandoff, type RecoveryHandoffOptions } from './recovery-handoff.js';
 import { settings } from '../settings/store.js';
-import { learnFromCompletedResponse, learnFromToolResult } from './learning-adapter.js';
+import { learnFromCompletedResponse, learnFromRunOutcome, learnFromToolResult } from './learning-adapter.js';
 import { missingRequiredTaskActions, type SuccessfulToolAction } from './task-coverage.js';
 import { buildToolRecoveryDirective, toolAttemptSignature, type FailedToolAttempt } from './tool-recovery.js';
 import { ProblemTracker } from './problem-tracker.js';
@@ -351,6 +351,7 @@ export async function runAgent(
   // Edit→verify→fix loop (the Claude Code discipline): tracks whether file edits
   // are still unverified. Set on successful Write/Edit, cleared on a passing Verify.
   let editsSinceVerify = false;
+  let editsThisRun = false;
   let verifyGuardPrompts = 0;
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
@@ -359,6 +360,47 @@ export async function runAgent(
   // final message names every model tried and why each one failed instead of
   // only the last error.
   const candidateErrors: Array<{ label: string; error: string }> = [];
+
+  // Experience learning hook: record exactly one outcome per run, at the
+  // terminal event, without threading bookkeeping through every early return.
+  // `verified` is mechanically derived (no edits, or Verify ran after the last
+  // edit) rather than trusting the model's summary.
+  const outcomeRecorded = { value: false };
+  const callerOnEvent = opts.onEvent;
+  opts = {
+    ...opts,
+    onEvent: (event) => {
+      try {
+        if (!outcomeRecorded.value && event.type === 'done' && event.success) {
+          outcomeRecorded.value = true;
+          learnFromRunOutcome({
+            task: originalRequest,
+            provider: activeCandidate.provider,
+            model: activeCandidate.model,
+            outcome: 'success',
+            verified: !editsThisRun || !editsSinceVerify,
+            tools: [...successfulToolNames],
+            durationMs: Date.now() - runStartedAt,
+          });
+        } else if (!outcomeRecorded.value && event.type === 'fallback_required') {
+          outcomeRecorded.value = true;
+          learnFromRunOutcome({
+            task: originalRequest,
+            provider: activeCandidate.provider,
+            model: activeCandidate.model,
+            outcome: 'failure',
+            verified: false,
+            tools: [...successfulToolNames],
+            durationMs: Date.now() - runStartedAt,
+            failure: typeof event.error === 'string' ? event.error : 'The run ended without a verified result.',
+          });
+        }
+      } catch {
+        // Learning is advisory; it must never break the run's terminal event.
+      }
+      callerOnEvent(event);
+    },
+  };
 
   // ── Autonomous Agent Architecture: Prompt Architect → Critic → Execution Brief ──
   // For non-trivial objectives, derive a compact execution brief once per run.
@@ -1008,7 +1050,15 @@ export async function runAgent(
       // re-discovering the dead one. Opt out with Settings → autoSwitchModel.
       const switchedAway = activeCandidate.provider !== opts.provider || activeCandidate.model !== opts.model;
       const earnedSwitch = Boolean(selectedModelHardFailure) && !isTransientStreamFailure(selectedModelHardFailure ?? '');
-      if (switchedAway && earnedSwitch && !autoSwitchPersisted && settings.get('autoSwitchModel') !== false) {
+      // Evaluation runs must never rewrite the user's active provider/model;
+      // their failover is benchmark noise, not a preference change.
+      if (
+        switchedAway &&
+        earnedSwitch &&
+        !autoSwitchPersisted &&
+        process.env.INFINITE_EVAL !== '1' &&
+        settings.get('autoSwitchModel') !== false
+      ) {
         autoSwitchPersisted = true;
         const from = `${opts.provider}/${opts.model}`;
         const reason = `Auto-switched: ${from} failed (${(selectedModelHardFailure ?? '').slice(0, 180)}) and ${activeCandidate.label} answered. Saved as the active model so the next turn starts here.`;
@@ -1162,6 +1212,7 @@ export async function runAgent(
         // Edit→verify→fix bookkeeping.
         if (canonicalName === 'Verify') editsSinceVerify = false;
         else if (canonicalName === 'Write' || canonicalName === 'Edit') editsSinceVerify = true;
+        if (canonicalName === 'Write' || canonicalName === 'Edit') editsThisRun = true;
         learnFromToolResult({
           request: originalRequest,
           taskContext,

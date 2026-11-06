@@ -40,7 +40,7 @@ vi.mock('./permissions.js', () => ({ checkPermission: mocks.checkPermission, cur
 vi.mock('../tools/base.js', () => ({ toolRegistry: { asProviderTools: mocks.asProviderTools }, CORE_TOOL_NAMES: new Set() }));
 vi.mock('../brain/router.js', () => ({ DecisionRouter: vi.fn().mockImplementation(() => ({ recordTask: vi.fn() })) }));
 vi.mock('./browser-routing.js', () => ({ routeForcedBrowserTool: mocks.routeForcedBrowserTool }));
-vi.mock('./learning-adapter.js', () => ({ learnFromToolResult: mocks.learnFromToolResult, learnFromCompletedResponse: vi.fn() }));
+vi.mock('./learning-adapter.js', () => ({ learnFromToolResult: mocks.learnFromToolResult, learnFromCompletedResponse: vi.fn(), learnFromRunOutcome: vi.fn() }));
 // Sticky auto-switch persists the recovered model through the settings store —
 // stub it so tests never touch the real profile's settings.json, while still
 // recording writes so the auto-switch can be asserted.

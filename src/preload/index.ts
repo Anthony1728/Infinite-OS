@@ -180,6 +180,10 @@ const api = {
   searchMemories: (args: { query: string }) => ipcRenderer.invoke(IPC.MEMORY_SEARCH, args),
   getMemoryStats: () => ipcRenderer.invoke(IPC.MEMORY_STATS),
 
+  listEvaluations: (args?: { limit?: number }) => ipcRenderer.invoke(IPC.EVALUATION_LIST, args ?? {}),
+  getEvaluation: (args: { id: string }) => ipcRenderer.invoke(IPC.EVALUATION_GET, args),
+  evaluationCatalog: () => ipcRenderer.invoke(IPC.EVALUATION_CATALOG),
+
   listMcpServers: () => ipcRenderer.invoke(IPC.MCP_LIST_SERVERS),
   connectMcp: (args: { name: string; config: { command: string; args?: string[]; env?: Record<string, string> } }) =>
     ipcRenderer.invoke(IPC.MCP_CONNECT, args),

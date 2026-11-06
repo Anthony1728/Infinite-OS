@@ -35,6 +35,7 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders', color: 'text-violet-400' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins', color: 'text-emerald-400' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities', color: 'text-indigo-400' },
+  { id: 'evaluation', label: 'Evaluation', icon: 'automation.pulse', color: 'text-sky-400' },
   { id: 'business', label: 'Business OS', icon: 'home.business', color: 'text-emerald-400' },
   { id: 'creations', label: 'AI Creations', icon: 'tab.feature', color: 'text-violet-400' },
   { id: 'enterprise', label: 'Enterprise', icon: 'nav.projects', color: 'text-indigo-400' },

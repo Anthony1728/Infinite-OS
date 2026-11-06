@@ -97,6 +97,10 @@ export function recordModelOutcome(
   error?: string,
 ): void {
   if (!provider || !model) return;
+  // Evaluation runs are synthetic benchmark traffic. They must not reshape the
+  // user's routing memory: a weak benchmark model failing once should never
+  // demote a model in normal chat.
+  if (process.env.INFINITE_EVAL === '1') return;
   const store = load();
   const key = perfKey(provider, model);
   const existing = store[key];

@@ -44,6 +44,7 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities' },
+  { id: 'evaluation', label: 'Evaluation', icon: 'automation.pulse' },
   { id: 'guide', label: 'Guide', icon: 'home.learn' },
   { id: 'spell', label: 'Spell Forge', icon: 'nav.spell' },
   { id: 'journal', label: 'Journal & Notes', icon: 'memory.note' },

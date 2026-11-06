@@ -724,6 +724,13 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
   const lessons = getBrainTeachingManager().searchLessons(latestText, 3);
   const learnedContext = retrieveLearningContext(latestText, { limit: 3, minConfidence: 0.5 });
   const preferences = retrieveLearningContext('', { kinds: ['preference'], limit: 2, minConfidence: 0.5 });
+  // Outcome-derived operating rules. Empty until the store has repeated
+  // mechanical evidence (2+ failures in a category or 2+ verified procedures).
+  let experienceContext = '';
+  try {
+    const { getExperienceContext } = await import('../brain/experience.js');
+    experienceContext = getExperienceContext(latestText, 3);
+  } catch { /* experience learning is advisory */ }
   // Business knowledge base: the Knowledge tab's company facts + uploaded
   // files. Brain answers from both memory and the KB.
   let kbContext = '';
@@ -742,9 +749,16 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
   // memory store actually inform answers — it was previously UI-only.
   let memoryContext = '';
   try {
-    const { recallMemories } = await import('../memory/store.js');
+    const memory = await import('../memory/store.js');
     const { recallGraph } = await import('../memory/graph.js');
-    const hits = recallMemories(latestText, { limit: 5 });
+    // Embedding-backed hybrid recall; the synchronous lexical path remains the
+    // fallback so a cold embedding backend can never break a chat turn.
+    let hits: Awaited<ReturnType<typeof memory.recallMemoriesHybrid>> = [];
+    try {
+      hits = await memory.recallMemoriesHybrid(latestText, { limit: 5 });
+    } catch {
+      hits = memory.recallMemories(latestText, { limit: 5 });
+    }
     if (hits.length) {
       memoryContext = 'Durable memory from past sessions (facts, decisions, procedures):\n'
         + hits.map((m) => {
@@ -766,7 +780,7 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
     }
     if (memoryContext) memoryContext = memoryContext.slice(0, 2_000);
   } catch { /* memory recall is advisory — never block the turn */ }
-  if (!lessons.length && !learnedContext && !preferences && !kbContext && !memoryContext) return trimmed;
+  if (!lessons.length && !learnedContext && !preferences && !kbContext && !memoryContext && !experienceContext) return trimmed;
   const recall: Message = {
     id: `brain-recall-${Date.now()}`,
     role: 'user',
@@ -777,6 +791,7 @@ export async function buildContext(messages: Message[], opts: { cwd: string; max
         '[Infinite Brain recall — internal learned context; use only when relevant and never claim it is a fresh web source]',
         preferences ? `User preferences learned from prior interactions:\n${preferences}` : '',
         learnedContext ? `Relevant verified learning memory:\n${learnedContext}` : '',
+        experienceContext,
         kbContext ? `Business knowledge base (company facts + uploaded files):\n${kbContext}` : '',
         memoryContext ? `${memoryContext}` : '',
         ...lessons.map((lesson, index) => [

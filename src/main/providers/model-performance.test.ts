@@ -86,6 +86,19 @@ describe('model performance memory', () => {
     expect(getModelReliability(PROVIDER, MODEL)).toBeGreaterThan(0);
   });
 
+  it('does not record outcomes from synthetic evaluation runs', () => {
+    process.env.INFINITE_EVAL = '1';
+    try {
+      recordModelOutcome(PROVIDER, 'bench-model', true);
+      recordModelOutcome(PROVIDER, 'bench-model', false, 'benchmark failure');
+      expect(getModelPerformance(PROVIDER, 'bench-model')).toBeNull();
+    } finally {
+      delete process.env.INFINITE_EVAL;
+    }
+    recordModelOutcome(PROVIDER, 'bench-model', true);
+    expect(getModelPerformance(PROVIDER, 'bench-model')?.successes).toBe(1);
+  });
+
   it('exposes stats snapshot sorted by recency', () => {
     recordModelOutcome(PROVIDER, MODEL, true);
     const stats = getModelPerformanceStats().filter((s) => s.provider === PROVIDER);

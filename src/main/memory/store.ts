@@ -2,6 +2,8 @@ import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { infiniteHome } from '../profiles/home';
+import { embedText } from '../indexing/embeddings.js';
+import { hybridScore, isRelevant, lexicalOverlap, lexicalVectorSimilarity } from './hybrid.js';
 import { normalizeTier, tierForType, scoreMemory, toMs, VALID_TIERS, type MemoryTier } from './tiers.js';
 
 export type { MemoryTier };
@@ -70,6 +72,10 @@ export function getDb(): Database.Database {
   if (!columns.has('importance')) db.exec(`ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5`);
   if (!columns.has('access_count')) db.exec(`ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`);
   if (!columns.has('last_accessed')) db.exec(`ALTER TABLE memories ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT 0`); // SQLite forbids non-constant ALTER defaults; toMs() falls back to updated_at when reading.
+  if (!columns.has('embedding')) db.exec(`ALTER TABLE memories ADD COLUMN embedding BLOB`);
+  if (!columns.has('embedding_backend')) db.exec(`ALTER TABLE memories ADD COLUMN embedding_backend TEXT`);
+  if (!columns.has('embedding_model')) db.exec(`ALTER TABLE memories ADD COLUMN embedding_model TEXT`);
+  if (!columns.has('embedding_updated_at')) db.exec(`ALTER TABLE memories ADD COLUMN embedding_updated_at INTEGER NOT NULL DEFAULT 0`);
   // Backfill pre-tier rows: chats are episodic events, everything else is semantic.
   // The importance/access guard keeps user-promoted rows untouched.
   db.exec(`UPDATE memories SET tier = 'episodic' WHERE type = 'chat' AND tier = 'semantic' AND importance = 0.5 AND access_count = 0`);
@@ -115,6 +121,120 @@ export function normalizeDataset(dataset?: string): string {
   return value.slice(0, 64) || 'default';
 }
 
+// ── Embedding persistence ──────────────────────────────────────────────────
+// Vectors live in the same SQLite row as the memory. Float32 BLOBs keep the
+// file small (~3 KB per memory) and decode without JSON parsing on every
+// recall. The backend/model are stored alongside so a vector is never compared
+// against a different embedding space (lexical hashed vectors vs nomic-embed
+// vs mxbai-embed are not interchangeable).
+
+const pendingEmbeddings = new Set<string>();
+
+function encodeEmbedding(vector: number[]): Buffer {
+  const floats = new Float32Array(vector);
+  return Buffer.from(floats.buffer, floats.byteOffset, floats.byteLength);
+}
+
+function decodeEmbedding(raw: unknown): number[] | null {
+  if (!raw) return null;
+  if (Buffer.isBuffer(raw) || raw instanceof Uint8Array) {
+    const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+    if (bytes.byteLength < 4 || bytes.byteLength % 4 !== 0) return null;
+    const copy = new Float32Array(bytes.byteLength / 4);
+    for (let i = 0; i < copy.length; i++) copy[i] = bytes.readFloatLE(i * 4);
+    return Array.from(copy);
+  }
+  // Tolerate a JSON-array vector written by an older experiment.
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+        return parsed as number[];
+      }
+    } catch { /* not a JSON vector */ }
+  }
+  return null;
+}
+
+function embeddingText(row: { title: string; content: string; tags: string[] }): string {
+  return `${row.title}\n${row.content}\n${row.tags.join(' ')}`.slice(0, 8_000);
+}
+
+async function embedMemoryNow(id: string): Promise<void> {
+  try {
+    const d = getDb();
+    const row = d.prepare('SELECT title, content, tags FROM memories WHERE id = ?').get(id) as
+      | { title: string; content: string; tags: string }
+      | undefined;
+    if (!row) return;
+    const tags = JSON.parse(row.tags || '[]') as string[];
+    const embedded = await embedText(embeddingText({ title: row.title, content: row.content, tags }));
+    d.prepare(`
+      UPDATE memories
+      SET embedding = ?, embedding_backend = ?, embedding_model = ?, embedding_updated_at = ?
+      WHERE id = ?
+    `).run(
+      encodeEmbedding(embedded.vector),
+      embedded.backend,
+      embedded.model ?? '',
+      Date.now(),
+      id,
+    );
+  } catch {
+    // Embeddings are an enhancement, not a dependency: recall falls back to
+    // lexical ranking whenever the vector backend is unavailable.
+  }
+}
+
+/**
+ * Persist a vector for one memory without blocking the caller. Safe to call
+ * repeatedly; an in-flight id is deduplicated.
+ */
+export function queueMemoryEmbedding(id: string): void {
+  if (pendingEmbeddings.has(id)) return;
+  pendingEmbeddings.add(id);
+  void embedMemoryNow(id).finally(() => pendingEmbeddings.delete(id));
+}
+
+/**
+ * Embed memories that predate this feature (or whose content changed while
+ * Ollama was offline). Returns how many rows were attempted/embedded.
+ */
+export async function backfillMemoryEmbeddings(opts?: { limit?: number }): Promise<{ scanned: number; embedded: number; failed: number }> {
+  const d = getDb();
+  const limit = Math.max(1, Math.min(500, opts?.limit ?? 64));
+  const rows = d.prepare(`
+    SELECT id FROM memories
+    WHERE embedding IS NULL OR embedding_updated_at < updated_at
+    ORDER BY importance DESC, updated_at DESC
+    LIMIT ?
+  `).all(limit) as Array<{ id: string }>;
+  let embedded = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      await embedMemoryNow(row.id);
+      const check = d.prepare('SELECT embedding FROM memories WHERE id = ?').get(row.id) as { embedding: unknown } | undefined;
+      if (check?.embedding) embedded++;
+      else failed++;
+    } catch {
+      failed++;
+    }
+  }
+  return { scanned: rows.length, embedded, failed };
+}
+
+/** Count rows with a persisted vector. Surfaced in stats and diagnostics. */
+export function getEmbeddingStats(): { total: number; embedded: number; lexicalBackend: number; ollamaBackend: number } {
+  const d = getDb();
+  const total = (d.prepare('SELECT COUNT(*) as count FROM memories').get() as { count: number }).count;
+  const embedded = (d.prepare('SELECT COUNT(*) as count FROM memories WHERE embedding IS NOT NULL').get() as { count: number }).count;
+  const lexicalBackend = (d.prepare(`SELECT COUNT(*) as count FROM memories WHERE embedding_backend = 'lexical'`).get() as { count: number }).count;
+  const ollamaBackend = (d.prepare(`SELECT COUNT(*) as count FROM memories WHERE embedding_backend = 'ollama'`).get() as { count: number }).count;
+  return { total, embedded, lexicalBackend, ollamaBackend };
+}
+
+
 export function createMemory(entry: NewMemory): MemoryEntry {
   const d = getDb();
   const id = `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -128,6 +248,7 @@ export function createMemory(entry: NewMemory): MemoryEntry {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
   `).run(id, entry.type, entry.title, entry.content, JSON.stringify(entry.tags), entry.sessionId ?? null, dataset, now, now, tier, importance, now);
 
+  queueMemoryEmbedding(id);
   return getMemory(id)!;
 }
 
@@ -194,6 +315,8 @@ export function updateMemory(id: string, updates: Partial<Omit<MemoryEntry, 'id'
 
   d.prepare(`UPDATE memories SET ${fields.join(', ')} WHERE id = ?`).run(...values);
 
+  const textChanged = updates.title !== undefined || updates.content !== undefined || updates.tags !== undefined;
+  if (textChanged) queueMemoryEmbedding(id);
   return getMemory(id);
 }
 
@@ -207,7 +330,7 @@ export function searchMemories(query: string, dataset?: string): MemoryEntry[] {
   return listMemories(undefined, query, dataset);
 }
 
-export function getMemoryStats(dataset?: string): { total: number; byType: Record<string, number>; byTier: Record<string, number>; datasets: number } {
+export function getMemoryStats(dataset?: string): { total: number; byType: Record<string, number>; byTier: Record<string, number>; datasets: number; embedded: number } {
   const d = getDb();
   const where = dataset ? ' WHERE dataset = ?' : '';
   const params = dataset ? [normalizeDataset(dataset)] : [];
@@ -217,7 +340,8 @@ export function getMemoryStats(dataset?: string): { total: number; byType: Recor
   const tierRows = d.prepare(`SELECT tier, COUNT(*) as count FROM memories${where} GROUP BY tier`).all(...params) as { tier: string; count: number }[];
   const byTier = Object.fromEntries(tierRows.map((r) => [r.tier, r.count]));
   const datasets = (d.prepare('SELECT COUNT(DISTINCT dataset) as count FROM memories').get() as { count: number }).count;
-  return { total, byType, byTier, datasets };
+  const embedded = (d.prepare(`SELECT COUNT(*) as count FROM memories${where ? `${where} AND` : ' WHERE'} embedding IS NOT NULL`).get(...params) as { count: number }).count;
+  return { total, byType, byTier, datasets, embedded };
 }
 
 function touchAccess(ids: string[]): void {
@@ -229,10 +353,12 @@ function touchAccess(ids: string[]): void {
 }
 
 /**
- * Tier-aware recall: LIKE-matches candidates, then ranks by importance,
- * recency (30-day half-life), and prior usefulness (access log). Semantic and
- * procedural memories outrank stale episodic ones at equal match quality.
- * Every returned memory counts as a use (tunes future ranking).
+ * Tier-aware lexical recall. Stays synchronous for call sites that cannot
+ * await; ranking now includes a lexical-vector similarity signal so related
+ * wording beats pure title coincidence even before embeddings are available.
+ *
+ * The embedding-backed path is recallMemoriesHybrid(); this function remains
+ * the deterministic fallback and the prefilter for the SQLite UI.
  */
 export function recallMemories(query: string, opts?: { tiers?: MemoryTier[]; limit?: number; dataset?: string }): MemoryEntry[] {
   const d = getDb();
@@ -273,12 +399,132 @@ export function recallMemories(query: string, opts?: { tiers?: MemoryTier[]; lim
   const now = Date.now();
   const scored = rows.map((row) => {
     const entry = mapRow(row);
-    return { entry, score: scoreMemory(entry, query, now) };
+    const text = `${entry.title} ${entry.content} ${entry.tags.join(' ')}`;
+    return {
+      entry,
+      score: hybridScore({
+        baseScore: scoreMemory(entry, query, now),
+        semanticSimilarity: lexicalVectorSimilarity(query, text),
+        lexicalOverlap: lexicalOverlap(query, text),
+      }),
+    };
   });
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score || b.entry.updatedAt - a.entry.updatedAt);
   const top = scored.slice(0, limit);
   touchAccess(top.map((s) => s.entry.id));
   return top.map((s) => ({ ...s.entry, accessCount: s.entry.accessCount + 1, lastAccessed: now }));
+}
+
+export interface HybridRecallOptions {
+  tiers?: MemoryTier[];
+  limit?: number;
+  dataset?: string;
+  /** Hard ceiling for the query embedding call. The turn must never wait on
+   *  a cold/slow embedding server; lexical fallback covers that turn. */
+  timeoutMs?: number;
+}
+
+interface QueryVector {
+  vector: number[];
+  backend: 'ollama' | 'lexical';
+  model: string;
+}
+
+/** Embed a query within a bounded budget. The background call is allowed to
+ *  finish (warming the model for the next turn) but never blocks this one. */
+async function embedQueryBounded(text: string, timeoutMs: number): Promise<QueryVector | null> {
+  const task = embedText(text)
+    .then((result): QueryVector => ({ vector: result.vector, backend: result.backend, model: result.model ?? '' }))
+    .catch(() => null);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), Math.max(200, timeoutMs));
+    timer.unref?.();
+  });
+  const result = await Promise.race([task, timeout]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
+/**
+ * Embedding-backed hybrid recall.
+ *
+ * Unlike the legacy path this does NOT prefilter by LIKE: it scans the dataset
+ * (capped at 400 rows) and ranks by importance/recency + cosine similarity +
+ * token overlap. That is what lets "how do we ship releases?" find a memory
+ * titled "Deployment pipeline" with no shared words. Rows that have not been
+ * backfilled yet borrow a deterministic lexical-vector similarity so recall
+ * quality degrades honestly instead of dropping them.
+ */
+export async function recallMemoriesHybrid(query: string, opts?: HybridRecallOptions): Promise<MemoryEntry[]> {
+  const d = getDb();
+  const tiers = (opts?.tiers ?? []).filter((t) => VALID_TIERS.includes(t));
+  const limit = Math.max(1, Math.min(50, opts?.limit ?? 10));
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (opts?.dataset) {
+    conditions.push('dataset = ?');
+    params.push(normalizeDataset(opts.dataset));
+  }
+  if (tiers.length > 0) {
+    conditions.push(`tier IN (${tiers.map(() => '?').join(',')})`);
+    params.push(...tiers);
+  }
+  const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+  const rows = d.prepare(`SELECT * FROM memories${where} ORDER BY updated_at DESC LIMIT 400`).all(...params) as Record<string, unknown>[];
+  if (!rows.length) return [];
+
+  const trimmed = query.trim();
+  const hasQuery = trimmed.length > 0;
+  const queryVector = hasQuery ? await embedQueryBounded(trimmed, opts?.timeoutMs ?? 2_500) : null;
+  const now = Date.now();
+  const scored: Array<{ entry: MemoryEntry; score: number }> = [];
+
+  for (const row of rows) {
+    const entry = mapRow(row);
+    const text = `${entry.title}\n${entry.content}\n${entry.tags.join(' ')}`;
+    const lexical = hasQuery ? lexicalOverlap(query, text) : 0;
+    let semantic = 0;
+    if (hasQuery) {
+      const stored = decodeEmbedding(row.embedding);
+      const storedBackend = typeof row.embedding_backend === 'string' ? row.embedding_backend : null;
+      const storedModel = typeof row.embedding_model === 'string' ? row.embedding_model : '';
+      if (
+        stored &&
+        queryVector &&
+        storedBackend === queryVector.backend &&
+        (queryVector.backend === 'lexical' || storedModel === queryVector.model) &&
+        stored.length === queryVector.vector.length
+      ) {
+        semantic = dot(stored, queryVector.vector);
+      } else {
+        // No compatible vector yet (legacy row, backend change, or Ollama was
+        // offline at write time): use the deterministic lexical vector.
+        semantic = lexicalVectorSimilarity(query, text);
+      }
+      if (!isRelevant(semantic, lexical, true)) continue;
+    }
+    scored.push({
+      entry,
+      score: hybridScore({
+        baseScore: scoreMemory(entry, query, now),
+        semanticSimilarity: semantic,
+        lexicalOverlap: lexical,
+      }),
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score || b.entry.updatedAt - a.entry.updatedAt);
+  const top = scored.slice(0, limit);
+  touchAccess(top.map((s) => s.entry.id));
+  return top.map((s) => ({ ...s.entry, accessCount: s.entry.accessCount + 1, lastAccessed: now }));
+}
+
+/** Dot product for already-normalized vectors (cosine without re-normalizing). */
+function dot(a: number[], b: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
 }
 
 /** Move a memory between tiers (e.g. episodic event → durable semantic fact). */

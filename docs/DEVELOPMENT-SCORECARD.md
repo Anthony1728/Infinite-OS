@@ -1,14 +1,14 @@
 # INFINITE OS — Development Scorecard & Progression Record
 
 > Continuous project tracking per the master development framework.
-> Updated: 2026-11-07 · Rating method: average of 13 core systems, evidence-based.
+> Updated: 2026-11-07c · Rating method: average of 13 core systems, evidence-based.
 > Rule: no points for placeholders, simulations, or untested claims.
 
 ---
 
 ## CURRENT PROJECT SCORE
 
-**Overall: 7.1 / 10** (up from audited baseline 6.0) · **Current phase: 6 — Multi-Agent Collaboration (in progress)**
+**Overall: 7.3 / 10** (up from audited baseline 6.0) · **Current phase: 6 — Multi-Agent Collaboration (in progress)**
 
 ## CORE SYSTEM RATINGS
 
@@ -17,31 +17,34 @@
 | A | Infinite Core Intelligence | **7** | Real agent loop with execution brief, LLM compaction, capability-failure model switching, edit→verify guards, verified delegation pipeline with acceptance criteria + revision rounds (`agent/loop.ts`, `agent/coordination.ts`) | LLM-derived task-specific criteria (criteria are role templates); planner is heuristic |
 | B | Model Intelligence | **7.5** | 9 provider adapters; Wilson-score failover with persistent reliability; capability-based model switching; sticky auto-switch persistence; per-token cost accounting (`providers/failover.ts`, `model-performance.ts`, `pricing.ts`) — all unit-tested | No task-based routing that changes the PRIMARY model; no structured outputs at the adapter contract |
 | C | Infinite Agent Society | **7** | Agent registry + custom agents; crews with multi-model assignment and degrade ladders; **verified delegation** (criteria → mechanical verify → revision → honest `[verified]/[UNVERIFIED]` to leader → leader itself verified); per-agent memory datasets (`agent/crew.ts`, `agent/coordination.ts`) — 12 integration tests | Typed A2A message protocol; workers/automation paths not yet on the coordination contract; one-orchestrator consolidation (crew vs workers vs automation) |
-| D | Infinite Memory | **7** | SQLite tiers + entity graph; recall wired into every turn (`agent/context.ts`); tokenized retrieval; episodic writes on every chat turn; heartbeat consolidation (recalled episodes → semantic); per-agent datasets; semantic repo index survives restart | Embedding-based memory recall (embeddings exist, used only for file index); contradiction detection/correction; DB-backed suite skipped in CI (Electron ABI) |
+| D | Infinite Memory | **8** | SQLite tiers + entity graph; **embedding-backed hybrid recall** (`memory/hybrid.ts`, `memory/store.ts`): normalized Float32 vectors, Ollama `nomic-embed-text` with deterministic lexical fallback, backfill + stats, async recall wired into chat context, coordination, and knowledge tools; tokenized retrieval; episodic writes; heartbeat consolidation; per-agent datasets; semantic repo index survives restart | Contradiction detection/correction; cross-encoder reranking; DB-backed suite skipped in CI (Electron ABI) |
 | E | Infinite Execution Engine | **7.5** | Tool layer: per-tool timeouts, parallel-safe fan-out (cap 6), Pre/PostToolUse hooks, plan-mode gate before permissions, hash-chained audit log, destructive-command hard stop enforced in-path (`agent/tool-execution.ts`) — tested | OS-level sandboxing (Bash runs with full user rights inside policy); per-tool QoS |
 | F | Infinite Coding Environment | **6.5** | Edit/Write/Read/Grep(ripgrep)/Glob/Git(35+ subcommands)/Verify(auto-detect tsc-lint-test-build/pytest/go); file-content checkpoints + rollback; git worktree isolation; semantic index fixed (restart bug) + auto-index on session start; headless exec mode | Real LSP (current = diagnostics shelling); symbol-level repo map; harness-enforced Verify (prompt-enforced today); test generation removed as a stub |
 | G | Computer Use | **6.5** | PCLiveMap vector observation (UIA elements w/ values, ~1k tokens); **persistent PowerShell host** (ms-level actions, watchdog, honest error logs); **mechanical action verification** (cursor-position proof, per-action result records, seq-delta reported to model) | macOS/Linux support; accessibility-tree interaction (InvokePattern); OCR targeting precision; DPI-awareness |
 | H | Browser Intelligence | **7.5** | Chrome extension bridge over the user's real logged-in Chrome (95+ commands, timing-safe token, standby connections, Emergency Stop propagation); navigate now waits for load + reports loadError/loadTimedOut; CDP Operator fallback; in-app browser | Live-web tests are skip-gated; post-click effect verification at content level; real accessibility tree |
 | I | Infinite Automation | **7** | Trigger engine (cron/interval/once/idle/event/webhook/file_change), workflow builder, blocking approvals with comment→revision flow, multi-channel delivery (desktop/WhatsApp/Telegram/email), keep-awake — scheduler + builder tested | Workers path not on the verified-delegation contract; no per-node retry/QoS parity with n8n-class tools |
 | J | Infinite Voice | **5** | Voice sessions live in main process (survive view changes), Windows dictation, wake word, TTS | Untested in CI; interruption quality unverified; no live test evidence |
-| K | Infinite Learning | **6** | Learning adapter records every tool result + completed response; teaching mode (record→compile→editable steps) is real and deterministic; brain metrics now real (tick-delta CPU, kernel RAM, statfs disk) | Experience→instruction improvement loop is lesson-based only; no automatic prompt/self-model refinement from outcomes |
+| K | Infinite Learning | **7** | Learning adapter records every tool result + completed response; teaching mode (record→compile→editable steps) is real and deterministic; **outcome-derived operating rules** (`brain/experience.ts`): failure guards need ≥2 observations, verified procedures need ≥2 verified successes with the same leading tool sequence, secrets redacted, one terminal outcome per run, rules injected into agent context; brain metrics real | Rules are deterministic templates, not LLM-refined; no cross-project transfer weighting; evaluation runs intentionally excluded from learning |
 | L | Infinite Skills | **6** | Skills registry, CRUD + import/export (incl. Claude import), skills injection into system prompt | Skills not auto-selected per task; no skill generation from successful runs |
 | M | Infinite Interface | **7** | Cohesive dark UI with brand icon system; Connectors honest-status surface; onboarding now includes provider/model step with live connection test; Notes rename complete; ChatView memoized; 5.1MB→42KB dictionary chunk; ChatView lazy-loaded | Transcript virtualization for 500+ messages; settings defaults registry; Classic-theme dead code fully removed |
 
-**Average: 6.9 → reported 7.1** (weighted up by cross-system integration evidence; see weaknesses below which the average must not hide).
+**Average: 7.0 → reported 7.3** (weighted up by cross-system integration evidence; the new mechanical evaluation harness is not separately scored yet, but it hardens the evidence for A/F instead of inflating them; see weaknesses below which the average must not hide).
 
 ## INTEGRATION & RELIABILITY WEAKNESSES (not hidden by the average)
 
 1. **Three orchestration surfaces** (crew / workers / automation builder) share machinery but not the verified-delegation contract — only crews do.
 2. **DB-backed memory tests skip in CI** (better-sqlite3 Electron ABI) — memory persistence is not regression-protected under plain vitest.
 3. **LAN surfaces without TLS**: phone remote + bridge are token-authed but plaintext HTTP; email credentials still on a hardcoded legacy passphrase (safeStorage migration pending).
-4. **Verify loop is prompt-enforced**, not harness-enforced (no PostToolUse hook auto-runs Verify after Edit).
+4. **Verify is enforced at the end of a run** (two reminder rounds, then a visible failure), not by an automatic PostToolUse Verify after every edit.
 5. **Live-integration tests** (browser bridge, WhatsApp, voice) are skip-gated — green CI does not prove them.
+6. **Evaluation evidence is still thin**: 5 built-in tasks and a small number of real passing runs; no multi-model benchmark matrix or regression trend yet.
 
 ## WHAT WE IMPROVED (recent, with test evidence)
 
 | Change | Tests |
 |--------|-------|
+| **Mechanical task-completion evaluation** (`npm run eval`): 5 seeded real tasks, isolated workspace per task, file/JSON/regex/command checks, hard timeouts + process-tree kill, persisted reports, read-only UI history reachable from both sidebars | 24 evaluation tests; seeded-failure proof for all 5 tasks; real CLI run `eval-mw59u81y-9963df` passed 8/8 checks on `create-welcome-note` after provider failover; Playwright `evaluation-view.spec.ts` opens the page and asserts the real catalog + empty history |
+| **Evaluation isolation**: benchmark runs do not rewrite the active provider/model, model-reliability memory, or learned experience rules | `model-performance.test.ts` guard test; settings + `model-performance.json` inspected after a real run |
 | Verified-delegation pipeline: criteria → mechanical verify → revision → honest leader reporting → leader-verification loop | `coordination.integration.test.ts` (12 tests, real filesystem) |
 | **Automation agent_run steps on the same verified-delegation contract** (criteria → verify → revise → honest `[UNVERIFIED]` marker in result) | 18/18 automation tests + typecheck |
 | **Harness-enforced Verify**: after 2 reminder rounds, a run ending with unverified edits FAILS visibly (was: accepted with a footnote) | loop tests 8/8 + typecheck |
@@ -55,8 +58,22 @@
 | Extension navigate load-wait + loadError reporting | `node --check` + bridge design review |
 | Semantic index restart fix + true semantic_search routing | indexer changes + knowledge tests |
 | Memory recall wired into every turn; tokenized retrieval; episodic writes; heartbeat consolidation | context/store changes, full suite green |
+| **Embedding-backed hybrid memory recall** with deterministic lexical fallback, backfill, and stats | `memory/hybrid.test.ts` (7 tests) + async store paths |
+| **Experience-derived operating rules** from repeated verified successes/failures, injected into every turn | `brain/experience.test.ts` (6 tests) + loop terminal-outcome hook |
 | Onboarding provider/model step with live connection test | typecheck (manual first-run pass pending) |
 | Performance: dictionary 5.1MB→42KB; ChatView lazy + memoized; phone token-in-header | build output; 8/8 smoke tests |
+
+## TASK-COMPLETION EVALUATION (what is actually proven)
+
+The harness defines "done" before the agent runs and scores it from the workspace, never from the agent's summary.
+
+- **Seeded tasks**: `create-welcome-note`, `fix-failing-test`, `update-package-config`, `diagnose-broken-config`, `refactor-rename-export`. Every task fails its checks on the untouched seed workspace (tested for all 5).
+- **Checks**: file existence/absence, exact content, regex, JSON path equality, and real shell commands with exit-code/stdout assertions, hard timeouts, and process-tree kill on Windows.
+- **Containment**: absolute paths, `..` escapes, and symlinks that resolve outside the task workspace are rejected.
+- **Independent of self-report**: a run can PASS the checks while the runner reports `success: false`; `eval-mw59u81y-9963df` did exactly that (8/8 checks passed, runner did not claim verified completion).
+- **Honest failure path**: `eval-mw59lw81-e44d8f` recorded 0/5 passes when no provider was reachable; every check reported its real missing file/value/command failure instead of a fabricated success.
+- **Isolation**: evaluations run only in the headless CLI process. Benchmark traffic is excluded from sticky model switching, model-reliability memory, and learned experience rules.
+- **UI access**: Playwright `e2e/evaluation-view.spec.ts` launches the built app with an isolated profile, opens Evaluation from the default Classic sidebar, and asserts the real suite catalog and the honest empty-history state.
 
 ## CURRENT PHASE — 6: MULTI-AGENT COLLABORATION (~80%)
 
@@ -65,12 +82,14 @@ Missing: central coordination unification (one orchestrator surface over crew/wo
 
 ## NEXT PHASE — 7: AUTONOMOUS OPERATING ENVIRONMENT (→ 8.3–9.0)
 
-Requirements and plan:
-1. Put the verified-delegation contract behind `automation/builder.ts` agent_run actions and workers (reuses `coordination.ts`).
-2. Harness-enforced Verify (PostToolUse hook auto-runs after Edit/Write).
+Requirements and plan (✓ = done):
+1. Put the verified-delegation contract behind `automation/builder.ts` agent_run actions and workers (reuses `coordination.ts`). — automation done, workers pending.
+2. ✓ Harness-enforced Verify (runs that end with unverified edits fail visibly after two reminder rounds).
 3. Structured outputs on `ProviderAdapter` (json_schema response_format where supported, validator fallback).
 4. TLS or loopback-pairing for phone remote; email credentials re-keyed to safeStorage.
-5. Embedding-based memory recall (reuse `indexing/embeddings.ts`).
+5. ✓ Embedding-based memory recall (hybrid embeddings + deterministic lexical fallback).
+6. ✓ Mechanical task-completion evaluation with isolated workspaces and persisted reports.
+7. Expand evaluation to a multi-model benchmark matrix and a regression trend before claiming 9/10 execution reliability.
 
 ## SCORE HISTORY
 
@@ -80,6 +99,7 @@ Requirements and plan:
 | 2026-11-06 | 6.8 | Memory lifecycle live; security hard stops; perf fixes; Notes rename |
 | 2026-11-07 | 7.1 | Verified-delegation pipeline + per-agent memory + leader verification |
 | 2026-11-07b | 7.2 | Automation on the delegation contract; harness-enforced Verify; remote brute-force guard |
+| 2026-11-07c | 7.3 | Embedding-backed hybrid memory; outcome-derived experience rules; mechanical task-completion evaluation (real pass + honest failure evidence) |
 
 ## TARGET
 

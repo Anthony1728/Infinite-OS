@@ -37,6 +37,8 @@
     "pretest:e2e": "npm run build",
     "test:e2e": "playwright test",
     "exec": "node scripts/exec.mjs",
+    "eval": "node scripts/eval.mjs",
+    "eval:list": "node scripts/eval.mjs --list",
     "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps"
   },
   "build": {

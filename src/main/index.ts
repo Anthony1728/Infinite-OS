@@ -375,6 +375,28 @@ app.whenReady().then(async () => {
     app.exit(code);
     return;
   }
+  // Headless evaluation (`npm run eval`): real agent runs in isolated
+  // workspaces, scored by mechanical checks. No window, no prompts.
+  if (process.argv.includes('--eval')) {
+    const { parseEvalArgs, evalUsage } = await import('./evaluation/args.js');
+    const { runEval } = await import('./evaluation/run.js');
+    const raw = process.argv.slice(process.argv.indexOf('--eval') + 1);
+    const parsed = parseEvalArgs(raw);
+    if ('error' in parsed) {
+      if (parsed.error !== 'help') console.error(`eval: ${parsed.error}\n`);
+      console.error(evalUsage());
+      app.exit(parsed.error === 'help' ? 0 : 2);
+      return;
+    }
+    registerBuiltinTools();
+    const code = await runEval(parsed);
+    await Promise.all([
+      new Promise<void>((r) => process.stdout.write('', () => r())),
+      new Promise<void>((r) => process.stderr.write('', () => r())),
+    ]);
+    app.exit(code);
+    return;
+  }
   // Dictation is a local composer capability and must not depend on a model
   // provider. Grant microphone capture only to the trusted Infinite OS window.
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -460,6 +482,16 @@ app.whenReady().then(async () => {
 
   // Heartbeat — periodic idle consolidation (Hermes-inspired)
   void import('./heartbeat/index.js').then(({ startHeartbeat }) => startHeartbeat()).catch(() => {});
+
+  // Upgrade existing memory rows to the embedding-backed recall path in the
+  // background. Lexical vectors are stored when Ollama is unavailable, so this
+  // is still useful (and cheap) on a fresh install.
+  void import('./memory/store.js')
+    .then(({ backfillMemoryEmbeddings }) => backfillMemoryEmbeddings({ limit: 96 }))
+    .then((result) => {
+      if (result.embedded > 0) logger.info(`[memory] Embedded ${result.embedded} existing memories for hybrid recall`);
+    })
+    .catch((e) => logger.warn({ err: e }, 'Memory embedding backfill failed'));
 
   // Source guard — only Infinite AI may edit Infinite OS source
   void import('./guard/source-guard.js').then(({ startGuard, setViolationHandler }) => {
