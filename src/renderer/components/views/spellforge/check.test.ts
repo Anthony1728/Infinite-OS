@@ -5,7 +5,7 @@
  * quietly reports that every ordinary English word is misspelled.
  */
 import { describe, expect, it, beforeAll } from 'vitest';
-import { dictionaryHealth, parseWordList, readBundledDictionary } from './dict-loader';
+import { dictionaryHealth, parseWordList, getLoadedDictionary } from './dict-loader';
 import { applyCorrections, checkTextSync, ensureDictionary, isDictionaryReady } from './check';
 import { has } from './engine';
 
@@ -42,7 +42,7 @@ describe('bundled dictionary', () => {
   });
 
   it('contains no carriage returns in any entry', () => {
-    const { words, freq } = readBundledDictionary();
+    const { words, freq } = getLoadedDictionary()!;
     expect(words.some((w) => w.includes('\r'))).toBe(false);
     expect(freq.some((w) => w.includes('\r'))).toBe(false);
   });
@@ -55,7 +55,7 @@ describe('bundled dictionary', () => {
   });
 
   it('ranks the frequency list in order', () => {
-    const { freq } = readBundledDictionary();
+    const { freq } = getLoadedDictionary()!;
     expect(freq[0]).toBe('you');
     expect(freq.indexOf('the')).toBeLessThan(freq.indexOf('zebra') === -1 ? Infinity : freq.indexOf('zebra'));
   });

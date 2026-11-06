@@ -868,6 +868,15 @@ export async function runAgent(
         });
         continue;
       }
+      // Harness-enforced: after the reminder budget is exhausted, a run that
+      // still ends with unverified edits is a FAILURE — not a success with a
+      // footnote. The user sees exactly why; the next attempt (automation
+      // retry, recovery attempt) starts knowing the rule is real.
+      if (editsSinceVerify) {
+        opts.onEvent({ type: 'error', error: 'Run ended with UNVERIFIED file edits — the model never ran the Verify tool after its last Edit/Write despite two reminders. The changes are on disk but unvalidated; review or re-run.' });
+        opts.onEvent({ type: 'fallback_required', error: 'Unverified file edits: Verify was not run after the last edit.' });
+        return messages;
+      }
       const updates = drainInterjections(opts.sessionId);
       if (updates.length > 0) {
         for (const update of updates) {
@@ -1165,7 +1174,17 @@ export async function runAgent(
       messages.push({
         id: crypto.randomUUID(),
         role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: tu.id, content: result.content, is_error: result.is_error }],
+        content: [{
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: result.content,
+          is_error: result.is_error,
+          // Third-party output (web pages, MCP replies, files) can carry
+          // injected instructions. Marking it lets buildContext wrap it in
+          // an explicit "untrusted data" frame so the model cannot mistake
+          // it for a directive from the user.
+          untrusted: UNTRUSTED_TOOL_NAMES.has(canonicalName),
+        }],
         timestamp: Date.now(),
       });
       opts.onEvent({ type: 'tool_result', tool_use_id: tu.id, content: result.content, is_error: result.is_error });
@@ -1185,6 +1204,17 @@ export async function runAgent(
   else opts.onEvent({ type: 'fallback_required' });
   return messages;
 }
+
+/**
+ * Tools whose output is third-party content the model must treat as data.
+ * Web pages, browser snapshots, MCP replies, and files read from disk can
+ * all carry prompt-injection payloads; marking them lets the framing layer
+ * in buildContext warn the model without re-reading every tool's source.
+ */
+const UNTRUSTED_TOOL_NAMES = new Set([
+  'WebFetch', 'WebSearch', 'Browser', 'browser_extension', 'Operator',
+  'Read', 'Glob', 'Grep', 'Knowledge', 'ConversationSearch',
+]);
 
 function messageText(message: Message): string {
   return message.content

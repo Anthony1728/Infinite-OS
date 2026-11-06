@@ -238,8 +238,29 @@ export function recallMemories(query: string, opts?: { tiers?: MemoryTier[]; lim
   const d = getDb();
   const tiers = (opts?.tiers ?? []).filter((t) => VALID_TIERS.includes(t));
   const limit = Math.max(1, Math.min(50, opts?.limit ?? 10));
-  const conditions: string[] = ['(title LIKE ? OR content LIKE ? OR tags LIKE ?)'];
-  const params: unknown[] = [`%${query}%`, `%${query}%`, `%${query}%`];
+  // Tokenized matching: the old whole-query LIKE ("what did we decide about
+  // the deploy pipeline") matched almost nothing unless the exact substring
+  // existed. Each meaningful word becomes its own OR clause so partial
+  // relevance surfaces; scoreMemory ranking still separates signal from noise.
+  const words = Array.from(
+    new Set(
+      query
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 3),
+    ),
+  ).slice(0, 8);
+  const matchers = words.length > 0 ? words : [query.trim()].filter(Boolean);
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (matchers.length > 0) {
+    conditions.push(`(${matchers.map(() => '(title LIKE ? OR content LIKE ? OR tags LIKE ?)').join(' OR ')})`);
+    for (const word of matchers) {
+      const pattern = `%${word}%`;
+      params.push(pattern, pattern, pattern);
+    }
+  }
   if (opts?.dataset) {
     conditions.push('dataset = ?');
     params.push(normalizeDataset(opts.dataset));

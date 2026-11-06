@@ -11,8 +11,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
+import { collectSystemMetrics } from '../system/metrics.js';
 import { infiniteHome } from '../profiles/home.js';
 
 // Types
@@ -490,7 +491,9 @@ export class InfiniteBrain {
   }
 
   private getCpuUsage(): number {
-    return Math.random() * 0.3 + 0.1; // Placeholder
+    // Real OS tick-delta measurement (was Math.random() — every health score
+    // built on it was fiction).
+    return collectSystemMetrics().cpu / 100;
   }
 
   private getMemoryUsage(): number {
@@ -499,7 +502,16 @@ export class InfiniteBrain {
   }
 
   private getDiskUsage(): number {
-    return 0.5; // Placeholder
+    // Real usage of the drive holding the brain's data dir; 0 when the OS
+    // won't tell us (better honest-unknown than the old hardcoded 0.5).
+    try {
+      const stats = statfsSync(this.dataDir);
+      const total = Number(stats.blocks);
+      const available = Number(stats.bavail);
+      return total > 0 ? Math.min(1, Math.max(0, 1 - available / total)) : 0;
+    } catch {
+      return 0;
+    }
   }
 
   // Data persistence

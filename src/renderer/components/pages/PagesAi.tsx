@@ -165,8 +165,8 @@ export function PagesAi({
       let effectivePrompt = prompt.trim();
       let effectiveAction: AiAction = action;
       if (action === 'grammar') effectivePrompt = 'Correct the spelling, grammar, punctuation, and awkward phrasing in the supplied page. Preserve the author\'s voice and meaning. Return only the corrected text.';
-      if (action === 'summarize' && !effectivePrompt) effectivePrompt = isDatabase ? 'Summarize the key patterns, gaps, and next actions in this database.' : 'Summarize this page in a compact set of useful key points.';
-      if (action === 'rewrite' && !effectivePrompt) effectivePrompt = 'Rewrite this page so it is clearer, tighter, and stronger while preserving its meaning.';
+      if (action === 'summarize' && !effectivePrompt) effectivePrompt = isDatabase ? 'Summarize the key patterns, gaps, and next actions in this database.' : 'Summarize this note in a compact set of useful key points.';
+      if (action === 'rewrite' && !effectivePrompt) effectivePrompt = 'Rewrite this note so it is clearer, tighter, and stronger while preserving its meaning.';
       if (action === 'sheet') {
         if (!database) return;
         const columns = database.properties
@@ -182,7 +182,7 @@ export function PagesAi({
         effectiveAction = 'sheet';
         setAction('sheet');
       }
-      if (!effectivePrompt) effectivePrompt = 'Write something useful for this page.';
+      if (!effectivePrompt) effectivePrompt = 'Write something useful for this note.';
       const response = await window.api.studioAi({
         action: effectiveAction === 'sheet' ? 'sheet' : effectiveAction,
         kind: effectiveAction === 'sheet' ? 'sheet' : 'document',
@@ -252,8 +252,8 @@ export function PagesAi({
           onChange={(event) => setPrompt(event.target.value)}
           placeholder={isDatabase
             ? 'Describe the rows you want, e.g. “10 launch tasks across design, engineering, and marketing, due over the next month”'
-            : action === 'write' ? 'What should this page become? Add details, audience, tone, and structure…'
-              : action === 'custom' ? 'Tell the AI exactly what to do with this page…'
+            : action === 'write' ? 'What should this note become? Add details, audience, tone, and structure…'
+              : action === 'custom' ? 'Tell the AI exactly what to do with this note…'
                 : 'Optional: add direction for the AI…'}
           rows={4}
           onKeyDown={(event) => {

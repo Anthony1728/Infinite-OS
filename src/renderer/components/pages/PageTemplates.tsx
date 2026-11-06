@@ -50,7 +50,7 @@ export function PageTemplates({
           <div className="pages-segmented">
             {(['all', 'page', 'database'] as const).map((value) => (
               <button key={value} type="button" className={filter === value ? 'is-active' : ''} onClick={() => setFilter(value)}>
-                {value === 'all' ? 'All templates' : value === 'page' ? 'Pages' : 'Databases'}
+                {value === 'all' ? 'All templates' : value === 'page' ? 'Notes' : 'Databases'}
               </button>
             ))}
           </div>
@@ -69,7 +69,7 @@ export function PageTemplates({
                 <span className="pages-template-icon">{template.icon}</span>
                 <span className="pages-template-kind">
                   {template.kind === 'database' ? <Database size={11} /> : <FileText size={11} />}
-                  {template.kind === 'database' ? 'Database' : 'Page'}
+                  {template.kind === 'database' ? 'Database' : 'Note'}
                 </span>
               </div>
               <div className="pages-template-body">

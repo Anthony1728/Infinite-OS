@@ -98,7 +98,7 @@ describe('profile activation', () => {
     const { getActiveUid, setActiveUid } = await import('./home.js');
     // Regression: the auth handler once compared the RAW session email
     // against the SANITIZED pointer, mismatched forever, and relaunched
-    // on every boot â€” black orphan window in dev.
+    // on every boot — black orphan window in dev.
     const base = await mkdtemp(join(tmpdir(), 'profiles-uid-'));
     try {
       const session = { user: { email: 'test@example.com' }, isAuthenticated: true };

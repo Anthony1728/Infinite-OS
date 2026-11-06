@@ -54,14 +54,14 @@ function PagesLanding() {
           <span className="pages-landing-spark is-two" />
           <span className="pages-landing-spark is-three" />
         </div>
-        <div className="pages-eyebrow"><Sparkles size={12} /> Infinite Pages</div>
+        <div className="pages-eyebrow"><Sparkles size={12} /> Infinite Notes</div>
         <h1>A home for every thought.</h1>
         <p className="pages-landing-lead">
-          Write without friction. Shape ideas into pages, databases, and living systems — then let AI help you move faster.
+          Write without friction. Shape ideas into notes, databases, and living systems — then let AI help you move faster.
         </p>
         <div className="pages-landing-actions">
           <button type="button" className="pages-primary-button is-large" onClick={() => void create({ title: 'Untitled' })}>
-            <Plus size={16} /> New page
+            <Plus size={16} /> New note
           </button>
           <button type="button" className="pages-secondary-button is-large" onClick={() => void create({ kind: 'database', title: 'Untitled database' })}>
             <Database size={16} /> New database
@@ -75,7 +75,7 @@ function PagesLanding() {
           <div className="pages-landing-recent">
             <div className="pages-landing-section-head">
               <span>Continue where you left off</span>
-              <span className="pages-landing-count">{summaries.filter((summary) => !summary.trashedAt && !summary.rowDatabaseId).length} pages</span>
+              <span className="pages-landing-count">{summaries.filter((summary) => !summary.trashedAt && !summary.rowDatabaseId).length} notes</span>
             </div>
             <div className="pages-landing-grid">
               {recent.map((page) => (
@@ -87,7 +87,7 @@ function PagesLanding() {
                     <div className="pages-landing-card-title">{page.title}</div>
                     <div className="pages-landing-card-meta">
                       {page.kind === 'database' ? <Database size={11} /> : <FileText size={11} />}
-                      {page.kind === 'database' ? 'Database' : 'Page'}
+                      {page.kind === 'database' ? 'Database' : 'Note'}
                       <span>·</span>
                       {formatRelative(page.updatedAt)}
                     </div>
@@ -116,7 +116,7 @@ function PagesLanding() {
         )}
 
         <div className="pages-landing-hint">
-          Tip: press <kbd>Alt</kbd> <kbd>N</kbd> for a new page, type <kbd>/</kbd> for blocks, or <kbd>[[</kbd> to link another page.
+          Tip: press <kbd>Alt</kbd> <kbd>N</kbd> for a new note, type <kbd>/</kbd> for blocks, or <kbd>[[</kbd> to link another note.
         </div>
       </div>
 
@@ -160,7 +160,7 @@ function TrashDialog({ onClose }: { onClose: () => void }) {
             <div className="pages-trash-empty">
               <div className="pages-empty-glyph"><Trash2 size={22} /></div>
               <h3>Trash is empty</h3>
-              <p>Deleted pages will wait here until you decide what to do with them.</p>
+              <p>Deleted notes will wait here until you decide what to do with them.</p>
             </div>
           ) : trashed.map((page) => (
             <div key={page.id} className="pages-trash-row">
@@ -168,7 +168,7 @@ function TrashDialog({ onClose }: { onClose: () => void }) {
               <div className="min-w-0 flex-1">
                 <div className="pages-trash-title">{page.title}</div>
                 <div className="pages-trash-meta">
-                  {page.kind === 'database' ? 'Database' : 'Page'}
+                  {page.kind === 'database' ? 'Database' : 'Note'}
                   {page.trashedAt ? ` · deleted ${formatRelative(page.trashedAt)}` : ''}
                 </div>
               </div>
@@ -283,10 +283,10 @@ export function PagesView() {
         ) : activeSummary?.trashedAt ? (
           <div className="pages-missing">
             <div className="pages-empty-glyph"><Trash2 size={24} /></div>
-            <h2>This page is in the trash</h2>
-            <p>Restore it to continue writing, or choose another page from the sidebar.</p>
+            <h2>This note is in the trash</h2>
+            <p>Restore it to continue writing, or choose another note from the sidebar.</p>
             <button type="button" className="pages-primary-button" onClick={() => void usePagesStore.getState().restore(activePage.id)}>
-              <Undo2 size={14} /> Restore page
+              <Undo2 size={14} /> Restore note
             </button>
           </div>
         ) : (

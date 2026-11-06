@@ -1,5 +1,5 @@
 /* ============================================================================
-   Infinite Pages
+   Infinite Notes
    A focused, editorial workspace layered over the Infinite OS shell.
    ========================================================================= */
 
@@ -381,11 +381,8 @@
   flex: 0 0 auto;
   border-radius: 10px;
   color: #ddd4ff;
-  background:
-    radial-gradient(80% 80% at 25% 15%, rgba(255, 255, 255, 0.2), transparent 55%),
-    linear-gradient(145deg, #6d28d9, #312e81 60%, #0e7490);
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  box-shadow: 0 6px 18px -10px rgba(109, 40, 217, 0.9);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .pages-sidebar-title {

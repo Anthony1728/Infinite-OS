@@ -1,15 +1,18 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { ChatView } from '../chat/ChatView';
 import { useSessionStore } from '../../stores/session';
 import { useAiTabsStore } from '../../stores/aiTabs';
 import { DynamicTabView } from './DynamicTabView';
+
+// ChatView was the only statically imported view — its ~1.5MB chunk was the
+// whole startup cost. It's lazy like everything else now; App.tsx idle-
+// prefetches it the same way it does the Terminal chunk.
+const ChatView = lazy(() => import('../chat/ChatView').then(m => ({ default: m.ChatView })));
 
 // Lazy-load — 2026-09-01 v3: homepage removed, 6 X'd modules removed from bundle, side moved items as nav
 // REMOVED from bundle: AgentsView, InfiniteCanvas, BusinessOSView, KnowledgeView, YouTubeLearningView, MultiAgentView, OSHomeView
 // KEPT/MOVED to side: StandingOrdersView, ActiveMemoryView, PluginStoreView, CapabilitiesView (Tools & Skills)
 // Routines scratched per latest image → removed; files kept on disk + .backups for restore
 const FileManager = lazy(() => import('../workspace/FileManager').then(m => ({ default: m.FileManager })));
-const MemoryPanel = lazy(() => import('../memory/MemoryPanel').then(m => ({ default: m.MemoryPanel })));
 const SettingsView = lazy(() => import('../views/SettingsView').then(m => ({ default: m.SettingsView })));
 const AutomationView = lazy(() => import('../views/AutomationView').then(m => ({ default: m.AutomationView })));
 // Workers: Warmwind-style autonomous tasks — step lists, Teaching mode, app catalog, vault.
@@ -30,7 +33,6 @@ const DeployView = lazy(() => import('../views/DeployView').then(m => ({ default
 const EnterpriseView = lazy(() => import('../views/EnterpriseView').then(m => ({ default: m.EnterpriseView })));
 const PluginStoreView = lazy(() => import('../views/PluginStoreView').then(m => ({ default: m.PluginStoreView })));
 const TaskReplayView = lazy(() => import('../views/TaskReplayView').then(m => ({ default: m.TaskReplayView })));
-const TestView = lazy(() => import('../views/TestView').then(m => ({ default: m.TestView })));
 const VideoView = lazy(() => import('../views/VideoView').then(m => ({ default: m.VideoView })));
 const VoiceView = lazy(() => import('../views/VoiceView').then(m => ({ default: m.VoiceView })));
 const WebsiteBuilderView = lazy(() => import('../views/WebsiteBuilderView').then(m => ({ default: m.WebsiteBuilderView })));
@@ -119,7 +121,8 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
       case 'workers':
         return <WorkersView />;
       case 'memory':
-        return <MemoryPanel onClose={() => onViewChange('chats')} />;
+      case 'active-memory':
+        return <ActiveMemoryView />;
       case 'workspace':
         return <WorkspaceView />;
       case 'browser':
@@ -144,8 +147,6 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <WebsiteBuilderView />;
       case 'deploy':
         return <DeployView />;
-      case 'testing':
-        return <TestView />;
       case 'video':
         return <VideoView />;
       case 'voice':
@@ -154,8 +155,6 @@ export function MainView({ activeView, onViewChange, onOpenDeploy }: MainViewPro
         return <TaskReplayView />;
       case 'standing-orders':
         return <StandingOrdersView />;
-      case 'active-memory':
-        return <ActiveMemoryView />;
       case 'enterprise':
         return <EnterpriseView />;
       case 'business':

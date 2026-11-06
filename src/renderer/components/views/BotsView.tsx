@@ -67,6 +67,10 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
   const [showHidden, setShowHidden] = useState(false);
   const [dialog, setDialog] = useState<null | { mode: 'new' | 'edit'; bot?: Bot }>(null);
   const [taskFor, setTaskFor] = useState<Bot | null>(null);
+  // Master-detail layout: the left column lists bots compactly, the right
+  // column shows the selected bot's full profile — so one bot never floats
+  // alone in a page-sized void.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -104,6 +108,13 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
       return b.name.toLowerCase().includes(q) || (b.description ?? '').toLowerCase().includes(q);
     });
   }, [bots, search, hidden, showHidden]);
+
+  // Selection falls back to the first visible bot so the detail pane is
+  // never empty while a bot exists.
+  const selected = useMemo(
+    () => visible.find((b) => b.id === selectedId) ?? visible[0] ?? null,
+    [visible, selectedId],
+  );
 
   const setHide = (id: string, hide: boolean) => {
     setHidden((prev) => {
@@ -242,7 +253,11 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
                   : 'bg-white/[0.04] border-white/[0.08] text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              👁{showHidden ? '' : '·'}
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              {showHidden ? '' : hidden.length}
             </button>
           )}
           <button
@@ -254,140 +269,206 @@ export function BotsView({ onViewChange }: { onViewChange: (view: string) => voi
         </div>
       </div>
 
-      <div className="mt-3 mb-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search bots…"
-          aria-label="Search bots"
-          className="w-full max-w-sm rounded-xl bg-[#0c1018] border border-white/[0.07] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/30 transition-colors"
-        />
-      </div>
+      {/* Master-detail: compact list on the left, the selected bot's full
+          profile on the right — the same shape as the Workers view, so one
+          bot never floats alone in a page-sized void. */}
+      <div className="grid lg:grid-cols-[minmax(280px,1fr)_minmax(340px,1.35fr)] gap-4 flex-1 min-h-0 mt-3">
+        {/* List column */}
+        <div className="flex flex-col gap-3 min-h-0">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search bots…"
+            aria-label="Search bots"
+            className="w-full rounded-xl bg-[#0c1018] border border-white/[0.07] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-violet-500/30 transition-colors flex-shrink-0"
+          />
 
-      {/* Active-now presence strip */}
-      {activeBots.length > 0 && (
-        <div className="mb-3 flex items-center gap-2 overflow-x-auto pb-1">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-emerald-300/80 flex-shrink-0">
-            Active now
-          </span>
-          {activeBots.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => void openChat(b)}
-              className="inline-flex flex-shrink-0 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/[0.07] px-2.5 py-1 text-xs text-emerald-100 hover:bg-emerald-500/[0.12] transition-colors"
-            >
-              <BotAvatar name={b.name} seed={b.avatarSeed} size={20} busy />
-              {b.name}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* No pt/pr here: .card-grid-animated owns the glow clearance, and any
-          inset padding on the scroller re-cuts the card shadow. */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
-        {loading ? (
-          <div className="py-16 text-center text-sm text-zinc-500">Loading bots…</div>
-        ) : visible.length === 0 ? (
-          <div className="min-h-[240px] flex flex-col items-center justify-center gap-2 text-center rounded-xl bg-[#0c1018] border border-white/[0.06]">
-            <div className="text-sm text-zinc-400 font-medium">{bots.length ? 'No bots match' : 'No bots yet'}</div>
-            <div className="text-xs text-zinc-600 max-w-sm">
-              {bots.length
-                ? 'Try a different search — or reveal hidden bots with the eye toggle.'
-                : 'Create your first specialist: a name and a role is enough to start.'}
+          {/* Active-now presence strip */}
+          {activeBots.length > 0 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-shrink-0">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-emerald-300/80 flex-shrink-0">
+                Active now
+              </span>
+              {activeBots.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => void openChat(b)}
+                  className="inline-flex flex-shrink-0 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/[0.07] px-2.5 py-1 text-xs text-emerald-100 hover:bg-emerald-500/[0.12] transition-colors"
+                >
+                  <BotAvatar name={b.name} seed={b.avatarSeed} size={20} busy />
+                  {b.name}
+                </button>
+              ))}
             </div>
-            {!bots.length && (
-              <button
-                onClick={() => setDialog({ mode: 'new' })}
-                className="mt-2 rounded-lg px-4 py-2 text-xs font-semibold bg-white/[0.05] border border-white/10 text-zinc-200 hover:bg-white/[0.08] transition-colors"
-              >
-                + New Bot
-              </button>
+          )}
+
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
+            {loading ? (
+              <div className="py-16 text-center text-sm text-zinc-500">Loading bots…</div>
+            ) : visible.length === 0 ? (
+              <div className="min-h-[240px] flex flex-col items-center justify-center gap-2 text-center rounded-xl bg-[#0c1018] border border-white/[0.06]">
+                <div className="text-sm text-zinc-400 font-medium">{bots.length ? 'No bots match' : 'No bots yet'}</div>
+                <div className="text-xs text-zinc-600 max-w-sm">
+                  {bots.length
+                    ? 'Try a different search — or reveal hidden bots with the eye toggle.'
+                    : 'Create your first specialist: a name and a role is enough to start.'}
+                </div>
+                {!bots.length && (
+                  <button
+                    onClick={() => setDialog({ mode: 'new' })}
+                    className="mt-2 rounded-lg px-4 py-2 text-xs font-semibold bg-white/[0.05] border border-white/10 text-zinc-200 hover:bg-white/[0.08] transition-colors"
+                  >
+                    + New Bot
+                  </button>
+                )}
+              </div>
+            ) : (
+              visible.map((b) => {
+                const busy = busyIds.has(b.id);
+                const dimmed = hidden.includes(b.id);
+                const last = runs.find((r) => r.agentId === b.id);
+                const dot = last
+                  ? last.status === 'running' || last.status === 'queued'
+                    ? 'bg-amber-400 animate-pulse'
+                    : last.status === 'failed'
+                      ? 'bg-red-400'
+                      : last.status === 'completed'
+                        ? 'bg-emerald-400'
+                        : 'bg-zinc-500'
+                  : 'bg-zinc-800';
+                return (
+                  <button
+                    key={b.id}
+                    onClick={() => setSelectedId(b.id)}
+                    className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                      selected?.id === b.id
+                        ? 'border-violet-500/40 bg-violet-500/[0.08]'
+                        : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]'
+                    } ${dimmed ? 'opacity-50' : ''}`}
+                  >
+                    <BotAvatar name={b.name} seed={b.avatarSeed} size={36} busy={busy} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-zinc-100 truncate">{b.name}</span>
+                        {busy && <span className="af-badge">working</span>}
+                      </span>
+                      <span className="block text-xs text-zinc-500 truncate">{b.description || 'No role set'}</span>
+                    </span>
+                    <span className={`h-2 w-2 rounded-full flex-shrink-0 ${dot}`} />
+                  </button>
+                );
+              })
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 card-grid-animated pb-6">
-            {visible.map((b) => {
-              const busy = busyIds.has(b.id);
-              const dimmed = hidden.includes(b.id);
-              const routines = routineCount(b.name);
-              return (
-                <div key={b.id} className={`agent-card agent-card--static !p-4 ${dimmed ? 'opacity-50' : ''}`}>
-                  <div className="flex items-start gap-3">
-                    <BotAvatar name={b.name} seed={b.avatarSeed} size={44} busy={busy} />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-zinc-100 truncate">{b.name}</div>
-                      <div className="text-xs text-zinc-500 truncate">{b.description || 'No role set'}</div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        {busy && <span className="af-badge">working</span>}
-                        {(b.provider || b.model) && (
-                          <span className="text-[10px] font-mono text-cyan-300/80">
-                            {b.provider ?? ''}{b.model ? `/${b.model.split('/').pop()}` : ''}
-                          </span>
-                        )}
-                        {routines > 0 && (
-                          <span className="text-[10px] text-zinc-500">
-                            {routines} routine{routines === 1 ? '' : 's'}
-                          </span>
-                        )}
-                      </div>
+        </div>
+
+        {/* Detail column */}
+        <div className="min-h-0 overflow-y-auto custom-scrollbar">
+          {!selected ? (
+            <div className="h-full min-h-[240px] flex flex-col items-center justify-center gap-2 text-center rounded-2xl border border-white/[0.06] bg-white/[0.015] p-8">
+              <div className="text-sm text-zinc-400 font-medium">No bot selected</div>
+              <div className="text-xs text-zinc-600 max-w-xs">
+                Select a bot to see its role, model, routines, and controls.
+              </div>
+            </div>
+          ) : (() => {
+            const busy = busyIds.has(selected.id);
+            const dimmed = hidden.includes(selected.id);
+            const routines = routineCount(selected.name);
+            const last = runs.find((r) => r.agentId === selected.id);
+            const dot = last
+              ? last.status === 'running' || last.status === 'queued'
+                ? 'bg-amber-400 animate-pulse'
+                : last.status === 'failed'
+                  ? 'bg-red-400'
+                  : last.status === 'completed'
+                    ? 'bg-emerald-400'
+                    : 'bg-zinc-500'
+              : 'bg-zinc-700';
+            const lastDetail =
+              last?.preview?.trim() ||
+              (last?.status === 'failed' && last.error ? last.error.slice(0, 120) : '') ||
+              last?.status ||
+              '';
+            return (
+              <div className="rounded-2xl border border-white/[0.07] bg-[#0c1018] p-5">
+                <div className="flex items-start gap-4">
+                  <BotAvatar name={selected.name} seed={selected.avatarSeed} size={64} busy={busy} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-white truncate">{selected.name}</h2>
+                      {busy && <span className="af-badge">working</span>}
+                      {dimmed && <span className="af-badge opacity-70">hidden</span>}
+                    </div>
+                    <p className="text-sm text-zinc-500 mt-0.5">{selected.description || 'No role set'}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                      {(selected.provider || selected.model) && (
+                        <span className="rounded-md border border-cyan-500/20 bg-cyan-500/[0.06] px-2 py-0.5 font-mono text-cyan-300/80">
+                          {selected.provider ?? 'any provider'}{selected.model ? ` · ${selected.model}` : ''}
+                        </span>
+                      )}
+                      <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-zinc-400">
+                        {routines} routine{routines === 1 ? '' : 's'}
+                      </span>
+                      <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-zinc-400">
+                        {selected.allowedTools.length} tool{selected.allowedTools.length === 1 ? '' : 's'}
+                      </span>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button onClick={() => void openChat(b)} className="af-action">
-                      Chat
-                    </button>
-                    <button
-                      onClick={() => setTaskFor(b)}
-                      className="af-action"
-                    >
-                      Run task
-                    </button>
-                  </div>
-                  {(() => {
-                    const last = runs.find((r) => r.agentId === b.id);
-                    if (!last) return null;
-                    const dot =
-                      last.status === 'running' || last.status === 'queued'
-                        ? 'bg-amber-400 animate-pulse'
-                        : last.status === 'failed'
-                          ? 'bg-red-400'
-                          : last.status === 'completed'
-                            ? 'bg-emerald-400'
-                            : 'bg-zinc-500';
-                    const detail =
-                      last.preview?.trim() ||
-                      (last.status === 'failed' && last.error ? last.error.slice(0, 90) : '') ||
-                      last.status;
-                    return (
-                      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-500 min-w-0">
-                        <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${dot}`} />
-                        <span className="truncate" title={detail}>{detail}</span>
-                      </div>
-                    );
-                  })()}
-                  <div className="mt-2 flex items-center gap-1 text-[11px]">
-                    <button onClick={() => setDialog({ mode: 'edit', bot: b })} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Edit</button>
-                    <button onClick={() => void duplicateBot(b)} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Duplicate</button>
-                    <button
-                      onClick={() => onViewChange('automations')}
-                      title="Routines live in Automations, namespaced per bot"
-                      className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
-                    >
-                      Routines
-                    </button>
-                    <button onClick={() => setHide(b.id, !dimmed)} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">
-                      {dimmed ? 'Unhide' : 'Hide'}
-                    </button>
-                    <button onClick={() => void removeBot(b)} className="ml-auto rounded px-1.5 py-1 text-zinc-600 hover:text-red-300 hover:bg-red-500/10 transition-colors">
-                      Delete
-                    </button>
-                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+
+                {last && (
+                  <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-500 min-w-0">
+                      <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${dot}`} />
+                      <span className="uppercase tracking-[0.12em] text-[9.5px] text-zinc-600 flex-shrink-0">Last run</span>
+                      <span className="truncate" title={lastDetail}>{lastDetail}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button onClick={() => void openChat(selected)} className="af-action">
+                    Chat
+                  </button>
+                  <button onClick={() => setTaskFor(selected)} className="af-action">
+                    Run task
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px]">
+                  <button onClick={() => setDialog({ mode: 'edit', bot: selected })} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Edit</button>
+                  <button onClick={() => void duplicateBot(selected)} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">Duplicate</button>
+                  <button
+                    onClick={() => onViewChange('automations')}
+                    title="Routines live in Automations, namespaced per bot"
+                    className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors"
+                  >
+                    Routines
+                  </button>
+                  <button onClick={() => setHide(selected.id, !dimmed)} className="rounded px-1.5 py-1 text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] transition-colors">
+                    {dimmed ? 'Unhide' : 'Hide'}
+                  </button>
+                  <button onClick={() => void removeBot(selected)} className="ml-auto rounded px-1.5 py-1 text-zinc-600 hover:text-red-300 hover:bg-red-500/10 transition-colors">
+                    Delete
+                  </button>
+                </div>
+
+                {selected.soul && (
+                  <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div className="text-[9.5px] uppercase tracking-[0.12em] text-zinc-600 mb-1">SOUL persona</div>
+                    <p className="text-[11.5px] leading-relaxed text-zinc-400 line-clamp-4 whitespace-pre-wrap">{selected.soul}</p>
+                  </div>
+                )}
+                {selected.systemPrompt && (
+                  <div className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                    <div className="text-[9.5px] uppercase tracking-[0.12em] text-zinc-600 mb-1">Instructions</div>
+                    <p className="text-[11.5px] leading-relaxed text-zinc-500 line-clamp-4 whitespace-pre-wrap">{selected.systemPrompt}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
       </div>
 
       {taskFor && (

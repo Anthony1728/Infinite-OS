@@ -25,7 +25,7 @@ const NAV_PRIMARY: { id: string; label: string; icon: AppIconName }[] = [
   // Documents, sheets, and decks with AI writing beside them.
   { id: 'studio', label: 'Studio', icon: 'nav.studio' },
   // The connected workspace: pages, wikis, and databases.
-  { id: 'pages', label: 'Pages', icon: 'nav.pages' },
+  { id: 'pages', label: 'Notes', icon: 'nav.pages' },
   // Filed-away conversations. Searchable, and every entry can be
   // restored and carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document' },
@@ -38,7 +38,6 @@ const NAV_SECONDARY: { id: string; label: string; icon: AppIconName }[] = [
   // One worker per recurring task: Teaching mode, per-worker vault, app installs.
   { id: 'workers', label: 'Workers', icon: 'automation.pulse' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory' },
-  { id: 'active-memory', label: 'Active Memory', icon: 'home.memory' },
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders' },
   { id: 'messaging', label: 'Messaging', icon: 'home.chat' },
   { id: 'artifacts', label: 'Artifacts', icon: 'tab.document' },

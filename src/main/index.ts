@@ -290,7 +290,12 @@ function createWindow(): void {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    // Scheme check before handing anything to the OS: a file:// or
+    // custom-protocol URL from renderer content must never become an OS
+    // open call. Matches the guards on the SYSTEM_OPEN_URL / APP_OPEN_EXTERNAL
+    // IPC paths.
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    else console.warn('[window] blocked non-http window-open URL:', url.slice(0, 120));
     return { action: 'deny' };
   });
 

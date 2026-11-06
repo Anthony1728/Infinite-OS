@@ -57,6 +57,11 @@ export function registerAutomationIpc(getMainWindow?: () => Electron.BrowserWind
     return automationBuilder.getRuns(workflowId);
   });
 
+  // One feed for the Activity inbox: every workflow's runs, newest first.
+  ipcMain.handle(IPC.AUTOMATION_LIST_RUNS, async () => {
+    return automationBuilder.getRuns();
+  });
+
   ipcMain.handle(IPC.AUTOMATION_STATS, async () => {
     return automationBuilder.getStats();
   });

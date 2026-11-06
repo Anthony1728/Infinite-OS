@@ -568,11 +568,26 @@ function summarizeTool(name: string, input: unknown): { label: string; detail: s
   return { label: short(name), detail, category: 'tool' };
 }
 
+/** A message typed while a run is live. It waits its turn instead of racing it. */
+export interface QueuedChatMessage {
+  id: string;
+  sessionId: string;
+  text: string;
+  blocks?: ContentBlock[];
+  createdAt: number;
+}
+
 interface ChatState {
   sessions: Session[];
   currentSessionId: string | null;
   messages: Message[];
   streaming: boolean;
+  /** Per-session queue — a new message never interrupts the run that is live. */
+  queuedMessages: QueuedChatMessage[];
+  queueMessage: (text: string, blocks?: ContentBlock[]) => void;
+  removeQueuedMessage: (id: string) => void;
+  /** Pull the oldest queued message for a session, removing it from the queue. */
+  takeQueuedMessage: (sessionId: string) => QueuedChatMessage | null;
   loadingSession: boolean;
   activity: ActivityItem[];
   pendingPermission: { id: string; tool: string; input: unknown } | null;
@@ -637,6 +652,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentSessionId: null,
   messages: [],
   streaming: false,
+  queuedMessages: [],
   untilDone: typeof localStorage !== 'undefined' && localStorage.getItem(UNTIL_DONE_STORAGE_KEY) === '1',
   intensity: (typeof localStorage !== 'undefined' && (['auto','low','medium','high','max'] as Intensity[]).includes(localStorage.getItem(UNTIL_DONE_STORAGE_KEY + ':intensity') as Intensity)
     ? localStorage.getItem(UNTIL_DONE_STORAGE_KEY + ':intensity') as Intensity
@@ -1522,6 +1538,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       localStorage.setItem(UNTIL_DONE_STORAGE_KEY + ':intensity', intensity);
     } catch { /* storage may be unavailable */ }
     set({ intensity });
+  },
+
+  queueMessage: (text, blocks) => {
+    const sessionId = get().currentSessionId;
+    if (!sessionId || (!text.trim() && !(blocks?.length))) return;
+    set((state) => ({
+      queuedMessages: [
+        ...state.queuedMessages,
+        { id: crypto.randomUUID(), sessionId, text, blocks, createdAt: Date.now() },
+      ],
+    }));
+  },
+
+  removeQueuedMessage: (id) => {
+    set((state) => ({ queuedMessages: state.queuedMessages.filter((item) => item.id !== id) }));
+  },
+
+  takeQueuedMessage: (sessionId) => {
+    const next = get().queuedMessages.find((item) => item.sessionId === sessionId) ?? null;
+    if (!next) return null;
+    set((state) => ({ queuedMessages: state.queuedMessages.filter((item) => item.id !== next.id) }));
+    return next;
   },
 
   sendMessage: async (visibleText, images, mode = 'chat', agentId, background = false) => {

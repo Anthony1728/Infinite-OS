@@ -4,13 +4,14 @@
 // DPAPI credentials. When the app is launched from a different security context
 // (elevated process, another account sharing the profile, credential rotation)
 // the encrypted blob written earlier cannot be decrypted and the key would
-// silently look "missing" every launch. To keep keys persistent in that case we
-// keep a plaintext mirror in the same user profile directory and only use it
-// after the encrypted blob has failed to decrypt. The mirror lives under the
-// user's home directory with the same ACLs as the rest of Infinite OS data.
+// silently look "missing" every launch. A legacy plaintext mirror could bridge
+// that gap; today it is only ever a TRANSIENT recovery path — a mirror written
+// by an old build (or on a platform with no encrypted storage at all) is
+// re-encrypted under the current context and deleted the moment a working
+// context reads it. Plaintext keys stop existing at the first opportunity.
 
 import { safeStorage } from 'electron';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { infiniteHome } from '../profiles/home.js';
@@ -22,7 +23,6 @@ const PLAINTEXT_FILE = join(DIR, 'secrets.plain.json');
 let cache: Record<string, string> = {};
 let loadPromise: Promise<void> | null = null;
 let saveQueue: Promise<void> = Promise.resolve();
-let decryptFailed = false;
 
 async function load(): Promise<void> {
   if (loadPromise) return loadPromise;
@@ -48,12 +48,24 @@ async function load(): Promise<void> {
     try {
       const json = await readFile(PLAINTEXT_FILE, 'utf8');
       cache = JSON.parse(json);
-      decryptFailed = true;
-      console.warn(`[secrets] Used plaintext mirror (${Object.keys(cache).length} keys). Re-saving will refresh both copies.`);
+      console.warn(`[secrets] Used plaintext mirror (${Object.keys(cache).length} keys).`);
+      // The mirror is a last-resort bridge for machines where safeStorage is
+      // genuinely unavailable — never a permanent second store. When THIS
+      // context can encrypt (typical after a context switch broke the old
+      // DPAPI blob), re-persist encrypted right now and delete the plaintext
+      // copy so it stops existing.
+      if (safeStorage.isEncryptionAvailable()) {
+        try {
+          await save();
+          await rm(PLAINTEXT_FILE, { force: true });
+          console.log('[secrets] Re-encrypted under the current context; plaintext mirror removed.');
+        } catch (e) {
+          console.error('[secrets] Re-encryption after mirror recovery failed; mirror kept:', e);
+        }
+      }
       return;
     } catch (e) {
       console.error('[secrets] No usable plaintext mirror either; starting with empty cache:', e);
-      decryptFailed = true;
       cache = {};
     }
   })();
@@ -84,17 +96,16 @@ async function save(): Promise<void> {
         }
         console.log(`[secrets] Saved ${Object.keys(snapshot).length} keys: ${Object.keys(snapshot).join(', ') || 'none'}`);
       } catch (e) {
-        console.error('[secrets] safeStorage roundtrip failed; falling back to the plaintext mirror as the only store:', e);
-        decryptFailed = true;
+        console.error('[secrets] safeStorage roundtrip failed; the key is saved in memory only for this session:', e);
       }
     }
-    // A decryption failure was observed at some point on this machine, so the
-    // current process (or a sibling launch context) cannot always read the
-    // encrypted blob back. Keep a plaintext mirror so the key survives the
-    // next launch regardless of the DPAPI context it runs under.
-    if (!encrypted || decryptFailed) {
+    // Plaintext on disk is written ONLY when the platform has no encrypted
+    // storage at all (rare; DPAPI is always present on Windows). An encrypted
+    // write that failed its read-back verification surfaces an error instead
+    // of quietly duplicating the keys as plaintext.
+    if (!encrypted) {
       await writeFile(PLAINTEXT_FILE, json, 'utf8');
-      console.warn('[secrets] Writing plaintext mirror (key will survive context changes).');
+      console.warn('[secrets] safeStorage unavailable — writing plaintext store.');
     }
   });
   saveQueue = operation.catch(() => undefined);

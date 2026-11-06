@@ -337,7 +337,7 @@ export function PageEditor({ page, summaries }: { page: PageRecord; summaries: P
       : imported;
     setDraft((previous) => ({ ...previous, blocks: nextBlocks }));
     enqueue({ blocks: nextBlocks });
-    toast({ type: 'success', title: mode === 'append' ? 'Added to page' : 'Page rewritten' });
+    toast({ type: 'success', title: mode === 'append' ? 'Added to note' : 'Note rewritten' });
   };
 
   const applyAiRows = async (rows: Array<Record<string, DatabaseValue>>) => {
@@ -380,7 +380,7 @@ export function PageEditor({ page, summaries }: { page: PageRecord; summaries: P
   const copyPageLink = async () => {
     try {
       await navigator.clipboard.writeText(`infinite://pages/${page.id}`);
-      toast({ type: 'success', title: 'Page link copied' });
+      toast({ type: 'success', title: 'Note link copied' });
     } catch {
       toast({ type: 'error', title: 'Could not copy the link' });
     }

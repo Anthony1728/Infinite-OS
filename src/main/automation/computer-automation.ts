@@ -16,6 +16,162 @@ import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * Persistent PowerShell host.
+ *
+ * Every mouse move, click, and key event used to spawn a cold `powershell.exe`
+ * (~0.5–1.5s each; a click was three spawns, a smooth move ten). This class
+ * keeps ONE PowerShell process alive and dispatches commands over stdin,
+ * delimited by unique end-markers, with a serialized queue (input injection
+ * must stay ordered) and a per-command watchdog. A hung command restarts the
+ * host rather than wedging the channel forever, and the host idles out after
+ * ten quiet minutes to release its memory.
+ *
+ * Real success/failure travels back via a PowerShell-level try/catch, which
+ * also un-fakes the action log: previously `logAction` recorded `success: true`
+ * unconditionally because `executePowerShell` swallowed errors.
+ */
+class PersistentPowerShellHost {
+  private child: ReturnType<typeof spawn> | null = null;
+  private queue: Promise<void> = Promise.resolve();
+  private buffer = '';
+  private waiter: { marker: string; onChunk: (text: string, done: boolean) => void } | null = null;
+  private seq = 0;
+  private lastUsedAt = 0;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private static readonly IDLE_SHUTDOWN_MS = 10 * 60_000;
+  private static readonly COMMAND_TIMEOUT_MS = 30_000;
+
+  private async ensureHost(): Promise<NonNullable<PersistentPowerShellHost['child']>> {
+    if (this.child) return this.child;
+    this.buffer = '';
+    const child = spawn('powershell.exe', ['-NoProfile', '-NoLogo', '-NoExit', '-Command', '-'], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      this.buffer += chunk;
+      this.drain();
+    });
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      // PowerShell REPL errors land on stderr; route them into the capture
+      // buffer so the waiter sees them as part of the command's output.
+      this.buffer += chunk;
+      this.drain();
+    });
+    child.on('close', () => {
+      this.child = null;
+      // A dead host must fail any in-flight command instead of hanging.
+      this.waiter?.onChunk('', true);
+      this.waiter = null;
+    });
+    child.on('error', () => {
+      this.child = null;
+      this.waiter?.onChunk('', true);
+      this.waiter = null;
+    });
+    this.child = child;
+    return child;
+  }
+
+  /** Feed buffered output to the active waiter until its end-marker appears. */
+  private drain(): void {
+    const waiter = this.waiter;
+    if (!waiter) {
+      // No command in flight: drop REPL noise (banners, prompts).
+      this.buffer = '';
+      return;
+    }
+    const markerIndex = this.buffer.indexOf(waiter.marker);
+    if (markerIndex === -1) return;
+    const captured = this.buffer.slice(0, markerIndex);
+    this.buffer = this.buffer.slice(markerIndex + waiter.marker.length);
+    this.waiter = null;
+    waiter.onChunk(captured, true);
+  }
+
+  /**
+   * Run one PowerShell snippet. Serialized: each command waits for the
+   * previous one's end-marker before it is written to stdin.
+   */
+  run(command: string, timeoutMs = PersistentPowerShellHost.COMMAND_TIMEOUT_MS): Promise<{ output: string; ok: boolean }> {
+    const runId = ++this.seq;
+    const task = this.queue.then(async () => {
+      const child = await this.ensureHost();
+      const marker = `__INFINITE_EOC_${runId}_${Math.random().toString(36).slice(2, 10)}__`;
+      // try/catch gives us a REAL success signal (the old per-spawn path
+      // swallowed errors and logged every action as success), and writing
+      // the marker via its own statement guarantees termination.
+      const wrapped = [
+        `try {`,
+        `  & { ${command} }`,
+        `} catch { Write-Output ("__INFINITE_ERR__" + $_.Exception.Message) }`,
+        `Write-Output "${marker}"`,
+        ``,
+      ].join('\n');
+
+      return await new Promise<{ output: string; ok: boolean }>((resolve) => {
+        let settled = false;
+        let captured = '';
+        let sawError = false;
+        const finish = (output: string, ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(watchdog);
+          resolve({ output, ok });
+        };
+        const watchdog = setTimeout(() => {
+          // A hung command poisons the shared channel: restart the host so
+          // the next command starts clean instead of queuing behind a corpse.
+          this.killHost();
+          finish(captured.trim(), false);
+        }, timeoutMs);
+
+        this.waiter = {
+          marker,
+          onChunk: (text, done) => {
+            captured += text;
+            if (text.includes('__INFINITE_ERR__')) sawError = true;
+            if (done) finish(captured.trim(), !sawError);
+          },
+        };
+        child.stdin?.write(wrapped + '\n');
+      });
+    });
+    this.queue = task.then(() => undefined, () => undefined);
+    this.lastUsedAt = Date.now();
+    this.scheduleIdleShutdown();
+    return task;
+  }
+
+  private scheduleIdleShutdown(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      if (Date.now() - this.lastUsedAt >= PersistentPowerShellHost.IDLE_SHUTDOWN_MS) {
+        this.killHost();
+      }
+    }, PersistentPowerShellHost.IDLE_SHUTDOWN_MS);
+    this.idleTimer.unref?.();
+  }
+
+  private killHost(): void {
+    try { this.child?.kill(); } catch { /* already gone */ }
+    this.child = null;
+    this.buffer = '';
+    this.waiter?.onChunk('', true);
+    this.waiter = null;
+  }
+
+  dispose(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.killHost();
+  }
+}
+
+const persistentPowershell = new PersistentPowerShellHost();
+
 export interface Point {
   x: number;
   y: number;
@@ -141,10 +297,12 @@ export class ComputerAutomation {
     if (smooth) {
       // Smooth movement in steps
       await this.smoothMove(x, y);
+      this.requireOk(`moveMouse(${x}, ${y})`);
     } else {
       await this.executePowerShell(
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${x}, ${y})`
       );
+      this.requireOk(`moveMouse(${x}, ${y})`);
     }
     this.logAction(`moveMouse(${x}, ${y})`, true);
   }
@@ -266,6 +424,7 @@ public class Mouse {
 "@
 [Mouse]::mouse_event(${flags}, ${dx}, ${dy}, 0, 0)`
     );
+    this.requireOk(`mouseEvent(0x${flags.toString(16)})`);
   }
 
   // ========== KEYBOARD CONTROL ==========
@@ -295,6 +454,7 @@ public class Mouse {
     await this.executePowerShell(
       `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`
     );
+    this.requireOk('sendText');
   }
 
   /**
@@ -307,6 +467,7 @@ public class Mouse {
       await this.executePowerShell(
         `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{${key}}')`
       );
+      this.requireOk(`pressKey(${key})`);
     } else {
       await this.keybdEvent(vk, 0);
       await this.delay(10);
@@ -369,6 +530,7 @@ public class Keyboard {
 "@
 [Keyboard]::keybd_event(${vk}, 0, ${flags}, 0)`
     );
+    this.requireOk(`keybdEvent(vk=${vk}, flags=${flags})`);
   }
 
   /**
@@ -559,6 +721,7 @@ if ($p -and $p.MainWindowHandle -ne 0) {
     await this.executePowerShell(
       `(Get-Process | Where-Object {$_.MainWindowTitle -like '*${title}*'})[0].CloseMainWindow()`
     );
+    this.requireOk(`minimizeWindow(${title})`);
     return true;
   }
 
@@ -569,6 +732,7 @@ if ($p -and $p.MainWindowHandle -ne 0) {
    */
   async openApp(name: string): Promise<boolean> {
     await this.executePowerShell(`Start-Process "${name}"`);
+    this.requireOk(`openApp(${name})`);
     this.logAction(`openApp(${name})`, true);
     return true;
   }
@@ -578,6 +742,7 @@ if ($p -and $p.MainWindowHandle -ne 0) {
    */
   async openUrl(url: string): Promise<boolean> {
     await this.executePowerShell(`Start-Process "${url}"`);
+    this.requireOk(`openUrl(${url})`);
     this.logAction(`openUrl(${url})`, true);
     return true;
   }
@@ -835,7 +1000,22 @@ public static class InfiniteForegroundWindow {
 
   // ========== HELPER METHODS ==========
 
+  /** Outcome of the most recent executePowerShell call — actions check this
+   * (requireOk) so the action log records real failures instead of the old
+   * unconditional success:true. */
+  private lastCommandOk = true;
+  private lastCommandError = '';
+
   private async executePowerShell(command: string): Promise<string> {
+    // Persistent host: milliseconds instead of a ~1s cold spawn per action.
+    if (this.isWindows) {
+      const { output, ok } = await persistentPowershell.run(command);
+      this.lastCommandOk = ok;
+      this.lastCommandError = ok ? '' : (output || 'PowerShell command failed');
+      return ok ? output : '';
+    }
+    this.lastCommandOk = true;
+    this.lastCommandError = '';
     return new Promise((resolve) => {
       const child = spawn('powershell.exe', ['-NoProfile', '-Command', command], {
         windowsHide: true,
@@ -846,6 +1026,15 @@ public static class InfiniteForegroundWindow {
       child.on('close', () => resolve(stdout.trim()));
       child.on('error', () => resolve(''));
     });
+  }
+
+  /** Throw with the real PowerShell error when the last command failed.
+   * Turns silent no-op actions into honest tool errors. */
+  private requireOk(action: string): void {
+    if (!this.lastCommandOk) {
+      this.logAction(action, false);
+      throw new Error(this.lastCommandError || 'PowerShell action failed');
+    }
   }
 
   private async delay(ms: number): Promise<void> {

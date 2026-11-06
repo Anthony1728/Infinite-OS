@@ -285,16 +285,27 @@ export function recallGraph(query: string, opts?: { dataset?: string; depth?: nu
   const depth = Math.max(1, Math.min(3, opts?.depth ?? 1));
   const limit = Math.max(1, Math.min(50, opts?.limit ?? 12));
   const q = query.trim();
-  const seedRows = q
+  // Tokenized seeds — same fix as recallMemories: a whole-sentence LIKE almost
+  // never matched, which quietly disabled traversal for natural questions.
+  const seedWords = Array.from(
+    new Set(
+      q
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 3),
+    ),
+  ).slice(0, 6);
+  const seedRows = seedWords.length > 0
     ? db.prepare(`
         SELECT n.*, (
           SELECT COUNT(*) FROM graph_edges e WHERE e.source_id = n.id OR e.target_id = n.id
         ) AS degree
         FROM graph_nodes n
-        WHERE n.dataset = ? AND (n.name LIKE ? OR n.content LIKE ? OR n.tags LIKE ?)
+        WHERE n.dataset = ? AND (${seedWords.map(() => '(n.name LIKE ? OR n.content LIKE ? OR n.tags LIKE ?)').join(' OR ')})
         ORDER BY degree DESC, n.updated_at DESC
         LIMIT 40
-      `).all(dataset, `%${q}%`, `%${q}%`, `%${q}%`) as Array<Record<string, unknown>>
+      `).all(dataset, ...seedWords.flatMap((w) => [`%${w}%`, `%${w}%`, `%${w}%`])) as Array<Record<string, unknown>>
     : db.prepare(`
         SELECT n.*, (
           SELECT COUNT(*) FROM graph_edges e WHERE e.source_id = n.id OR e.target_id = n.id

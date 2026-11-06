@@ -3,8 +3,24 @@ import { useAuthStore } from '../../stores/auth';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { useUIStore, TEMPLATE_PRESETS } from '../../stores/ui';
 
+/** Providers worth showing a first-run user: the free/keyless paths first,
+ *  then the two most common keyed clouds. Keep this short — a wall of nine
+ *  providers is a decision, three is a choice. */
+const ONBOARDING_PROVIDERS = [
+  { id: 'ollama', label: 'Ollama (local & free)', hint: 'Runs on this PC. No key, fully private.' },
+  { id: 'openrouter', label: 'OpenRouter', hint: 'One key, many free models.' },
+  { id: 'openai', label: 'OpenAI', hint: 'Uses your ChatGPT API key.' },
+] as const;
+
+interface ProviderInfo {
+  id: string;
+  label: string;
+  requiresApiKey: boolean;
+  freeModels: Array<{ id: string; label?: string }>;
+}
+
 export function OnboardingFlow() {
-  const [step, setStep] = useState<'loading' | 'welcome' | 'setup' | 'initializing' | 'complete'>('welcome');
+  const [step, setStep] = useState<'loading' | 'welcome' | 'setup' | 'model' | 'initializing' | 'complete'>('welcome');
   const [progress, setProgress] = useState(0);
   const [setupProgress, setSetupProgress] = useState(0);
   const { user, completeOnboarding, updateProfile } = useAuthStore();
@@ -12,6 +28,78 @@ export function OnboardingFlow() {
   const [theme, setTheme] = useState<'dark' | 'light' | 'midnight'>('dark');
   const [notifications, setNotifications] = useState(true);
   const [aiMemory, setAiMemory] = useState(true);
+
+  // Model step state
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [chosen, setChosen] = useState<string>('');
+  const [apiKey, setApiKey] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [chosenModel, setChosenModel] = useState<string>('');
+
+  // Load provider capabilities once when the model step opens.
+  useEffect(() => {
+    if (step !== 'model') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = (await window.api.listProviders()) as ProviderInfo[];
+        if (!cancelled) setProviders(list);
+      } catch { /* provider list is cosmetic — manual entry still works */ }
+    })();
+    return () => { cancelled = true; };
+  }, [step]);
+
+  const chosenInfo = providers.find((p) => p.id === chosen);
+  const needsKey = chosenInfo?.requiresApiKey ?? (chosen === 'openrouter' || chosen === 'openai');
+
+  const pickProvider = (id: string) => {
+    setChosen(id);
+    setTestResult(null);
+    setApiKey('');
+    const info = providers.find((p) => p.id === id);
+    // Default to the provider's first free model (or a sane chat default).
+    setChosenModel(info?.freeModels?.find((m) => !/embed|guard|vision/i.test(m.id))?.id ?? info?.freeModels?.[0]?.id ?? '');
+  };
+
+  const testConnection = async () => {
+    if (!chosen) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = (await window.api.testProvider({ provider: chosen, apiKey: apiKey.trim() })) as { ok: boolean; error?: string };
+      setTestResult(result.ok
+        ? { ok: true, message: 'Connected — you are ready to chat.' }
+        : { ok: false, message: result.error ?? 'Connection failed. Check the key and try again.' });
+    } catch (e) {
+      setTestResult({ ok: false, message: e instanceof Error ? e.message : 'Connection failed.' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const applyModelChoice = async () => {
+    // Save the key (when the provider takes one) and persist the selection
+    // in infinite:current — the same record every chat turn reads.
+    try {
+      if (needsKey && apiKey.trim()) {
+        await window.api.setProviderKey({ provider: chosen, key: apiKey.trim() });
+      }
+      const cur = JSON.parse(localStorage.getItem('infinite:current') ?? '{}') as Record<string, unknown>;
+      localStorage.setItem('infinite:current', JSON.stringify({
+        ...cur,
+        provider: chosen,
+        model: chosenModel || cur.model,
+      }));
+    } catch { /* selection is still in localStorage even if the key save hiccupped */ }
+    updateProfile({
+      name: name || user?.name,
+      workspaceTheme: theme,
+      notificationsEnabled: notifications,
+      aiMemoryEnabled: aiMemory,
+    });
+    setStep('initializing');
+  };
 
   // Map onboarding theme → real Infinite OS appearance so the whole OS
   // actually changes (dark = original Infinite classic, light = cloud,
@@ -250,15 +338,123 @@ export function OnboardingFlow() {
               onClick={() => {
                 // Ensure the real OS appearance matches the selected theme
                 applyOnboardingTheme(theme);
-                updateProfile({
-                  name: name || user?.name,
-                  workspaceTheme: theme,
-                  notificationsEnabled: notifications,
-                  aiMemoryEnabled: aiMemory,
-                });
-                setStep('initializing');
+                setStep('model');
               }}
               className="px-8 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium transition-all"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 'model') {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-4">
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute top-1/3 left-1/3 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl" />
+          <div className="absolute bottom-1/3 right-1/3 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+        </div>
+
+        <div className="relative max-w-lg w-full animate-fade-in">
+          <h2 className="text-2xl font-bold text-white text-center mb-2">Choose Your AI Engine</h2>
+          <p className="text-gray-500 text-center text-sm mb-8">
+            Infinite OS needs a model to think with. Pick local-free or connect a cloud key.
+          </p>
+
+          <div className="bg-[#12121a] border border-white/[0.06] rounded-2xl p-6 space-y-5">
+            <div className="space-y-2.5">
+              {ONBOARDING_PROVIDERS.map((p) => {
+                const selected = chosen === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => pickProvider(p.id)}
+                    className={`w-full text-left rounded-xl border px-4 py-3 transition-all ${
+                      selected
+                        ? 'border-indigo-500/60 bg-indigo-500/[0.12] shadow-[0_0_16px_rgba(99,102,241,0.2)]'
+                        : 'border-white/[0.08] bg-[#0d0d11] hover:border-indigo-500/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-gray-300'}`}>{p.label}</span>
+                      {selected && <span className="text-indigo-400 text-xs">✓</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">{p.hint}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {chosen && chosenInfo && (chosenInfo.freeModels?.length ?? 0) > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Model</label>
+                <select
+                  value={chosenModel}
+                  onChange={(e) => setChosenModel(e.target.value)}
+                  className="w-full bg-[#0d0d11] border border-white/[0.08] rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-indigo-500/50 transition-colors"
+                >
+                  {chosenInfo.freeModels
+                    .filter((m) => !/embed|guard|rerank/i.test(m.id))
+                    .slice(0, 30)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>{m.label ?? m.id}</option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {chosen && needsKey && (
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
+                  className="w-full bg-[#0d0d11] border border-white/[0.08] rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-indigo-500/50 transition-colors font-mono"
+                  placeholder="Paste your key — it is encrypted on this PC"
+                />
+                <div className="flex items-center gap-2 mt-2.5">
+                  <button
+                    onClick={() => void testConnection()}
+                    disabled={testing || !apiKey.trim()}
+                    className="px-4 py-2 rounded-lg bg-white/[0.06] border border-white/[0.1] text-sm text-gray-200 hover:bg-white/[0.1] transition-colors disabled:opacity-40"
+                  >
+                    {testing ? 'Testing…' : 'Test connection'}
+                  </button>
+                  {testResult && (
+                    <span className={`text-xs ${testResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {testResult.message}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {chosen === 'ollama' && (
+              <button
+                onClick={() => void testConnection()}
+                disabled={testing}
+                className="px-4 py-2 rounded-lg bg-white/[0.06] border border-white/[0.1] text-sm text-gray-200 hover:bg-white/[0.1] transition-colors disabled:opacity-40"
+              >
+                {testing ? 'Checking…' : 'Check Ollama is running'}
+              </button>
+            )}
+          </div>
+
+          <div className="mt-6 flex items-center justify-between">
+            <button
+              onClick={() => setStep('setup')}
+              className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              ← Back
+            </button>
+            <button
+              onClick={() => void applyModelChoice()}
+              disabled={!chosen || (needsKey && !apiKey.trim())}
+              className="px-8 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium transition-all disabled:opacity-40 disabled:hover:from-indigo-600 disabled:hover:to-purple-600"
             >
               Initialize Workspace
             </button>

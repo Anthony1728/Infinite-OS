@@ -48,7 +48,11 @@ describe('real tool pipeline (permission -> executeToolCall -> bash)', () => {
     expect(mocks.requestPermission).not.toHaveBeenCalled();
   });
 
-  it('denies a destructive command in workspace mode without executing it', async () => {
+  it('hard-blocks a destructive command in workspace mode before any prompt', async () => {
+    // rm -rf-class commands are stopped by the autonomy-policy gate INSIDE
+    // executeToolCall — a hard stop that no profile can wave through. The
+    // permission layer is never reached: an irreversible command must not be
+    // one click away from running, it must be re-planned.
     mocks.values.set('permissionMode', 'workspace');
     const result = await executeToolCall({
       tool: bash,
@@ -61,8 +65,8 @@ describe('real tool pipeline (permission -> executeToolCall -> bash)', () => {
       ...options,
     });
     expect(result.is_error).toBe(true);
-    expect(String(result.content)).toContain('Permission denied');
-    expect(mocks.requestPermission).toHaveBeenCalledTimes(1);
+    expect(String(result.content)).toContain('Blocked by policy');
+    expect(mocks.requestPermission).not.toHaveBeenCalled();
   });
 
   it('returns a useful error for an empty command instead of hanging', async () => {

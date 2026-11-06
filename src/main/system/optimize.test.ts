@@ -11,7 +11,7 @@ import {
 
 /**
  * These tests exist to stop this feature from ever being the reason somebody's
- * computer stops working. The dangerous failures are not slowness â€” they are:
+ * computer stops working. The dangerous failures are not slowness — they are:
  *
  *   - killing a security or licensing service
  *   - deleting files outside a temp folder
@@ -52,7 +52,7 @@ describe('CPU vendor mismatch is a fact, not a judgement', () => {
   });
 
   it('leaves it alone when the machine really is AMD', () => {
-    // Same entry, same rule, different conclusion â€” because the machine differs.
+    // Same entry, same rule, different conclusion — because the machine differs.
     expect(classifyStartup(item({ name: 'amd_dc_opt', command: 'C:\\amd\\amd_dc_opt.exe' }), AMD)).not.toBe('safe');
   });
 });
@@ -186,7 +186,7 @@ describe('regressions found while building this', () => {
 
   it('recognises Defender whatever case it is written in', () => {
     // This list was originally `winDefend` and compared case-sensitively, so the
-    // real service name `WinDefend` did not match â€” meaning Windows Defender was
+    // real service name `WinDefend` did not match — meaning Windows Defender was
     // not protected. A safety check that fails on capitalisation is a broken
     // safety check.
     expect(isProtectedProcess('WinDefend')).toBe(true);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkersStore, type WorkerView } from '../../stores/workers';
 import { useNotificationStore } from '../../stores/notifications';
+import { AppIcon, BRAND_GRADIENT } from '../brand/AppIcon';
 
 const STATUS_META: Record<WorkerView['status'], { label: string; dot: string; badge: string }> = {
   running: { label: 'Running', dot: 'bg-emerald-400', badge: 'bg-emerald-400/10 text-emerald-300 border-emerald-400/30' },
@@ -399,7 +400,7 @@ export function WorkersPanel({ onOpenTeaching }: { onOpenTeaching: () => void })
           )}
           {!loading && !workers.length && (
             <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
-              <div className="text-4xl mb-2">🤖</div>
+              <div className="mb-2 flex justify-center"><AppIcon name="inf.agent" className="h-10 w-10" gradient={BRAND_GRADIENT} /></div>
               <div className="text-white font-medium">No workers yet</div>
               <p className="text-sm text-gray-500 mt-1">
                 Teach it a task you already do by hand, or describe one and let it write the steps.
@@ -463,7 +464,7 @@ export function WorkersPanel({ onOpenTeaching }: { onOpenTeaching: () => void })
         <div className="min-h-0 overflow-y-auto">
           {!selected ? (
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-8 text-center text-sm text-gray-500 h-full flex flex-col items-center justify-center">
-              <div className="text-3xl mb-2">📋</div>
+              <div className="mb-2"><AppIcon name="inf.tasks" className="h-8 w-8" gradient={BRAND_GRADIENT} /></div>
               Select a worker to see its steps, run history, and controls.
             </div>
           ) : (

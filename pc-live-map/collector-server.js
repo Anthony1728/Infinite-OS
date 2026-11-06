@@ -308,13 +308,53 @@ const server = http.createServer(async (req, res) => {
         a.y_norm = Math.min(1000, Math.max(0, r.y_norm));
         a.via = 'click_name:' + r.matched;
       }
+      const actionId = require('crypto').randomUUID();
       rotateIfNeeded(ACTION_FILE, 2 * 1024 * 1024);
-      const rec = { t: new Date().toISOString(), ...a };
+      const rec = { t: new Date().toISOString(), id: actionId, ...a };
       fs.appendFileSync(ACTION_FILE, JSON.stringify(rec) + '\n', 'utf8');
       const payload = 'data: ' + JSON.stringify({ action_queued: rec }) + '\n\n';
       for (const c of clients) { try { c.write(payload); } catch {} }
+
+      // MECHANICAL verification, not advice: wait (bounded) for the executor's
+      // result record, and observe whether the tracker's seq advanced — the
+      // two signals that distinguish "action ran" from "action silently
+      // no-op'd". Nothing here re-reads the screen; the executor's cursor
+      // proof is the act-level check and seq is the effect-level check.
+      const RESULT_FILE = path.join(path.dirname(ACTION_FILE), 'pc-action-results.jsonl');
+      const seqBefore = (latestOS && latestOS.seq) || 0;
+      const deadline = Date.now() + 3500;
+      let result = null;
+      while (Date.now() < deadline && !result) {
+        await new Promise((r) => setTimeout(r, 120));
+        try {
+          if (!fs.existsSync(RESULT_FILE)) continue;
+          const lines = fs.readFileSync(RESULT_FILE, 'utf8').split('\n').filter(Boolean);
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const r = JSON.parse(lines[i]);
+              if (r.id === actionId) { result = r; break; }
+            } catch {}
+          }
+        } catch {}
+      }
+      const seqAfter = (latestOS && latestOS.seq) || 0;
+      const verification = {
+        executed: !!result,
+        ok: result ? result.ok === true : false,
+        ...(result && result.error ? { error: result.error } : {}),
+        ...(result && result.cursor ? { cursor: result.cursor } : {}),
+        seq_before: seqBefore,
+        seq_after: seqAfter,
+        seq_advanced: seqAfter > seqBefore,
+        note: result
+          ? (result.ok === true
+            ? (seqAfter > seqBefore ? 'action executed and screen state advanced' : 'action executed; screen state unchanged (may be expected — verify with /api/live)')
+            : 'action FAILED at the executor level — do not assume it took effect')
+          : 'executor did not report within 3.5s (executor not running, or rate-limited) — verify with /api/live',
+      };
+
       res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
-      res.end(JSON.stringify({ ok: true, queued: rec }));
+      res.end(JSON.stringify({ ok: true, queued: rec, verified: verification }));
     } catch (e) {
       res.writeHead(400, { 'Content-Type': 'application/json', ...cors });
       res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));

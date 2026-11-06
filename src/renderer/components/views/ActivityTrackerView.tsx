@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ActivityInbox } from '../activity/ActivityInbox';
 
 interface TrackerStatus {
   isTracking: boolean;
@@ -38,6 +39,7 @@ export function ActivityTrackerView() {
   const [patterns, setPatterns] = useState<ActivityPattern[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [tab, setTab] = useState<'inbox' | 'desktop'>('inbox');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -121,24 +123,46 @@ export function ActivityTrackerView() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6 animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-5 gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Activity Tracker</h1>
-          <p className="text-gray-500 text-sm">Monitor your mouse, keyboard, and app usage patterns.</p>
+          <h1 className="text-2xl font-bold text-white">Activity</h1>
+          <p className="text-gray-500 text-sm">What finished, what failed, and what needs you — plus your desktop patterns.</p>
         </div>
-        <button
-          onClick={handleToggleTracking}
-          className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${
-            status?.isTracking
-              ? 'bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30'
-              : 'bg-green-500/20 text-green-300 border border-green-500/30 hover:bg-green-500/30'
-          }`}
-        >
-          <span className={`w-2 h-2 rounded-full ${status?.isTracking ? 'bg-red-400 animate-pulse' : 'bg-green-400'}`} />
-          {status?.isTracking ? 'Stop Tracking' : 'Start Tracking'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-white/[0.07] bg-white/[0.02] p-0.5">
+            <button
+              onClick={() => setTab('inbox')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'inbox' ? 'bg-white/[0.09] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Inbox
+            </button>
+            <button
+              onClick={() => setTab('desktop')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'desktop' ? 'bg-white/[0.09] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Desktop
+            </button>
+          </div>
+          {tab === 'desktop' && (
+            <button
+              onClick={handleToggleTracking}
+              className={`px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2 ${
+                status?.isTracking
+                  ? 'bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30'
+                  : 'bg-green-500/20 text-green-300 border border-green-500/30 hover:bg-green-500/30'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${status?.isTracking ? 'bg-red-400 animate-pulse' : 'bg-green-400'}`} />
+              {status?.isTracking ? 'Stop Tracking' : 'Start Tracking'}
+            </button>
+          )}
+        </div>
       </div>
 
+      {tab === 'inbox' ? (
+        <ActivityInbox />
+      ) : (
+        <>
       {loading && (
         <div className="flex items-center justify-center py-8 text-gray-500 text-sm gap-2">
           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -390,6 +414,8 @@ export function ActivityTrackerView() {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

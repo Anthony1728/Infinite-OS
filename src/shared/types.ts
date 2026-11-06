@@ -25,6 +25,14 @@ export type ContentBlock =
       tool_use_id: string;
       content: string | ContentBlock[];
       is_error?: boolean;
+      /**
+       * True when this output is untrusted third-party content: a fetched web
+       * page, an MCP tool's reply, a browser snapshot, a file read from outside
+       * the workspace. The model is told to treat it as data to interpret —
+       * never as instructions to follow. Framing is what stops prompt
+       * injection from reaching arbitrary execution.
+       */
+      untrusted?: boolean;
     }
   | {
       type: 'question';

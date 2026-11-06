@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive, Search, RotateCcw, Trash2, X, MessageSquare, Folder,
 } from 'lucide-react';
+import { AppIcon, BRAND_GRADIENT } from '../brand/AppIcon';
 import { useChatStore } from '../../stores/chat';
 import { useSessionStore } from '../../stores/session';
 import type { Session } from '../../../shared/types';
@@ -101,8 +102,8 @@ export function ArchiveView() {
     <div className="h-full flex flex-col bg-[#0a0a0f] text-white">
       <div className="flex-shrink-0 flex items-center justify-between gap-4 p-4 border-b border-white/10">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center flex-shrink-0">
-            <Archive size={17} className="text-white" />
+          <div className="w-9 h-9 rounded-xl border border-white/[0.08] bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <AppIcon name="inf.archive" className="w-[18px] h-[18px]" gradient={BRAND_GRADIENT} />
           </div>
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">Archive</h1>

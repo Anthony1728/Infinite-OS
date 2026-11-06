@@ -171,6 +171,7 @@ const api = {
 
   createMemory: (args: {
     type: string; title: string; content: string; tags: string[]; sessionId?: string;
+    tier?: 'episodic' | 'semantic' | 'procedural'; importance?: number;
   }) => ipcRenderer.invoke(IPC.MEMORY_CREATE, { entry: args }),
   listMemories: (args?: { type?: string; search?: string }) => ipcRenderer.invoke(IPC.MEMORY_LIST, args ?? {}),
   getMemory: (args: { id: string }) => ipcRenderer.invoke(IPC.MEMORY_GET, args),
@@ -302,6 +303,7 @@ const api = {
   automationAddAction: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_ADD_ACTION, args),
   automationGetTemplates: () => ipcRenderer.invoke(IPC.AUTOMATION_GET_TEMPLATES),
   automationGetRuns: (args: unknown) => ipcRenderer.invoke(IPC.AUTOMATION_GET_RUNS, args),
+  automationListRuns: () => ipcRenderer.invoke(IPC.AUTOMATION_LIST_RUNS),
   automationStats: () => ipcRenderer.invoke(IPC.AUTOMATION_STATS),
   automationSchedulerStatus: () => ipcRenderer.invoke(IPC.AUTOMATION_SCHEDULER_STATUS),
   automationSetKeepAwake: (enabled: boolean) => ipcRenderer.invoke(IPC.AUTOMATION_SET_KEEP_AWAKE, { enabled }),
@@ -704,22 +706,6 @@ const api = {
   deployQuickPush: (args: { cwd?: string; message?: string }) => ipcRenderer.invoke(IPC.DEPLOY_QUICK_PUSH, args),
   deployOsStatus: () => ipcRenderer.invoke(IPC.DEPLOY_OS_STATUS),
   deployOsPush: (args: { message?: string }) => ipcRenderer.invoke(IPC.DEPLOY_OS_PUSH, args),
-
-  // Testing
-  testCreateSuite: (args: { name: string; framework: string; description?: string }) =>
-    ipcRenderer.invoke(IPC.TEST_CREATE_SUITE, args),
-  testListSuites: () => ipcRenderer.invoke(IPC.TEST_LIST_SUITES),
-  testGetSuite: (args: { id: string }) => ipcRenderer.invoke(IPC.TEST_GET_SUITE, args),
-  testDeleteSuite: (args: { id: string }) => ipcRenderer.invoke(IPC.TEST_DELETE_SUITE, args),
-  testAddTest: (args: { suiteId: string; test: unknown }) => ipcRenderer.invoke(IPC.TEST_ADD_TEST, args),
-  testRemoveTest: (args: { suiteId: string; testId: string }) => ipcRenderer.invoke(IPC.TEST_REMOVE_TEST, args),
-  testRunSuite: (args: { suiteId: string }) => ipcRenderer.invoke(IPC.TEST_RUN_SUITE, args),
-  testGenerateTests: (args: { description: string; filePath?: string }) =>
-    ipcRenderer.invoke(IPC.TEST_GENERATE_TESTS, args),
-  testStats: () => ipcRenderer.invoke(IPC.TEST_STATS),
-  testCreatePlan: (args: { name: string; description: string; scope: string; priority?: string }) =>
-    ipcRenderer.invoke(IPC.TEST_CREATE_PLAN, args),
-  testListPlans: () => ipcRenderer.invoke(IPC.TEST_LIST_PLANS),
 
   // Enterprise
   enterpriseAddMember: (args: { name: string; email: string; role?: string }) =>

@@ -475,6 +475,9 @@ export function App() {
     const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     const prefetch = () => {
       void import('./components/views/TerminalView').catch(() => {});
+      // ChatView is lazy too now — prefetch it alongside Terminal so the
+      // default Chats route opens instantly without paying it at startup.
+      void import('./components/chat/ChatView').catch(() => {});
     };
     if (idle) idle(prefetch);
     else setTimeout(prefetch, 2500);

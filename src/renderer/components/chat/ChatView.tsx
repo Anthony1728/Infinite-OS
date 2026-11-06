@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -2131,7 +2131,7 @@ function RealChat({
   input: string;
   setInput: (v: string) => void;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
-  onSend: (text: string) => void;
+  onSend: (text: string, blocks?: ContentBlock[]) => void;
   mode: ChatExecutionMode;
   onModeChange: (mode: ChatExecutionMode) => void;
   selectedAgentId: string;
@@ -2144,6 +2144,11 @@ function RealChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const orchestratedTaskId = useChatStore((s) => s.orchestratedTaskId);
   const interject = useChatStore((s) => s.interject);
+  const queuedMessages = useChatStore((s) => s.queuedMessages);
+  const takeQueuedMessage = useChatStore((s) => s.takeQueuedMessage);
+  const removeQueuedMessage = useChatStore((s) => s.removeQueuedMessage);
+  const queueMessage = useChatStore((s) => s.queueMessage);
+  const currentSessionId = useChatStore((s) => s.currentSessionId);
   const activity = useChatStore((s) => s.activity);
   const providerStatus = useChatStore((s) => s.providerStatus);
   const loadingSession = useChatStore((s) => s.loadingSession);
@@ -2214,8 +2219,9 @@ function RealChat({
   const isStreamingText =
     lastMsg?.role === 'assistant' &&
     lastMsg.content.some((b) => b.type === 'text' && 'text' in b && (b as { text: string }).text.trim());
-  const runningToolIds = new Set(
-    activity.filter((a) => a.status === 'running').map((a) => a.toolUseId),
+  const runningToolIds = useMemo(
+    () => new Set(activity.filter((a) => a.status === 'running').map((a) => a.toolUseId)),
+    [activity],
   );
   // Per-tool metadata (streaming input, duration, result, error) is kept in
   // the activity feed so a ToolCallCard can render the complete story of a
@@ -2239,10 +2245,21 @@ function RealChat({
     else el.scrollTop = el.scrollHeight;
   }, [messages, streaming, activity]);
 
-  // Handle sending during streaming (interjection)
-  const handleSendDuringStream = (text: string) => {
-    if (!text.trim()) return;
-    interject(text.trim());
+  // Handle sending during streaming: the message waits its turn. It never
+  // interrupts the run and never fires a second answer alongside it.
+  const queuedForSession = queuedMessages.filter((item) => item.sessionId === currentSessionId);
+
+  useEffect(() => {
+    if (streaming || !currentSessionId || queuedForSession.length === 0) return;
+    const next = takeQueuedMessage(currentSessionId);
+    if (!next) return;
+    onSend(next.text, next.blocks);
+    setInput('');
+  }, [streaming, currentSessionId, queuedForSession.length, takeQueuedMessage, onSend, setInput]);
+
+  const handleSendDuringStream = (text: string, blocks?: ContentBlock[]) => {
+    if (!text.trim() && !(blocks?.length)) return;
+    queueMessage(text.trim(), blocks);
     setInput('');
   };
 
@@ -2401,6 +2418,51 @@ function RealChat({
       </div>
       <div className="flex-shrink-0 px-6 py-4 lg:px-10">
         <div>
+          {queuedForSession.length > 0 && (
+            <div className="mb-2 space-y-1.5" aria-live="polite">
+              <div className="flex items-center gap-2 px-1">
+                <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/80">Queued</span>
+                <span className="text-[10px] text-zinc-600">
+                  {queuedForSession.length === 1 ? 'Sends when this run finishes' : `${queuedForSession.length} messages send in order`}
+                </span>
+              </div>
+              {queuedForSession.map((item, index) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5"
+                >
+                  <span className="font-mono text-[9px] text-zinc-600">{index + 1}</span>
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-zinc-400" title={item.text}>
+                    {item.text || `${item.blocks?.length ?? 0} attachment${(item.blocks?.length ?? 0) === 1 ? '' : 's'}`}
+                  </span>
+                  {streaming && item.text && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        removeQueuedMessage(item.id);
+                        void interject(item.text);
+                      }}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-cyan-300/80 transition-colors hover:bg-cyan-400/10 hover:text-cyan-200"
+                      title="Send this now as a live steer"
+                    >
+                      Send now
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeQueuedMessage(item.id)}
+                    aria-label="Remove queued message"
+                    title="Remove from queue"
+                    className="flex h-5 w-5 items-center justify-center rounded text-zinc-600 transition-colors hover:bg-white/[0.05] hover:text-zinc-300"
+                  >
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <InputBar
             input={input}
             setInput={setInput}
@@ -2410,7 +2472,7 @@ function RealChat({
             onModeChange={onModeChange}
             selectedAgentId={selectedAgentId}
             onAgentChange={onAgentChange}
-            placeholder={streaming ? 'Send a suggestion or update...' : 'Continue the conversation...'}
+            placeholder={streaming ? 'Type to queue the next message…' : 'Continue the conversation...'}
             isOnline={isOnline}
             workspaceOpen={workspaceOpen}
             onWorkspaceOpenChange={onWorkspaceOpenChange}
@@ -2425,7 +2487,13 @@ function RealChat({
   );
 }
 
-function MessageBubble({
+// Memoized: during streaming, only the last assistant message's identity
+// changes — every earlier bubble keeps its props and skips re-rendering. The
+// unmemoized version re-rendered the WHOLE transcript on every text delta,
+// which is the main reason long chats degraded mid-stream.
+const MessageBubble = memo(MessageBubbleImpl);
+
+function MessageBubbleImpl({
   message,
   turnDurationMs,
   runningToolIds,

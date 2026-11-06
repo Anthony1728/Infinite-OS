@@ -17,7 +17,7 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'board', label: 'Board', icon: 'nav.projects', color: 'text-emerald-400' },
   { id: 'planner', label: 'Planner', icon: 'nav.planner', color: 'text-violet-400' },
   { id: 'studio', label: 'Studio', icon: 'nav.studio', color: 'text-cyan-400' },
-  { id: 'pages', label: 'Pages', icon: 'nav.pages', color: 'text-violet-400' },
+  { id: 'pages', label: 'Notes', icon: 'nav.pages', color: 'text-violet-400' },
   // Filed-away conversations. Searchable, and every entry can be restored and
   // carried on from.
   { id: 'archive', label: 'Archive', icon: 'tab.document', color: 'text-slate-400' },
@@ -32,7 +32,6 @@ const NAV: { id: string; label: string; icon: AppIconName; color: string }[] = [
   { id: 'workers', label: 'Workers', icon: 'automation.pulse', color: 'text-sky-400' },
   { id: 'memory', label: 'Memory', icon: 'nav.memory', color: 'text-purple-400' },
   { id: 'workspace', label: 'Workspace', icon: 'nav.workspace', color: 'text-teal-400' },
-  { id: 'active-memory', label: 'Active Memory', icon: 'nav.memory', color: 'text-cyan-400' },
   { id: 'standing-orders', label: 'Standing Orders', icon: 'home.standing-orders', color: 'text-violet-400' },
   { id: 'plugins', label: 'Plugin Store', icon: 'home.plugins', color: 'text-emerald-400' },
   { id: 'capabilities', label: 'Tools & Skills', icon: 'nav.capabilities', color: 'text-indigo-400' },

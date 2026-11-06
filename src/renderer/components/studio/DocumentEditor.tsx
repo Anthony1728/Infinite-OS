@@ -266,49 +266,54 @@ export function DocumentEditor({ item }: DocumentEditorProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] bg-[#101015]/80 px-4 py-2 backdrop-blur-xl">
-        {HISTORY.map((button) => (
-          <ToolbarButton key={button.label} button={button} onRun={run} />
-        ))}
-        <Divider />
-        {INLINE.map((button) => (
-          <ToolbarButton key={button.label} button={button} active={active[button.state ?? '']} onRun={run} />
-        ))}
-        <Divider />
-        {BLOCKS.map((button) => (
-          <ToolbarButton key={button.label} button={button} active={active[button.state ?? '']} onRun={run} />
-        ))}
-        <Divider />
-        {ALIGN.map((button) => (
-          <ToolbarButton key={button.label} button={button} onRun={run} />
-        ))}
-        <Divider />
-        <button
-          type="button"
-          title="Insert link"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={beginAddLink}
-          className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
-        >
-          <StudioIcon name="link" />
-        </button>
-        <button
-          type="button"
-          title="Clear formatting"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            editorRef.current?.focus();
-            document.execCommand('removeFormat');
-            document.execCommand('formatBlock', false, 'p');
-            sync();
-          }}
-          className="rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
-        >
-          Clear
-        </button>
-        <div className="ml-auto flex items-center gap-3 pr-1 text-[11px] text-zinc-500">
-          <span>{words.toLocaleString()} {words === 1 ? 'word' : 'words'}</span>
-          <span className={status === 'saving' ? 'text-amber-400/80' : status === 'saved' ? 'text-emerald-400/80' : ''}>
+      {/* One row, always: formatting buttons scroll horizontally instead of
+          wrapping, and the word-count/status group is pinned outside the
+          scroll area — the old flex-wrap let them collide on narrow panes. */}
+      <div className="flex items-center border-b border-white/[0.06] bg-[#101015]/80 backdrop-blur-xl">
+        <div className="flex flex-1 min-w-0 flex-nowrap items-center gap-1 overflow-x-auto px-4 py-2 custom-scrollbar">
+          {HISTORY.map((button) => (
+            <ToolbarButton key={button.label} button={button} onRun={run} />
+          ))}
+          <Divider />
+          {INLINE.map((button) => (
+            <ToolbarButton key={button.label} button={button} active={active[button.state ?? '']} onRun={run} />
+          ))}
+          <Divider />
+          {BLOCKS.map((button) => (
+            <ToolbarButton key={button.label} button={button} active={active[button.state ?? '']} onRun={run} />
+          ))}
+          <Divider />
+          {ALIGN.map((button) => (
+            <ToolbarButton key={button.label} button={button} onRun={run} />
+          ))}
+          <Divider />
+          <button
+            type="button"
+            title="Insert link"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={beginAddLink}
+            className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+          >
+            <StudioIcon name="link" />
+          </button>
+          <button
+            type="button"
+            title="Clear formatting"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              editorRef.current?.focus();
+              document.execCommand('removeFormat');
+              document.execCommand('formatBlock', false, 'p');
+              sync();
+            }}
+            className="flex-shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-200"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="flex-shrink-0 flex items-center gap-3 pl-2 pr-4 text-[11px] text-zinc-500">
+          <span className="whitespace-nowrap">{words.toLocaleString()} {words === 1 ? 'word' : 'words'}</span>
+          <span className={`whitespace-nowrap ${status === 'saving' ? 'text-amber-400/80' : status === 'saved' ? 'text-emerald-400/80' : ''}`}>
             {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : ''}
           </span>
         </div>

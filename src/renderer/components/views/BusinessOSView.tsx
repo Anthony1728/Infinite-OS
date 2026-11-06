@@ -3,10 +3,11 @@ import {
   DollarSign, Users, Handshake, ListTodo, TrendingUp, TrendingDown,
   Plus, Search, X, Send, Mail, Phone, Building2, Tag,
   CheckCircle2, Circle, Clock, FileText,
-  BarChart3, ArrowUpRight, Calendar,
+  ArrowUpRight, Calendar,
   Trash2, StickyNote
 } from 'lucide-react';
 import { InputModal, type InputModalField } from '../modals/InputModal';
+import { AppIcon, BRAND_GRADIENT } from '../brand/AppIcon';
 
 type Tab = 'overview' | 'crm' | 'leads' | 'email' | 'analytics' | 'tasks' | 'invoices';
 
@@ -1004,8 +1005,8 @@ const toggleTask = (id: string) => {
       <div className="flex-shrink-0 p-4 border-b border-white/10">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center">
-              <BarChart3 size={18} className="text-white" />
+            <div className="w-9 h-9 rounded-xl border border-white/[0.08] bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+              <AppIcon name="inf.chart" className="w-[18px] h-[18px]" gradient={BRAND_GRADIENT} />
             </div>
             <h1 className="text-lg font-semibold text-white">Business Command Center</h1>
           </div>

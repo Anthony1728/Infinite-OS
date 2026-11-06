@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 // The guard persists its runaway-loop window to the profile directory. Without
 // this override the tests would write to the developer's real Infinite OS
-// profile â€” the same hazard that left a stale provider-health timestamp
+// profile — the same hazard that left a stale provider-health timestamp
 // skipping a provider for minutes.
 process.env.INFINITE_TEST_HOME ??= mkdtempSync(join(tmpdir(), 'infinite-guard-test-'));
 afterAll(() => {
@@ -159,7 +159,7 @@ describe('a runaway edit loop is stopped', () => {
     resetSelfModificationGuard();
   });
 
-  it('lets a real fix through â€” iterating on one file many times is normal', () => {
+  it('lets a real fix through — iterating on one file many times is normal', () => {
     for (let i = 0; i < 10; i++) {
       expect(guardSelfModification(ROOT, 'src/main/tools/browser.ts', 'modify').allowed).toBe(true);
     }

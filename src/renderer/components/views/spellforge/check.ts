@@ -3,7 +3,7 @@
  * text, after making sure the bundled dictionary is built. Both the journal
  * and Spell Forge go through here so they never disagree about a word.
  */
-import { readBundledDictionary } from './dict-loader';
+import { loadBundledDictionary } from './dict-loader';
 import { analyze, buildDict, type Finding } from './engine';
 import { checkGrammar, type GrammarFinding } from './grammar';
 
@@ -15,26 +15,25 @@ let dictReady = false;
 /**
  * Split the bundled lists once and build the lookup structures.
  * The word list is ~370k entries, so this happens exactly once per session
- * and every later call is a resolved promise.
+ * and every later call is a resolved promise. The lists themselves arrive
+ * via a lazy dynamic import — the first call pays one asset load.
  */
-function build(): void {
+async function build(): Promise<void> {
   if (dictReady) return;
-  const { words, freq } = readBundledDictionary();
+  const { words, freq } = await loadBundledDictionary();
   buildDict(words, freq);
   dictReady = true;
 }
 
 export function ensureDictionary(): Promise<boolean> {
   if (!dictPromise) {
-    dictPromise = new Promise<boolean>((resolve) => {
-      try {
-        build();
-        resolve(true);
-      } catch (e) {
+    dictPromise = build().then(
+      () => true,
+      (e) => {
         console.error('Dictionary build failed:', e);
-        resolve(false);
-      }
-    });
+        return false;
+      },
+    );
   }
   return dictPromise;
 }

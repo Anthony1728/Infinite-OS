@@ -33,7 +33,10 @@ interface ConnectedServer {
 
 const servers = new Map<string, ConnectedServer>();
 
-export async function loadMcpConfig(cwd: string): Promise<Record<string, McpServerConfig>> {
+export async function loadMcpConfig(
+  cwd: string,
+  opts?: { projectScope?: boolean },
+): Promise<Record<string, McpServerConfig>> {
   const out: Record<string, McpServerConfig> = {};
 
   // User scope
@@ -45,20 +48,45 @@ export async function loadMcpConfig(cwd: string): Promise<Record<string, McpServ
     } catch { /* skip */ }
   }
 
-  // Project scope
-  const projectPath = join(cwd, '.mcp.json');
-  if (existsSync(projectPath)) {
-    try {
-      const data = JSON.parse(await readFile(projectPath, 'utf8'));
-      Object.assign(out, data.mcpServers ?? {});
-    } catch { /* skip */ }
+  // Project scope — only when explicitly requested. A repo's .mcp.json is
+  // untrusted input: auto-spawning its commands was drive-by code execution
+  // the moment the user opened an untrusted folder. Project servers connect
+  // when the user explicitly asks (MCP → connect), never at boot.
+  if (opts?.projectScope) {
+    const projectPath = join(cwd, '.mcp.json');
+    if (existsSync(projectPath)) {
+      try {
+        const data = JSON.parse(await readFile(projectPath, 'utf8'));
+        Object.assign(out, data.mcpServers ?? {});
+      } catch { /* skip */ }
+    }
   }
 
   return out;
 }
 
+/** Benign environment allowlist for spawned MCP servers. The old behaviour
+ * forwarded process.env wholesale, handing every provider API key in the
+ * environment to whatever command a config asked to run. */
+function safeServerEnv(custom?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of [
+    'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH',
+    'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'TEMP', 'TMP',
+    'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'OS', 'USERNAME', 'COMPUTERNAME',
+    'LANG', 'TERM',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return { ...out, ...(custom ?? {}) };
+}
+
 export async function connectAll(cwd: string): Promise<void> {
-  const config = await loadMcpConfig(cwd);
+  // Boot-time auto-connect deliberately covers ONLY the user-level config —
+  // servers the user installed themselves. See loadMcpConfig for why the
+  // project scope never runs here.
+  const config = await loadMcpConfig(cwd, { projectScope: false });
   for (const [name, cfg] of Object.entries(config)) {
     try {
       // A slow or broken optional MCP server must never hold the desktop
@@ -87,7 +115,7 @@ function createTransport(cfg: McpServerConfig) {
     return new StdioClientTransport({
       command: cfg.command,
       args: cfg.args ?? [],
-      env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
+      env: safeServerEnv(cfg.env),
     });
   }
 

@@ -16,6 +16,14 @@ import type { AgentId, AgentEvent } from '../agents/types.js';
 import { spawnSubagent } from './runtime.js';
 import { providerRegistry } from '../providers/registry.js';
 import type { Message } from '../../shared/types.js';
+import {
+  deriveAcceptanceCriteria,
+  renderTaskWithCriteria,
+  verifyDeliverable,
+  renderRevisionRequest,
+  recordAgentWork,
+  type DelegatedTask,
+} from './coordination.js';
 
 export interface CrewAssignment {
   provider: string;
@@ -33,6 +41,8 @@ export interface CrewMember {
   status: 'standby' | 'running' | 'completed' | 'failed' | 'skipped';
   result?: string;
   error?: string;
+  /** Mechanical verification of the deliverable (file claims checked, etc.) */
+  verification?: { verdict: 'pass' | 'fail' | 'unverified'; reasons: string[] };
   toolCallCount: number;
   startedAt?: number;
   completedAt?: number;
@@ -60,6 +70,8 @@ export interface CrewRun {
     memberReports: Array<{ role: string; agentType: string; provider: string; model: string; result?: string }>;
     fallbacks: string[];
     unresolved: string[];
+    /** Mechanical verification of the leader's integrated delivery. */
+    leaderVerification?: { verdict: 'pass' | 'fail' | 'unverified'; reasons: string[] };
   };
 }
 
@@ -387,9 +399,53 @@ export async function runCrew(
     member.startedAt = Date.now();
     event({ type: 'crew_member_started', runId: run.id, data: member });
 
-    const baseTask = `Work independently on your part of the project. You are one member of a crew led by the user's chosen model.\n\nPROJECT:\n${opts.prompt}\n\nYOUR ROLE: ${member.role} — ${member.description}\n\nProduce a complete, production-grade artifact for your role. You may read files, write files, create designs, or return text — whatever your role requires. When done, reply with a concise summary of exactly what you produced (file paths, key decisions). The leader will integrate your work.`;
+    // Structured delegation: the specialist gets a definition of done that
+    // the coordinator can MECHANICALLY check afterwards — not "do your best".
+    const acceptanceCriteria = deriveAcceptanceCriteria(member.agentType, opts.prompt);
+    const task: DelegatedTask = {
+      id: uuid(),
+      role: member.role,
+      agentType: member.agentType,
+      prompt: renderTaskWithCriteria(opts.prompt, member.role, member.description, acceptanceCriteria),
+      acceptanceCriteria,
+      status: 'delegated',
+      result: '',
+      verification: { verdict: 'unverified', checked: [], reasons: [] },
+    };
+
     const retryChain = [member.assignment, ...(member.alternativeAssignments ?? [])];
     let lastError = '';
+
+    const spawnOnce = async (ass: { provider: string; model: string }, taskText: string): Promise<string> => {
+      const spawned = spawnSubagent({
+        agentId: member.agentType,
+        task: taskText,
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+        provider: ass.provider,
+        model: ass.model,
+        parentHistory: opts.parentHistory,
+        background: false,
+        retry: { maxAttempts: 2, backoff: true },
+        sink: (ev: AgentEvent) => {
+          // Stream the member's text live so the pair panel shows BOTH
+          // models working — one coherent narrative, not a silent handoff.
+          if (ev.type === 'text_delta' && (ev as { text?: unknown }).text) {
+            event({
+              type: 'crew_member_delta',
+              runId: run.id,
+              data: { memberId: member.id, text: (ev as { text: string }).text },
+            });
+          }
+          event({
+            type: 'crew_member_progress',
+            runId: run.id,
+            data: { memberId: member.id, agentEvent: ev.type, detail: ev.type === 'fail' ? (ev as { error: string }).error : '' },
+          });
+        },
+      });
+      return spawned.done;
+    };
 
     for (let i = 0; i < retryChain.length; i++) {
       const ass = retryChain[i];
@@ -398,39 +454,45 @@ export async function runCrew(
         event({ type: 'crew_member_retrying', runId: run.id, data: { memberId: member.id, reason: lastError, assignment: ass } });
       }
       try {
-        const spawned = spawnSubagent({
-          agentId: member.agentType,
-          task: baseTask,
-          sessionId: opts.sessionId,
-          cwd: opts.cwd,
-          provider: ass.provider,
-          model: ass.model,
-          parentHistory: opts.parentHistory,
-          background: false,
-          retry: { maxAttempts: 2, backoff: true },
-          sink: (ev: AgentEvent) => {
-            // Stream the member's text live so the pair panel shows BOTH
-            // models working — one coherent narrative, not a silent handoff.
-            if (ev.type === 'text_delta' && (ev as { text?: unknown }).text) {
-              event({
-                type: 'crew_member_delta',
-                runId: run.id,
-                data: { memberId: member.id, text: (ev as { text: string }).text },
-              });
+        let result = await spawnOnce(ass, task.prompt);
+        task.result = result;
+        task.status = 'result_ready';
+        task.verification = verifyDeliverable(task, opts.cwd);
+
+        // One revision round when mechanical checks fail: the specialist is
+        // re-run with exactly which criteria failed and why. This is the
+        // "agents check each other's work" loop — a claimed-but-missing file
+        // is caught HERE instead of poisoning the leader's integration.
+        if (task.verification.verdict === 'fail') {
+          event({
+            type: 'crew_member_progress',
+            runId: run.id,
+            data: { memberId: member.id, agentEvent: 'verification_failed', detail: task.verification.reasons.join('; ').slice(0, 300) },
+          });
+          try {
+            const revised = await spawnOnce(ass, renderRevisionRequest(task, task.verification));
+            if (revised.trim()) {
+              task.result = revised;
+              result = revised;
+              // The revised attempt's verification is the honest current state.
+              task.verification = verifyDeliverable(task, opts.cwd);
             }
-            event({
-              type: 'crew_member_progress',
-              runId: run.id,
-              data: { memberId: member.id, agentEvent: ev.type, detail: ev.type === 'fail' ? (ev as { error: string }).error : '' },
-            });
-          },
-        });
-        const result = await spawned.done;
+          } catch (revErr) {
+            fallbacks.push(`${member.role}: revision round failed — ${(revErr instanceof Error ? revErr.message : String(revErr)).slice(0, 120)}`);
+          }
+        }
+
         member.result = result;
+        member.verification = task.verification;
         member.status = 'completed';
         member.completedAt = Date.now();
         member.assignment = ass;
         event({ type: 'crew_member_completed', runId: run.id, data: member });
+        // Per-agent memory: this specialist's next run starts with what it
+        // did here instead of a cold start. Awaited so the run's completion
+        // guarantees the record exists (the write itself is advisory and
+        // internally try/catch'd).
+        await recordAgentWork(member.agentType, member.role, opts.prompt, result, opts.sessionId);
         return;
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
@@ -498,7 +560,17 @@ export async function runCrew(
   event({ type: 'leader_started', runId: run.id, data: {} });
   const memberReport = results
     .filter((r) => r.result)
-    .map((r) => `## ${r.role} (${r.provider}/${r.model})\n${(r.result ?? '').slice(0, 6000)}`)
+    .map((r) => {
+      const member = plan.members.find((m) => m.role === r.role);
+      const verificationLine = member?.verification
+        ? (member.verification.verdict === 'pass'
+          ? '[verified] mechanical checks passed — file claims confirmed on disk.'
+          : member.verification.verdict === 'fail'
+            ? `[UNVERIFIED — failed checks: ${member.verification.reasons.join('; ').slice(0, 300)}] Re-check every claim in this output before relying on it.`
+            : '[unverified] no mechanical checks applied to this output type.')
+        : '[no verification record]';
+      return `## ${r.role} (${r.provider}/${r.model}) — ${verificationLine}\n${(r.result ?? '').slice(0, 6000)}`;
+    })
     .join('\n\n');
 
   const leaderPrompt = [
@@ -511,40 +583,98 @@ export async function runCrew(
     ``,
     `Your job: review everything the crew produced, integrate it into one coherent, production-grade result that fully satisfies the original request. Fix gaps the specialists missed. Deliver the final answer — the complete implementation, artifact, or report — exactly as the user requested. If specialist output has errors, correct them. Never apologize for using the crew; just deliver.`,
     ``,
+    `Each specialist section carries a verification line. [verified] means its file claims were confirmed on disk; [UNVERIFIED — failed checks] means its claims were contradicted and you MUST re-check the work yourself (e.g. read the file, run the command) before relying on it; [unverified] means no mechanical check applied.`,
+    ``,
     `IMPORTANT: If the crew entirely failed and you are working alone, still complete the request from scratch to the best of your ability.`,
   ].join('\n');
 
-  try {
-    const leaderSpawned = spawnSubagent({
-      agentId: 'general',
-      task: leaderPrompt,
-      sessionId: opts.sessionId,
-      cwd: opts.cwd,
-      provider: plan.leader.provider,
-      model: plan.leader.model,
-      parentHistory: opts.parentHistory,
-      background: false,
-      retry: { maxAttempts: 3, backoff: true },
-      sink: (ev) => {
+    try {
+      const leaderSpawned = spawnSubagent({
+        agentId: 'general',
+        task: leaderPrompt,
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+        provider: plan.leader.provider,
+        model: plan.leader.model,
+        parentHistory: opts.parentHistory,
+        background: false,
+        retry: { maxAttempts: 3, backoff: true },
+        sink: (ev) => {
+          event({
+            type: 'crew_member_progress',
+            runId: run.id,
+            data: { memberId: 'leader', agentEvent: ev.type, detail: (ev as { preview?: string }).preview ?? '' },
+          });
+        },
+      });
+      let leaderResult = await leaderSpawned.done;
+
+      // Leader verification: the INTEGRATED delivery must clear the same
+      // mechanical bar as every specialist. A leader that claims files it
+      // never wrote (or merely promises future work) gets one revision round
+      // naming exactly which checks failed — no level of the hierarchy is
+      // exempt from verification.
+      const leaderTask: DelegatedTask = {
+        id: uuid(),
+        role: 'Leader',
+        agentType: 'general',
+        prompt: leaderPrompt,
+        acceptanceCriteria: deriveAcceptanceCriteria('general', opts.prompt),
+        status: 'result_ready',
+        result: leaderResult,
+        verification: { verdict: 'unverified', checked: [], reasons: [] },
+      };
+      leaderTask.verification = verifyDeliverable(leaderTask, opts.cwd);
+      if (leaderTask.verification.verdict === 'fail') {
         event({
           type: 'crew_member_progress',
           runId: run.id,
-          data: { memberId: 'leader', agentEvent: ev.type, detail: (ev as { preview?: string }).preview ?? '' },
+          data: { memberId: 'leader', agentEvent: 'verification_failed', detail: leaderTask.verification.reasons.join('; ').slice(0, 300) },
         });
-      },
-    });
-    const leaderResult = await leaderSpawned.done;
-    event({ type: 'leader_completed', runId: run.id, data: {} });
-    run.report = {
-      summary: `Crew complete (${strategy}): leader integrated ${results.filter((r) => r.result).length}/${plan.members.length} specialists.`,
-      leaderResult,
-      memberReports: results,
-      fallbacks,
-      unresolved,
-    };
-    run.status = 'completed';
-    event({ type: 'crew_completed', runId: run.id, data: run.report });
-  } catch (err) {
+        try {
+          const revised = await spawnSubagent({
+            agentId: 'general',
+            task: renderRevisionRequest(leaderTask, leaderTask.verification),
+            sessionId: opts.sessionId,
+            cwd: opts.cwd,
+            provider: plan.leader.provider,
+            model: plan.leader.model,
+            parentHistory: opts.parentHistory,
+            background: false,
+            retry: { maxAttempts: 2, backoff: true },
+            sink: (ev) => {
+              event({
+                type: 'crew_member_progress',
+                runId: run.id,
+                data: { memberId: 'leader', agentEvent: ev.type, detail: (ev as { preview?: string }).preview ?? '' },
+              });
+            },
+          }).done;
+          if (revised.trim()) {
+            leaderResult = revised;
+            leaderTask.result = revised;
+            leaderTask.verification = verifyDeliverable(leaderTask, opts.cwd);
+          }
+        } catch (revErr) {
+          fallbacks.push(`Leader revision round failed — ${(revErr instanceof Error ? revErr.message : String(revErr)).slice(0, 120)}`);
+        }
+      }
+
+      event({ type: 'leader_completed', runId: run.id, data: {} });
+      run.report = {
+        summary: `Crew complete (${strategy}): leader integrated ${results.filter((r) => r.result).length}/${plan.members.length} specialists. Delivery verification: ${leaderTask.verification.verdict}.`,
+        leaderResult,
+        memberReports: results,
+        fallbacks,
+        unresolved,
+        leaderVerification: {
+          verdict: leaderTask.verification.verdict,
+          reasons: leaderTask.verification.reasons,
+        },
+      };
+      run.status = 'completed';
+      event({ type: 'crew_completed', runId: run.id, data: run.report });
+    } catch (err) {
     run.status = 'failed';
     run.report = {
       summary: `Crew failed: ${err instanceof Error ? err.message : String(err)}`,

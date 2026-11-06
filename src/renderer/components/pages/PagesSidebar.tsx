@@ -7,7 +7,6 @@ import {
   FileDown,
   FileText,
   FolderPlus,
-  LayoutGrid,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { PageSummary } from '../../../shared/pages';
 import { usePagesStore } from '../../stores/pages';
+import { AppIcon, BRAND_GRADIENT } from '../brand/AppIcon';
 import { formatRelative, htmlToPlainText } from './pageUtils';
 import { PagePopover, PopoverItem, PopoverSeparator } from './PagePopover';
 
@@ -333,7 +333,7 @@ export function PagesSidebar({ onOpenTemplates, onOpenTrash, onOpenAI }: PagesSi
     <aside className="pages-sidebar">
       <div className="pages-sidebar-head">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="pages-mark"><LayoutGrid size={15} /></div>
+          <div className="pages-mark"><AppIcon name="inf.note" className="h-4 w-4" gradient={BRAND_GRADIENT} /></div>
           <div className="min-w-0">
             <div className="pages-sidebar-title">Pages</div>
             <div className="pages-sidebar-subtitle">Your second brain</div>
@@ -347,7 +347,7 @@ export function PagesSidebar({ onOpenTemplates, onOpenTrash, onOpenAI }: PagesSi
       <div className="pages-sidebar-actions">
         <button type="button" className="pages-primary-button flex-1" onClick={() => void create({ title: 'Untitled' })}>
           <Plus size={15} />
-          <span>New page</span>
+          <span>New note</span>
         </button>
         <button type="button" className="pages-secondary-button" onClick={onOpenTemplates} title="Start from a template">
           <Sparkles size={15} />
@@ -359,7 +359,7 @@ export function PagesSidebar({ onOpenTemplates, onOpenTrash, onOpenAI }: PagesSi
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search every page…"
+          placeholder="Search every note…"
           aria-label="Search pages"
         />
         {query ? (
@@ -402,7 +402,7 @@ export function PagesSidebar({ onOpenTemplates, onOpenTrash, onOpenAI }: PagesSi
             }}
           >
             <FileText size={14} />
-            <span>All pages</span>
+            <span>All notes</span>
             <span className="pages-sidebar-count">{pageCount}</span>
           </button>
 
@@ -451,7 +451,7 @@ export function PagesSidebar({ onOpenTemplates, onOpenTrash, onOpenAI }: PagesSi
               {pageCount === 0 ? (
                 <div className="pages-sidebar-empty">
                   A blank canvas is waiting.
-                  <button type="button" onClick={() => void create({ title: 'Untitled' })}>Create your first page</button>
+                  <button type="button" onClick={() => void create({ title: 'Untitled' })}>Create your first note</button>
                 </div>
               ) : null}
             </div>

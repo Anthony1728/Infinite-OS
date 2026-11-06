@@ -27,6 +27,9 @@ The app is built with **Electron, React, TypeScript, and Vite**. A Manifest V3 b
 ## Highlights
 
 - **One workspace** — chat, files, terminal, editor, browser, projects, and automation share a single window and a single command palette.
+- **A home that answers** — a daily brief, pinned live note cards, a needs-you inbox, and a memory graph show what happened, what is waiting, and what the OS remembers.
+- **Blocking approvals** — a run stops at an approval step. Approve it, reject it, or leave a comment that re-runs the agent and returns a revised draft; a comment never silently unblocks the run.
+- **Queued chat** — pressing Enter during a live run queues the next message instead of racing it. The queue sends in order, and "Send now" is the only explicit interjection.
 - **Local-first by default** — conversations, memory, settings, and account profiles live under `~/.infinite-ai`. No telemetry is sent by the app itself.
 - **Per-account isolation** — every account gets its own profile directory. Signing into a different account cannot read or inherit another account's data.
 - **Real browser control** — the bundled MV3 extension drives a normal Chrome or Edge session: open tabs, navigate, read pages, fill forms, click, extract links, and take screenshots.

@@ -170,10 +170,15 @@ class PhoneRemoteServer {
     return ranked.length ? ranked : ['127.0.0.1'];
   }
 
-  private tokenOk(url: URL): boolean {
-    const given = Buffer.from(url.searchParams.get('token') ?? '');
+  private tokenOk(url: URL, req?: http.IncomingMessage): boolean {
+    // Prefer the Authorization header — a token in the URL query leaks into
+    // browser history, referer headers, and proxy logs on anything between
+    // the phone and this machine. The query param stays as a fallback so the
+    // served page's own fetches keep working during a rolling update.
+    const header = String(req?.headers?.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+    const given = Buffer.from(header || (url.searchParams.get('token') ?? ''));
     const expected = Buffer.from(this.token);
-    return given.length === expected.length && timingSafeEqual(given, expected);
+    return given.length > 0 && given.length === expected.length && timingSafeEqual(given, expected);
   }
 
   private sse(res: http.ServerResponse): void {
@@ -203,9 +208,37 @@ class PhoneRemoteServer {
     }
   }
 
+  // Brute-force guard: a token is 192 bits, but an unthrottled 401 endpoint
+  // on the LAN is still an invitation. After AUTH_FAIL_LIMIT failures inside
+  // the window, every request is rejected for AUTH_PENALTY_MS — real users
+  // scanning a fresh QR never hit it; a guessing loop stalls out.
+  private static readonly AUTH_FAIL_LIMIT = 10;
+  private static readonly AUTH_FAIL_WINDOW_MS = 5 * 60_000;
+  private static readonly AUTH_PENALTY_MS = 15 * 60_000;
+  private authFailures: number[] = [];
+  private authPenaltyUntil = 0;
+
+  private recordAuthFailure(): void {
+    const now = Date.now();
+    this.authFailures = this.authFailures.filter((t) => now - t < PhoneRemoteServer.AUTH_FAIL_WINDOW_MS);
+    this.authFailures.push(now);
+    if (this.authFailures.length >= PhoneRemoteServer.AUTH_FAIL_LIMIT) {
+      this.authPenaltyUntil = now + PhoneRemoteServer.AUTH_PENALTY_MS;
+      this.authFailures = [];
+      console.warn('[remote] auth brute-force guard engaged — rejecting requests for 15 minutes');
+    }
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-    if (!this.tokenOk(url)) {
+    const now = Date.now();
+    if (now < this.authPenaltyUntil) {
+      res.writeHead(429, { 'Content-Type': 'text/plain' });
+      res.end('Infinite OS phone remote: too many invalid attempts — try again later.');
+      return;
+    }
+    if (!this.tokenOk(url, req)) {
+      this.recordAuthFailure();
       res.writeHead(401, { 'Content-Type': 'text/plain' });
       res.end('Infinite OS phone remote: invalid or missing token.');
       return;
@@ -695,7 +728,12 @@ function mobilePage(): string {
   var turns = {};
   var toolChips = {};
 
-  function api(path) { return path + '?token=' + encodeURIComponent(token); }
+  // Auth rides in the Authorization header — NOT the URL. Query-string tokens
+  // leak into browser history, referer headers, and proxy logs; a header
+  // never leaves the request. (The server still accepts ?token= for the very
+  // first page load itself.)
+  var authHeaders = { 'Authorization': 'Bearer ' + token };
+  function api(path) { return path; }
   function scroll() {
     if (stickToBottom) log.scrollTop = log.scrollHeight;
   }
@@ -879,7 +917,7 @@ function mobilePage(): string {
   }
 
   function loadHistory() {
-    return fetch(api('/api/history')).then(function (res) {
+    return fetch(api('/api/history'), { headers: authHeaders }).then(function (res) {
       if (!res.ok) return null;
       return res.json();
     }).then(function (data) {
@@ -890,7 +928,7 @@ function mobilePage(): string {
     }).catch(function () { /* offline history is fine */ });
   }
 
-  fetch(api('/api/status')).then(function (res) {
+  fetch(api('/api/status'), { headers: authHeaders }).then(function (res) {
     if (res.status === 401) {
       showFatal('This link is invalid or expired. Open Infinite OS on the PC → Settings → Connect Your Phone and scan the new code.');
       return;
@@ -898,6 +936,8 @@ function mobilePage(): string {
     return loadHistory();
   }).catch(function () { setConn('offline'); });
 
+  // EventSource cannot set custom headers, so the stream keeps the one-time
+  // page-load token via the URL — same as the initial document request.
   var source = new EventSource(api('/api/stream'));
   source.onopen = function () { setConn('live'); };
   source.onerror = function () { setConn('reconnecting'); };
@@ -1038,7 +1078,7 @@ function mobilePage(): string {
     setActivity('Sending…');
     fetch(api('/api/chat'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
       body: JSON.stringify({ message: text })
     }).then(function (res) {
       if (res.status === 401) {
@@ -1060,7 +1100,7 @@ function mobilePage(): string {
   send.addEventListener('click', submit);
   if (stop) stop.addEventListener('click', function () {
     setActivity('Stopping…');
-    fetch(api('/api/stop'), { method: 'POST' }).catch(function () {});
+    fetch(api('/api/stop'), { method: 'POST', headers: authHeaders }).catch(function () {});
   });
   input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
 })();

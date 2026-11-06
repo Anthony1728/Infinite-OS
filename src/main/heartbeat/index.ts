@@ -62,6 +62,22 @@ async function runHeartbeat(): Promise<void> {
     }
   } catch { /* memory not ready yet */ }
 
+  // Consolidate: promote battle-tested episodic memories. A recalled episode
+  // is a fact that keeps proving useful — three or more accesses promote it
+  // to the semantic tier so it outranks decay and becomes durable context
+  // for future turns. This closes the memory lifecycle: write → recall →
+  // consolidate → prune.
+  try {
+    const { listMemories, promoteMemory } = await import('../memory/store.js');
+    const episodic = listMemories('chat').filter((m) => m.tier === 'episodic' && (m.accessCount ?? 0) >= 3);
+    for (const memory of episodic.slice(0, 25)) {
+      promoteMemory(memory.id, 'semantic', Math.max(memory.importance ?? 0, 0.7));
+    }
+    if (episodic.length > 0) {
+      console.log(`[heartbeat] promoted ${Math.min(episodic.length, 25)} recalled episodic memories to semantic`);
+    }
+  } catch { /* memory not ready yet */ }
+
   saveState({ lastRun: Date.now(), runs: state.runs + 1 });
   console.log(`[heartbeat] run #${heartbeatCount} completed`);
 }

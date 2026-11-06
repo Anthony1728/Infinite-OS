@@ -69,7 +69,7 @@ test('intensity and until done collapse with the activity panel', async () => {
     await activityButton.click();
     await page.waitForTimeout(500);
 
-    const snapshot = await page.evaluate(() => {
+    const snapshot = () => page.evaluate(() => {
       const all = [...document.querySelectorAll<HTMLElement>('button')];
       const intensity = all.find((el) => /Intensity/.test(el.textContent ?? ''));
       const until = all.find((el) => /Until done/.test(el.textContent ?? ''));
@@ -82,13 +82,20 @@ test('intensity and until done collapse with the activity panel', async () => {
       }) : null;
       return { intensity: measure(wrap), untilDone: measure(until) };
     });
-    console.log('TOOLBAR_SNAPSHOT', JSON.stringify(snapshot));
-    expect(snapshot.intensity?.width).toBe(0);
-    expect(snapshot.untilDone?.width).toBe(0);
-    expect(snapshot.intensity?.pointerEvents).toBe('none');
-    expect(snapshot.untilDone?.pointerEvents).toBe('none');
-    expect(snapshot.intensity?.opacity).toBe('0');
-    expect(snapshot.untilDone?.opacity).toBe('0');
+
+    // The collapse is animated; under a cold Electron start the compositor can
+    // begin the transition late. Wait for the end state instead of guessing a
+    // fixed delay, then assert the final values.
+    await expect.poll(async () => (await snapshot()).untilDone?.width, { timeout: 10_000 }).toBe(0);
+    await expect.poll(async () => (await snapshot()).intensity?.width, { timeout: 10_000 }).toBe(0);
+    const finalSnapshot = await snapshot();
+    console.log('TOOLBAR_SNAPSHOT', JSON.stringify(finalSnapshot));
+    expect(finalSnapshot.intensity?.width).toBe(0);
+    expect(finalSnapshot.untilDone?.width).toBe(0);
+    expect(finalSnapshot.intensity?.pointerEvents).toBe('none');
+    expect(finalSnapshot.untilDone?.pointerEvents).toBe('none');
+    expect(finalSnapshot.intensity?.opacity).toBe('0');
+    expect(finalSnapshot.untilDone?.opacity).toBe('0');
     await page.screenshot({ path: test.info().outputPath('toolbar-collapsed.png') });
   } finally {
     await app.close().catch(() => undefined);

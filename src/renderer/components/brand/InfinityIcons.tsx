@@ -339,6 +339,46 @@ export const INF_ICONS = {
     circles: [[12, 12, 8.4]],
   },
 
+  // Image file — photo/picture
+  'inf.image': {
+    segs: [
+      {
+        d: 'M4.5 4.5h15a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-15a1.5 1.5 0 0 1-1.5-1.5v-10a1.5 1.5 0 0 1 1.5-1.5Z',
+      },
+      { d: 'M12 12.5c-2.5 0-4.5-2-4.5-4.5S12 3.5 14.5 3.5s4.5 2 4.5 4.5-2 4.5-4.5 4.5Z' },
+      { d: 'M8 10 11 13 18 6', tone: 0.7 },
+    ],
+  },
+
+  // Video file — film reel
+  'inf.video': {
+    segs: [
+      {
+        d: 'M3.8 5.2h16.4a1.3 1.3 0 0 1 1.3 1.3v11a1.3 1.3 0 0 1-1.3 1.3H3.8a1.3 1.3 0 0 1-1.3-1.3v-11a1.3 1.3 0 0 1 1.3-1.3Z',
+      },
+      { d: 'M6.7 9.2 9.4 12l-2.7 2.8M11.9 14.9h4.5' },
+    ],
+  },
+
+  // Audio file — music note
+  'inf.music': {
+    segs: [
+      { d: 'M9 18.3V10a1 1 0 0 1 1-1h1.5a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-1' },
+      { d: 'M14.5 14.3a1 1 0 1 0 1.4 1.4c.2.2.2.5 0 .7l-1.4 1.4' },
+    ],
+  },
+
+  // Archive/compressed file — box
+  'inf.archive': {
+    segs: [
+      {
+        d: 'M4.5 5.5h15a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5h-15a1.5 1.5 0 0 1-1.5-1.5v-10a1.5 1.5 0 0 1 1.5-1.5Z',
+      },
+      { d: 'M9 10h6M9 14h6' },
+      { d: 'M8.5 11.5v4h7' },
+    ],
+  },
+
   // Cursor with radiating marks — manual trigger
   'inf.manual': {
     segs: [

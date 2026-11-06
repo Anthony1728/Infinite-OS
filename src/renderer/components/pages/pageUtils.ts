@@ -290,7 +290,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: 'table', label: 'Table', description: 'Simple editable table', icon: '▦', keywords: ['table', 'grid'] },
   { id: 'image', label: 'Image', description: 'Upload from this device', icon: '🖼', keywords: ['image', 'photo', 'picture', 'upload'] },
   { id: 'bookmark', label: 'Bookmark', description: 'Save a link as a card', icon: '🔗', keywords: ['bookmark', 'link', 'url'] },
-  { id: 'child_page', label: 'Page', description: 'Create a nested page', icon: '📄', keywords: ['page', 'subpage', 'child'] },
+  { id: 'child_page', label: 'Note', description: 'Create a nested note', icon: '📄', keywords: ['page', 'subpage', 'child'] },
   { id: 'child_database', label: 'Database', description: 'Create a nested database', icon: '🗂', keywords: ['database', 'table', 'board', 'collection'] },
 ];
 

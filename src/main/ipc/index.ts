@@ -2,6 +2,7 @@
 
 import { ipcMain, BrowserWindow, dialog, shell, clipboard, app } from 'electron';
 import { isAbsolute, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { IPC } from '../../shared/ipc.js';
@@ -96,7 +97,6 @@ import { sessionBoard } from '../agent/session-board.js';
 import { selectBestModel, getAllFreeModels } from '../providers/model-selector.js';
 import { videoEngine } from '../video/index.js';
 import { deploySystem } from '../deploy/index.js';
-import { testingFramework } from '../testing/index.js';
 import { enterpriseManager } from '../enterprise/index.js';
 import { callCenter } from '../callcenter/index.js';
 import { browserOperator } from '../operator/browser-operator.js';
@@ -383,6 +383,36 @@ registerOptimizeIpc();
         console.error('[IPC] CHAT_SEND: engine recording failed:', engineErr);
       }
 
+      // Episodic memory write: every completed chat turn becomes a decaying
+      // episodic memory, so recall has real data to surface later (the
+      // heartbeat prunes low-importance episodes after 30 days). Fire-and-
+      // forget — a memory failure must never fail the chat.
+      try {
+        const { recordEpisodic } = await import('../memory/store.js');
+        const turnUserText = userMessage.content
+          .filter((c) => c.type === 'text')
+          .map((c) => (c as { text?: string }).text ?? '')
+          .join(' ');
+        const turnAssistant = [...completedMessages].reverse().find((m) => m.role === 'assistant');
+        const turnAnswer = turnAssistant
+          ? turnAssistant.content
+              .filter((c) => c.type === 'text')
+              .map((c) => (c as { text?: string }).text ?? '')
+              .join(' ')
+          : '';
+        const turnHadErrors = completedMessages.some(
+          (m) => m.content.some((c) => c.type === 'tool_result' && c.is_error),
+        );
+        recordEpisodic(
+          sessionId,
+          turnUserText.slice(0, 120) || 'Chat turn',
+          `Asked: ${turnUserText.slice(0, 600)}\nAnswered: ${turnAnswer.slice(0, 600) || '(no text answer)'}`,
+          !turnHadErrors && turnAnswer.length > 10 ? 0.5 : 0.35,
+        );
+      } catch (memoryErr) {
+        console.warn('[IPC] CHAT_SEND: episodic memory write failed:', memoryErr);
+      }
+
       // A clear-history action may have deleted this session while the agent
       // was winding down after cancellation. Never recreate a deleted chat.
       const wasDiscarded = discardedRuns.delete(sessionId);
@@ -474,9 +504,24 @@ registerOptimizeIpc();
 
   // Sessions
   ipcMain.handle(IPC.SESSION_LIST, async () => sessionStore.listSessions());
-  ipcMain.handle(IPC.SESSION_CREATE, async (_e, { cwd, model, provider, title }) =>
-    sessionStore.createSession({ cwd, model, provider, title }),
-  );
+  ipcMain.handle(IPC.SESSION_CREATE, async (_e, { cwd, model, provider, title }) => {
+    const session = await sessionStore.createSession({ cwd, model, provider, title });
+    // Auto-index the workspace in the background so repo understanding is
+    // ready before the agent ever needs it — the Knowledge tool used to be
+    // the only trigger, which meant nobody's workspace was ever indexed.
+    // force=false makes repeat indexing cheap (unchanged files are skipped).
+    if (typeof cwd === 'string' && cwd && cwd !== '.' && cwd !== homedir()) {
+      void (async () => {
+        try {
+          const { getWorkspaceIndexer } = await import('../indexing/indexer.js');
+          await getWorkspaceIndexer().buildIndex([cwd], false);
+        } catch (e) {
+          console.warn('[index] background workspace index failed:', (e as Error).message);
+        }
+      })();
+    }
+    return session;
+  });
   ipcMain.handle(IPC.SESSION_LOAD, async (_e, { sessionId }) => sessionStore.loadMessages(sessionId));
   ipcMain.handle(IPC.SESSION_DELETE, async (_e, { sessionId }) => {
     if (activeRuns.has(sessionId)) discardedRuns.add(sessionId);
@@ -1663,25 +1708,6 @@ ipcMain.handle(IPC.RESUME_INTERRUPTED, async () => findInterruptedRuns());
   });
   ipcMain.handle(IPC.DEPLOY_OS_STATUS, async () => osPushStatus());
   ipcMain.handle(IPC.DEPLOY_OS_PUSH, async (_e, { message }: { message?: string }) => osPush(message));
-
-  // Testing Framework IPC
-  ipcMain.handle(IPC.TEST_CREATE_SUITE, async (_e, { name, framework, description }) =>
-    testingFramework.createSuite(name, framework, description),
-  );
-  ipcMain.handle(IPC.TEST_LIST_SUITES, async () => testingFramework.listSuites());
-  ipcMain.handle(IPC.TEST_GET_SUITE, async (_e, { id }) => testingFramework.getSuite(id) ?? null);
-  ipcMain.handle(IPC.TEST_DELETE_SUITE, async (_e, { id }) => testingFramework.deleteSuite(id));
-  ipcMain.handle(IPC.TEST_ADD_TEST, async (_e, { suiteId, test }) => testingFramework.addTest(suiteId, test));
-  ipcMain.handle(IPC.TEST_REMOVE_TEST, async (_e, { suiteId, testId }) => testingFramework.removeTest(suiteId, testId));
-  ipcMain.handle(IPC.TEST_RUN_SUITE, async (_e, { suiteId }) => testingFramework.runSuite(suiteId));
-  ipcMain.handle(IPC.TEST_GENERATE_TESTS, async (_e, { description, filePath }) =>
-    testingFramework.generateTests(description, filePath),
-  );
-  ipcMain.handle(IPC.TEST_STATS, async () => testingFramework.getSuiteStats());
-  ipcMain.handle(IPC.TEST_CREATE_PLAN, async (_e, { name, description, scope, priority }) =>
-    testingFramework.createPlan(name, description, scope, priority),
-  );
-  ipcMain.handle(IPC.TEST_LIST_PLANS, async () => testingFramework.listPlans());
 
   // Enterprise IPC
   ipcMain.handle(IPC.ENTERPRISE_ADD_MEMBER, async (_e, { name, email, role }) =>

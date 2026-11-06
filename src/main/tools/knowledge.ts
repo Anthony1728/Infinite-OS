@@ -78,7 +78,9 @@ export const knowledgeTool: Tool = {
       }
       if (input.action === 'forget') return input.id ? json({ deleted: memory.deleteMemory(input.id) }) : bad('forget requires id.');
       if (input.action === 'index_workspace') return json(await getWorkspaceIndexer().buildIndex([input.path ?? ctx.cwd], true));
-      if (input.action === 'semantic_search') return json(getWorkspaceIndexer().search(input.query ?? '', input.limit ?? 20));
+      // True semantic path: embeds the query with Ollama when available
+      // (lazily upgrading restored chunks) and falls back to lexical scoring.
+      if (input.action === 'semantic_search') return json(await getWorkspaceIndexer().searchSemantic(input.query ?? '', input.limit ?? 20));
       return bad(`Unknown Knowledge action: ${input.action}`);
     } catch (error) { return bad((error as Error).message); }
   },

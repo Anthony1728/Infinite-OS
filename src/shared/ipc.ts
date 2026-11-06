@@ -204,6 +204,7 @@ export const IPC = {
   AUTOMATION_ADD_ACTION: 'automation:add-action',
   AUTOMATION_GET_TEMPLATES: 'automation:get-templates',
   AUTOMATION_GET_RUNS: 'automation:get-runs',
+  AUTOMATION_LIST_RUNS: 'automation:list-runs',
   AUTOMATION_NEXT_RUNS: 'automation:next-runs',
   AUTOMATION_STATS: 'automation:stats',
   AUTOMATION_SCHEDULER_STATUS: 'automation:scheduler-status',
@@ -470,18 +471,6 @@ export const IPC = {
   DEPLOY_OS_STATUS: 'deploy:os-status',
   DEPLOY_OS_PUSH: 'deploy:os-push',
 
-  // Testing
-  TEST_CREATE_SUITE: 'test:create-suite',
-  TEST_LIST_SUITES: 'test:list-suites',
-  TEST_GET_SUITE: 'test:get-suite',
-  TEST_DELETE_SUITE: 'test:delete-suite',
-  TEST_ADD_TEST: 'test:add-test',
-  TEST_REMOVE_TEST: 'test:remove-test',
-  TEST_RUN_SUITE: 'test:run-suite',
-  TEST_GENERATE_TESTS: 'test:generate-tests',
-  TEST_STATS: 'test:stats',
-  TEST_CREATE_PLAN: 'test:create-plan',
-  TEST_LIST_PLANS: 'test:list-plans',
 
   // Enterprise
   ENTERPRISE_ADD_MEMBER: 'enterprise:add-member',

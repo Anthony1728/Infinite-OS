@@ -18,7 +18,8 @@
     "management",
     "browsingData",
     "notifications",
-    "idle"
+    "idle",
+    "webNavigation"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

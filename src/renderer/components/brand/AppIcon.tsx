@@ -52,6 +52,19 @@ const CUSTOM: Record<string, InfinityIconName> = {
   'nav.planner': 'inf.tasks',
   'nav.pages': 'inf.note',
 
+  // ── File type icons ─────────────────────────────────────────────
+  'inf.code': 'inf.code',
+  'inf.document': 'inf.document',
+  'inf.note': 'inf.note',
+  'inf.design': 'inf.design',
+  'inf.globe': 'inf.globe',
+  'inf.terminal': 'inf.terminal',
+  'inf.image': 'inf.image',
+  'inf.video': 'inf.video',
+  'inf.music': 'inf.music',
+  'inf.archive': 'inf.archive',
+  'inf.folder-tree': 'inf.folder-tree',
+
   // ── Top bar ─────────────────────────────────────────────────────
   'topbar.menu': 'inf.menu',
   'topbar.search': 'inf.search',

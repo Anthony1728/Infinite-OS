@@ -74,9 +74,17 @@ const LOW_RISK_TOOLS = new Set([
   'CreateTab', 'Bash', // Bash is nuanced — checked separately below for destructive commands
 ]);
 
+/** Destructive, irreversible shell commands (rm -rf /, format C:, DROP TABLE…).
+ * Exported so the tool-execution gate can ENFORCE this rather than leave it to
+ * the advisory autonomy estimate — a match here is a hard stop, never a
+ * downgraded-to-confirm suggestion. */
+export function isDestructiveBash(input: unknown): boolean {
+  const cmd = (input as { command?: string }).command ?? '';
+  return /(\brm\s+-rf\s+\/$|\bformat\s+[A-Z]:|\bdel\s+\/[sS]\b|\bRemove-Item\b.*-Recurse\s+-Force|\bDROP\s+TABLE|\bTRUNCATE\s)/i.test(cmd);
+}
+
 function isBashHighRisk(tu: ToolUse): boolean {
-  const cmd = (tu.input as { command?: string }).command ?? '';
-  return /(\brm\s+-rf\s+\/$|\bformat\s+[A-Z]:|\bdel\s+\/[sS]|\bRemove-Item\b.*-Recurse\s+-Force|\bDROP\s+TABLE|\bTRUNCATE\s)/i.test(cmd);
+  return isDestructiveBash(tu.input);
 }
 
 export function decideAutonomy(tu: ToolUse, cwd: string): AutonomyDecision {

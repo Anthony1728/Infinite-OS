@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { infiniteHome } from '../profiles/home.js';
 import { cpus, totalmem, freemem } from 'node:os';
+import { collectSystemMetrics } from '../system/metrics.js';
 
 export interface MonitorConfig {
   checkInterval: number;
@@ -144,19 +145,25 @@ export class SystemMonitor {
   }
 
   async collectMetrics(): Promise<SystemMetrics> {
-    const mem = process.memoryUsage();
+    // One real host sample drives everything: CPU comes from OS tick deltas
+    // and RAM from the kernel's free/total (system/metrics.ts). The old
+    // Math.random() CPU and process-RSS "system memory" made every health
+    // alert and history chart meaningless.
+    const host = collectSystemMetrics();
+    const totalMem = totalmem();
+    const freeMem = freemem();
     const metrics: SystemMetrics = {
       timestamp: Date.now(),
       cpu: {
-        usage: await this.getCpuUsage(),
-        cores: cpus().length,
+        usage: host.cpu,
+        cores: host.cpuCores,
         model: cpus()[0]?.model ?? 'Unknown',
       },
       memory: {
-        total: totalmem(),
-        used: mem.rss,
-        free: freemem(),
-        usagePercent: mem.rss / totalmem(),
+        total: totalMem,
+        used: Math.max(0, totalMem - freeMem),
+        free: freeMem,
+        usagePercent: totalMem > 0 ? (totalMem - freeMem) / totalMem : 0,
       },
       disk: {
         total: 0,
@@ -179,11 +186,6 @@ export class SystemMonitor {
 
     this.saveData();
     return metrics;
-  }
-
-  private async getCpuUsage(): Promise<number> {
-    // Simplified CPU usage
-    return Math.random() * 0.3 + 0.1;
   }
 
   private async checkNetwork(): Promise<boolean> {

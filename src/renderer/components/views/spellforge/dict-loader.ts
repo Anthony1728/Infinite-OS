@@ -1,9 +1,11 @@
 /* SpellForge — dictionary loading.
  *
- * The bundled word list and frequency list ship as plain-text assets that
- * `?raw` hands to us as one string. This module is the single place where
- * that string becomes a clean array of words, so the checker can never
- * disagree with a test about what the dictionary actually contains.
+ * The bundled word list and frequency list ship as plain-text assets that a
+ * lazy dynamic `?raw` import hands us as one string — LAZY, so ~4.7MB of word
+ * lists stays out of the main bundle and only loads when a spell-checking
+ * surface (Journal, Spell Forge) first builds its dictionary. This module is
+ * the single place where that string becomes a clean array of words, so the
+ * checker can never disagree with a test about what the dictionary contains.
  *
  * Line endings are the whole reason this file exists. The lists are edited on
  * Windows, so they arrive with CRLF endings; splitting naively on "\n" leaves
@@ -12,12 +14,31 @@
  * trims each entry before it is trusted.
  */
 
-import wordsRaw from '../../../assets/dict-words.txt?raw';
-import freqRaw from '../../../assets/dict-freq.txt?raw';
-
 export interface DictionaryData {
   words: string[];
   freq: string[];
+}
+
+let cached: DictionaryData | null = null;
+
+/**
+ * Load and parse the bundled dictionary once per session. The dynamic import
+ * is what keeps the asset out of the initial bundle: the lists become their
+ * own lazy chunk, fetched from disk the first time a checker asks.
+ */
+export async function loadBundledDictionary(): Promise<DictionaryData> {
+  if (cached) return cached;
+  const [{ default: wordsRaw }, { default: freqRaw }] = await Promise.all([
+    import('../../../assets/dict-words.txt?raw'),
+    import('../../../assets/dict-freq.txt?raw'),
+  ]);
+  cached = { words: parseWordList(wordsRaw), freq: parseWordList(freqRaw) };
+  return cached;
+}
+
+/** The loaded dictionary, or null before the first loadBundledDictionary(). */
+export function getLoadedDictionary(): DictionaryData | null {
+  return cached;
 }
 
 /**
@@ -37,11 +58,6 @@ export function parseWordList(raw: string): string[] {
   return out;
 }
 
-/** Read and clean the dictionary assets that ship with the app. */
-export function readBundledDictionary(): DictionaryData {
-  return { words: parseWordList(wordsRaw), freq: parseWordList(freqRaw) };
-}
-
 export interface DictionaryHealth {
   words: number;
   freq: number;
@@ -54,8 +70,10 @@ export interface DictionaryHealth {
 /**
  * Cheap integrity report for the bundled dictionary, so a corrupted asset is
  * reported as such instead of showing up as "every word is misspelled".
+ * Defaults to the lazily loaded dictionary; call after ensureDictionary().
  */
-export function dictionaryHealth(data: DictionaryData = readBundledDictionary()): DictionaryHealth {
+export function dictionaryHealth(data: DictionaryData | null = getLoadedDictionary()): DictionaryHealth {
+  if (!data) return { words: 0, freq: 0, malformed: 0, plausible: false };
   let malformed = 0;
   for (let i = 0; i < data.words.length; i++) {
     if (/\s/.test(data.words[i])) malformed++;

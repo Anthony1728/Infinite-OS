@@ -315,6 +315,19 @@ export async function runSubagent(
   opts.sink({ type: 'start', run: { ...state } });
   activity(state, opts.sink, 'status', `${agent.name} started`, `Working in ${opts.cwd}`);
 
+  // Per-agent memory: this specialist starts with what it (as this agent
+  // type) produced in earlier sessions — cold starts are what make repeated
+  // delegation feel like groundhog day. Advisory: any failure skips recall.
+  let task = opts.task;
+  try {
+    const { recallAgentMemory } = await import('./coordination.js');
+    const recall = await recallAgentMemory(opts.agentId, opts.task);
+    if (recall) {
+      task = `${recall}\n\n${task}`;
+      activity(state, opts.sink, 'status', 'Loaded your past work', `${recall.split('\n').length - 1} recalled item(s)`);
+    }
+  } catch { /* memory is advisory */ }
+
   // Apply agent configuration for this execution
   const config = opts.agentConfig;
   // No implicit step budget: complex tasks may continue until verified

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 
 interface MemoryEntry {
   id: string
@@ -11,161 +11,246 @@ interface MemoryEntry {
   createdAt: string
 }
 
-const CATEGORY_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+/** The real memory row stored by the main process (SQLite). */
+interface StoredMemory {
+  id: string
+  type: 'preference' | 'project' | 'document' | 'chat' | 'note'
+  title: string
+  content: string
+  tags: string[]
+  tier: 'episodic' | 'semantic' | 'procedural'
+  importance: number
+  accessCount: number
+  lastAccessed: number
+  createdAt: number
+  updatedAt: number
+}
+
+type Layer = 'all' | 'personal' | 'operating'
+type MemoryCategory = MemoryEntry['category']
+
+const CATEGORY_CONFIG: Record<MemoryCategory, { label: string; color: string; hex: string; bg: string; icon: string }> = {
   preference: {
     label: 'Preference',
-    color: 'text-purple-400',
-    bg: 'bg-purple-500/10',
+    color: 'text-violet-300',
+    hex: '#a78bfa',
+    bg: 'bg-violet-500/10',
     icon: 'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z'
   },
   context: {
     label: 'Context',
-    color: 'text-blue-400',
-    bg: 'bg-blue-500/10',
+    color: 'text-sky-300',
+    hex: '#7dd3fc',
+    bg: 'bg-sky-500/10',
     icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
   },
   fact: {
     label: 'Fact',
-    color: 'text-green-400',
-    bg: 'bg-green-500/10',
+    color: 'text-emerald-300',
+    hex: '#6ee7b7',
+    bg: 'bg-emerald-500/10',
     icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
   },
   pattern: {
     label: 'Pattern',
-    color: 'text-orange-400',
-    bg: 'bg-orange-500/10',
+    color: 'text-amber-300',
+    hex: '#fcd34d',
+    bg: 'bg-amber-500/10',
     icon: 'M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z'
   },
   workflow: {
     label: 'Workflow',
-    color: 'text-cyan-400',
+    color: 'text-cyan-300',
+    hex: '#67e8f9',
     bg: 'bg-cyan-500/10',
     icon: 'M13 10V3L4 14h7v7l9-11h-7z'
   }
 }
 
-const SEED_MEMORIES: MemoryEntry[] = [
-  {
-    id: '1',
-    category: 'preference',
-    key: 'preferred-theme',
-    value: 'Dark mode with purple accents',
-    relevance: 0.9,
-    lastAccessed: new Date().toISOString(),
-    accessCount: 12,
-    createdAt: new Date(Date.now() - 86400000 * 7).toISOString()
-  },
-  {
-    id: '2',
-    category: 'context',
-    key: 'current-project',
-    value: 'Working on Infinite UI - a multi-view React dashboard',
-    relevance: 0.95,
-    lastAccessed: new Date().toISOString(),
-    accessCount: 24,
-    createdAt: new Date(Date.now() - 86400000 * 3).toISOString()
-  },
-  {
-    id: '3',
-    category: 'fact',
-    key: 'react-version',
-    value: 'Using React 18 with TypeScript strict mode',
-    relevance: 0.7,
-    lastAccessed: new Date(Date.now() - 86400000).toISOString(),
-    accessCount: 5,
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString()
-  },
-  {
-    id: '4',
-    category: 'pattern',
-    key: 'component-structure',
-    value: 'Views follow: useState hooks, useEffect data loading, filter/search UI, card-based rendering',
-    relevance: 0.85,
-    lastAccessed: new Date().toISOString(),
-    accessCount: 18,
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString()
-  },
-  {
-    id: '5',
-    category: 'workflow',
-    key: 'git-workflow',
-    value: 'Feature branches from main, squash merge, conventional commits',
-    relevance: 0.75,
-    lastAccessed: new Date(Date.now() - 86400000 * 2).toISOString(),
-    accessCount: 8,
-    createdAt: new Date(Date.now() - 86400000 * 14).toISOString()
-  }
-]
+const CATEGORIES = Object.keys(CATEGORY_CONFIG) as MemoryCategory[]
 
-const STORAGE_KEY = 'infinite-active-memory'
+const LAYER_CATEGORIES: Record<Exclude<Layer, 'all'>, MemoryCategory[]> = {
+  personal: ['preference', 'pattern'],
+  operating: ['context', 'fact', 'workflow'],
+}
+
+function categoryFor(entry: StoredMemory): MemoryCategory {
+  const tags = entry.tags.map((tag) => tag.toLowerCase())
+  if (tags.includes('pattern')) return 'pattern'
+  if (entry.tier === 'procedural' || tags.includes('workflow')) return 'workflow'
+  if (entry.type === 'preference') return 'preference'
+  if (entry.type === 'document' || entry.type === 'note') return 'fact'
+  return 'context'
+}
+
+function iso(value: number): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString()
+}
+
+function toDisplay(entry: StoredMemory): MemoryEntry {
+  return {
+    id: entry.id,
+    category: categoryFor(entry),
+    key: entry.title,
+    value: entry.content,
+    relevance: Math.max(0, Math.min(1, entry.importance)),
+    lastAccessed: iso(entry.lastAccessed || entry.updatedAt || entry.createdAt),
+    accessCount: entry.accessCount,
+    createdAt: iso(entry.createdAt)
+  }
+}
+
+const NEW_MEMORY_SHAPE: Record<MemoryCategory, { type: StoredMemory['type']; tier: StoredMemory['tier']; tags: string[] }> = {
+  preference: { type: 'preference', tier: 'semantic', tags: [] },
+  context: { type: 'project', tier: 'semantic', tags: [] },
+  fact: { type: 'note', tier: 'semantic', tags: [] },
+  pattern: { type: 'note', tier: 'semantic', tags: ['pattern'] },
+  workflow: { type: 'note', tier: 'procedural', tags: ['workflow'] }
+}
+
+function tokensOf(entry: MemoryEntry): Set<string> {
+  const words = `${entry.key} ${entry.value}`.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []
+  return new Set(words)
+}
+
+function short(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
 
 export function ActiveMemoryView() {
   const [memories, setMemories] = useState<MemoryEntry[]>([])
-  const [filterCategory, setFilterCategory] = useState<string>('all')
+  const [filterCategory, setFilterCategory] = useState<'all' | MemoryCategory>('all')
+  const [layer, setLayer] = useState<Layer>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [newMemory, setNewMemory] = useState({ category: 'preference' as MemoryEntry['category'], key: '', value: '' })
-  const [stats, setStats] = useState({ total: 0, accessed: 0, avgRelevance: 0 })
+  const [newMemory, setNewMemory] = useState({ category: 'preference' as MemoryCategory, key: '', value: '' })
+  const [mode, setMode] = useState<'list' | 'graph'>('graph')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [neighborhoodOnly, setNeighborhoodOnly] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      try {
-        setMemories(JSON.parse(stored))
-      } catch {
-        setMemories(SEED_MEMORIES)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_MEMORIES))
-      }
-    } else {
-      setMemories(SEED_MEMORIES)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_MEMORIES))
+  const loadMemories = useCallback(async () => {
+    try {
+      const rows = (await window.api.listMemories()) as StoredMemory[]
+      setMemories(rows.map(toDisplay))
+      setError('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load memory.')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
-  useEffect(() => {
-    if (memories.length === 0) {
-      setStats({ total: 0, accessed: 0, avgRelevance: 0 })
-      return
+  useEffect(() => { void loadMemories() }, [loadMemories])
+
+  const createMemory = async () => {
+    if (!newMemory.key.trim() || !newMemory.value.trim()) return
+    const shape = NEW_MEMORY_SHAPE[newMemory.category]
+    try {
+      await window.api.createMemory({
+        type: shape.type,
+        title: newMemory.key.trim(),
+        content: newMemory.value.trim(),
+        tags: shape.tags,
+        tier: shape.tier,
+        importance: 0.6
+      })
+      setNewMemory({ category: 'preference', key: '', value: '' })
+      setShowCreate(false)
+      await loadMemories()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save this memory.')
     }
-    const total = memories.length
-    const accessed = memories.filter(m => m.accessCount > 0).length
-    const avgRelevance = memories.reduce((sum, m) => sum + m.relevance, 0) / total
-    setStats({ total, accessed, avgRelevance: Math.round(avgRelevance * 100) / 100 })
+  }
+
+  const deleteMemory = async (id: string) => {
+    try {
+      await window.api.deleteMemory({ id })
+      setMemories((current) => current.filter((memory) => memory.id !== id))
+      if (selectedId === id) setSelectedId(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not forget this memory.')
+    }
+  }
+
+  const stats = useMemo(() => {
+    if (memories.length === 0) return { total: 0, accessed: 0, avgRelevance: 0 }
+    const accessed = memories.filter((m) => m.accessCount > 0).length
+    const avgRelevance = memories.reduce((sum, m) => sum + m.relevance, 0) / memories.length
+    return { total: memories.length, accessed, avgRelevance: Math.round(avgRelevance * 100) / 100 }
   }, [memories])
 
-  const saveMemories = (updated: MemoryEntry[]) => {
-    setMemories(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-  }
+  const visible = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return memories.filter((memory) => {
+      if (layer !== 'all' && !LAYER_CATEGORIES[layer].includes(memory.category)) return false
+      if (filterCategory !== 'all' && memory.category !== filterCategory) return false
+      if (!query) return true
+      return memory.key.toLowerCase().includes(query) || memory.value.toLowerCase().includes(query)
+    })
+  }, [memories, layer, filterCategory, searchQuery])
 
-  const createMemory = () => {
-    if (!newMemory.key.trim() || !newMemory.value.trim()) return
-    const entry: MemoryEntry = {
-      id: Date.now().toString(),
-      category: newMemory.category,
-      key: newMemory.key.trim(),
-      value: newMemory.value.trim(),
-      relevance: 0.5,
-      lastAccessed: new Date().toISOString(),
-      accessCount: 0,
-      createdAt: new Date().toISOString()
+  /** Edges come from shared category or at least one meaningful shared word. */
+  const edges = useMemo(() => {
+    const list: Array<{ a: string; b: string; shared: string[] }> = []
+    const tokenMap = new Map(memories.map((memory) => [memory.id, tokensOf(memory)]))
+    for (let i = 0; i < memories.length; i += 1) {
+      for (let j = i + 1; j < memories.length; j += 1) {
+        const first = memories[i]
+        const second = memories[j]
+        const firstTokens = tokenMap.get(first.id) ?? new Set<string>()
+        const secondTokens = tokenMap.get(second.id) ?? new Set<string>()
+        const shared = [...firstTokens].filter((token) => secondTokens.has(token)).slice(0, 4)
+        if (shared.length > 0 || first.category === second.category) {
+          list.push({ a: first.id, b: second.id, shared })
+        }
+      }
     }
-    saveMemories([entry, ...memories])
-    setNewMemory({ category: 'preference', key: '', value: '' })
-    setShowCreate(false)
-  }
+    return list
+  }, [memories])
 
-  const deleteMemory = (id: string) => {
-    saveMemories(memories.filter(m => m.id !== id))
-  }
+  const neighborIndex = useMemo(() => {
+    const index = new Map<string, Set<string>>()
+    for (const edge of edges) {
+      if (!index.has(edge.a)) index.set(edge.a, new Set())
+      if (!index.has(edge.b)) index.set(edge.b, new Set())
+      index.get(edge.a)!.add(edge.b)
+      index.get(edge.b)!.add(edge.a)
+    }
+    return index
+  }, [edges])
 
-  const filtered = memories.filter(m => {
-    const matchCategory = filterCategory === 'all' || m.category === filterCategory
-    const matchSearch = searchQuery === '' ||
-      m.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.value.toLowerCase().includes(searchQuery.toLowerCase())
-    return matchCategory && matchSearch
-  })
+  const graphNodes = useMemo(() => {
+    if (!neighborhoodOnly || !selectedId) return visible
+    const neighbors = neighborIndex.get(selectedId) ?? new Set<string>()
+    return visible.filter((memory) => memory.id === selectedId || neighbors.has(memory.id))
+  }, [visible, neighborhoodOnly, selectedId, neighborIndex])
+
+  const graphEdges = useMemo(() => {
+    const ids = new Set(graphNodes.map((memory) => memory.id))
+    return edges.filter((edge) => ids.has(edge.a) && ids.has(edge.b))
+  }, [edges, graphNodes])
+
+  const positions = useMemo(() => {
+    const ordered = [...graphNodes].sort((a, b) => a.category.localeCompare(b.category) || a.key.localeCompare(b.key))
+    const count = ordered.length
+    const radius = count <= 2 ? 100 : 138
+    const center = { x: 320, y: 190 }
+    const map = new Map<string, { x: number; y: number }>()
+    ordered.forEach((memory, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(count, 1) - Math.PI / 2
+      map.set(memory.id, {
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius
+      })
+    })
+    return map
+  }, [graphNodes])
+
+  const selected = memories.find((memory) => memory.id === selectedId) ?? null
+  const connected = selectedId ? (neighborIndex.get(selectedId)?.size ?? 0) : 0
 
   const formatDate = (iso: string) => {
     const d = new Date(iso)
@@ -179,100 +264,109 @@ export function ActiveMemoryView() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-500/20">
-          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold text-textMain">Active Memory</h1>
-          <p className="text-sm text-textMuted">Context-aware memory system that learns and adapts</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-bgCard border border-white/[0.06] rounded-xl p-4">
-          <div className="text-2xl font-bold text-textMain">{stats.total}</div>
-          <div className="text-xs text-textMuted mt-1">Total Memories</div>
-        </div>
-        <div className="bg-bgCard border border-white/[0.06] rounded-xl p-4">
-          <div className="text-2xl font-bold text-textMain">{stats.accessed}</div>
-          <div className="text-xs text-textMuted mt-1">Recently Accessed</div>
-        </div>
-        <div className="bg-bgCard border border-white/[0.06] rounded-xl p-4">
-          <div className="text-2xl font-bold text-violet-400">{Math.round(stats.avgRelevance * 100)}%</div>
-          <div className="text-xs text-textMuted mt-1">Avg Relevance</div>
-        </div>
-      </div>
-
-      <div className="bg-bgCard border border-white/[0.06] rounded-xl p-4">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <svg className="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <div className="h-full overflow-y-auto p-6 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-300">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <circle cx="6" cy="12" r="2.2" />
+              <circle cx="17" cy="6" r="2.2" />
+              <circle cx="18" cy="17" r="2.2" />
+              <path strokeLinecap="round" d="M8 11 15 7M9 13.5l7 2.5M17 8.3l.7 6.4" />
             </svg>
           </div>
           <div>
-            <h3 className="text-sm font-medium text-textMain">How Active Memory Works</h3>
-            <p className="text-xs text-textMuted mt-1 leading-relaxed">
-              Active Memory stores contextual information that persists across sessions. It tracks your preferences,
-              project context, learned facts, detected patterns, and common workflows. Memories with higher relevance
-              scores are surfaced more frequently, and access counts help identify your most-used information.
-            </p>
+            <h1 className="text-xl font-semibold text-textMain">Memory graph</h1>
+            <p className="text-sm text-textMuted">What the OS remembers about you, your work, and the way you operate.</p>
           </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="flex rounded-lg border border-white/[0.07] bg-white/[0.02] p-0.5">
+            <button
+              onClick={() => setMode('graph')}
+              className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${mode === 'graph' ? 'bg-white/[0.09] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              Graph
+            </button>
+            <button
+              onClick={() => setMode('list')}
+              className={`rounded-md px-2.5 py-1 text-[11px] transition-colors ${mode === 'list' ? 'bg-white/[0.09] text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              List
+            </button>
+          </div>
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="rounded-lg border border-white/[0.08] bg-white px-3 py-1.5 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100"
+          >
+            {showCreate ? 'Cancel' : '+ New memory'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-rose-400/20 bg-rose-400/[0.05] px-3 py-2 text-[11px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-white/[0.06] bg-bgCard p-3.5">
+          <div className="text-xl font-semibold tabular-nums text-textMain">{loading ? '…' : stats.total}</div>
+          <div className="mt-0.5 text-[10px] uppercase tracking-wide text-textMuted">Memories</div>
+        </div>
+        <div className="rounded-xl border border-white/[0.06] bg-bgCard p-3.5">
+          <div className="text-xl font-semibold tabular-nums text-textMain">{stats.accessed}</div>
+          <div className="mt-0.5 text-[10px] uppercase tracking-wide text-textMuted">Recently used</div>
+        </div>
+        <div className="rounded-xl border border-white/[0.06] bg-bgCard p-3.5">
+          <div className="text-xl font-semibold tabular-nums text-cyan-300">{Math.round(stats.avgRelevance * 100)}%</div>
+          <div className="mt-0.5 text-[10px] uppercase tracking-wide text-textMuted">Avg relevance</div>
         </div>
       </div>
 
       {showCreate && (
-        <div className="bg-bgCard border border-white/[0.06] rounded-xl p-4 space-y-3">
-          <h3 className="text-sm font-medium text-textMain">Create New Memory</h3>
+        <div className="rounded-xl border border-white/[0.06] bg-bgCard p-4 space-y-3">
+          <h3 className="text-sm font-medium text-textMain">Create a memory</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-textMuted mb-1">Category</label>
+              <label className="mb-1 block text-[11px] text-textMuted">Category</label>
               <select
                 value={newMemory.category}
-                onChange={(e) => setNewMemory({ ...newMemory, category: e.target.value as MemoryEntry['category'] })}
-                className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain focus:outline-none focus:border-violet-500/50"
+                onChange={(e) => setNewMemory({ ...newMemory, category: e.target.value as MemoryCategory })}
+                className="w-full rounded-lg border border-borderSubtle bg-bgInput px-3 py-2 text-sm text-textMain focus:border-cyan-400/40 focus:outline-none"
               >
-                {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
-                  <option key={key} value={key}>{config.label}</option>
+                {CATEGORIES.map((key) => (
+                  <option key={key} value={key}>{CATEGORY_CONFIG[key].label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-textMuted mb-1">Key</label>
+              <label className="mb-1 block text-[11px] text-textMuted">Key</label>
               <input
-                type="text"
                 value={newMemory.key}
                 onChange={(e) => setNewMemory({ ...newMemory, key: e.target.value })}
                 placeholder="memory-key"
-                className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder:text-textMuted/50 focus:outline-none focus:border-violet-500/50"
+                className="w-full rounded-lg border border-borderSubtle bg-bgInput px-3 py-2 text-sm text-textMain placeholder:text-textMuted/50 focus:border-cyan-400/40 focus:outline-none"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-textMuted mb-1">Value</label>
+            <label className="mb-1 block text-[11px] text-textMuted">Value</label>
             <textarea
               value={newMemory.value}
               onChange={(e) => setNewMemory({ ...newMemory, value: e.target.value })}
-              placeholder="Memory content..."
+              placeholder="What should the OS remember?"
               rows={2}
-              className="w-full bg-bgInput border border-borderSubtle rounded-lg px-3 py-2 text-sm text-textMain placeholder:text-textMuted/50 focus:outline-none focus:border-violet-500/50 resize-none"
+              className="w-full resize-none rounded-lg border border-borderSubtle bg-bgInput px-3 py-2 text-sm text-textMain placeholder:text-textMuted/50 focus:border-cyan-400/40 focus:outline-none"
             />
           </div>
           <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setShowCreate(false)}
-              className="px-3 py-1.5 text-xs text-textMuted hover:text-textMain transition-colors"
-            >
-              Cancel
-            </button>
+            <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 text-xs text-textMuted transition-colors hover:text-textMain">Cancel</button>
             <button
               onClick={createMemory}
               disabled={!newMemory.key.trim() || !newMemory.value.trim()}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-violet-500 to-indigo-500 rounded-lg shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              className="rounded-lg bg-white px-4 py-1.5 text-xs font-semibold text-zinc-900 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Create
             </button>
@@ -280,100 +374,259 @@ export function ActiveMemoryView() {
         </div>
       )}
 
-      <div className="flex items-center gap-3">
-        <div className="flex-1 relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[200px] flex-1">
+          <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-textMuted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
-            type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search memories..."
-            className="w-full bg-bgInput border border-borderSubtle rounded-xl pl-10 pr-4 py-2 text-sm text-textMain placeholder:text-textMuted/50 focus:outline-none focus:border-violet-500/50"
+            placeholder="Search keys and values…"
+            className="w-full rounded-xl border border-borderSubtle bg-bgInput py-2 pl-10 pr-4 text-sm text-textMain placeholder:text-textMuted/50 focus:border-cyan-400/40 focus:outline-none"
           />
         </div>
-        <select
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          className="bg-bgInput border border-borderSubtle rounded-xl px-3 py-2 text-sm text-textMain focus:outline-none focus:border-violet-500/50"
-        >
-          <option value="all">All Categories</option>
-          {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
-            <option key={key} value={key}>{config.label}</option>
+        <div className="flex rounded-xl border border-borderSubtle bg-bgInput p-0.5">
+          {(['all', 'personal', 'operating'] as Layer[]).map((value) => (
+            <button
+              key={value}
+              onClick={() => setLayer(value)}
+              className={`rounded-lg px-2.5 py-1.5 text-[11px] capitalize transition-colors ${layer === value ? 'bg-white/[0.09] text-white' : 'text-textMuted hover:text-textMain'}`}
+            >
+              {value}
+            </button>
           ))}
-        </select>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2 text-xs font-medium text-white bg-gradient-to-r from-violet-500 to-indigo-500 rounded-xl shadow-lg shadow-violet-500/20 hover:shadow-violet-500/30 transition-all"
-        >
-          {showCreate ? 'Cancel' : '+ New Memory'}
-        </button>
+        </div>
       </div>
 
-      <div className="space-y-3">
-        {filtered.length === 0 ? (
-          <div className="bg-bgCard border border-white/[0.06] rounded-xl p-8 text-center">
-            <svg className="w-12 h-12 text-textMuted/30 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-            </svg>
-            <p className="text-sm text-textMuted">No memories found</p>
-            <p className="text-xs text-textMuted/50 mt-1">Try a different search or category filter</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => setFilterCategory('all')}
+          className={`rounded-full border px-2.5 py-1 text-[10.5px] transition-colors ${filterCategory === 'all' ? 'border-white/[0.16] bg-white/[0.08] text-white' : 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300'}`}
+        >
+          All relationships
+        </button>
+        {CATEGORIES.map((category) => {
+          const config = CATEGORY_CONFIG[category]
+          const active = filterCategory === category
+          return (
+            <button
+              key={category}
+              onClick={() => setFilterCategory(active ? 'all' : category)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] transition-colors ${active ? 'border-white/[0.16] bg-white/[0.08] text-white' : 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300'}`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: config.hex }} />
+              {config.label}
+            </button>
+          )
+        })}
+        {selectedId && (
+          <button
+            onClick={() => setNeighborhoodOnly((value) => !value)}
+            className={`ml-auto rounded-full border px-2.5 py-1 text-[10.5px] transition-colors ${neighborhoodOnly ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200' : 'border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:text-zinc-300'}`}
+            title="Show only the selected memory and its direct connections"
+          >
+            Neighborhood only
+          </button>
+        )}
+      </div>
+
+      {mode === 'graph' ? (
+        <div className="grid gap-3 lg:grid-cols-[1fr_300px]">
+          <div className="relative min-h-[360px] overflow-hidden rounded-2xl border border-white/[0.06] bg-[#0d1119]">
+            {loading ? (
+              <div className="flex h-full min-h-[360px] items-center justify-center gap-2 px-6 text-sm text-textMuted">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-cyan-400/60 border-t-transparent" />
+                Loading memory…
+              </div>
+            ) : memories.length === 0 ? (
+              <div className="flex h-full min-h-[360px] flex-col items-center justify-center gap-2 px-6 text-center">
+                <div className="text-sm text-zinc-300">Nothing is remembered yet.</div>
+                <p className="max-w-sm text-[11px] leading-relaxed text-zinc-500">
+                  Memories are written as you work. Add one now, or ask Infinite to remember something in chat.
+                </p>
+                <button
+                  onClick={() => setShowCreate(true)}
+                  className="mt-1 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100"
+                >
+                  Add the first memory
+                </button>
+              </div>
+            ) : graphNodes.length === 0 ? (
+              <div className="flex h-full min-h-[360px] items-center justify-center px-6 text-center text-sm text-textMuted">
+                No memories match this view.
+              </div>
+            ) : (
+              <svg viewBox="0 0 640 380" className="h-full min-h-[360px] w-full" role="img" aria-label="Memory relationship graph">
+                <defs>
+                  <radialGradient id="memory-glow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.10" />
+                    <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
+                  </radialGradient>
+                </defs>
+                <circle cx="320" cy="190" r="170" fill="url(#memory-glow)" />
+                {graphEdges.map((edge) => {
+                  const from = positions.get(edge.a)
+                  const to = positions.get(edge.b)
+                  if (!from || !to) return null
+                  const touchesSelection = selectedId === edge.a || selectedId === edge.b
+                  return (
+                    <line
+                      key={`${edge.a}:${edge.b}`}
+                      x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                      stroke={touchesSelection ? 'rgba(34,211,238,0.38)' : 'rgba(255,255,255,0.075)'}
+                      strokeWidth={touchesSelection ? 1.4 : 1}
+                    />
+                  )
+                })}
+                {graphNodes.map((memory) => {
+                  const point = positions.get(memory.id)
+                  if (!point) return null
+                  const config = CATEGORY_CONFIG[memory.category]
+                  const isSelected = selectedId === memory.id
+                  return (
+                    <g
+                      key={memory.id}
+                      transform={`translate(${point.x} ${point.y})`}
+                      onClick={() => setSelectedId(memory.id)}
+                      className="cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(memory.id) }}
+                    >
+                      <circle r={isSelected ? 12 : 8} fill={config.hex} fillOpacity={isSelected ? 0.28 : 0.14} stroke={config.hex} strokeOpacity={isSelected ? 0.9 : 0.5} strokeWidth={1.2} />
+                      <circle r={isSelected ? 4 : 2.6} fill={config.hex} />
+                      <text
+                        y={isSelected ? 24 : 19}
+                        textAnchor="middle"
+                        fontSize="9"
+                        fill={isSelected ? '#e4e4e7' : '#a1a1aa'}
+                        style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace' }}
+                      >
+                        {short(memory.key, 18)}
+                      </text>
+                    </g>
+                  )
+                })}
+              </svg>
+            )}
+            <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/[0.05] bg-black/30 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.14em] text-zinc-600">
+              {graphNodes.length} nodes · {graphEdges.length} edges
+            </div>
           </div>
-        ) : (
-          filtered.map((memory) => {
+
+          <aside className="rounded-2xl border border-white/[0.06] bg-bgCard p-4">
+            {selected ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CONFIG[selected.category].bg} ${CATEGORY_CONFIG[selected.category].color}`}>
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: CATEGORY_CONFIG[selected.category].hex }} />
+                    {CATEGORY_CONFIG[selected.category].label}
+                  </span>
+                  <button onClick={() => setSelectedId(null)} className="text-[10px] text-zinc-600 hover:text-zinc-300">Clear</button>
+                </div>
+                <div>
+                  <div className="font-mono text-[11px] text-zinc-500">{selected.key}</div>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-200">{selected.value}</p>
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[10px] text-zinc-500">
+                    <span>Relevance</span><span className="tabular-nums">{Math.round(selected.relevance * 100)}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                    <div className="h-full rounded-full" style={{ width: `${selected.relevance * 100}%`, background: CATEGORY_CONFIG[selected.category].hex }} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-[10.5px] text-zinc-500">
+                  <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2 py-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-zinc-600">Connections</div>
+                    <div className="mt-0.5 text-zinc-300">{connected}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2 py-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-zinc-600">Accessed</div>
+                    <div className="mt-0.5 text-zinc-300">{selected.accessCount}×</div>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2 py-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-zinc-600">Created</div>
+                    <div className="mt-0.5 text-zinc-300">{formatDate(selected.createdAt)}</div>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.05] bg-black/20 px-2 py-1.5">
+                    <div className="text-[9px] uppercase tracking-wide text-zinc-600">Last used</div>
+                    <div className="mt-0.5 text-zinc-300">{formatDate(selected.lastAccessed)}</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteMemory(selected.id)}
+                  className="w-full rounded-lg border border-rose-400/15 bg-rose-500/[0.06] px-3 py-1.5 text-[11px] text-rose-300 transition-colors hover:bg-rose-500/10"
+                >
+                  Forget this memory
+                </button>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[220px] flex-col items-center justify-center text-center">
+                <div className="text-[11px] text-zinc-500">Select a node to see what it holds and what it connects to.</div>
+                <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.16em] text-zinc-700">shared words · shared layer</div>
+              </div>
+            )}
+          </aside>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {visible.length === 0 ? (
+            <div className="rounded-xl border border-white/[0.06] bg-bgCard p-8 text-center">
+              <p className="text-sm text-textMuted">{memories.length === 0 ? 'Nothing is remembered yet' : 'No memories match this view'}</p>
+              <p className="mt-1 text-xs text-textMuted/50">
+                {memories.length === 0
+                  ? 'Add the first memory, or ask Infinite to remember something in chat.'
+                  : 'Try a different search, layer, or relationship filter.'}
+              </p>
+            </div>
+          ) : visible.map((memory) => {
             const config = CATEGORY_CONFIG[memory.category]
             return (
               <div
                 key={memory.id}
-                className="bg-bgCard border border-white/[0.06] rounded-xl p-4 hover:border-white/[0.1] transition-colors"
+                className={`rounded-xl border bg-bgCard p-4 transition-colors ${selectedId === memory.id ? 'border-cyan-400/30' : 'border-white/[0.06] hover:border-white/[0.1]'}`}
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${config.bg} ${config.color}`}>
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d={config.icon} />
-                        </svg>
+                  <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedId(memory.id)}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium ${config.bg} ${config.color}`}>
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ background: config.hex }} />
                         {config.label}
                       </span>
-                      <span className="text-xs text-textMuted font-mono">{memory.key}</span>
+                      <span className="font-mono text-[11px] text-textMuted">{memory.key}</span>
                     </div>
-                    <p className="text-sm text-textMain leading-relaxed">{memory.value}</p>
-                    <div className="flex items-center gap-4 mt-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-textMuted">Relevance</span>
-                        <div className="w-24 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full"
-                            style={{ width: `${memory.relevance * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-textMuted">{Math.round(memory.relevance * 100)}%</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-textMuted">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        {memory.accessCount}
-                      </div>
-                      <span className="text-xs text-textMuted/60">{formatDate(memory.lastAccessed)}</span>
+                    <p className="text-sm leading-relaxed text-textMain">{memory.value}</p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[10.5px] text-textMuted">
+                      <span className="tabular-nums">{Math.round(memory.relevance * 100)}% relevant</span>
+                      <span>{memory.accessCount} views</span>
+                      <span>{formatDate(memory.lastAccessed)}</span>
+                      <span>{neighborIndex.get(memory.id)?.size ?? 0} connections</span>
                     </div>
-                  </div>
+                  </button>
                   <button
                     onClick={() => deleteMemory(memory.id)}
-                    className="p-1.5 text-textMuted/50 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                    aria-label={`Forget ${memory.key}`}
+                    className="rounded-lg p-1.5 text-textMuted/50 transition-all hover:bg-red-500/10 hover:text-red-400"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </button>
                 </div>
               </div>
             )
-          })
-        )}
+          })}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-white/[0.05] bg-white/[0.015] px-4 py-3">
+        <h3 className="text-[11px] font-medium text-zinc-300">How the graph reads</h3>
+        <p className="mt-1 text-[10.5px] leading-relaxed text-zinc-600">
+          Personal covers preferences and patterns. Operating covers context, facts, and workflows. Edges mean two memories share a
+          relationship or a meaningful word — the graph never invents connections that are not in the text.
+        </p>
       </div>
     </div>
   )

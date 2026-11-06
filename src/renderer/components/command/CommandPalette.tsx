@@ -3,39 +3,38 @@ import { motion } from 'framer-motion';
 import { Command } from 'cmdk';
 
 const COMMANDS = [
-  { id: 'infinite', label: 'Infinite — explain everything', icon: 'IN', category: 'Platform' },
-  { id: 'home', label: 'Power Center', icon: 'PC', category: 'Power', shortcut: '⌘K → power' },
-  { id: 'new-chat', label: 'New Chat', icon: 'AI', category: 'Chat', shortcut: 'Ctrl+N' },
-  { id: 'open-canvas', label: 'Open Canvas', icon: 'CN', category: 'Workspace' },
-  { id: 'open-code', label: 'Open Code Editor', icon: 'CD', category: 'Workspace' },
-  { id: 'standing-orders', label: 'Standing Orders', icon: 'SO', category: 'Automation' },
-  { id: 'active-memory', label: 'Active Memory', icon: 'AM', category: 'Knowledge' },
-  { id: 'capabilities', label: 'Tools & Skills', icon: 'TS', category: 'Platform' },
-  { id: 'guide', label: 'Guide', icon: 'GD', category: 'Platform' },
-  { id: 'overview', label: 'Overview', icon: 'OV', category: 'Platform' },
-  { id: 'automations', label: 'Automation Studio', icon: 'AU', category: 'Automation' },
-  { id: 'workers', label: 'Workers', icon: 'WK', category: 'Automation' },
-  { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace' },
-  { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace' },
-  { id: 'planner', label: 'Planner', icon: 'PL', category: 'Life' },
-  { id: 'studio', label: 'Studio', icon: 'SD', category: 'Create' },
-  { id: 'pages', label: 'Pages & Wikis', icon: 'PG', category: 'Create' },
-  { id: 'documents', label: 'Knowledge Hub', icon: 'KH', category: 'Knowledge' },
-  { id: 'terminal', label: 'Terminal', icon: 'TM', category: 'Tools', shortcut: 'Ctrl+`' },
-  { id: 'voice', label: 'Voice Assistant', icon: 'VA', category: 'Tools' },
-  { id: 'bots', label: 'Bots', icon: 'BT', category: 'Workspace' },
-  { id: 'artifacts', label: 'Artifacts', icon: 'AR', category: 'Workspace' },
-  { id: 'messaging', label: 'Messaging', icon: 'MS', category: 'Actions' },
-  { id: 'memory', label: 'Memory', icon: 'MM', category: 'Knowledge' },
-  { id: 'website-builder', label: 'Website Builder', icon: 'WB', category: 'Creative' },
-  { id: 'app-builder', label: 'App Builder', icon: 'AB', category: 'Creative' },
-  { id: 'plugins', label: 'Plugin Marketplace', icon: 'PL', category: 'Platform' },
-  { id: 'deploy', label: 'Deploy Project', icon: 'DP', category: 'Actions' },
-  { id: 'testing', label: 'Testing Framework', icon: 'TS', category: 'Tools' },
-  { id: 'enterprise', label: 'Enterprise', icon: 'EN', category: 'Platform' },
-  { id: 'settings', label: 'Settings', icon: 'ST', category: 'App', shortcut: 'Ctrl+,' },
-  { id: 'quick-capture', label: 'Quick Capture (append note)', icon: 'QC', category: 'Actions', shortcut: 'Ctrl+Shift+Y' },
-  { id: 'quick-capture-open', label: 'Open Quick Notes folder', icon: 'QN', category: 'Actions' },
+  { id: 'infinite', label: 'Infinite — explain everything', icon: 'IN', category: 'Platform', keywords: 'about overview what is' },
+  { id: 'home', label: 'Power Center', icon: 'PC', category: 'Power', shortcut: 'Ctrl/⌘ K → power', keywords: 'home dashboard brief needs you' },
+  { id: 'new-chat', label: 'New Chat', icon: 'AI', category: 'Chat', shortcut: 'Ctrl+N', keywords: 'conversation ask agent' },
+  { id: 'open-canvas', label: 'Open Canvas', icon: 'CN', category: 'Workspace', keywords: 'board freeform diagram' },
+  { id: 'open-code', label: 'Open Code Editor', icon: 'CD', category: 'Workspace', keywords: 'files code ide' },
+  { id: 'standing-orders', label: 'Standing Orders', icon: 'SO', category: 'Automation', keywords: 'rules recurring' },
+  { id: 'memory', label: 'Memory Graph', icon: 'AM', category: 'Knowledge', keywords: 'active memory graph nodes edges remember recall knowledge' },
+  { id: 'capabilities', label: 'Tools & Skills', icon: 'TS', category: 'Platform', keywords: 'capabilities tools skills registry' },
+  { id: 'guide', label: 'Guide', icon: 'GD', category: 'Platform', keywords: 'help learn how to' },
+  { id: 'overview', label: 'Overview', icon: 'OV', category: 'Platform', keywords: 'about system' },
+  { id: 'automations', label: 'Automation Studio', icon: 'AU', category: 'Automation', keywords: 'approvals reviews workflows runs schedule' },
+  { id: 'activity', label: 'Activity Inbox', icon: 'AC', category: 'Automation', keywords: 'activity runs failures needs you inbox stream' },
+  { id: 'workers', label: 'Workers', icon: 'WK', category: 'Automation', keywords: 'background jobs' },
+  { id: 'workspace', label: 'Team Workspace', icon: 'TM', category: 'Workspace', keywords: 'team members projects' },
+  { id: 'projects', label: 'Projects', icon: 'PR', category: 'Workspace', keywords: 'tasks kanban' },
+  { id: 'planner', label: 'Planner', icon: 'PL', category: 'Life', keywords: 'calendar schedule tasks' },
+  { id: 'studio', label: 'Studio', icon: 'SD', category: 'Create', keywords: 'create media' },
+  { id: 'pages', label: 'Notes & Wikis', icon: 'PG', category: 'Create', keywords: 'docs notes wiki' },
+  { id: 'documents', label: 'Knowledge Hub', icon: 'KH', category: 'Knowledge', keywords: 'documents files knowledge' },
+  { id: 'terminal', label: 'Terminal', icon: 'TM', category: 'Tools', shortcut: 'Ctrl+`', keywords: 'shell command powershell' },
+  { id: 'voice', label: 'Voice Assistant', icon: 'VA', category: 'Tools', keywords: 'speak listen microphone' },
+  { id: 'bots', label: 'Bots', icon: 'BT', category: 'Workspace', keywords: 'assistants agents' },
+  { id: 'artifacts', label: 'Artifacts', icon: 'AR', category: 'Workspace', keywords: 'outputs files results' },
+  { id: 'messaging', label: 'Messaging', icon: 'MS', category: 'Actions', keywords: 'send message chat' },
+  { id: 'website-builder', label: 'Website Builder', icon: 'WB', category: 'Creative', keywords: 'site web create' },
+  { id: 'app-builder', label: 'App Builder', icon: 'AB', category: 'Creative', keywords: 'app build create' },
+  { id: 'plugins', label: 'Plugin Marketplace', icon: 'PL', category: 'Platform', keywords: 'plugins marketplace install' },
+  { id: 'deploy', label: 'Deploy Project', icon: 'DP', category: 'Actions', keywords: 'ship publish deploy' },
+  { id: 'enterprise', label: 'Enterprise', icon: 'EN', category: 'Platform', keywords: 'company team org' },
+  { id: 'settings', label: 'Settings', icon: 'ST', category: 'App', shortcut: 'Ctrl+,', keywords: 'preferences config providers models' },
+  { id: 'quick-capture', label: 'Quick Capture (append note)', icon: 'QC', category: 'Actions', shortcut: 'Ctrl+Shift+Y', keywords: 'note capture idea' },
+  { id: 'quick-capture-open', label: 'Open Quick Notes folder', icon: 'QN', category: 'Actions', keywords: 'notes folder files' },
 ];
 
 const RECENT_KEY = 'infinite:palette-recent';
@@ -80,14 +79,31 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
     return () => window.removeEventListener('keydown', handler);
   }, [open, setOpen, onCommand]);
 
+  useEffect(() => {
+    if (!open) setSearch('');
+  }, [open]);
+
   const query = search.toLowerCase().trim();
   const tokens = query ? query.split(/\s+/).filter(Boolean) : [];
-  const match = (c: typeof COMMANDS[number]) => {
-    if (!query) return true;
-    const hay = `${c.label} ${c.category} ${c.id}`.toLowerCase();
-    return tokens.every((t) => hay.includes(t));
+
+  /** 0 = exact label, 1 = label prefix, 2 = word start, 3 = substring, 4 = covered by keywords. */
+  const score = (c: typeof COMMANDS[number]): number => {
+    if (!query) return 0;
+    const label = c.label.toLowerCase();
+    if (label === query) return 0;
+    if (label.startsWith(query)) return 1;
+    if (tokens.length > 0 && tokens.every((t) => label.split(/\s+/).some((word) => word.startsWith(t)))) return 2;
+    if (tokens.every((t) => label.includes(t))) return 3;
+    const hay = `${c.category} ${c.id} ${c.keywords ?? ''}`.toLowerCase();
+    if (tokens.every((t) => hay.includes(t))) return 4;
+    return Number.POSITIVE_INFINITY;
   };
-  const filtered = COMMANDS.filter(match);
+
+  const filtered = COMMANDS
+    .map((command) => ({ command, rank: score(command) }))
+    .filter((row) => Number.isFinite(row.rank))
+    .sort((a, b) => a.rank - b.rank)
+    .map((row) => row.command);
   const recentIds = !query ? getRecent() : [];
   const recentCommands = recentIds.map((id) => COMMANDS.find((c) => c.id === id)).filter(Boolean) as typeof COMMANDS;
 
@@ -95,12 +111,16 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
     (acc[cmd.category] ??= []).push(cmd);
     return acc;
   }, {});
-  // Power category first when no filter — makes Power Center instantly discoverable
-  const orderedGroups = Object.entries(grouped).sort(([a], [b]) => {
-    if (a === 'Power') return -1;
-    if (b === 'Power') return 1;
-    return a.localeCompare(b);
-  });
+  // While searching, keep one ranked list so the best match is always first.
+  // With no query, group by category and put Power first — the Home surface
+  // should be instantly discoverable.
+  const orderedGroups: Array<[string, typeof COMMANDS]> = query
+    ? (filtered.length > 0 ? [['Results', filtered]] : [])
+    : Object.entries(grouped).sort(([a], [b]) => {
+      if (a === 'Power') return -1;
+      if (b === 'Power') return 1;
+      return a.localeCompare(b);
+    });
 
   if (!open) return null;
 
@@ -183,7 +203,7 @@ export function CommandPalette({ open: externalOpen, onOpenChange, onCommand }: 
         </Command.List>
         <div className="border-t border-white/[0.06] px-3 py-2 flex items-center justify-between text-[10px] text-zinc-600">
           <span><span className="font-mono text-zinc-400">↑↓</span> navigate · <span className="font-mono text-zinc-400">↵</span> select · <span className="font-mono text-zinc-400">ESC</span> close</span>
-          <span className="hidden sm:inline">Home is ⌘K → “home”</span>
+          <span className="hidden sm:inline">Home is Ctrl/⌘ K → “home”</span>
         </div>
       </Command>
     </motion.div>

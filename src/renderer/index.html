@@ -9,7 +9,7 @@
          website. A <webview> guest is a separate WebContents and is governed by
          the remote page's own policy, but plain iframes (oEmbed previews,
          YouTube/Vimeo embeds, docs sites) need this explicitly. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com blob:; worker-src 'self' blob:; font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; img-src 'self' data: blob: https: http:; frame-src 'self' data: blob: https: http:; child-src 'self' data: blob: https: http:; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434 ws://127.0.0.1:8765 ws://localhost:8765 http://localhost:5173 ws://localhost:5173 https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://*.monaco-editor.com;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; frame-src 'self' data: blob: https: http:; child-src 'self' data: blob: https: http:; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434 ws://127.0.0.1:8765 ws://localhost:8765 http://localhost:5173 ws://localhost:5173;" />
     <title>Infinite OS</title>
     <style>
       /* Pre-React boot splash: pure HTML/CSS so the Infinite mark paints the

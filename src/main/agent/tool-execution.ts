@@ -1,6 +1,7 @@
 import type { ContentBlock } from '../../shared/types.js';
 import { checkPermission, currentPermissionProfile } from './permissions.js';
 import { runHooks } from './hooks.js';
+import { isDestructiveBash } from './autonomy-policy.js';
 import type { Tool, ToolResult } from '../tools/base.js';
 import { actionAuditLog } from '../audit/action-log.js';
 import { planModeGuard } from './plan-mode.js';
@@ -133,6 +134,22 @@ export async function executeToolCall(options: ToolExecutionOptions): Promise<To
       // lets the model fix itself instead of seeing "Permission denied".
       if (tool.name === 'Bash' && !((toolUse.input as { command?: unknown } | undefined)?.command)) {
         return { content: 'Bash tool requires a non-empty "command" string parameter.', is_error: true };
+      }
+      // Hard stop for destructive shell commands — enforced HERE rather than
+      // only in the advisory autonomy estimate, so no profile (including
+      // full-system access) can wave them through. The model must re-plan to
+      // a scoped, reversible alternative or hand the command to the user.
+      if (tool.name === 'Bash' && isDestructiveBash(toolUse.input)) {
+        actionAuditLog.record({
+          sessionId, tool: canonicalToolName, input: toolUse.input,
+          decision: 'denied', outcome: 'denied',
+          durationMs: Date.now() - started,
+          unrestricted,
+        });
+        return {
+          content: 'Blocked by policy: this command is irreversible and destructive (rm -rf on a root path, disk format, DROP TABLE, …). Re-plan with a scoped, reversible alternative — or give the exact command to the user to run themselves.',
+          is_error: true,
+        };
       }
       // Enforced plan mode (tool-level, like Claude Code's plan gate): the
       // read-only verdict comes before permission checks so even a full-system

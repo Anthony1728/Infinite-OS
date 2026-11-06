@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, readdirSy
 import { join, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { infiniteHome } from '../profiles/home.js';
-import { embedText, lexicalVector, cosineSimilarity, normalize } from './embeddings.js';
+import { embedText, lexicalVector, cosineSimilarity } from './embeddings.js';
 
 export interface IndexedFile {
   id: string;
@@ -235,6 +235,8 @@ export class WorkspaceIndexer {
     this.index.delete(file.id);
     this.embeddings.delete(file.id);
     this.chunks.delete(file.id);
+    this.chunkBackend.delete(file.id);
+    this.upgradeQueued.delete(file.id);
     this.save();
     return true;
   }
@@ -249,20 +251,37 @@ export class WorkspaceIndexer {
     }
   }
 
+  /** Which backend produced a file's chunk vectors — lexical vectors must
+   * never be cosine-compared against Ollama vectors (meaningless scores). */
+  private chunkBackend: Map<string, 'lexical' | 'ollama'> = new Map();
+  /** Files queued for a background Ollama re-embed so one search doesn't
+   * queue the same repo fifty times. */
+  private upgradeQueued: Set<string> = new Set();
+
   /** Chunk a freshly indexed file and embed each chunk. */
   private async buildChunks(file: IndexedFile): Promise<void> {
     const pieces = chunkFileContent(file.content);
     const chunks: IndexedChunk[] = [];
+    let backend: 'lexical' | 'ollama' = 'lexical';
     for (const piece of pieces) {
+      let vector: number[];
+      try {
+        const embedded = await embedText(`${file.path}\n${piece.text}`);
+        vector = embedded.vector;
+        if (embedded.backend === 'ollama') backend = 'ollama';
+      } catch {
+        vector = lexicalVector(`${file.path}\n${piece.text}`);
+      }
       chunks.push({
         fileId: file.id,
         path: file.path,
         startLine: piece.startLine,
         endLine: piece.endLine,
         text: piece.text,
-        vector: await this.embedFor(`${file.path}\n${piece.text}`),
+        vector,
       });
     }
+    this.chunkBackend.set(file.id, backend);
     this.chunks.set(file.id, chunks);
   }
 
@@ -323,16 +342,33 @@ export class WorkspaceIndexer {
     if (!query.trim()) return [];
     try {
       const { vector: queryVector, backend } = await embedText(query);
+      // Lexical twin of the query: restored-from-disk chunks carry lexical
+      // vectors, and comparing those to an Ollama query vector produces
+      // meaningless scores. Each chunk is scored against its own backend's
+      // query vector only.
+      const lexicalQueryVector = backend === 'ollama' ? lexicalVector(query) : queryVector;
       const results: SearchResult[] = [];
       for (const [fileId, chunks] of this.chunks) {
         const file = this.index.get(fileId);
         if (!file) continue;
+        const chunkBackend = this.chunkBackend.get(fileId) ?? 'lexical';
+        // One-shot upgrade: when the real embedding model is available but a
+        // file's chunks are still lexical (fresh from load), re-embed them in
+        // the background so every later query gets true semantic recall.
+        if (backend === 'ollama' && chunkBackend === 'lexical' && !this.upgradeQueued.has(fileId)) {
+          this.upgradeQueued.add(fileId);
+          void this.buildChunks(file).catch(() => {
+            // Upgrade failed — keep scoring lexically and allow a retry later.
+            this.upgradeQueued.delete(fileId);
+          });
+        }
         let bestScore = 0;
         let bestChunk: IndexedChunk | null = null;
         for (const chunk of chunks) {
-          // Vectors from different backends are incomparable — score lexical
-          // chunk vectors with the lexical query vector only.
-          const score = cosineSimilarity(queryVector, backend === 'ollama' ? normalize(chunk.vector) : chunk.vector);
+          const score = cosineSimilarity(
+            chunkBackend === 'ollama' && backend === 'ollama' ? queryVector : lexicalQueryVector,
+            chunk.vector,
+          );
           if (score > bestScore) {
             bestScore = score;
             bestChunk = chunk;
@@ -573,6 +609,21 @@ export class WorkspaceIndexer {
           const hydrated = { ...file, content };
           this.index.set(file.id, hydrated);
           this.embeddings.set(file.id, lexicalVector(content));
+          // Rebuild the chunk map — search() and searchSemantic() iterate
+          // this.chunks, so a load that skips this step left the index
+          // "present but empty": every query returned zero results until a
+          // forced re-index. Restored chunks are lexical; searchSemantic
+          // upgrades them to Ollama vectors lazily on first semantic query.
+          const pieces = chunkFileContent(content);
+          this.chunks.set(file.id, pieces.map((piece) => ({
+            fileId: file.id,
+            path: file.path,
+            startLine: piece.startLine,
+            endLine: piece.endLine,
+            text: piece.text,
+            vector: lexicalVector(`${file.path}\n${piece.text}`),
+          })));
+          this.chunkBackend.set(file.id, 'lexical');
         } catch {
           // Skip files that became unreadable since the previous index.
         }

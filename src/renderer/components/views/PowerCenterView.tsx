@@ -17,6 +17,8 @@ import { useAgentsStore } from '../../stores/agents';
 import { useBrainStore } from '../../stores/brain';
 import { useAutomationStore } from '../../stores/automation';
 import { useAiTabsStore } from '../../stores/aiTabs';
+import { useHomePinsStore } from '../../stores/homePins';
+import { HomePins } from '../home/HomePins';
 import { usePlannerStore, plannerSnapshot } from '../../stores/planner';
 import { useWatchdogStore, type WatchdogFinding } from '../../stores/watchdog';
 import { AppIcon, BRAND_GRADIENT, type AppIconName } from '../brand/AppIcon';
@@ -283,6 +285,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
   const pendingApprovals = useAutomationStore((s) => s.pendingApprovals);
   const loadPendingApprovals = useAutomationStore((s) => s.loadPendingApprovals);
   const initRunListener = useAutomationStore((s) => s.initRunListener);
+  const addHomePin = useHomePinsStore((s) => s.addPin);
   const tabs = useAiTabsStore((s) => s.tabs);
   const plannerData = usePlannerStore((s) => s.data);
   const loadPlanner = usePlannerStore((s) => s.load);
@@ -438,7 +441,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
     onViewChange('chats');
   };
 
-  const handleQuickCapture = async () => {
+  const handleQuickCapture = async (pinAfter = false) => {
     const text = capture.trim();
     if (!text) return;
     setSaving(true);
@@ -447,6 +450,7 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
       if (res.ok) {
         setSavedPath(res.path);
         setCapture('');
+        if (pinAfter) addHomePin(res.path, 'Quick capture');
         window.setTimeout(() => setSavedPath(null), 3000);
       }
     } finally {
@@ -755,6 +759,8 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
           </div>
         </section>
 
+        <HomePins />
+
         {/* GETTING STARTED — self-checking tour. Hides itself once complete. */}
         {tourRemaining > 0 && (
           <section className="mt-4">
@@ -884,6 +890,15 @@ export function PowerCenterView({ onViewChange, onOpenDeploy }: PowerCenterViewP
                   aria-label="Save quick capture"
                 >
                   {saving ? '…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => void handleQuickCapture(true)}
+                  disabled={saving || !capture.trim()}
+                  className="rounded-xl border border-white/[0.09] bg-white/[0.04] px-2.5 py-2 text-[12px] font-medium text-zinc-300 transition-colors hover:bg-white/[0.08] disabled:opacity-40"
+                  aria-label="Save quick capture and pin it to Home"
+                  title="Save and pin this note to Home"
+                >
+                  Pin
                 </button>
               </div>
               {savedPath && <div className="mt-2 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] text-emerald-300">Saved → {savedPath}</div>}

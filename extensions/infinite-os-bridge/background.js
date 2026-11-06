@@ -628,7 +628,39 @@ async function handleCommand(rawCommand, params) {
         const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         tab = await chrome.tabs.update(active?.id, { url: params.url });
       }
-      result = { id: tab.id, url: tab.url, title: tab.title, started: Date.now() };
+      // Wait for the navigation to actually settle. The old handler returned
+      // the PRE-navigation url/title, and a failed load (404, DNS error,
+      // interstitial) looked identical to a success — the model had to
+      // re-inspect blindly to discover the page never loaded.
+      const tabId = tab.id;
+      const settled = await new Promise((resolve) => {
+        const timeout = setTimeout(() => { cleanup(); resolve({ complete: false, timedOut: true }); }, Math.max(2000, Number(params.loadTimeoutMs) || 15000));
+        const onUpdated = (id, info) => {
+          if (id !== tabId || info.status !== 'complete') return;
+          cleanup(); resolve({ complete: true });
+        };
+        const onNavError = (details) => {
+          if (details.tabId !== tabId || details.frameId !== 0 || details.transitionQualifiers?.includes('forward_back')) return;
+          if (details.error) { cleanup(); resolve({ complete: false, error: details.error }); }
+        };
+        function cleanup() {
+          clearTimeout(timeout);
+          chrome.tabs.onUpdated.removeListener(onUpdated);
+          try { chrome.webNavigation.onErrorOccurred.removeListener(onNavError); } catch { /* permission absent */ }
+        }
+        chrome.tabs.onUpdated.addListener(onUpdated);
+        try { chrome.webNavigation.onErrorOccurred.addListener(onNavError); } catch { /* permission absent */ }
+      });
+      const fresh = await chrome.tabs.get(tabId);
+      result = {
+        id: tabId,
+        url: fresh.url,
+        title: fresh.title,
+        started: Date.now(),
+        loaded: settled.complete === true,
+        ...(settled.error ? { loadError: settled.error } : {}),
+        ...(settled.timedOut ? { loadTimedOut: true } : {}),
+      };
       break;
     }
 

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { InfinityIcon } from '../brand/InfinityIcons';
 
 // Deterministic bot face from name + seed (Hermes blob-face idea, Infinite glass look).
 // Same name + seed = same face forever; no two bots look alike by accident.
@@ -38,6 +39,13 @@ export function BotAvatar({
   busy?: boolean;
 }) {
   const [from, to] = useMemo(() => botPalette(name, seed), [name, seed]);
+  // A bot named "1" (or any digit) renders a bare number as its "initial",
+  // which reads like a placeholder. Numbers and '?' get the brand agent
+  // glyph in the bot's own palette instead — every avatar looks designed.
+  const useGlyph = useMemo(() => {
+    const clean = name.trim();
+    return !clean || /^[0-9?]/.test(clean);
+  }, [name]);
   const initial = useMemo(() => {
     const clean = name.trim();
     return clean ? clean.charAt(0).toUpperCase() : '?';
@@ -55,7 +63,11 @@ export function BotAvatar({
       }}
       aria-hidden="true"
     >
-      {initial}
+      {useGlyph ? (
+        <InfinityIcon name="inf.agent" className="h-1/2 w-1/2" gradient={[from, to]} strokeWidth={1.7} />
+      ) : (
+        initial
+      )}
       <span
         className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0c0c10] ${
           busy ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'

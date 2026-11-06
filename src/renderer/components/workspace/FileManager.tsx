@@ -24,7 +24,7 @@ import {
   Grid3X3,
   List,
 } from 'lucide-react';
-import { joinSystemPath, normalizeSystemPath, parentSystemPath, type SystemRoots } from '../../lib/systemPaths';
+import { joinSystemPath, normalizeSystemPath, parentSystemPath } from '../../lib/systemPaths';
 
 interface DirEntry {
   name: string;
@@ -165,7 +165,6 @@ export function FileManager() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [addressPath, setAddressPath] = useState(cwd);
-  const [systemRoots, setSystemRoots] = useState<SystemRoots>({ home: '', common: [], drives: [] });
   const [fmCreate, setFmCreate] = useState<null | { type: 'file' | 'folder'; name: string }>(null);
   const [fmRename, setFmRename] = useState<null | { oldPath: string; name: string }>(null);
   const [fmDelete, setFmDelete] = useState<null | { path: string }>(null);
@@ -209,10 +208,6 @@ export function FileManager() {
       setEntries([]);
     }
     setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void window.api.fileSystemRoots().then((roots: SystemRoots) => setSystemRoots(roots));
   }, []);
 
   const loadFile = useCallback(async (filePath: string) => {
@@ -529,73 +524,73 @@ export function FileManager() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Toolbar */}
-      <div className="flex-shrink-0 px-3 py-2 border-b border-[var(--os-line)] bg-[var(--os-surface-2)]/90 backdrop-blur-[12px]">
-        <div className="flex items-center gap-2 mb-2">
+      {/* Toolbar - Clean and minimal */}
+      <div className="flex-shrink-0 px-3 py-2.5 border-b border-[var(--os-line)] bg-[var(--os-surface-2)]/90 backdrop-blur-[12px]">
+        <div className="flex items-center gap-2 mb-2.5">
           <button onClick={goBack} disabled={historyIndex <= 0}
-            className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain disabled:opacity-30 transition-all"
+            className="w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain disabled:opacity-30 transition-all"
             title="Back">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
           </button>
           <button onClick={goForward} disabled={historyIndex >= history.length - 1}
-            className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain disabled:opacity-30 transition-all"
+            className="w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain disabled:opacity-30 transition-all"
             title="Forward">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
           </button>
           <button onClick={navigateUp}
-            className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
+            className="w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
             title="Up one folder">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
           </button>
           <button onClick={() => loadDir(path)}
-            className="w-7 h-7 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
+            className="w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
             title="Refresh">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
           </button>
-          <button onClick={() => void chooseFolder()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Open another folder">Open Folder</button>
-          <button onClick={() => void createFile()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a file in this folder">New File</button>
-          <button onClick={() => void createFolder()} className="h-7 rounded-lg border border-white/8 px-2.5 text-[10px] text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a folder here">New Folder</button>
-          <button onClick={toggleViewMode} className="w-7 h-7 rounded-lg border border-white/8 flex items-center justify-center text-textMuted hover:text-textMain hover:bg-white/5" title={viewMode === 'list' ? 'Grid view' : 'List view'}>
-            {viewMode === 'list' ? <Grid3X3 className="w-3.5 h-3.5" /> : <List className="w-3.5 h-3.5" />}
+          <button onClick={() => void chooseFolder()} className="h-8 rounded-lg border border-white/8 px-3 text-xs text-textMuted hover:bg-white/5 hover:text-textMain" title="Open another folder">Open Folder</button>
+          <button onClick={() => void createFile()} className="h-8 rounded-lg border border-white/8 px-3 text-xs text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a file in this folder">New File</button>
+          <button onClick={() => void createFolder()} className="h-8 rounded-lg border border-white/8 px-3 text-xs text-textMuted hover:bg-white/5 hover:text-textMain" title="Create a folder here">New Folder</button>
+          <button onClick={toggleViewMode} className="w-8 h-8 rounded-lg border border-white/8 flex items-center justify-center text-textMuted hover:text-textMain hover:bg-white/5" title={viewMode === 'list' ? 'Grid view' : 'List view'}>
+            {viewMode === 'list' ? <Grid3X3 className="w-4 h-4" /> : <List className="w-4 h-4" />}
           </button>
           <div className="flex-1 min-w-0">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filter files..."
-              className="w-full h-7 rounded-lg bg-white/5 border border-white/8 px-2.5 text-xs placeholder:text-textMuted/50 focus:outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
+              className="w-full h-8 rounded-lg bg-white/5 border border-white/8 px-3 text-sm placeholder:text-textMuted/50 focus:outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
             />
           </div>
           {selectedFile && !fileMeta?.isBinary && dirty && (
             <button onClick={saveFile}
-              className="h-7 px-3 rounded-lg bg-[color-mix(in_srgb,var(--os-accent)_84%,#4338ca)] hover:bg-[color-mix(in_srgb,var(--os-accent)_92%,#4338ca)] shadow-[0_0_14px_color-mix(in_srgb,var(--os-accent)_18%,transparent)] text-white text-xs font-medium flex items-center gap-1.5 transition-all">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+              className="h-8 px-3.5 rounded-lg bg-[color-mix(in_srgb,var(--os-accent)_84%,#4338ca)] hover:bg-[color-mix(in_srgb,var(--os-accent)_92%,#4338ca)] shadow-[0_0_14px_color-mix(in_srgb,var(--os-accent)_18%,transparent)] text-white text-xs font-medium flex items-center gap-1.5 transition-all">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
               Save
             </button>
           )}
-          {selectedFile && <button onClick={() => void openExternally(selectedFile)} className="h-7 rounded-lg border border-white/8 px-2 text-[10px] text-textMuted hover:text-textMain flex items-center gap-1" title="Open with system default app"><ExternalLink className="w-3 h-3" /> Open</button>}
-          {selectedFile && <button onClick={() => void renameSelected()} className="h-7 rounded-lg border border-white/8 px-2 text-[10px] text-textMuted hover:text-textMain">Rename</button>}
-          {selectedFile && <button onClick={() => void deleteSelected()} className="h-7 rounded-lg border border-red-500/15 px-2 text-[10px] text-red-400/80 hover:bg-red-500/10">Delete</button>}
+          {selectedFile && <button onClick={() => void openExternally(selectedFile)} className="h-8 rounded-lg border border-white/8 px-2.5 text-xs text-textMuted hover:text-textMain flex items-center gap-1.5" title="Open with system default app"><ExternalLink className="w-3.5 h-3.5" /> Open</button>}
+          {selectedFile && <button onClick={() => void renameSelected()} className="h-8 rounded-lg border border-white/8 px-2.5 text-xs text-textMuted hover:text-textMain">Rename</button>}
+          {selectedFile && <button onClick={() => void deleteSelected()} className="h-8 rounded-lg border border-red-500/15 px-2.5 text-xs text-red-400/80 hover:bg-red-500/10">Delete</button>}
         </div>
         <form
-          className="mb-2 flex items-center gap-2"
+          className="mb-2.5 flex items-center gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             navigateTo(addressPath);
           }}
         >
-          <span className="text-[10px] font-medium uppercase tracking-wider text-textMuted/60">Path</span>
+          <span className="text-[11px] font-medium uppercase tracking-wider text-textMuted/60">Path</span>
           <input
             value={addressPath}
             onChange={(event) => setAddressPath(event.target.value)}
-            className="h-7 flex-1 rounded-lg border border-white/8 bg-white/5 px-2.5 font-mono text-[11px] text-textMain outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
+            className="h-8 flex-1 rounded-lg border border-white/8 bg-white/5 px-3 font-mono text-xs text-textMain outline-none focus:ring-1 focus:ring-[color-mix(in_srgb,var(--os-accent)_40%,transparent)]"
             aria-label="System file path"
             spellCheck={false}
           />
-          <button type="submit" className="h-7 rounded-lg border border-white/8 px-3 text-[10px] text-textMuted hover:bg-[color-mix(in_srgb,var(--os-accent)_10%,rgba(255,255,255,.05))] hover:text-[color-mix(in_srgb,var(--os-accent)_70%,white)] hover:border-[color-mix(in_srgb,var(--os-accent)_20%,transparent)]">Go</button>
+          <button type="submit" className="h-8 rounded-lg border border-white/8 px-3.5 text-xs text-textMuted hover:bg-[color-mix(in_srgb,var(--os-accent)_10%,rgba(255,255,255,.05))] hover:text-[color-mix(in_srgb,var(--os-accent)_70%,white)] hover:border-[color-mix(in_srgb,var(--os-accent)_20%,transparent)]">Go</button>
         </form>
-        <div className="flex items-center gap-1 text-[10px] text-textMuted/70 truncate flex-wrap">
-          {path.split(/[\\/]/).filter(Boolean).map((seg, i, arr) => {
+        <div className="flex items-center gap-1 text-xs text-textMuted/70 truncate flex-wrap">
+          {path.split(/[\\/]/).filter(Boolean).map((seg: string, i: number, arr: string[]) => {
             const isLast = i === arr.length - 1;
             const built = (path.startsWith('\\\\') ? '\\\\' : path.startsWith('/') ? '/' : '') + arr.slice(0, i + 1).join(path.includes('\\') ? '\\' : '/') + (path.includes('\\') && !path.endsWith('\\') && i < arr.length - 1 ? '' : '');
             const display = seg;
@@ -603,7 +598,7 @@ export function FileManager() {
               <span key={i} className="flex items-center gap-1">
                 <button
                   onClick={() => navigateTo(arr.slice(0, i + 1).join(path.includes('\\') ? '\\' : '/') + (path.match(/^[A-Za-z]:/) && i === 0 ? '\\' : ''))}
-                  className={`px-1 py-0.5 rounded ${isLast ? 'text-[color-mix(in_srgb,var(--os-accent)_72%,white)] bg-[color-mix(in_srgb,var(--os-accent)_10%,transparent)]' : 'hover:text-textMain hover:bg-white/[0.06]'}`}
+                  className={`px-1.5 py-1 rounded ${isLast ? 'text-[color-mix(in_srgb,var(--os-accent)_72%,white)] bg-[color-mix(in_srgb,var(--os-accent)_10%,transparent)]' : 'hover:text-textMain hover:bg-white/[0.06]'}`}
                   title={built}
                 >
                   {display}
@@ -616,42 +611,10 @@ export function FileManager() {
         </div>
       </div>
 
-      {/* Content area */}
+      {/* Content area - Full width file list */}
       <div className="flex-1 min-h-0 flex">
-        <aside className="w-44 flex-shrink-0 overflow-y-auto border-r border-borderSubtle bg-bgPanel/20 p-2 custom-scrollbar">
-          <div className="mb-1 px-2 text-[9px] font-semibold uppercase tracking-wider text-textMuted/50">Locations</div>
-          {[...systemRoots.common, ...systemRoots.drives].map((location) => (
-            <button
-              key={`${location.kind}:${location.path}`}
-              type="button"
-              onClick={() => navigateTo(location.path)}
-              title={location.path}
-              className={`mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-                normalizeSystemPath(path) === normalizeSystemPath(location.path)
-                  ? 'bg-[color-mix(in_srgb,var(--os-accent)_13%,transparent)] text-[color-mix(in_srgb,var(--os-accent)_76%,white)] border-l-2 border-[var(--os-accent)]'
-                  : 'text-textMuted hover:bg-white/[0.04] hover:text-textMain'
-              }`}
-            >
-              <span>{location.kind === 'drive' ? '▣' : location.name === 'Home' ? '⌂' : '◇'}</span>
-              <span className="truncate">{location.name}</span>
-            </button>
-          ))}
-          <div className="mt-3 px-2 text-[9px] font-semibold uppercase tracking-wider text-textMuted/50">Details</div>
-          <div className="px-2 py-1.5 text-[10px] text-textMuted/60">
-            {selectedFile ? (
-              <>
-                <div className="truncate text-textMain font-medium">{relativePath}</div>
-                {fileMeta ? <div className="mt-1">{formatSize(fileMeta.size ?? 0)}</div> : null}
-                {fileMeta?.mtime ? <div className="text-[9px]">{formatDate(fileMeta.mtime)}</div> : null}
-                {fileMeta?.mimeType ? <div className="text-[9px] truncate">{fileMeta.mimeType}</div> : null}
-              </>
-            ) : (
-              <div>{filteredEntries.length} items{search ? ` (filtered)` : ''}</div>
-            )}
-          </div>
-        </aside>
-        {/* File tree / grid */}
-        <div className={`${selectedFile ? 'w-64 border-r border-borderSubtle' : 'flex-1'} overflow-y-auto custom-scrollbar transition-all`}>
+        {/* File tree / grid - Full width */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
           {loading && entries.length === 0 && (
             <div className="flex items-center justify-center h-32 text-textMuted text-xs">Loading...</div>
           )}
@@ -667,13 +630,13 @@ export function FileManager() {
             <>
               {/* Header */}
               {filteredEntries.length > 0 && (
-                <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 text-[9px] uppercase tracking-wider text-textMuted/50 bg-bgPanel/80 backdrop-blur border-b border-white/[0.04]">
+                <div className="sticky top-0 z-10 flex items-center gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-textMuted/50 bg-bgPanel/80 backdrop-blur border-b border-white/[0.04]">
                   <span className="flex-1">Name</span>
-                  <span className="w-16 text-right">Size</span>
-                  <span className="w-24 text-right hidden sm:block">Modified</span>
+                  <span className="w-20 text-right">Size</span>
+                  <span className="w-28 text-right hidden sm:block">Modified</span>
                 </div>
               )}
-              {filteredEntries.map((entry) => {
+              {filteredEntries.map((entry: DirEntry) => {
                 const fullPath = joinSystemPath(path, entry.name);
                 const isSelected = selectedFile === fullPath;
                 const checked = selectedEntries.has(fullPath);
@@ -682,10 +645,10 @@ export function FileManager() {
                     key={entry.name}
                     onClick={() => openEntry(entry)}
                     onContextMenu={(e) => handleContextMenu(e, entry)}
-                    className={`w-full flex items-center gap-2 py-1.5 px-3 text-xs transition-all cursor-pointer ${
+                    className={`w-full flex items-center gap-3 py-2.5 px-3 text-sm transition-all cursor-pointer ${
                       isSelected
                         ? 'bg-[color-mix(in_srgb,var(--os-accent)_13%,transparent)] text-[color-mix(in_srgb,var(--os-accent)_76%,white)] border-l-2 border-[var(--os-accent)]'
-                        : 'text-textMuted hover:text-textMain hover:bg-[color-mix(in_srgb,var(--os-accent)_7%,rgba(255,255,255,.03))] hover:border-l-2 hover:border-[color-mix(in_srgb,var(--os-accent)_22%,transparent)]'
+                        : 'text-textMain/90 hover:text-textMain hover:bg-[color-mix(in_srgb,var(--os-accent)_7%,rgba(255,255,255,.03))] hover:border-l-2 hover:border-[color-mix(in_srgb,var(--os-accent)_22%,transparent)]'
                     }`}
                   >
                     <input type="checkbox" checked={checked} onChange={(e) => {
@@ -695,18 +658,18 @@ export function FileManager() {
                         if (next.has(fullPath)) next.delete(fullPath); else next.add(fullPath);
                         return next;
                       });
-                    }} onClick={(e) => e.stopPropagation()} className="w-3 h-3 rounded accent-[var(--os-accent)]" />
-                    <FileIcon name={entry.name} isDir={entry.isDirectory} open={isSelected} className="w-3.5 h-3.5" />
+                    }} onClick={(e) => e.stopPropagation()} className="w-3.5 h-3.5 rounded accent-[var(--os-accent)]" />
+                    <FileIcon name={entry.name} isDir={entry.isDirectory} open={isSelected} className="w-5 h-5" />
                     <span className="flex-1 truncate text-left">{entry.name}</span>
-                    <span className="w-16 text-right text-[10px] text-textMuted/60">{entry.isDirectory ? '—' : formatSize(entry.size ?? 0)}</span>
-                    <span className="w-24 text-right text-[9px] text-textMuted/40 hidden sm:block">{entry.mtime ? formatDate(entry.mtime).split(',')[0] : ''}</span>
+                    <span className="w-20 text-right text-xs text-textMuted/70">{entry.isDirectory ? '—' : formatSize(entry.size ?? 0)}</span>
+                    <span className="w-28 text-right text-xs text-textMuted/50 hidden sm:block">{entry.mtime ? formatDate(entry.mtime).split(',')[0] : ''}</span>
                   </div>
                 );
               })}
             </>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-2 p-2">
-              {filteredEntries.map((entry) => {
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 p-3">
+              {filteredEntries.map((entry: DirEntry) => {
                 const fullPath = joinSystemPath(path, entry.name);
                 const isSelected = selectedFile === fullPath;
                 return (
@@ -718,13 +681,13 @@ export function FileManager() {
                       const fp = joinSystemPath(path, entry.name);
                       if (!entry.isDirectory) void openExternally(fp);
                     }}
-                    className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border text-center transition-all ${
+                    className={`flex flex-col items-center gap-2 p-4 rounded-xl border text-center transition-all ${
                       isSelected ? 'bg-[color-mix(in_srgb,var(--os-accent)_13%,transparent)] border-[var(--os-accent)] text-white' : 'border-white/5 hover:border-white/10 hover:bg-white/[0.03] text-textMuted'
                     }`}
                   >
-                    {entry.isDirectory ? <Folder className="w-8 h-8 text-amber-300/70" /> : isImageExt(entry.name) ? <ImageIcon className="w-8 h-8 text-violet-400" /> : isVideoExt(entry.name) ? <Film className="w-8 h-8 text-pink-400" /> : isAudioExt(entry.name) ? <Music className="w-8 h-8 text-emerald-400" /> : <FileIcon name={entry.name} isDir={false} className="w-8 h-8" />}
-                    <span className="text-[10px] leading-tight line-clamp-2 break-all w-full">{entry.name}</span>
-                    <span className="text-[9px] text-textMuted/50">{entry.isDirectory ? '' : formatSize(entry.size ?? 0)}</span>
+                    {entry.isDirectory ? <Folder className="w-10 h-10 text-amber-300/70" strokeWidth={1.7} /> : isImageExt(entry.name) ? <ImageIcon className="w-10 h-10 text-violet-400" /> : isVideoExt(entry.name) ? <Film className="w-10 h-10 text-pink-400" /> : isAudioExt(entry.name) ? <Music className="w-10 h-10 text-emerald-400" /> : <FileIcon name={entry.name} isDir={false} className="w-10 h-10" />}
+                    <span className="text-xs leading-tight line-clamp-2 break-all w-full">{entry.name}</span>
+                    <span className="text-[11px] text-textMuted/50">{entry.isDirectory ? '' : formatSize(entry.size ?? 0)}</span>
                   </button>
                 );
               })}
@@ -734,16 +697,16 @@ export function FileManager() {
 
         {/* Preview / Editor pane */}
         {selectedFile && (
-          <div className="flex-1 min-w-0 flex flex-col">
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-borderSubtle bg-bgPanel/30">
+          <div className="flex-1 min-w-0 flex flex-col border-l border-[var(--os-line)]">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-borderSubtle bg-bgPanel/30">
               <div className="flex items-center gap-2 min-w-0">
-                <FileIcon name={selectedFile.split(/[\\/]/).pop() ?? ''} isDir={false} className="w-3.5 h-3.5" />
-                <span className="text-xs text-textMain truncate font-medium">{relativePath}</span>
+                <FileIcon name={selectedFile.split(/[\\/]/).pop() ?? ''} isDir={false} className="w-4 h-4" />
+                <span className="text-sm text-textMain truncate font-medium">{relativePath}</span>
                 {dirty && <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" title="Unsaved changes" />}
-                {fileMeta?.isBinary && fileMeta?.mimeType ? <span className="text-[9px] text-zinc-500 hidden sm:inline">{fileMeta.mimeType} · {formatSize(fileMeta.size ?? 0)}</span> : null}
+                {fileMeta?.isBinary && fileMeta?.mimeType ? <span className="text-[11px] text-zinc-500 hidden sm:inline">{fileMeta.mimeType} · {formatSize(fileMeta.size ?? 0)}</span> : null}
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => void openExternally(selectedFile)} className="w-6 h-6 rounded hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain" title="Open externally"><ExternalLink className="w-3 h-3" /></button>
+                <button onClick={() => void openExternally(selectedFile)} className="w-7 h-7 rounded hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain" title="Open externally"><ExternalLink className="w-3.5 h-3.5" /></button>
                 <button onClick={() => { setSelectedFile(null); setFileContent(''); setFileMeta(null); setDirty(false); }}
                   className="w-6 h-6 rounded hover:bg-white/5 flex items-center justify-center text-textMuted hover:text-textMain transition-all"
                   title="Close">
@@ -764,18 +727,18 @@ export function FileManager() {
           style={{ left: Math.min(contextMenu.x, window.innerWidth - 190), top: Math.min(contextMenu.y, window.innerHeight - 200) }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button onClick={() => { openEntry(contextMenu.entry); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"><FolderOpen className="w-3.5 h-3.5" /> Open</button>
-          <button onClick={() => { void openExternally(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Open externally</button>
-          <button onClick={() => { void copyPath(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Copy path</button>
-          <button onClick={() => { void duplicateEntry(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Duplicate</button>
+          <button onClick={() => { openEntry(contextMenu.entry); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center gap-2"><FolderOpen className="w-3.5 h-3.5" /> Open</button>
+          <button onClick={() => { void openExternally(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center gap-2"><ExternalLink className="w-3.5 h-3.5" /> Open externally</button>
+          <button onClick={() => { void copyPath(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Copy path</button>
+          <button onClick={() => { void duplicateEntry(contextMenu.fullPath); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Copy className="w-3.5 h-3.5" /> Duplicate</button>
           <div className="my-1 border-t border-white/5" />
-          <button onClick={() => { setFmRename({ oldPath: contextMenu.fullPath, name: contextMenu.entry.name }); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Edit3 className="w-3.5 h-3.5" /> Rename</button>
-          <button onClick={() => { setFmDelete({ path: contextMenu.fullPath }); setContextMenu(null); }} className="w-full px-3 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+          <button onClick={() => { setFmRename({ oldPath: contextMenu.fullPath, name: contextMenu.entry.name }); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-zinc-300 hover:bg-white/5 flex items-center gap-2"><Edit3 className="w-3.5 h-3.5" /> Rename</button>
+          <button onClick={() => { setFmDelete({ path: contextMenu.fullPath }); setContextMenu(null); }} className="w-full px-3 py-2 text-left text-[13px] text-red-400 hover:bg-red-500/10 flex items-center gap-2"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
         </div>
       )}
 
       {/* Status bar */}
-      <div className="flex-shrink-0 px-3 py-1.5 border-t border-borderSubtle bg-bgPanel/30 flex items-center justify-between text-[10px] text-textMuted/70">
+      <div className="flex-shrink-0 px-3 py-2 border-t border-borderSubtle bg-bgPanel/30 flex items-center justify-between text-xs text-textMuted/70">
         <span>{filteredEntries.length} items {search ? `(filtered from ${entries.length})` : ''}{selectedEntries.size > 0 ? ` · ${selectedEntries.size} selected` : ''}</span>
         <span className="hidden sm:inline truncate ml-2">{path}</span>
       </div>
