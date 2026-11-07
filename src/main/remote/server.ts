@@ -8,6 +8,7 @@
  */
 
 import http from 'node:http';
+import https from 'node:https';
 import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
@@ -17,6 +18,7 @@ import { runAgent } from '../agent/loop.js';
 import { appendMessage, loadMessages } from '../session/store.js';
 import { resolveActiveModel, NoActiveModelError, type SettingsGetter } from '../agent/active-model.js';
 import { settings } from '../settings/store.js';
+import { generateSelfSignedCert, type SelfSignedPem } from './tls-cert.js';
 import type { ContentBlock, Message } from '../../shared/types.js';
 
 const PORT = Number(process.env.INFINITE_REMOTE_PORT ?? 8766);
@@ -37,15 +39,19 @@ class PhoneRemoteServer {
   private port = PORT;
   private listening = false;
   private listenError = '';
+  private tls: SelfSignedPem | null = null;
 
   start(): void {
     if (this.server) return;
     this.token = this.loadToken();
+    this.tls = this.loadOrCreateCert();
     this.createServer(PORT);
   }
 
   private createServer(port: number): void {
-    const server = http.createServer((req, res) => void this.handle(req, res));
+    const server = this.tls
+      ? https.createServer({ key: this.tls.keyPem, cert: this.tls.certPem }, (req, res) => void this.handle(req, res))
+      : http.createServer((req, res) => void this.handle(req, res));
     this.server = server;
     server.on('error', (err: NodeJS.ErrnoException) => {
       this.listening = false;
@@ -68,7 +74,7 @@ class PhoneRemoteServer {
       const addr = server.address();
       this.port = typeof addr === 'object' && addr ? addr.port : port;
       this.startedAt = Date.now();
-      console.log(`[remote] phone companion listening on 0.0.0.0:${this.port}`);
+      console.log(`[remote] phone companion listening on 0.0.0.0:${this.port} (${this.tls ? "https" : "http"})`);
     });
     server.listen(port, '0.0.0.0');
   }
@@ -97,7 +103,8 @@ class PhoneRemoteServer {
   }> {
     const addresses = this.lanAddresses();
     const lanIp = addresses[0] ?? '127.0.0.1';
-    const url = `http://${lanIp}:${this.port}/?token=${this.token}`;
+    const scheme = this.tls ? 'https' : 'http';
+    const url = `${scheme}://${lanIp}:${this.port}/?token=${this.token}`;
     let qrDataUrl = '';
     try {
       qrDataUrl = await QRCode.toDataURL(url, { margin: 1, width: 320, color: { dark: '#18181b', light: '#fafafa' } });
@@ -115,6 +122,30 @@ class PhoneRemoteServer {
       busy: this.busy,
       error: this.listenError,
     };
+  }
+
+  /** Generate (once) and persist the TLS keypair for the companion. The
+   *  cert is reused across boots so the phone's trust exception sticks. */
+  private loadOrCreateCert(): SelfSignedPem | null {
+    const dir = join(homedir(), '.infinite-ai');
+    const certPath = join(dir, 'remote-cert.pem');
+    const keyPath = join(dir, 'remote-key.pem');
+    try {
+      if (existsSync(certPath) && existsSync(keyPath)) {
+        const certPem = readFileSync(certPath, 'utf8');
+        const keyPem = readFileSync(keyPath, 'utf8');
+        return { certPem, keyPem, fingerprintSha256: '' };
+      }
+      const pem = generateSelfSignedCert('Infinite-OS-Phone');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(certPath, pem.certPem, { mode: 0o600 });
+      writeFileSync(keyPath, pem.keyPem, { mode: 0o600 });
+      console.log('[remote] generated self-signed TLS certificate (fingerprint', pem.fingerprintSha256 + ')');
+      return pem;
+    } catch (err) {
+      console.error('[remote] TLS cert generation failed; falling back to HTTP:', (err as Error).message);
+      return null;
+    }
   }
 
   private loadToken(): string {
@@ -756,7 +787,7 @@ function mobilePage(): string {
     for (var i = 0; i < keys.length; i++) {
       var v = input[keys[i]];
       if (typeof v === 'string' && v.trim()) {
-        var one = v.replace(/\s+/g, ' ').trim();
+        var one = v.replace(/\\s+/g, ' ').trim();
         return one.length > 48 ? one.slice(0, 47) + '…' : one;
       }
     }
@@ -990,7 +1021,7 @@ function mobilePage(): string {
     if (ev.type === 'text_delta') {
       var t2 = getTurn(ev.message_id);
       var chunk = String(ev.text == null ? '' : ev.text);
-      if (!t2.sawContent) chunk = chunk.replace(/^\s+/, '');
+      if (!t2.sawContent) chunk = chunk.replace(/^\\s+/, '');
       if (!chunk) return;
       ensureBubble(t2);
       markTurnVisible();

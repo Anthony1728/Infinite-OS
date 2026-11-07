@@ -10,6 +10,8 @@ describe('evaluation CLI arguments', () => {
       model: null,
       json: false,
       list: false,
+      matrix: [],
+      trend: false,
       timeoutMin: null,
     });
   });

@@ -11,7 +11,7 @@
 const STORAGE_KEY = 'infinite:composer-drafts';
 const LIMIT = 200;
 
-let drafts = readAll();
+const drafts = readAll();
 let order: string[] = Object.keys(drafts);
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 

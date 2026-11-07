@@ -14,6 +14,7 @@ import { actionAuditLog } from '../audit/action-log.js';
 import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcpDisconnect, getStatus as mcpGetStatus, listTools as mcpListTools } from '../mcp/manager.js';
 import * as sessionStore from '../session/store.js';
 import { markRunStarted, clearRunMarker, findInterruptedRuns } from '../agent/resume.js';
+import { writeResumeQueue, consumeResumeQueue, type ResumeEntry } from '../agent/resume-queue.js';
 import { interjectAgent, runAgent } from '../agent/loop.js';
 import { UNTIL_DONE_MAX_TURNS, UNTIL_DONE_WALL_CLOCK_MS } from '../agent/run-budget.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
@@ -142,6 +143,9 @@ import {
 } from '../email/index.js';
 
 const activeRuns = new Map<string, AbortController>();
+// Live-run identity for survive-the-reload: snapshotted to a queue file
+// before any relaunch so interrupted runs can be auto-continued.
+const runMeta = new Map<string, { provider: string; model: string; cwd: string; request: string; background: boolean }>();
 const discardedRuns = new Set<string>();
 
 /** First text block of an incoming message payload, for task titles. */
@@ -168,6 +172,95 @@ function getSelfApplyRunner(): SelfApplyRunner {
   return selfApplySingleton;
 }
 
+/** Snapshot every live run so a relaunch can continue them (survive-reload). */
+export function snapshotActiveRunsForResume(): void {
+  const entries: ResumeEntry[] = [];
+  for (const [sessionId, meta] of runMeta) {
+    entries.push({ sessionId, request: meta.request, provider: meta.provider, model: meta.model, cwd: meta.cwd, background: meta.background, savedAt: Date.now() });
+  }
+  writeResumeQueue(entries);
+}
+
+/** Broadcast a chat-stream event to every open window. */
+function broadcastChatEvent(payload: Record<string, unknown>): void {
+  try {
+    const { BrowserWindow } = require('electron') as typeof import('electron');
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { win.webContents.send(IPC.CHAT_STREAM_EVENT, payload); } catch { /* window dying */ }
+    }
+  } catch {
+    /* headless/tests — events dropped, messages still persist */
+  }
+}
+
+/**
+ * Continue every run the last relaunch cut off.
+ *
+ * Each queued entry re-runs the agent on its ORIGINAL session with a
+ * continuation directive: the transcript (persisted per-message) is already
+ * in the conversation, so the agent verifies current state and finishes the
+ * task instead of the work dying with the process.
+ */
+async function resumeInterruptedRuns(): Promise<void> {
+  const entries = await consumeResumeQueue(async (sessionId) =>
+    Boolean(await sessionStore.loadSessionMeta(sessionId).catch(() => null)),
+  );
+  if (entries.length === 0) return;
+  console.log('[resume] continuing ' + entries.length + ' interrupted run(s) after restart');
+  for (const entry of entries) {
+    void (async () => {
+      const controller = new AbortController();
+      activeRuns.set(entry.sessionId, controller);
+      runMeta.set(entry.sessionId, { provider: entry.provider, model: entry.model, cwd: entry.cwd, request: entry.request, background: entry.background });
+      markRunStarted(entry.sessionId, entry.request);
+      try {
+        const note: Message = {
+          id: uuid(),
+          role: 'user',
+          content: [{ type: 'text', text:
+            '[Resumed after restart] The app restarted while this task was running. The transcript above is the work already completed. ' +
+            'Verify the current state first (the requested files/values may already exist and the rebuild may already have happened). ' +
+            'Do NOT call BuildFeature, start another build, or relaunch the app in this resumed run — the restart this note follows was that step. ' +
+            'If the requested change is already present, confirm it with a read/command and finish with the evidence. ' +
+            'Original request: ' + entry.request }],
+          timestamp: Date.now(),
+        };
+        await sessionStore.appendMessage(entry.sessionId, note);
+        broadcastChatEvent({ sessionId: entry.sessionId, type: 'provider_status', status: 'resuming', detail: 'Resuming interrupted task after restart...' });
+        const history = await sessionStore.loadMessages(entry.sessionId);
+        const historyBefore = history.slice(0, -1);
+        if (entry.background) startBackgroundTask(entry.sessionId, entry.request.slice(0, 80));
+        const completed = await runAgent(historyBefore, note, {
+          sessionId: entry.sessionId,
+          cwd: entry.cwd,
+          provider: entry.provider,
+          model: entry.model,
+          signal: controller.signal,
+          onEvent: (ev) => broadcastChatEvent({ sessionId: entry.sessionId, ...ev }),
+          onMessage: async (produced) => {
+            if (discardedRuns.has(entry.sessionId)) return;
+            await sessionStore.appendMessage(entry.sessionId, produced);
+            markRunStarted(entry.sessionId, entry.request);
+          },
+        });
+        clearRunMarker(entry.sessionId);
+        if (entry.background) {
+          const lastAssistant = [...completed].reverse().find((m) => m.role === 'assistant');
+          const summary = lastAssistant ? lastAssistant.content.filter((c) => c.type === 'text').map((c) => (c as { text?: string }).text ?? '').join(' ') : '';
+          finishBackgroundTask(entry.sessionId, 'completed', summary);
+        }
+      } catch (err) {
+        clearRunMarker(entry.sessionId);
+        console.warn('[resume] continuation failed:', (err as Error).message);
+        finishBackgroundTask(entry.sessionId, 'failed', (err as Error).message);
+      } finally {
+        if (activeRuns.get(entry.sessionId) === controller) activeRuns.delete(entry.sessionId);
+        runMeta.delete(entry.sessionId);
+      }
+    })();
+  }
+}
+
 export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   // Plan-mode + todo events ride the chat stream channel, so wire the emitters here.
   const chatStreamSend: (channel: string, payload: unknown) => void = (channel, payload) =>
@@ -177,6 +270,8 @@ export function registerIpc(getMainWindow: () => BrowserWindow | null): void {
   setBackgroundTaskEmitter(chatStreamSend);
   registerWindowIpc(getMainWindow);
   registerAuthIpc();
+  // Survive-the-reload: continue runs the last relaunch interrupted.
+  setTimeout(() => { void resumeInterruptedRuns().catch((e) => console.warn('[resume] failed:', (e as Error).message)); }, 5_000);
   registerOwnerIpc();
   registerTerminalIpc();
   registerCheckpointIpc();
@@ -275,6 +370,7 @@ registerOptimizeIpc();
 
     const controller = new AbortController();
     activeRuns.set(sessionId, controller);
+    runMeta.set(sessionId, { provider, model, cwd, request: messageTextOf(message), background: Boolean(background) });
 
     // Enforced plan mode: when the user sent this message in Plan mode, arm the
     // read-only gate for the run. It stays on until the model calls ExitPlan
@@ -451,6 +547,7 @@ registerOptimizeIpc();
 
     discardedRuns.delete(sessionId);
     if (activeRuns.get(sessionId) === controller) activeRuns.delete(sessionId);
+    runMeta.delete(sessionId);
     // A run that ended without ExitPlan approval leaves the gate armed; clear
     // it so the next normal message is not silently read-only.
     if (planMode && !getPendingExitPlan(sessionId)) setPlanMode(sessionId, false);
@@ -1165,7 +1262,9 @@ ipcMain.handle(IPC.RESUME_INTERRUPTED, async () => findInterruptedRuns());
     return getSelfApplyRunner().run({
       isPackaged: app.isPackaged,
       repoRoot: findSelfRepoRoot(),
+      devServer: Boolean(process.env['ELECTRON_RENDERER_URL']),
       relaunch: () => {
+        snapshotActiveRunsForResume();
         app.relaunch();
         app.exit(0);
       },

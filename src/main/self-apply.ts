@@ -17,6 +17,8 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 export type SelfApplyAction = 'hot-reload' | 'rebuild' | 'blocked';
 
@@ -28,16 +30,23 @@ export interface SelfApplyPlan {
 export function planSelfApply(input: {
   isPackaged: boolean;
   repoRoot: string | null;
+  /**
+   * True only when the app is actually running under `electron-vite dev`
+   * (ELECTRON_RENDERER_URL is set). A production build launched with
+   * `electron .` is NOT hot-reloaded: its `out/` bundle is static, so it
+   * needs the same rebuild + relaunch as a packaged app.
+   */
+  devServer?: boolean;
   building?: boolean;
 }): SelfApplyPlan {
   if (input.building) {
     return { action: 'blocked', reason: 'A rebuild is already running.' };
   }
-  if (!input.isPackaged) {
+  if (input.devServer && input.repoRoot) {
     return {
       action: 'hot-reload',
       reason:
-        'Dev mode: the renderer hot-reloads (HMR) and main-process edits restart Electron automatically — self-edits are already live.',
+        'Dev server: the renderer hot-reloads (HMR) and main-process edits restart Electron automatically — self-edits are already live.',
     };
   }
   if (!input.repoRoot) {
@@ -48,7 +57,9 @@ export function planSelfApply(input: {
   }
   return {
     action: 'rebuild',
-    reason: 'Packaged build: typecheck + rebuild + relaunch to load the self-edits.',
+    reason: input.isPackaged
+      ? 'Packaged build: typecheck + rebuild + relaunch from the source checkout to load the self-edits.'
+      : 'Built from source: typecheck + rebuild + relaunch to load the self-edits.',
   };
 }
 
@@ -88,9 +99,32 @@ const defaultSpawn: SpawnLike = (command, args, options) => {
   return nodeSpawn(command, args, options) as unknown as ChildLike;
 };
 
-async function defaultRelaunch(): Promise<void> {
+async function defaultRelaunch(target?: { repoRoot?: string | null; isPackaged?: boolean }): Promise<void> {
   try {
     const { app } = await import('electron');
+    // app.exit() skips before-quit, so snapshot live runs HERE or the next
+    // launch has nothing to resume. This is the path BuildFeature takes
+    // (applySelfEdit -> defaultRelaunch), not just the manual IPC button.
+    try {
+      const { snapshotActiveRunsForResume } = await import('./ipc/index.js');
+      snapshotActiveRunsForResume();
+    } catch {
+      /* headless/tests — no live runs to snapshot */
+    }
+    const repoRoot = target?.repoRoot ?? null;
+    // A packaged app loads resources/app.asar, which a repo `npm run build`
+    // cannot update. When a source checkout exists, relaunch into the freshly
+    // built repo with its own Electron binary so the new code actually loads.
+    if (target?.isPackaged && repoRoot) {
+      const electronBin = process.platform === 'win32'
+        ? join(repoRoot, 'node_modules', 'electron', 'dist', 'electron.exe')
+        : join(repoRoot, 'node_modules', '.bin', 'electron');
+      if (existsSync(electronBin)) {
+        app.relaunch({ execPath: electronBin, args: [repoRoot] });
+        app.exit(0);
+        return;
+      }
+    }
     app.relaunch();
     app.exit(0);
   } catch {
@@ -123,7 +157,7 @@ export class SelfApplyRunner {
   constructor(
     private readonly deps: {
       spawn?: SpawnLike;
-      relaunch?: () => void | Promise<void>;
+      relaunch?: (target: { repoRoot: string | null; isPackaged: boolean; devServer: boolean }) => void | Promise<void>;
       now?: () => number;
     } = {},
   ) {}
@@ -140,8 +174,9 @@ export class SelfApplyRunner {
   async run(input: {
     isPackaged: boolean;
     repoRoot: string | null;
+    devServer?: boolean;
     onEvent?: (event: SelfApplyEvent) => void;
-    relaunch?: () => void | Promise<void>;
+    relaunch?: (target: { repoRoot: string | null; isPackaged: boolean; devServer: boolean }) => void | Promise<void>;
   }): Promise<{ ok: boolean; plan: SelfApplyPlan }> {
     const building = this.phase === 'building' || this.phase === 'restarting';
     const plan = planSelfApply({ ...input, building });
@@ -199,7 +234,11 @@ export class SelfApplyRunner {
 
     this.phase = 'restarting';
     emit(input.onEvent, { phase: 'restarting', line: 'Build passed — relaunching Infinite OS…' });
-    await (input.relaunch ?? this.deps.relaunch ?? defaultRelaunch)();
+    await (input.relaunch ?? this.deps.relaunch ?? defaultRelaunch)({
+      repoRoot: input.repoRoot,
+      isPackaged: input.isPackaged,
+      devServer: Boolean(input.devServer),
+    });
     this.phase = 'done';
     emit(input.onEvent, { phase: 'done' });
     return { ok: true, plan };
@@ -220,7 +259,8 @@ export class SelfApplyRunner {
 export async function applySelfEdit(input: {
   isPackaged: boolean;
   repoRoot: string | null;
-  relaunch?: () => void | Promise<void>;
+  devServer?: boolean;
+  relaunch?: (target: { repoRoot: string | null; isPackaged: boolean; devServer: boolean }) => void | Promise<void>;
   onEvent?: (event: SelfApplyEvent) => void;
 }): Promise<{ applied: boolean; message: string }> {
   const runner = new SelfApplyRunner();

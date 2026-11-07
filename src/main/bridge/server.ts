@@ -542,6 +542,31 @@ class BridgeServer {
     }
   }
 
+  // Brute-force guard (parity with the phone remote): after AUTH_FAIL_LIMIT
+  // failures inside the window, every unauthenticated request is rejected for
+  // the penalty window. The endpoint is loopback-only, but a local non-admin
+  // process guessing at /exec is exactly what this stops cheaply.
+  private static readonly AUTH_FAIL_LIMIT = 10;
+  private static readonly AUTH_FAIL_WINDOW_MS = 5 * 60_000;
+  private static readonly AUTH_PENALTY_MS = 15 * 60_000;
+  private authFailures: number[] = [];
+  private authPenaltyUntil = 0;
+
+  private authThrottled(): boolean {
+    return Date.now() < this.authPenaltyUntil;
+  }
+
+  private recordAuthFailure(): void {
+    const now = Date.now();
+    this.authFailures = this.authFailures.filter((t) => now - t < BridgeServer.AUTH_FAIL_WINDOW_MS);
+    this.authFailures.push(now);
+    if (this.authFailures.length >= BridgeServer.AUTH_FAIL_LIMIT) {
+      this.authPenaltyUntil = now + BridgeServer.AUTH_PENALTY_MS;
+      this.authFailures = [];
+      console.warn('[bridge] auth brute-force guard engaged — rejecting requests for 15 minutes');
+    }
+  }
+
   private tokensMatch(provided: string | undefined | null): boolean {
     // If the token file could not be read/generated, reject all connections
     // rather than silently disabling authentication.
@@ -809,8 +834,14 @@ class BridgeServer {
   }
 
   private handleUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
+    if (this.authThrottled()) {
+      socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const token = this.requestToken(req);
     if (!this.tokensMatch(token)) {
+      this.recordAuthFailure();
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
@@ -944,7 +975,12 @@ class BridgeServer {
     }
 
     if (path === '/status') {
+      if (this.authThrottled()) {
+        this.sendJson(res, 429, { ok: false, error: 'too many invalid attempts - try again later' });
+        return;
+      }
       if (!this.tokensMatch(this.requestToken(req))) {
+        this.recordAuthFailure();
         this.sendJson(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }
@@ -953,7 +989,12 @@ class BridgeServer {
     }
 
     if (path === '/exec' && req.method === 'POST') {
+      if (this.authThrottled()) {
+        this.sendJson(res, 429, { ok: false, error: 'too many invalid attempts - try again later' });
+        return;
+      }
       if (!this.tokensMatch(this.requestToken(req))) {
+        this.recordAuthFailure();
         this.sendJson(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }

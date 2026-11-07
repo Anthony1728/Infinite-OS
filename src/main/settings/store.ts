@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import chokidar from 'chokidar';
 import { infiniteHome } from '../profiles/home.js';
+import { settingsDefault } from '../../shared/settings-defaults.js';
 
 type Scope = 'managed' | 'user' | 'project' | 'local';
 
@@ -56,7 +57,11 @@ class SettingsStore {
       const data = this.cache[scope] as Record<string, unknown> | undefined;
       if (data && key in data) return data[key] as T;
     }
-    return undefined;
+    // Fall back to the defaults registry: one place per key, instead of every
+    // call site improvising `?? something`. Keys without a meaningful default
+    // (apiKey, cwd, provider…) stay undefined exactly as before.
+    const fallback = settingsDefault(key);
+    return (fallback === undefined ? undefined : fallback) as T | undefined;
   }
 
   async set(scope: Scope, key: string, value: unknown, cwd: string): Promise<void> {

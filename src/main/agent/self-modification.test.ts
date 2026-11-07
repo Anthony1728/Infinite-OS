@@ -40,7 +40,11 @@ const ROOT = 'C:\\repo';
  * rewriting the machinery that does the versioning and the logging.
  */
 describe('the agent cannot quietly dismantle its own undo', () => {
-  beforeEach(() => {
+  // The owner gate (self-modification is the creator's privilege) is bypassed for
+// unit tests via the documented env switch — these tests exercise the OTHER guards.
+process.env.INFINITE_ALLOW_SELF_MODIFICATION = '1';
+
+beforeEach(() => {
     settingsValues.clear();
     resetSelfModificationGuard();
   });

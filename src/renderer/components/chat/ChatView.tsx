@@ -13,6 +13,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useAiTabsStore, type AiTabKind } from '../../stores/aiTabs';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { CodeBlock } from './CodeBlock';
+import { MermaidDiagram } from './MermaidDiagram';
 import { MessageContextMenu, type ContextMenuItem } from './MessageContextMenu';
 import { AppIcon, type AppIconName } from '../brand/AppIcon';
 import { ProjectCards } from '../layout/ProjectCards';
@@ -2235,6 +2236,23 @@ function RealChat({
   // When the inline live-activity feed is showing steps, it carries the
   // "working" signal — don't also render the generic thinking bubble.
   const showThinking = streaming && !isStreamingText && !hasRunningTool && activity.length === 0;
+  // Bounded transcript state (see the render site). The window counts from
+  // the END; it grows by a step per "load earlier" click. A new session
+  // (message id set changes) resets to the default window.
+  const TRANSCRIPT_WINDOW_DEFAULT = 80;
+  const TRANSCRIPT_WINDOW_STEP = 120;
+  const [transcriptWindow, setTranscriptWindow] = useState(TRANSCRIPT_WINDOW_DEFAULT);
+  const firstMessageId = messages[0]?.id;
+  const lastMessageId = messages[messages.length - 1]?.id;
+  useEffect(() => {
+    setTranscriptWindow(TRANSCRIPT_WINDOW_DEFAULT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstMessageId, lastMessageId === undefined]);
+  const hiddenMessageCount = Math.max(0, messages.length - transcriptWindow);
+  const visibleMessages = hiddenMessageCount > 0 ? messages.slice(-transcriptWindow) : messages;
+  const absoluteIndexOfVisible = hiddenMessageCount > 0
+    ? visibleMessages.map((_, i) => hiddenMessageCount + i)
+    : visibleMessages.map((_, i) => i);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -2367,18 +2385,35 @@ function RealChat({
               </span>
               <span className="ml-3 text-sm text-zinc-400">Loading conversation…</span>
             </div>
-          ) : messages.map((m, index) => (
-            <MessageBubble
-              key={m.id}
-              message={m}
-              // Turn duration: how long the assistant took from the question
-              // it is answering (Otto's turn stats, approximated from
-              // timestamps — good to the second, which is all it claims).
-              turnDurationMs={m.role === 'assistant' ? turnDurationFor(messages, index) : undefined}
-              runningToolIds={runningToolIds}
-              activityByToolId={activityByToolId}
-            />
-          ))}
+          ) : (
+            <>
+              {/* Bounded transcript: render a trailing window, never the whole
+                  history. A 500-message session used to mount 500 memoized
+                  bubbles (memo saves re-renders, not the initial mount) and
+                  ate the pane on every session switch. Older messages load
+                  progressively on demand; the visible tail is always complete. */}
+              {hiddenMessageCount > 0 && (
+                <button
+                  onClick={() => setTranscriptWindow((w) => w + TRANSCRIPT_WINDOW_STEP)}
+                  className="mx-auto my-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-1.5 text-[11px] text-zinc-400 transition-colors hover:bg-white/[0.08] hover:text-zinc-200"
+                >
+                  Load {Math.min(TRANSCRIPT_WINDOW_STEP, hiddenMessageCount)} earlier message{hiddenMessageCount === 1 ? '' : 's'} ({hiddenMessageCount} hidden)
+                </button>
+              )}
+              {visibleMessages.map((m, index) => (
+                <MessageBubble
+                  key={m.id}
+                  message={m}
+                  // Turn duration: how long the assistant took from the question
+                  // it is answering (Otto's turn stats, approximated from
+                  // timestamps — good to the second, which is all it claims).
+                  turnDurationMs={m.role === 'assistant' ? turnDurationFor(messages, absoluteIndexOfVisible[index]) : undefined}
+                  runningToolIds={runningToolIds}
+                  activityByToolId={activityByToolId}
+                />
+              ))}
+            </>
+          )}
           {showThinking && <ThinkingBubble />}
           {/* A pending AskUserQuestion is rendered by the global QuestionOverlay
               (mounted in App.tsx) so it is reachable from every section, not just
@@ -2861,11 +2896,15 @@ function MessageBubbleImpl({
                           );
                         }
                       }
-                      const isBlock = String(children).includes('\n');
+                      const isBlock = String(children).includes('\\n');
+                      const lang = match?.[1]?.toLowerCase();
+                      if (isBlock && lang === 'mermaid') {
+                        return <MermaidDiagram code={String(children).replace(/\\n$/, '')} />;
+                      }
                       if (isBlock) {
                         return (
                           <CodeBlock
-                            code={String(children).replace(/\n$/, '')}
+                            code={String(children).replace(/\\n$/, '')}
                             language={match?.[1]}
                           />
                         );

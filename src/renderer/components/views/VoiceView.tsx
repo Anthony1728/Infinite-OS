@@ -21,6 +21,7 @@ import { useVoiceAssistant } from '../../hooks/useVoiceAssistant';
 import { useChatStore } from '../../stores/chat';
 import { InfiniteLogo } from '../brand/InfiniteLogo';
 import { CodeBlock } from '../chat/CodeBlock';
+import { MermaidDiagram } from '../chat/MermaidDiagram';
 import { ToolCallCard } from '../tools/ToolCallCard';
 import { useVoiceSessionStore } from '../../stores/voice-session';
 import {
@@ -2268,6 +2269,9 @@ function VoiceAssistantBlocks({
                           {children}
                         </code>
                       );
+                    }
+                    if (match[1]?.toLowerCase() === 'mermaid') {
+                      return <MermaidDiagram code={rawCode} />;
                     }
                     return <CodeBlock code={rawCode} language={match[1]} />;
                   },

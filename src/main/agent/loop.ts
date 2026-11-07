@@ -1240,6 +1240,52 @@ export async function runAgent(
       });
       opts.onEvent({ type: 'tool_result', tool_use_id: tu.id, content: result.content, is_error: result.is_error });
     }
+    // PostToolUse auto-Verify: when a batch edited files, run the Verify tool
+    // HARNESS-SIDE and feed the result back as a user note, so failures
+    // surface on the very next turn instead of whenever the model decides to
+    // check (or never — the old failure mode). Runs only when the model did
+    // not already call Verify in the same batch; the injected result is a
+    // user message, never an orphan tool_result (strict providers reject
+    // results without a matching tool_use).
+    const batchEditedFiles = batchResults.some(({ tool, result }) =>
+      !result.is_error && (tool?.name === 'Write' || tool?.name === 'Edit'));
+    const modelVerifiedThisBatch = toolUses.some((tu) => tu.name === 'Verify');
+    if (batchEditedFiles && !modelVerifiedThisBatch) {
+      const verifyTool = toolRegistry.get('Verify');
+      if (verifyTool) {
+        opts.onEvent({ type: 'provider_status', status: 'working', detail: 'Auto-verifying edits…' });
+        const verifyId = crypto.randomUUID();
+        try {
+          const verifyResult = await executeToolCall({
+            tool: verifyTool,
+            toolUse: { type: 'tool_use', id: verifyId, name: 'Verify', input: {} },
+            sessionId: opts.sessionId,
+            cwd: opts.cwd,
+            parentSignal: opts.signal,
+            onUpdate: () => { /* verify progress stays off the transcript */ },
+          });
+          const verifyText = typeof verifyResult.content === 'string' ? verifyResult.content : JSON.stringify(verifyResult.content);
+          performanceMetrics.toolCalls++;
+          successfulToolExecutions++;
+          successfulToolNames.add('Verify');
+          if (!verifyResult.is_error) editsSinceVerify = false; // harness-verified counts
+          messages.push({
+            id: crypto.randomUUID(),
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: `[Harness auto-Verify after your edits — ${verifyResult.is_error ? 'FAILED' : 'ran'}]:\n${verifyText.slice(0, 4_000)}`,
+            }],
+            timestamp: Date.now(),
+          });
+          opts.onEvent({ type: 'provider_status', status: 'working', detail: verifyResult.is_error ? 'Auto-verify FAILED — fixing required' : 'Auto-verify passed' });
+        } catch (verifyErr) {
+          // Verify tool timeout/abort must never kill the run — the end-of-run
+          // guard still applies.
+          console.warn('[agent] auto-Verify failed:', (verifyErr as Error).message);
+        }
+      }
+    }
     if (batchFailures.length) {
       messages.push({ id: crypto.randomUUID(), role: 'user', content: [{ type: 'text', text: buildToolRecoveryDirective(batchFailures) }], timestamp: Date.now() });
     }

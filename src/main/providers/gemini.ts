@@ -43,7 +43,16 @@ export const gemini: ProviderAdapter = {
         description: tool.description,
         parameters: tool.input_schema,
       })) }] as never : undefined,
-    });
+      // Structured output: Gemini natively supports a JSON response MIME type
+      // plus an inline schema. Older SDK typings lack responseJsonSchema —
+      // cast — and the caller still re-validates with validateStructuredOutput.
+      ...(req.responseFormat?.schema ? {
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseJsonSchema: req.responseFormat.schema,
+        },
+      } : {}),
+    } as never);
 
     try {
       const contents = toGeminiContents(req.messages);

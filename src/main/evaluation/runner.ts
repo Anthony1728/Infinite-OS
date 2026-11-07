@@ -9,6 +9,7 @@
 
 import type { Message } from '../../shared/types.js';
 import { runAgent } from '../agent/loop.js';
+import { appendMessage } from '../session/store.js';
 import type { EvalRunner, EvalRunnerResult } from './contracts.js';
 
 export interface AgentEvalRunnerOptions {
@@ -29,6 +30,7 @@ export function createAgentEvalRunner(options: AgentEvalRunnerOptions): EvalRunn
     let error: string | undefined;
     const tools: string[] = [];
     let streamedText = '';
+    const sessionId = `eval-${task.id}-${Date.now()}`;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -39,7 +41,7 @@ export function createAgentEvalRunner(options: AgentEvalRunnerOptions): EvalRunn
 
     try {
       const completed = await runAgent([], userMessage, {
-        sessionId: `eval-${task.id}-${Date.now()}`,
+        sessionId,
         cwd: context.workspace,
         provider: options.provider,
         model: options.model,
@@ -69,6 +71,12 @@ export function createAgentEvalRunner(options: AgentEvalRunnerOptions): EvalRunn
           } else if (payload.type === 'error') {
             error = error ?? (payload.error ? String(payload.error) : 'The agent reported an error.');
           }
+        },
+        // Persist the full transcript (session store) so a failed run is
+        // DIAGNOSABLE: the checks prove claim-vs-reality, the transcript shows
+        // which tool calls the model actually made and what they returned.
+        onMessage: async (produced) => {
+          await appendMessage(sessionId, produced).catch(() => undefined);
         },
       });
 

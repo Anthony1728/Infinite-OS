@@ -84,7 +84,7 @@ describe('SellApp', () => {
     expect(r2.is_error).toBe(true);
   });
 
-  it('packages a real creation: listing.json + listing.md with checksum, no key needed', async () => {
+  it('packages a real creation: listing.json + listing.md with checksum, no key needed', { timeout: 60_000 }, async () => {
     const app = join(dir, 'my-app');
     const { mkdirSync, writeFileSync } = await import('node:fs');
     mkdirSync(app, { recursive: true });

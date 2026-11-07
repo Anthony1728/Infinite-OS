@@ -59,7 +59,13 @@ async function applyStep(repoRoot: string | null): Promise<string> {
       // Headless (tests, exec): treat as not packaged, which takes the
       // hot-reload branch and changes nothing.
     }
-    const result = await applySelfEdit({ isPackaged, repoRoot });
+    const result = await applySelfEdit({
+      isPackaged,
+      repoRoot,
+      // Only the electron-vite dev server actually hot-reloads. A built app
+      // launched with `electron .` must rebuild to load its edits.
+      devServer: Boolean(process.env['ELECTRON_RENDERER_URL']),
+    });
     return result.applied
       ? 'Rebuilt and relaunched — the change is live now.'
       : result.message;

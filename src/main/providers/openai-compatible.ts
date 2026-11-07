@@ -115,7 +115,23 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
           temperature: req.temperature ?? 0.7,
           stream: true,
           tools: !disableToolsForRetry && req.tools?.length ? req.tools.map(toOpenAITool) : undefined,
-        };
+          // Structured output (OpenAI-compatible json_schema form). Providers
+          // that predate the field ignore it — the CALLER always re-validates
+          // the reply with validateStructuredOutput, so an ignored request
+          // degrades to plain text instead of a broken handshake.
+          ...(req.responseFormat?.schema
+            ? {
+                response_format: {
+                  type: 'json_schema',
+                  json_schema: {
+                    name: req.responseFormat.name ?? 'structured_output',
+                    strict: true,
+                    schema: req.responseFormat.schema,
+                  },
+                },
+              }
+            : {}),
+        } as Record<string, unknown>;
 
         // Tell the UI we're about to hit the network so the user gets feedback
         // immediately, before any DNS / TCP / TLS handshakes have even started.
@@ -164,7 +180,7 @@ export function openaiCompatible(opts: Opts): ProviderAdapter {
 
         if (!res.ok || !res.body) {
           const errText = await res.text().catch(() => 'no body');
-          if (body.tools?.length && isDegradedFunctionError(errText) && attempt < maxRetries) {
+          if ((body.tools as Array<unknown> | undefined)?.length && isDegradedFunctionError(errText) && attempt < maxRetries) {
             disableToolsForRetry = true;
             continue;
           }

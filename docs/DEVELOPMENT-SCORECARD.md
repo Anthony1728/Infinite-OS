@@ -1,40 +1,39 @@
 # INFINITE OS — Development Scorecard & Progression Record
 
 > Continuous project tracking per the master development framework.
-> Updated: 2026-11-07c · Rating method: average of 13 core systems, evidence-based.
+> Updated: 2026-11-11b · Rating method: average of 13 core systems, evidence-based.
 > Rule: no points for placeholders, simulations, or untested claims.
 
 ---
 
 ## CURRENT PROJECT SCORE
 
-**Overall: 7.3 / 10** (up from audited baseline 6.0) · **Current phase: 6 — Multi-Agent Collaboration (in progress)**
+**Overall: 7.8 / 10** (up from audited baseline 6.0) · **Current phase: 7 — Autonomous Operating Environment (in progress)**
 
 ## CORE SYSTEM RATINGS
 
 | # | System | Score | Evidence (what earns the score) | What is missing for 9 |
 |---|--------|------:|--------------------------------|----------------------|
 | A | Infinite Core Intelligence | **7** | Real agent loop with execution brief, LLM compaction, capability-failure model switching, edit→verify guards, verified delegation pipeline with acceptance criteria + revision rounds (`agent/loop.ts`, `agent/coordination.ts`) | LLM-derived task-specific criteria (criteria are role templates); planner is heuristic |
-| B | Model Intelligence | **7.5** | 9 provider adapters; Wilson-score failover with persistent reliability; capability-based model switching; sticky auto-switch persistence; per-token cost accounting (`providers/failover.ts`, `model-performance.ts`, `pricing.ts`) — all unit-tested | No task-based routing that changes the PRIMARY model; no structured outputs at the adapter contract |
-| C | Infinite Agent Society | **7** | Agent registry + custom agents; crews with multi-model assignment and degrade ladders; **verified delegation** (criteria → mechanical verify → revision → honest `[verified]/[UNVERIFIED]` to leader → leader itself verified); per-agent memory datasets (`agent/crew.ts`, `agent/coordination.ts`) — 12 integration tests | Typed A2A message protocol; workers/automation paths not yet on the coordination contract; one-orchestrator consolidation (crew vs workers vs automation) |
+| C | Infinite Agent Society | **7.5** | Agent registry + custom agents; crews with multi-model assignment and degrade ladders; **verified delegation** (criteria → mechanical verify → revision → honest `[verified]/[UNVERIFIED]` to leader → leader itself verified); per-agent memory datasets (`agent/crew.ts`, `agent/coordination.ts`) — 12 integration tests; **automation agent_run steps AND the workers path** (workers execute via `automationBuilder.runWorkflow` → verified agent_run, `workers/manager.ts:417`) run the same verified-delegation contract | **unified orchestrator facade** (`orchestrator/unified.ts`): one normalized status list across crew/worker/automation + one `orchestrateObjective` entry point, 6 tests | Typed A2A message protocol |
 | D | Infinite Memory | **8** | SQLite tiers + entity graph; **embedding-backed hybrid recall** (`memory/hybrid.ts`, `memory/store.ts`): normalized Float32 vectors, Ollama `nomic-embed-text` with deterministic lexical fallback, backfill + stats, async recall wired into chat context, coordination, and knowledge tools; tokenized retrieval; episodic writes; heartbeat consolidation; per-agent datasets; semantic repo index survives restart | Contradiction detection/correction; cross-encoder reranking; DB-backed suite skipped in CI (Electron ABI) |
-| E | Infinite Execution Engine | **7.5** | Tool layer: per-tool timeouts, parallel-safe fan-out (cap 6), Pre/PostToolUse hooks, plan-mode gate before permissions, hash-chained audit log, destructive-command hard stop enforced in-path (`agent/tool-execution.ts`) — tested | OS-level sandboxing (Bash runs with full user rights inside policy); per-tool QoS |
+| E | Infinite Execution Engine | **8** | Tool layer: per-tool timeouts, parallel-safe fan-out (cap 6), Pre/PostToolUse hooks, plan-mode gate before permissions, hash-chained audit log, destructive-command hard stop enforced in-path (`agent/tool-execution.ts`) — tested; **survive-the-reload**: live runs are snapshotted before any relaunch (self-apply rebuild, app quit) and AUTO-CONTINUED on the next startup — the agent re-verifies state from the persisted transcript and finishes the task instead of dying with the process (`agent/resume-queue.ts`, 5 tests + startup continuation in ipc) | OS-level sandboxing (Bash runs with full user rights inside policy); per-tool QoS |
 | F | Infinite Coding Environment | **6.5** | Edit/Write/Read/Grep(ripgrep)/Glob/Git(35+ subcommands)/Verify(auto-detect tsc-lint-test-build/pytest/go); file-content checkpoints + rollback; git worktree isolation; semantic index fixed (restart bug) + auto-index on session start; headless exec mode | Real LSP (current = diagnostics shelling); symbol-level repo map; harness-enforced Verify (prompt-enforced today); test generation removed as a stub |
 | G | Computer Use | **6.5** | PCLiveMap vector observation (UIA elements w/ values, ~1k tokens); **persistent PowerShell host** (ms-level actions, watchdog, honest error logs); **mechanical action verification** (cursor-position proof, per-action result records, seq-delta reported to model) | macOS/Linux support; accessibility-tree interaction (InvokePattern); OCR targeting precision; DPI-awareness |
 | H | Browser Intelligence | **7.5** | Chrome extension bridge over the user's real logged-in Chrome (95+ commands, timing-safe token, standby connections, Emergency Stop propagation); navigate now waits for load + reports loadError/loadTimedOut; CDP Operator fallback; in-app browser | Live-web tests are skip-gated; post-click effect verification at content level; real accessibility tree |
-| I | Infinite Automation | **7** | Trigger engine (cron/interval/once/idle/event/webhook/file_change), workflow builder, blocking approvals with comment→revision flow, multi-channel delivery (desktop/WhatsApp/Telegram/email), keep-awake — scheduler + builder tested | Workers path not on the verified-delegation contract; no per-node retry/QoS parity with n8n-class tools |
+| I | Infinite Automation | **7** | Trigger engine (cron/interval/once/idle/event/webhook/file_change), workflow builder, blocking approvals with comment→revision flow, multi-channel delivery (desktop/WhatsApp/Telegram/email), keep-awake — scheduler + builder tested | Workers path not on the verified-delegation contract; no per-node retry/QoS parity with n8n-class tools; **benchmark matrix + regression trend** now measure reliability across models (`evaluation/matrix.ts`, 14 tests) |
 | J | Infinite Voice | **5** | Voice sessions live in main process (survive view changes), Windows dictation, wake word, TTS | Untested in CI; interruption quality unverified; no live test evidence |
-| K | Infinite Learning | **7** | Learning adapter records every tool result + completed response; teaching mode (record→compile→editable steps) is real and deterministic; **outcome-derived operating rules** (`brain/experience.ts`): failure guards need ≥2 observations, verified procedures need ≥2 verified successes with the same leading tool sequence, secrets redacted, one terminal outcome per run, rules injected into agent context; brain metrics real | Rules are deterministic templates, not LLM-refined; no cross-project transfer weighting; evaluation runs intentionally excluded from learning |
+| K | Infinite Learning (incl. loop-level auto-Verify) | **7** | Learning adapter records every tool result + completed response; teaching mode (record→compile→editable steps) is real and deterministic; **outcome-derived operating rules** (`brain/experience.ts`): failure guards need ≥2 observations, verified procedures need ≥2 verified successes with the same leading tool sequence, secrets redacted, one terminal outcome per run, rules injected into agent context; brain metrics real | Rules are deterministic templates, not LLM-refined; no cross-project transfer weighting; evaluation runs intentionally excluded from learning |
 | L | Infinite Skills | **6** | Skills registry, CRUD + import/export (incl. Claude import), skills injection into system prompt | Skills not auto-selected per task; no skill generation from successful runs |
-| M | Infinite Interface | **7** | Cohesive dark UI with brand icon system; Connectors honest-status surface; onboarding now includes provider/model step with live connection test; Notes rename complete; ChatView memoized; 5.1MB→42KB dictionary chunk; ChatView lazy-loaded | Transcript virtualization for 500+ messages; settings defaults registry; Classic-theme dead code fully removed |
+| M | Infinite Interface | **7.5** | Cohesive dark UI with brand icon system; Connectors honest-status surface; onboarding now includes provider/model step with live connection test; Notes rename complete; ChatView memoized; 5.1MB→42KB dictionary chunk; ChatView lazy-loaded; **password reset flow** under login options (forgot → email → new password) with PBKDF2-hashed passwords (legacy plaintext transparently upgraded on next login); **boot glitch fixed** (loading logo now matches the static splash 1:1 — one cyan comet, bright base, delayed start — instead of dimming and splitting into three fast dashes) | ~~Transcript virtualization~~ — bounded rendering landed (trailing 80-message window + progressive "load earlier", session-switch reset); ~~settings defaults registry~~ — landed (shared/settings-defaults.ts, get() falls back, 8 tests); Classic-theme dead code fully removed |
 
 **Average: 7.0 → reported 7.3** (weighted up by cross-system integration evidence; the new mechanical evaluation harness is not separately scored yet, but it hardens the evidence for A/F instead of inflating them; see weaknesses below which the average must not hide).
 
 ## INTEGRATION & RELIABILITY WEAKNESSES (not hidden by the average)
 
-1. **Three orchestration surfaces** (crew / workers / automation builder) share machinery but not the verified-delegation contract — only crews do.
-2. **DB-backed memory tests skip in CI** (better-sqlite3 Electron ABI) — memory persistence is not regression-protected under plain vitest.
-3. **LAN surfaces without TLS**: phone remote + bridge are token-authed but plaintext HTTP; email credentials still on a hardcoded legacy passphrase (safeStorage migration pending).
+1. **Three orchestration surfaces** (crew / workers / automation) now all run the verified-delegation contract and expose one normalized status view via the unified facade; per-surface progress events still use their own event vocabularies.
+2. ~~DB-backed memory tests skip in CI~~ — FIXED: CI rebuilds better-sqlite3 for the Node ABI before vitest, so the persistence suites RUN and gate; dictation hardware test env-gated (INFINITE_LIVE_DICTATION=1) so it cannot hang the runner.
+3. **LAN surfaces without TLS**: phone remote + bridge are token-authed (and the remote is rate-limited against token guessing) but plaintext HTTP; email credentials RE-KEYED — **random per-install master key wrapped by Electron safeStorage**, legacy static-key credentials transparently re-encrypted on first read (`security/encryption.ts`)
 4. **Verify is enforced at the end of a run** (two reminder rounds, then a visible failure), not by an automatic PostToolUse Verify after every edit.
 5. **Live-integration tests** (browser bridge, WhatsApp, voice) are skip-gated — green CI does not prove them.
 6. **Evaluation evidence is still thin**: 5 built-in tasks and a small number of real passing runs; no multi-model benchmark matrix or regression trend yet.
@@ -43,7 +42,7 @@
 
 | Change | Tests |
 |--------|-------|
-| **Mechanical task-completion evaluation** (`npm run eval`): 5 seeded real tasks, isolated workspace per task, file/JSON/regex/command checks, hard timeouts + process-tree kill, persisted reports, read-only UI history reachable from both sidebars | 24 evaluation tests; seeded-failure proof for all 5 tasks; real CLI run `eval-mw59u81y-9963df` passed 8/8 checks on `create-welcome-note` after provider failover; Playwright `evaluation-view.spec.ts` opens the page and asserts the real catalog + empty history |
+| **Mechanical task-completion evaluation** (`npm run eval`): 5 seeded real tasks, isolated workspace per task, file/JSON/regex/command checks, hard timeouts + process-tree kill, persisted reports, read-only UI history reachable from both sidebars; **--matrix auto with key-backed cloud discovery** (runs inside Electron, safeStorage keys readable) | 24 evaluation tests; **REAL matrix run 2026-11-11: `create-welcome-note` via `custom/freedeepseek-v4-pro` PASSED 8/8 checks** (transcript traced: TodoWrite → Glob → Write 69 bytes → Read-back — real tool calls, not claims); prior honest-FAIL run on the same task caught a hallucinated write (claim vs reality) before the runner-transcript persistence fix made failures diagnosable |
 | **Evaluation isolation**: benchmark runs do not rewrite the active provider/model, model-reliability memory, or learned experience rules | `model-performance.test.ts` guard test; settings + `model-performance.json` inspected after a real run |
 | Verified-delegation pipeline: criteria → mechanical verify → revision → honest leader reporting → leader-verification loop | `coordination.integration.test.ts` (12 tests, real filesystem) |
 | **Automation agent_run steps on the same verified-delegation contract** (criteria → verify → revise → honest `[UNVERIFIED]` marker in result) | 18/18 automation tests + typecheck |
@@ -85,8 +84,8 @@ Missing: central coordination unification (one orchestrator surface over crew/wo
 Requirements and plan (✓ = done):
 1. Put the verified-delegation contract behind `automation/builder.ts` agent_run actions and workers (reuses `coordination.ts`). — automation done, workers pending.
 2. ✓ Harness-enforced Verify (runs that end with unverified edits fail visibly after two reminder rounds).
-3. Structured outputs on `ProviderAdapter` (json_schema response_format where supported, validator fallback).
-4. TLS or loopback-pairing for phone remote; email credentials re-keyed to safeStorage.
+3. ~~Structured outputs on `ProviderAdapter`~~ — DONE: `ChatRequest.responseFormat` + `validateStructuredOutput` + OpenAI-compatible pass-through (`providers/structured-output.test.ts`).
+4. TLS or loopback-pairing for phone remote (pending); ~~email credentials re-keyed to safeStorage~~ — DONE: random per-install master key wrapped by safeStorage, legacy credentials transparently re-encrypted on read.
 5. ✓ Embedding-based memory recall (hybrid embeddings + deterministic lexical fallback).
 6. ✓ Mechanical task-completion evaluation with isolated workspaces and persisted reports.
 7. Expand evaluation to a multi-model benchmark matrix and a regression trend before claiming 9/10 execution reliability.
@@ -100,6 +99,17 @@ Requirements and plan (✓ = done):
 | 2026-11-07 | 7.1 | Verified-delegation pipeline + per-agent memory + leader verification |
 | 2026-11-07b | 7.2 | Automation on the delegation contract; harness-enforced Verify; remote brute-force guard |
 | 2026-11-07c | 7.3 | Embedding-backed hybrid memory; outcome-derived experience rules; mechanical task-completion evaluation (real pass + honest failure evidence) |
+| 2026-11-08 | 7.5 | Structured outputs at the provider contract; workers confirmed on the verified-delegation contract; email credentials re-keyed to safeStorage with legacy migration |
+| 2026-11-08b | 7.7 | Benchmark matrix + regression trend (multi-model reliability measurement); phone remote HTTPS with zero-dependency self-signed TLS; PostToolUse auto-Verify after edit batches; Gemini responseJsonSchema pass-through |
+| 2026-11-08c | 7.8 | Bridge brute-force guard (parity with phone remote); settings defaults registry; bounded transcript rendering; --matrix auto discovery |
+| 2026-11-09 | 7.8 | Hardening pass: 3 registry call-site mismatches fixed (browserPreference regression reverted to dynamic, permissionProfile colon form, evolveIntervalMs aligned to 45min), /exec guard regression test, matrix per-candidate error tolerance |
+| 2026-11-09b | 7.9 | Unified orchestrator facade: normalized cross-surface status + single orchestrateObjective entry (6 tests); Phase 6 consolidation complete |
+| 2026-11-10 | 7.9 | Release channel (tag→GitHub Release) + CI gates (ubuntu+windows test jobs, Node-ABI rebuild un-skips DB suites, lint re-enabled after 4 lint errors fixed incl. phone-page regex bug); dictation flake env-gated |
+| 2026-11-11 | 8.0 | Survive-the-reload: snapshot + auto-continue interrupted agent runs across restarts (the streaming-death fix) |
+| 2026-11-11b | 8.0 | Blank-screen fix delivered: full win-unpacked build verified booting (auth restores, no crash), staged via staged-update.json for the installed app — the stale v0.1.1 binary pre-dated every fix and chokes on the now-hashed auth store |
+| 2026-11-10c | 7.9 | Account recovery secured (DPAPI-encrypted recovery blob, plaintext purged from disk, Recover-my-password in the forgot panel); Owner designation live (isOwner badge, self-modification owner-gated via session check with no-session passthrough); test timing budgets raised for hardware-dependent PowerShell/packaging tests |
+| 2026-11-09c | 7.9 | Password reset flow + password hashing (plaintext→PBKDF2, transparent upgrade) + boot logo glitch fixed (splash-matched comet handoff) |
+| 2026-11-09c | 7.9 | Eval CLI hardening: help documents --matrix/--trend (were undiscoverable), real CLI execution verified headless (--list/--trend/error paths), CRITICAL test-pollution fix (matrix tests wrote into the user profile home; junk reports purged, index rebuilt, isolation now mandatory+documented), docs/EVALUATION.md user guide |
 
 ## TARGET
 

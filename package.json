@@ -122,6 +122,7 @@
     "imapflow": "^1.4.2",
     "katex": "^0.18.7",
     "lucide-react": "^1.17.0",
+    "mermaid": "^12.3.0",
     "node-fetch": "^3.3.2",
     "nodemailer": "^9.0.1",
     "openai": "^4.67.0",

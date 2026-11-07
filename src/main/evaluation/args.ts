@@ -11,6 +11,10 @@ export interface EvalArgs {
   json: boolean;
   list: boolean;
   timeoutMin: number | null;
+  /** Benchmark matrix: comma-separated provider/model pairs to run the suite against. */
+  matrix: string[];
+  /** Print the per-task regression trend instead of running anything. */
+  trend: boolean;
 }
 
 export function parseEvalArgs(argv: string[]): EvalArgs | { error: string } {
@@ -22,13 +26,20 @@ export function parseEvalArgs(argv: string[]): EvalArgs | { error: string } {
     json: false,
     list: false,
     timeoutMin: null,
+    matrix: [],
+    trend: false,
   };
 
   for (let index = 0; index < argv.length; index++) {
     const value = argv[index];
     if (value === '--json') args.json = true;
     else if (value === '--list') args.list = true;
-    else if (value === '--help' || value === '-h') return { error: 'help' };
+    else if (value === '--trend') args.trend = true;
+    else if (value === '--matrix') {
+      const next = argv[++index];
+      if (!next) return { error: '--matrix needs comma-separated provider/model pairs.' };
+      args.matrix.push(...next.split(',').map((entry) => entry.trim()).filter(Boolean));
+    } else if (value === '--help' || value === '-h') return { error: 'help' };
     else if (value === '--suite') {
       const next = argv[++index];
       if (!next) return { error: '--suite needs a suite id.' };
@@ -80,6 +91,11 @@ export function evalUsage(): string {
     '  --provider <id>    Provider override (defaults to Settings)',
     '  --model <id>       Model override (defaults to Settings)',
     '  --timeout <min>    Per-task wall-clock ceiling in minutes',
+    '  --matrix <specs>   Benchmark matrix: run the suite per candidate;',
+    '                     comma-separated provider/model pairs, or `auto` to',
+    '                     benchmark the current selection + local Ollama models',
+    '  --trend            Print per-task pass/fail history and REGRESSIONS',
+    '                     across stored reports, then exit',
     '  --list             List suites and tasks without running them',
     '  --json             Print the full report as JSON',
     '  --help             Show this help',

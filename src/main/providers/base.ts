@@ -1,6 +1,7 @@
 // Provider adapter interface — every LLM provider implements this.
 
 import type { Message, ModelInfo, TokenUsage } from '../../shared/types.js';
+import { validateJsonSchema } from '../agent/json-schema.js';
 
 export interface ChatRequest {
   model: string;
@@ -26,6 +27,41 @@ export interface ChatRequest {
    * cannot separate the two budgets ignore this.
    */
   thinkingBudget?: number;
+  /**
+   * Request a schema-constrained JSON response. Providers that support
+   * native structured output enforce the schema at generation time; every
+   * other provider ignores this and the CALLER must validate the reply with
+   * `validateStructuredOutput` — the contract is "schema is requested and
+   * always re-validated", never "schema is trusted".
+   */
+  responseFormat?: {
+    /** JSON Schema the reply must satisfy (draft-2020-12 subset used by validateJsonSchema). */
+    schema: Record<string, unknown>;
+    /** Optional name, surfaced in provider-specific request fields. */
+    name?: string;
+  };
+}
+
+/**
+ * Validate a model reply against a ChatRequest.responseFormat schema.
+ * Always called by consumers — even on providers with native structured
+ * output — so a provider that silently ignores the request cannot inject a
+ * malformed payload into an agent handshake.
+ */
+export function validateStructuredOutput(text: string, schema: Record<string, unknown>): { ok: true; value: unknown } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Tolerate models that wrap JSON in a fenced block despite instructions.
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced?.[1]) {
+      try { parsed = JSON.parse(fenced[1].trim()); } catch { /* fall through */ }
+    }
+  }
+  if (parsed === undefined) return { ok: false, error: 'Reply is not valid JSON.' };
+  const result = validateJsonSchema(parsed, schema);
+  return result.valid ? { ok: true, value: parsed } : { ok: false, error: result.error ?? 'Schema validation failed.' };
 }
 
 export interface ToolSpec {

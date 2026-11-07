@@ -33,6 +33,14 @@ import { buildRecoveryHandoff, type RecoveryHandoffOptions } from './recovery-ha
 import { buildToolRecoveryDirective, toolAttemptSignature, type FailedToolAttempt } from './tool-recovery.js';
 import { LOOP_STREAM_STALL_TIMEOUT_MS } from './loop.js';
 import { keepPartialAssistant } from './loop.js';
+import { parseJson, validateJsonSchema } from './json-schema.js';
+
+/** Tool-output check against an agent's validation schema (shared validator). */
+function validateOutput(content: string, schema: Record<string, unknown>): { valid: boolean; error?: string } {
+  const parsed = parseJson(content);
+  if (!parsed.ok) return { valid: false, error: 'Invalid JSON format' };
+  return validateJsonSchema(parsed.value, schema);
+}
 import { executeToolCall, isParallelSafeTool } from './tool-execution.js';
 import { StreamCoalescer } from './stream-coalescer.js';
 import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
@@ -341,7 +349,7 @@ export async function runSubagent(
     {
       id: uuid(),
       role: 'user',
-      content: [{ type: 'text', text: opts.task }],
+      content: [{ type: 'text', text: task }],
       timestamp: Date.now(),
     },
   ];
@@ -477,7 +485,7 @@ export async function runSubagent(
       ? allowedTools
       : allowedTools.filter((t) => CORE_TOOL_NAMES.has(t.name));
     const tools = activeCandidate.provider === 'ollama'
-      ? selectLocalModelTools(opts.task, scopedTools)
+      ? selectLocalModelTools(task, scopedTools)
       : scopedTools;
     const systemKey = `${activeCandidate.provider}/${activeCandidate.model}/${tools.map((tool) => tool.name).join(',')}`;
     let baseSystem = runSystemPrompts.get(systemKey);
@@ -511,7 +519,7 @@ export async function runSubagent(
 
     const recoveryHandoff = recoveryContext
       ? buildRecoveryHandoff({
-          originalRequest: opts.task,
+          originalRequest: task,
           ...(recoveryContext as Pick<RecoveryHandoffOptions, 'failedProvider' | 'failedModel' | 'stage' | 'failure'>),
           successfulToolExecutions,
           messages,
@@ -1149,52 +1157,8 @@ async function validateTaskCompletion(
   return isValid;
 }
 
-function validateOutput(content: string, _schema: Record<string, unknown>): { valid: boolean; error?: string } {
-  const parsed = parseJson(content);
-  if (!parsed.ok) return { valid: false, error: 'Invalid JSON format' };
-  return validateJsonSchema(parsed.value, _schema);
-}
-
-function parseJson(content: string): { ok: true; value: unknown } | { ok: false } {
-  try { return { ok: true, value: JSON.parse(content) }; }
-  catch { return { ok: false }; }
-}
-
-function validateJsonSchema(value: unknown, schema: Record<string, unknown>, path = '$'): { valid: boolean; error?: string } {
-  const type = schema.type;
-  if (typeof type === 'string') {
-    const validType = type === 'object' ? typeof value === 'object' && value !== null && !Array.isArray(value)
-      : type === 'array' ? Array.isArray(value)
-        : type === 'null' ? value === null
-          : typeof value === type;
-    if (!validType) return { valid: false, error: `${path} must be ${type}.` };
-  }
-  if (Array.isArray(schema.enum) && !schema.enum.some((item) => JSON.stringify(item) === JSON.stringify(value))) {
-    return { valid: false, error: `${path} must match one of the allowed values.` };
-  }
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    const object = value as Record<string, unknown>;
-    for (const required of Array.isArray(schema.required) ? schema.required : []) {
-      if (typeof required === 'string' && !(required in object)) return { valid: false, error: `${path}.${required} is required.` };
-    }
-    const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
-    if (properties) {
-      for (const [key, childSchema] of Object.entries(properties)) {
-        if (key in object) {
-          const result = validateJsonSchema(object[key], childSchema, `${path}.${key}`);
-          if (!result.valid) return result;
-        }
-      }
-    }
-  }
-  if (Array.isArray(value) && schema.items && typeof schema.items === 'object') {
-    for (let index = 0; index < value.length; index++) {
-      const result = validateJsonSchema(value[index], schema.items as Record<string, unknown>, `${path}[${index}]`);
-      if (!result.valid) return result;
-    }
-  }
-  return { valid: true };
-}
+// validateOutput / parseJson / validateJsonSchema live in the canonical
+// ./json-schema.js module (shared with providers/base.ts and loop.ts).
 
 /**
  * Run a batch of subagents in parallel. Resolves when all complete

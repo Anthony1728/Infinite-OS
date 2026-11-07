@@ -859,6 +859,10 @@ const api = {
   authSetUsers: (users: Record<string, unknown>) => ipcRenderer.invoke(IPC.AUTH_SET_USERS, users),
   authGetSession: () => ipcRenderer.invoke(IPC.AUTH_GET_SESSION),
   authSetSession: (session: unknown) => ipcRenderer.invoke(IPC.AUTH_SET_SESSION, session),
+  authStoreRecovery: (args: { email: string; password: string }) =>
+    ipcRenderer.invoke(IPC.AUTH_STORE_RECOVERY, args),
+  authRecoverPassword: (args: { email: string }) =>
+    ipcRenderer.invoke(IPC.AUTH_RECOVER_PASSWORD, args),
   authListProfiles: () => ipcRenderer.invoke(IPC.AUTH_LIST_PROFILES),
 
   // Replay events

@@ -121,7 +121,7 @@ export function Sidebar({
     return () => clearInterval(id);
   }, []);
   const runs = useAgentsStore((state) => state.runs);
-  const { user } = useAuthStore();
+  const { user, isOwner } = useAuthStore();
   const aiTabs = useAiTabsStore((state) => state.tabs);
   const closeAiTab = useAiTabsStore((state) => state.closeTab);
   const [currentModel, setCurrentModel] = useState('No model selected');
@@ -851,7 +851,17 @@ export function Sidebar({
               {user?.avatar ? <img src={user.avatar} alt="" className="h-full w-full object-cover" /> : <span className="text-xs font-semibold text-zinc-200">{user?.name?.charAt(0)?.toUpperCase() ?? 'U'}</span>}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-white truncate">{user?.name ?? 'User'}</div>
+              <div className="text-xs font-medium text-white truncate flex items-center gap-1.5">
+                {user?.name ?? 'User'}
+                {isOwner && (
+                  <span
+                    className="flex-shrink-0 rounded bg-gradient-to-r from-violet-600/40 to-cyan-500/40 px-1 py-px text-[8px] font-bold uppercase tracking-wider text-white ring-1 ring-violet-400/40"
+                    title="Owner — creator of this OS. Self-modification and privileged operations belong to this account."
+                  >
+                    Owner
+                  </span>
+                )}
+              </div>
               <div className="text-[9px] text-gray-600 truncate">{user?.email ?? ''}</div>
             </div>
             <button

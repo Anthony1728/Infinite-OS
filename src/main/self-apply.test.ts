@@ -15,10 +15,18 @@ import type { SelfApplyEvent } from './self-apply.js';
  */
 
 describe('deciding whether an edit needs anything done to it', () => {
-  it('does nothing in dev, because hot reload already applied it', () => {
-    const plan = planSelfApply({ isPackaged: false, repoRoot: 'C:\\repo' });
+  it('does nothing in the dev server, because hot reload already applied it', () => {
+    const plan = planSelfApply({ isPackaged: false, repoRoot: 'C:\\repo', devServer: true });
     expect(plan.action).toBe('hot-reload');
     expect(plan.reason).toMatch(/live|reload/i);
+  });
+
+  it('rebuilds a built app launched from source (no dev server)', () => {
+    // `electron .` loads a static out/ bundle. Reporting "already live" here
+    // was a lie: the edit sits inert until the bundle is rebuilt.
+    const plan = planSelfApply({ isPackaged: false, repoRoot: 'C:\\repo', devServer: false });
+    expect(plan.action).toBe('rebuild');
+    expect(plan.reason).toMatch(/source|rebuild/i);
   });
 
   it('rebuilds in a packaged build', () => {
@@ -43,8 +51,8 @@ describe('deciding whether an edit needs anything done to it', () => {
 });
 
 describe('applying an edit from the agent path', () => {
-  it('reports nothing to do in dev, and does not call it a failure', async () => {
-    const result = await applySelfEdit({ isPackaged: false, repoRoot: 'C:\\repo' });
+  it('reports nothing to do in the dev server, and does not call it a failure', async () => {
+    const result = await applySelfEdit({ isPackaged: false, repoRoot: 'C:\\repo', devServer: true });
     // `applied: false` here is the correct outcome, not a problem: HMR already
     // made it live. Reporting it as a failure would train the agent to retry
     // something that needs no retry.

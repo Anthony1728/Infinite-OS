@@ -1,4 +1,4 @@
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, safeStorage } from 'electron';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -9,6 +9,11 @@ import { getOwnerManager } from '../owner/manager.js';
 
 const authPath = join(homedir(), '.infinite-ai', 'auth.json');
 const sessionPath = join(homedir(), '.infinite-ai', 'auth-session.json');
+const recoveryPath = join(homedir(), '.infinite-ai', 'auth-recovery.json');
+
+interface RecoveryStore {
+  [email: string]: { blob: string; createdAt: number };
+}
 
 async function readJson<T>(path: string, fallback: T): Promise<T> {
   if (!existsSync(path)) return fallback;
@@ -52,6 +57,9 @@ function syncLocalOwner(session: unknown): void {
       email,
       ...(fullName ? { fullName, preferredName } : {}),
     });
+    // Plain marker: lets the self-modification owner gate resolve the owner
+    // email even when the owner DB is not loadable from the current runtime.
+    void writeJson(join(homedir(), '.infinite-ai', 'owner-email.json'), { email });
   } catch {
     /* owner store failure must never block sign-in */
   }
@@ -105,6 +113,42 @@ export function registerAuthIpc(): void {
     }
     return { ok: true };
   });
+  // ── Encrypted password recovery ────────────────────────────────────────
+  // The lock-screen password is stored as a PBKDF2 hash (unrecoverable by
+  // design). For "I forgot it" the OS keeps a SEPARATE copy encrypted with
+  // Electron safeStorage (DPAPI on Windows): decryptable only by this
+  // Windows user on this machine, never writable by other OS users, and
+  // never in the repository. The Forgot-password panel surfaces both paths:
+  // "Recover saved password" (decrypt) and "Set a new password" (reset).
+  ipcMain.handle(IPC.AUTH_STORE_RECOVERY, async (_event, args: { email?: string; password?: string }) => {
+    const email = String(args?.email ?? '').trim().toLowerCase();
+    const password = String(args?.password ?? '');
+    if (!email || !password) return { ok: false, error: 'email and password required' };
+    if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'encrypted storage unavailable' };
+    const store = await readJson<RecoveryStore>(recoveryPath, {});
+    store[email] = {
+      blob: safeStorage.encryptString(password).toString('base64'),
+      createdAt: Date.now(),
+    };
+    await writeJson(recoveryPath, store);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.AUTH_RECOVER_PASSWORD, async (_event, args: { email?: string }) => {
+    const email = String(args?.email ?? '').trim().toLowerCase();
+    if (!email) return { ok: false, error: 'email required' };
+    if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'encrypted storage unavailable on this machine' };
+    const store = await readJson<RecoveryStore>(recoveryPath, {});
+    const entry = store[email];
+    if (!entry) return { ok: false, error: 'No saved recovery for this account yet — set a new password instead' };
+    try {
+      const password = safeStorage.decryptString(Buffer.from(entry.blob, 'base64'));
+      return { ok: true, password };
+    } catch (e) {
+      return { ok: false, error: `Recovery blob is bound to a different Windows account: ${(e as Error).message}` };
+    }
+  });
+
   // Password-free roster for the "Who's using Infinite OS?" picker. The roster
   // carries only public profile data; opening a profile still requires the
   // account password (enforced in the renderer auth store).

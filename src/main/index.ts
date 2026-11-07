@@ -592,6 +592,11 @@ app.whenReady().then(async () => {
  */
 app.on('before-quit', () => {
   disposeTray();
+  // Survive-the-reload: snapshot live runs so the next launch CONTINUES them
+  // instead of the work dying with the process (the user's #1 reliability ask).
+  void import('./ipc/index.js')
+    .then(({ snapshotActiveRunsForResume }) => snapshotActiveRunsForResume())
+    .catch((err) => console.warn('[shutdown] run snapshot failed:', err));
   void import('./audit/action-log.js')
     .then(({ actionAuditLog }) => actionAuditLog.flush())
     .catch((err) => console.warn('[shutdown] action log flush failed:', err));

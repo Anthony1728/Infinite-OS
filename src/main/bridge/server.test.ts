@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { connect, type Socket } from 'node:net';
 import { randomBytes } from 'node:crypto';
-import { bridgeServer } from './server.js';
+import { bridgeServer, BridgeServer } from './server.js';
 import type { BridgeStatus } from './server.js';
 
 /**
@@ -288,4 +288,34 @@ describe('BridgeServer', () => {
       await wait(150);
     }
   }, 10_000);
+
+  it('brute-force guard: /exec 401s record failures and engage the throttle at the limit', async () => {
+    // Regression for the /exec guard wiring: a scripted insert once left
+    // /exec completely unwired and another inverted its 401 branch — this
+    // test pins the correct behavior on an ISOLATED instance so the
+    // production singleton (and its auth-failure state) stays untouched.
+    const isolated = new BridgeServer();
+    await isolated.start(0);
+    try {
+      const port = isolated.getStatus().port;
+      const base = `http://127.0.0.1:${port}`;
+      // AUTH_FAIL_LIMIT is a STATIC — it lives on the constructor, not the
+      // instance (reading it off the instance returns undefined and silently
+      // skips the whole loop, which is exactly what this test did first).
+      const limit = (isolated.constructor as unknown as { AUTH_FAIL_LIMIT: number }).AUTH_FAIL_LIMIT;
+      // Bad tokens on /exec: every one 401s and records.
+      for (let i = 0; i < limit; i++) {
+        const res = await fetch(`${base}/exec?token=wrong-${i}`, { method: 'POST', body: '{}' });
+        expect(res.status).toBe(401);
+      }
+      // Throttle engaged: even a VALID token is rejected while penalized.
+      const throttled = await fetch(`${base}/exec?token=${encodeURIComponent(testToken)}`, { method: 'POST', body: '{}' });
+      expect(throttled.status).toBe(429);
+      // The guard is endpoint-wide: /status is throttled too.
+      const statusRes = await fetch(`${base}/status?token=${encodeURIComponent(testToken)}`);
+      expect(statusRes.status).toBe(429);
+    } finally {
+      isolated.stop();
+    }
+  }, 15_000);
 });

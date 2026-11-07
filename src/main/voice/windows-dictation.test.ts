@@ -54,7 +54,14 @@ describe('dictationExitMessage', () => {
   });
 });
 
-describe.skipIf(process.platform !== 'win32')('Windows standalone dictation', () => {
+// Live proof (NOT part of CI): opens the REAL Windows speech recognizer and
+// the default microphone — hardware this machine may not have (CI, remote
+// desktops, mic-less desktops), where the start call hung into its timeout.
+// Run with INFINITE_LIVE_DICTATION=1 on a machine that actually has the
+// recognizer + a mic. The pure dictationExitMessage tests above stay in CI.
+const LIVE = process.env.INFINITE_LIVE_DICTATION === '1';
+
+describe.skipIf(!LIVE)('Windows standalone dictation', () => {
   afterEach(() => windowsDictation.stop());
 
   it('opens the installed Windows recognizer and default microphone without an AI provider', async () => {

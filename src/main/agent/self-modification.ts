@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { settings } from '../settings/store.js';
+import { getOwnerManager } from '../owner/manager.js';
 import { infiniteHome } from '../profiles/home.js';
 
 /**
@@ -179,6 +180,19 @@ export function guardSelfModification(
   // Outside the repository: not this guard's business.
   if (!rel || rel.startsWith('..')) return { allowed: true };
 
+  // Owner gate: editing Infinite OS itself is the creator's privilege.
+  // The signed-in identity comes from the main-owned session file — the
+  // renderer is never trusted for this decision. INFINITE_ALLOW_SELF_MODIFICATION=1
+  // bypasses for tests and headless tooling.
+  if (process.env.INFINITE_ALLOW_SELF_MODIFICATION !== '1' && !signedInEmailIsOwner()) {
+    return {
+      allowed: false,
+      reason:
+        `Self-modification is reserved for the OS owner. Sign in as the creator's account ` +
+        `(or set INFINITE_ALLOW_SELF_MODIFICATION=1) to let the agent change Infinite OS itself.`,
+    };
+  }
+
   if (protectionEnabled() && isProtectedPath(repoRoot, target)) {
     const verb = operation === 'delete' ? 'deleting' : operation === 'create' ? 'creating' : 'changing';
     return {
@@ -228,4 +242,30 @@ export function resetSelfModificationGuard(): void {
 /** The protected list, for showing the user what is guarded. */
 export function listProtectedPaths(): string[] {
   return [...PROTECTED_PATHS];
+}function signedInEmailIsOwner(): boolean {
+  try {
+    const sessionPath = join(infiniteHome(), 'auth-session.json');
+    // No signed-in account (CI, headless tooling, pre-login dev): behave
+    // exactly as before the gate existed. The privilege split applies only
+    // between signed-in local accounts — which is the owner-vs-guest case.
+    if (!existsSync(sessionPath)) return true;
+    const session = JSON.parse(readFileSync(sessionPath, 'utf8')) as { user?: { email?: string } } | null;
+    const email = session?.user?.email;
+    if (!email) return true;
+    // Owner email source: the owner DB when loadable, else the marker file
+    // written at sign-in (better-sqlite3 is Electron-ABI after postinstall,
+    // so the DB is not always loadable from the runtime this guard runs in).
+    try {
+      return getOwnerManager().isOwnerEmail(email);
+    } catch {
+      const markerPath = join(infiniteHome(), 'owner-email.json');
+      if (existsSync(markerPath)) {
+        const owner = (JSON.parse(readFileSync(markerPath, 'utf8')) as { email?: string }).email;
+        return !!owner && owner.toLowerCase() === email.toLowerCase();
+      }
+      return false;
+    }
+  } catch {
+    return true; // advisory machinery must never brick the tools
+  }
 }

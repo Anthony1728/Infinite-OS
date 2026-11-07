@@ -38,6 +38,8 @@ export interface User {
 interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
+  /** True when the signed-in account is the Infinite OS owner (creator). */
+  isOwner: boolean;
   isLoading: boolean;
   isNewUser: boolean;
   isRestoringSession: boolean;
@@ -51,6 +53,8 @@ interface AuthState {
   register: (name: string, email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   /** Profile entry: pick a face, then confirm the account password. */
   loginAs: (email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
+  /** Forgot-password flow: verify the email exists on this machine, set a new local password. */
+  resetPassword: (email: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   completeOnboarding: () => void;
   updateAccount: (updates: Partial<Pick<User, 'name' | 'avatar'>>) => void;
@@ -71,6 +75,64 @@ const getUsers = async (): Promise<Record<string, { user: User; password: string
 const saveUsers = async (users: Record<string, { user: User; password: string }>) => {
   await window.api.authSetUsers(users);
 };
+
+// ── Password hashing ────────────────────────────────────────────────────────
+// Passwords used to be stored in PLAINTEXT in auth.json. New/updated
+// passwords are stored as `sha256:<saltHex>:<hashHex>` (per-user random salt,
+// 100k SHA-256 iterations via Web Crypto in the renderer). Legacy plaintext
+// entries still verify and are transparently upgraded on the next successful
+// login. This is a local convenience lock: the profile data itself lives
+// unencrypted on the same disk, so the reset flow (see resetPassword) is
+// honest about what this protects.
+const PBKDF2_ITERATIONS = 100_000;
+
+function toHex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function isHashed(password: string): boolean {
+  return password.startsWith('sha256:');
+}
+
+async function hashPassword(password: string, saltHex: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+  const salt = Uint8Array.from(saltHex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16)));
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial,
+    256,
+  );
+  return `sha256:${saltHex}:${toHex(bits)}`;
+}
+
+async function makePasswordRecord(password: string): Promise<string> {
+  const saltHex = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+  return hashPassword(password, saltHex);
+}
+
+/** Fire-and-forget: stash an encrypted recovery copy at the one moment the
+ *  plaintext is known (successful login / register / reset). DPAPI-bound:
+ *  decryptable only by this Windows user on this machine. */
+function stashRecovery(email: string, password: string): void {
+  void window.api.authStoreRecovery({ email, password }).catch(() => undefined);
+}
+
+/** Verify `attempted` against a stored record (hashed or legacy plaintext). */
+async function verifyPassword(attempted: string, stored: string): Promise<boolean> {
+  if (isHashed(stored)) {
+    const [, saltHex, ] = stored.split(':');
+    const candidate = await hashPassword(attempted, saltHex);
+    return candidate === stored;
+  }
+  return attempted === stored;
+}
 
 let lastSavedSessionJson: string | undefined;
 const saveSession = async (user: User | null) => {
@@ -105,6 +167,20 @@ const loadSession = async (): Promise<{ user: User; isAuthenticated: boolean } |
   }
 };
 
+/** The signed-in account owns this OS when its email matches the owner
+ *  profile (syncLocalOwner binds them at sign-in). Advisory: never blocks auth. */
+async function checkOwner(email: string | undefined): Promise<boolean> {
+  if (!email) return false;
+  try {
+    const profile = (await window.api.ownerGetProfile()) as { email?: string };
+    const isOwner = !!profile?.email && profile.email.toLowerCase() === email.toLowerCase();
+    useAuthStore.setState({ isOwner });
+    return isOwner;
+  } catch {
+    return false;
+  }
+}
+
 let persistenceQueue: Promise<void> = Promise.resolve();
 
 const persistLatestUser = (): void => {
@@ -136,6 +212,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       isAuthenticated: false,
+      isOwner: false,
       isLoading: false,
       isNewUser: false,
       isRestoringSession: false,
@@ -150,18 +227,27 @@ export const useAuthStore = create<AuthState>()(
         const users = await getUsers();
         const entry = users[email.toLowerCase()];
 
-        if (!entry || entry.password !== password) {
+        if (!entry || !(await verifyPassword(password, entry.password))) {
           set({ isLoading: false });
           return { success: false, error: 'Invalid email or password' };
         }
 
         const hasOnboarded = entry.user.hasCompletedOnboarding === true;
 
+        // Transparent upgrade: a legacy plaintext password is re-stored hashed
+        // on the first successful login, so every active account converges on
+        // hashed records without a migration banner.
+        if (!isHashed(entry.password)) {
+          entry.password = await makePasswordRecord(password);
+        }
+
         // Update last login time
         const updatedUser = { ...entry.user, lastLoginAt: Date.now() };
         entry.user = updatedUser;
         await saveUsers(users);
         await saveSession(updatedUser);
+        stashRecovery(email.toLowerCase(), password);
+        void checkOwner(updatedUser.email);
 
         set({
           user: updatedUser,
@@ -189,14 +275,19 @@ export const useAuthStore = create<AuthState>()(
             set({ isLoading: false });
             return { success: false, error: 'Password required to open this profile' };
           }
-          if (entry.password !== password) {
+          if (!(await verifyPassword(password, entry.password))) {
             set({ isLoading: false });
             return { success: false, error: 'Incorrect password' };
+          }
+          if (!isHashed(entry.password)) {
+            entry.password = await makePasswordRecord(password);
           }
           const updatedUser = { ...entry.user, lastLoginAt: Date.now() };
           entry.user = updatedUser;
           await saveUsers(users);
           await saveSession(updatedUser);
+          stashRecovery(email.toLowerCase(), password);
+          void checkOwner(updatedUser.email);
           set({
             user: updatedUser,
             isAuthenticated: true,
@@ -238,7 +329,9 @@ export const useAuthStore = create<AuthState>()(
           lastLoginAt: Date.now(),
         };
 
-        users[email.toLowerCase()] = { user: newUser, password };
+        users[email.toLowerCase()] = { user: newUser, password: await makePasswordRecord(password) };
+        stashRecovery(email.toLowerCase(), password);
+        void checkOwner(newUser.email);
         await saveUsers(users);
         await saveSession(newUser);
 
@@ -253,11 +346,35 @@ export const useAuthStore = create<AuthState>()(
         return { success: true };
       },
 
+      /** Local lock-screen reset: verifies the account email exists, then
+       *  stores a fresh hashed password. Honest scope — this unlocks the
+       *  LOCAL profile (the profile data itself is unencrypted on this disk,
+       *  so this is a lock screen, not encryption). */
+      resetPassword: async (email: string, newPassword: string) => {
+        set({ isLoading: true });
+        const users = await getUsers();
+        const entry = users[email.toLowerCase()];
+        if (!entry) {
+          set({ isLoading: false });
+          return { success: false, error: 'No account with that email exists on this machine' };
+        }
+        if (newPassword.length < 8) {
+          set({ isLoading: false });
+          return { success: false, error: 'New password must be at least 8 characters' };
+        }
+        entry.password = await makePasswordRecord(newPassword);
+        stashRecovery(email.toLowerCase(), newPassword);
+        await saveUsers(users);
+        set({ isLoading: false });
+        return { success: true };
+      },
+
       logout: () => {
         saveSession(null);
         set({
           user: null,
           isAuthenticated: false,
+          isOwner: false,
           isNewUser: false,
           isRestoringSession: false,
         });
@@ -349,6 +466,7 @@ const tryRestoreSession = async () => {
         isNewUser: false,
       });
       console.log('[auth] Auto-restored session for:', session.user.email);
+      void checkOwner(session.user.email);
     }
   } catch (e) {
     console.error('[auth] Session restore failed:', e);

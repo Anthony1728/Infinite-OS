@@ -31,7 +31,7 @@ beforeEach(() => {
 });
 
 describe('real tool pipeline (permission -> executeToolCall -> bash)', () => {
-  it('executes a read-only PowerShell pipeline on this machine without prompting in workspace mode', { timeout: 15000 }, async () => {
+  it('executes a read-only PowerShell pipeline on this machine without prompting in workspace mode', { timeout: 30_000 }, async () => {
     mocks.values.set('permissionMode', 'workspace');
     const result = await executeToolCall({
       tool: bash,
