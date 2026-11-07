@@ -556,10 +556,13 @@ class BridgeServer {
     return Date.now() < this.authPenaltyUntil;
   }
 
-  private recordAuthFailure(): void {
+  private recordAuthFailure(path: string, source: string): void {
     const now = Date.now();
     this.authFailures = this.authFailures.filter((t) => now - t < BridgeServer.AUTH_FAIL_WINDOW_MS);
     this.authFailures.push(now);
+    // Source logging: the next engagement must be diagnosable (which endpoint,
+    // which origin) instead of a silent 15-minute lockout.
+    console.warn(`[bridge] auth failure #${this.authFailures.length}/${BridgeServer.AUTH_FAIL_LIMIT} on ${path} from ${source}`);
     if (this.authFailures.length >= BridgeServer.AUTH_FAIL_LIMIT) {
       this.authPenaltyUntil = now + BridgeServer.AUTH_PENALTY_MS;
       this.authFailures = [];
@@ -841,7 +844,7 @@ class BridgeServer {
     }
     const token = this.requestToken(req);
     if (!this.tokensMatch(token)) {
-      this.recordAuthFailure();
+      this.recordAuthFailure('upgrade', String(req.headers.origin ?? req.socket.remoteAddress ?? '?').slice(0, 60));
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
@@ -980,7 +983,7 @@ class BridgeServer {
         return;
       }
       if (!this.tokensMatch(this.requestToken(req))) {
-        this.recordAuthFailure();
+        this.recordAuthFailure('status', String(req.headers.origin ?? req.socket.remoteAddress ?? '?').slice(0, 60));
         this.sendJson(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }
@@ -994,7 +997,7 @@ class BridgeServer {
         return;
       }
       if (!this.tokensMatch(this.requestToken(req))) {
-        this.recordAuthFailure();
+        this.recordAuthFailure('exec', String(req.headers.origin ?? req.socket.remoteAddress ?? '?').slice(0, 60));
         this.sendJson(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }
