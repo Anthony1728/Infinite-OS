@@ -42,6 +42,7 @@
 
 | Change | Tests |
 |--------|-------|
+| **REAL benchmark evidence (2026-11-12)**: `create-welcome-note` via custom/freedeepseek 8/8 PASSED (traced real tool calls); `fix-failing-test` via opencode/deepseek-v4.1-flash 5/5 PASSED (real node --test); 1 honest FAIL caught hallucination |
 | **Mechanical task-completion evaluation** (`npm run eval`): 5 seeded real tasks, isolated workspace per task, file/JSON/regex/command checks, hard timeouts + process-tree kill, persisted reports, read-only UI history reachable from both sidebars; **--matrix auto with key-backed cloud discovery** (runs inside Electron, safeStorage keys readable) | 24 evaluation tests; **REAL matrix run 2026-11-11: `create-welcome-note` via `custom/freedeepseek-v4-pro` PASSED 8/8 checks** (transcript traced: TodoWrite → Glob → Write 69 bytes → Read-back — real tool calls, not claims); prior honest-FAIL run on the same task caught a hallucinated write (claim vs reality) before the runner-transcript persistence fix made failures diagnosable |
 | **Evaluation isolation**: benchmark runs do not rewrite the active provider/model, model-reliability memory, or learned experience rules | `model-performance.test.ts` guard test; settings + `model-performance.json` inspected after a real run |
 | Verified-delegation pipeline: criteria → mechanical verify → revision → honest leader reporting → leader-verification loop | `coordination.integration.test.ts` (12 tests, real filesystem) |
