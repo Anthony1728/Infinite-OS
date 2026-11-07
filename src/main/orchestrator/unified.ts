@@ -34,6 +34,13 @@ export interface Orchestration {
   /** One-line progress summary (specialists done, step index, …). */
   progress?: string;
   error?: string;
+  /** Verified-delegation contract verdicts: per-specialist + leader. */
+  contract?: {
+    verified: number;
+    total: number;
+    unverified: string[];
+    leaderVerdict?: 'pass' | 'fail' | 'unverified';
+  };
 }
 
 type CrewLister = typeof listCrewRuns;
@@ -81,6 +88,8 @@ export function listOrchestrations(deps?: {
   for (const run of crewLister().slice(0, 20)) {
     const status = crewStatus(run);
     if (!deps?.includeCompleted && (status === 'completed' || status === 'failed' || status === 'cancelled')) continue;
+    const verifiedCount = run.plan.members.filter((m) => m.verification?.verdict === 'pass').length;
+    const unverifiedNames = run.plan.members.filter((m) => m.verification?.verdict === 'fail').map((m) => m.role);
     out.push({
       id: run.id,
       kind: 'crew',
@@ -90,6 +99,12 @@ export function listOrchestrations(deps?: {
       ...(run.completedAt ? { completedAt: run.completedAt } : {}),
       progress: crewProgress(run),
       ...(run.report?.unresolved?.length ? { error: run.report.unresolved[0] } : {}),
+      contract: {
+        verified: verifiedCount,
+        total: run.plan.members.length,
+        unverified: unverifiedNames,
+        leaderVerdict: run.report?.leaderVerification?.verdict,
+      },
     });
   }
 
