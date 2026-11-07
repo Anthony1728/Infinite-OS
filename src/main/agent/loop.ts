@@ -34,6 +34,7 @@ import { ToolCallArgCoalescer } from './tool-arg-coalescer.js';
 import { executeToolCall, isParallelSafeTool, mapWithConcurrency, PARALLEL_TOOL_CONCURRENCY } from './tool-execution.js';
 import { shouldCompact, compactMessages } from './compaction.js';
 import { resolveRunBudget } from './run-budget.js';
+import { evaluateFileClaims, renderClaimRevisionDirective } from '../engine/run-contract.js';
 export { TOOL_EXECUTION_TIMEOUT_MS } from './tool-execution.js';
 
 // Stall timeout for stream consumption: if the provider blocks on reader.read()
@@ -353,6 +354,7 @@ export async function runAgent(
   let editsSinceVerify = false;
   let editsThisRun = false;
   let verifyGuardPrompts = 0;
+  let claimRevisionRounds = 0;
   const runSystemPrompts = new Map<string, string>();
   const failedAttemptCounts = new Map<string, number>();
   const problemTracker = new ProblemTracker();
@@ -918,6 +920,37 @@ export async function runAgent(
         opts.onEvent({ type: 'error', error: 'Run ended with UNVERIFIED file edits — the model never ran the Verify tool after its last Edit/Write despite two reminders. The changes are on disk but unvalidated; review or re-run.' });
         opts.onEvent({ type: 'fallback_required', error: 'Unverified file edits: Verify was not run after the last edit.' });
         return messages;
+      }
+
+      // Run contract: file-claim verification. The final answer must not
+      // claim writes that never happened — the real eval failure (a model
+      // saying "Created ... verified" with zero writes) is caught HERE, in
+      // the engine, before verified completion. One revision round carries
+      // the exact missing paths; a repeat offender fails the run honestly.
+      const assistantTextForClaims = assistant.content
+        .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+        .map((block) => block.text)
+        .join(' ');
+      if (assistantTextForClaims.trim()) {
+        const claims = evaluateFileClaims(assistantTextForClaims, opts.cwd);
+        if (claims.missing.length > 0) {
+          if (claimRevisionRounds < 1) {
+            claimRevisionRounds++;
+            performanceMetrics.retries++;
+            messages.push({
+              id: crypto.randomUUID(),
+              role: 'user',
+              content: [{ type: 'text', text: renderClaimRevisionDirective(claims.missing) }],
+              timestamp: Date.now(),
+            });
+            opts.onEvent({ type: 'provider_status', status: 'working', detail: `File-claim check failed (${claims.missing.length} phantom path(s)) — revision requested` });
+            continue;
+          }
+          // Revision budget exhausted with phantom claims intact: honest failure.
+          opts.onEvent({ type: 'error', error: `Run claimed ${claims.missing.length} file(s) that do not exist on disk after a revision round: ${claims.missing.join('; ').slice(0, 300)}. Refusing verified completion.` });
+          opts.onEvent({ type: 'fallback_required', error: 'File-claim verification failed: the delivery includes files that do not exist.' });
+          return messages;
+        }
       }
       const updates = drainInterjections(opts.sessionId);
       if (updates.length > 0) {
