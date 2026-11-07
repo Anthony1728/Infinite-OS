@@ -15,6 +15,7 @@ import { listServers as listMcpServers, connect as mcpConnect, disconnect as mcp
 import * as sessionStore from '../session/store.js';
 import { markRunStarted, clearRunMarker, findInterruptedRuns } from '../agent/resume.js';
 import { writeResumeQueue, consumeResumeQueue, type ResumeEntry } from '../agent/resume-queue.js';
+import { isContinuationRequest, buildTaskLedger, renderLedgerContext } from '../agent/task-ledger.js';
 import { interjectAgent, runAgent } from '../agent/loop.js';
 import { UNTIL_DONE_MAX_TURNS, UNTIL_DONE_WALL_CLOCK_MS } from '../agent/run-budget.js';
 import { respondToPermission } from '../agent/permission-prompt.js';
@@ -383,7 +384,23 @@ registerOptimizeIpc();
       startBackgroundTask(sessionId, messageTextOf(message));
     }
 
-    const userMessage: Message = { id: uuid(), role: 'user', content: message, timestamp: Date.now() };
+    // Continuation requests ('continue' after an interruption) carry no new
+    // instruction — the model would wander. Rebuild the task ledger from the
+    // persisted transcript and inject it as the model-facing text, so the
+    // agent resumes the TASK (goal, what ran, what still needs verifying).
+    let modelFacingContent = message;
+    if (isContinuationRequest(messageTextOf(message))) {
+      try {
+        const priorHistory = await sessionStore.loadMessages(sessionId);
+        const ledger = buildTaskLedger(priorHistory);
+        if (ledger) {
+          modelFacingContent = [{ type: 'text', text: renderLedgerContext(ledger, messageTextOf(message)) }];
+        }
+      } catch (e) {
+        console.warn('[chat] task ledger unavailable:', (e as Error).message);
+      }
+    }
+    const userMessage: Message = { id: uuid(), role: 'user', content: modelFacingContent, timestamp: Date.now() };
     const storedUserMessage: Message = { ...userMessage, content: displayMessage ?? message };
     const history = await sessionStore.loadMessages(sessionId);
     await sessionStore.appendMessage(sessionId, storedUserMessage);

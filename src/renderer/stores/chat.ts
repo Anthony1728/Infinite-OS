@@ -865,8 +865,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } else if (isUsageLimitError) {
         const resetMatch = event.error?.match(/Resets? in (\d+) days?/i);
         const resetInfo = resetMatch ? `\n\nResets in **${resetMatch[1]} days**.` : '';
-        const balanceUrl = (event.error?.match(/https:\/\/opencode\.ai[^\s"']+/)?.[0]) ?? 'https://opencode.ai/workspace';
-        responseText = `**Monthly usage limit reached (429).**${resetInfo}\n\n**Fix now:**\n• Enable from balance: ${balanceUrl}\n• Or switch model: **Settings → AI Provider** → pick **nvidia / meta/llama-3.3-70b-instruct** (free), **Groq**, **Gemini**, or any provider with available quota — then retry.\n• The **Infinite AI Brain** (local model) is always available and has no usage limits.`;
+                responseText = `**Your current model hit its monthly usage limit (429).**${resetInfo}
+
+**Your task is not lost.** Two ways forward:
+• **Switch model** in Settings → AI Provider (any model with available quota), then say **\"continue\"** in this chat — the OS remembers the task and picks up where it stopped.
+• **Top up the balance** for the current model, then **continue** the same way.`
       } else if (isVerifiedFail) {
         responseText = `**${context.agentName} had trouble verifying the task.**\n\n${event.error}\n\nThe task needed a tool call, but the model returned text only. Infinite OS will still help — see the Brain's answer next. If this repeats, try **Model: nvidia / meta/llama-3.3-70b-instruct** (best tool use) or rephrase to be more explicit (e.g. "Use Bash to...").`;
       }

@@ -1,7 +1,7 @@
 # INFINITE OS — Development Scorecard & Progression Record
 
 > Continuous project tracking per the master development framework.
-> Updated: 2026-11-11b · Rating method: average of 13 core systems, evidence-based.
+> Updated: 2026-11-12 · Rating method: average of 13 core systems, evidence-based.
 > Rule: no points for placeholders, simulations, or untested claims.
 
 ---
@@ -14,7 +14,7 @@
 
 | # | System | Score | Evidence (what earns the score) | What is missing for 9 |
 |---|--------|------:|--------------------------------|----------------------|
-| A | Infinite Core Intelligence | **7** | Real agent loop with execution brief, LLM compaction, capability-failure model switching, edit→verify guards, verified delegation pipeline with acceptance criteria + revision rounds (`agent/loop.ts`, `agent/coordination.ts`) | LLM-derived task-specific criteria (criteria are role templates); planner is heuristic |
+| A | Infinite Core Intelligence | **7.5** | Real agent loop with execution brief, LLM compaction, capability-failure model switching, edit→verify guards, verified delegation pipeline with acceptance criteria + revision rounds (`agent/loop.ts`, `agent/coordination.ts`) | task-ledger continuation (GOAL/DONE/PENDING-VERIFICATION rebuilt from transcript on "continue"); remaining: LLM-derived task-specific criteria (criteria are role templates) |
 | C | Infinite Agent Society | **7.5** | Agent registry + custom agents; crews with multi-model assignment and degrade ladders; **verified delegation** (criteria → mechanical verify → revision → honest `[verified]/[UNVERIFIED]` to leader → leader itself verified); per-agent memory datasets (`agent/crew.ts`, `agent/coordination.ts`) — 12 integration tests; **automation agent_run steps AND the workers path** (workers execute via `automationBuilder.runWorkflow` → verified agent_run, `workers/manager.ts:417`) run the same verified-delegation contract | **unified orchestrator facade** (`orchestrator/unified.ts`): one normalized status list across crew/worker/automation + one `orchestrateObjective` entry point, 6 tests | Typed A2A message protocol |
 | D | Infinite Memory | **8** | SQLite tiers + entity graph; **embedding-backed hybrid recall** (`memory/hybrid.ts`, `memory/store.ts`): normalized Float32 vectors, Ollama `nomic-embed-text` with deterministic lexical fallback, backfill + stats, async recall wired into chat context, coordination, and knowledge tools; tokenized retrieval; episodic writes; heartbeat consolidation; per-agent datasets; semantic repo index survives restart | Contradiction detection/correction; cross-encoder reranking; DB-backed suite skipped in CI (Electron ABI) |
 | E | Infinite Execution Engine | **8** | Tool layer: per-tool timeouts, parallel-safe fan-out (cap 6), Pre/PostToolUse hooks, plan-mode gate before permissions, hash-chained audit log, destructive-command hard stop enforced in-path (`agent/tool-execution.ts`) — tested; **survive-the-reload**: live runs are snapshotted before any relaunch (self-apply rebuild, app quit) and AUTO-CONTINUED on the next startup — the agent re-verifies state from the persisted transcript and finishes the task instead of dying with the process (`agent/resume-queue.ts`, 5 tests + startup continuation in ipc) | OS-level sandboxing (Bash runs with full user rights inside policy); per-tool QoS |
@@ -106,6 +106,7 @@ Requirements and plan (✓ = done):
 | 2026-11-09b | 7.9 | Unified orchestrator facade: normalized cross-surface status + single orchestrateObjective entry (6 tests); Phase 6 consolidation complete |
 | 2026-11-10 | 7.9 | Release channel (tag→GitHub Release) + CI gates (ubuntu+windows test jobs, Node-ABI rebuild un-skips DB suites, lint re-enabled after 4 lint errors fixed incl. phone-page regex bug); dictation flake env-gated |
 | 2026-11-11 | 8.0 | Survive-the-reload: snapshot + auto-continue interrupted agent runs across restarts (the streaming-death fix) |
+| 2026-11-12 | 8.0 | Task ledger: "continue" after interruption now rebuilds GOAL + DONE + PENDING-VERIFICATION from the transcript (smoke-tested against the real failed email session); 429 error card rewritten model-neutral + task-resumable (no more provider advertising) |
 | 2026-11-11b | 8.0 | Blank-screen fix delivered: full win-unpacked build verified booting (auth restores, no crash), staged via staged-update.json for the installed app — the stale v0.1.1 binary pre-dated every fix and chokes on the now-hashed auth store |
 | 2026-11-10c | 7.9 | Account recovery secured (DPAPI-encrypted recovery blob, plaintext purged from disk, Recover-my-password in the forgot panel); Owner designation live (isOwner badge, self-modification owner-gated via session check with no-session passthrough); test timing budgets raised for hardware-dependent PowerShell/packaging tests |
 | 2026-11-09c | 7.9 | Password reset flow + password hashing (plaintext→PBKDF2, transparent upgrade) + boot logo glitch fixed (splash-matched comet handoff) |
